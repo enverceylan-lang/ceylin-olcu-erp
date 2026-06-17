@@ -1,0 +1,94 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Customer {
+  id          String   @id @default(cuid())
+  name        String
+  phone       String?
+  address     String?
+  mapLocation String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  rooms       Room[]
+  sales       Sale[]
+}
+
+model Room {
+  id          String        @id @default(cuid())
+  name        String
+  customerId  String
+  customer    Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  imageUrl    String?       // Customer room image
+  notes       String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  measurements Measurement[]
+}
+
+model Measurement {
+  id          String   @id @default(cuid())
+  roomId      String
+  room        Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  width       Float    // in cm
+  height      Float    // in cm
+  productType String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  saleItems   SaleItem[]
+}
+
+model Product {
+  id               String   @id @default(cuid())
+  stockCode        String   @unique
+  name             String
+  unit             String   // e.g. meter, piece
+  cashPrice        Float
+  installmentPrice Float
+  dealerPrice      Float
+  imageUrl         String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  saleItems        SaleItem[]
+}
+
+model Sale {
+  id          String     @id @default(cuid())
+  customerId  String
+  customer    Customer   @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  totalAmount Float
+  notes       String?
+  status      String     @default("PENDING") // PENDING, PRODUCTION, MONTAGE, COMPLETED
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  items       SaleItem[]
+}
+
+model SaleItem {
+  id              String      @id @default(cuid())
+  saleId          String
+  sale            Sale        @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  measurementId   String?
+  measurement     Measurement? @relation(fields: [measurementId], references: [id], onDelete: SetNull)
+  productId       String
+  product         Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
+  pleatType       String      // SPARSE, NORMAL, TIGHT, or NONE
+  pleatMultiplier Float       // e.g. 2.1, 2.6, 3.1, or 1.0
+  quantity        Float       // calculated based on width and multiplier
+  unitPrice       Float
+  lineTotal       Float
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+}
