@@ -4,6 +4,7 @@ import { useTheme } from "next-themes";
 import { Moon, Sun, Menu, Bell } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuthStore, ROLE_PERMISSIONS } from "@/store/useAuthStore";
+import { useUiStore } from "@/store/useUiStore";
 
 const ROLE_BADGE_COLORS: Record<string, string> = {
   ADMIN: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
@@ -16,6 +17,7 @@ const ROLE_BADGE_COLORS: Record<string, string> = {
 export function Topbar() {
   const { theme, setTheme } = useTheme();
   const { currentUser } = useAuthStore();
+  const { toggleMobileMenu } = useUiStore();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => setMounted(true), []);
@@ -23,9 +25,14 @@ export function Topbar() {
   return (
     <header className="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-4 lg:px-8">
       <div className="flex items-center gap-4">
-        <button className="md:hidden p-2 rounded-md text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+        <button 
+          onClick={toggleMobileMenu}
+          className="md:hidden p-2 rounded-md text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+          aria-label="Menüyü Aç"
+        >
           <Menu className="w-5 h-5" />
         </button>
+
         {mounted && (
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">

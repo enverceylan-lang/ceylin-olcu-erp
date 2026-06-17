@@ -12,11 +12,13 @@ import {
   Wrench, 
   FileText, 
   Settings,
-  ChevronDown
+  ChevronDown,
+  X
 } from "lucide-react";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { useAuthStore, MOCK_USERS, ROLE_PERMISSIONS } from "@/store/useAuthStore";
+import { useUiStore } from "@/store/useUiStore";
 import { useState, useEffect } from "react";
 
 const menuItems = [
@@ -42,6 +44,7 @@ const ROLE_COLORS: Record<string, string> = {
 export function Sidebar() {
   const pathname = usePathname();
   const { currentUser, switchUser } = useAuthStore();
+  const { isMobileMenuOpen, setMobileMenuOpen } = useUiStore();
   const [showUserPicker, setShowUserPicker] = useState(false);
   const [mounted, setMounted] = useState(false);
   
@@ -55,15 +58,42 @@ export function Sidebar() {
   );
 
   return (
-    <aside className="w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 h-screen flex flex-col hidden md:flex">
-      <div className="p-6">
-        <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400">
-          Ölçü ERP
-        </h1>
-        <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
-          V1.0 SAHA PİLOT
-        </span>
-      </div>
+    <>
+      {/* Backdrop for mobile */}
+      {isMobileMenuOpen && (
+        <div 
+          onClick={() => setMobileMenuOpen(false)}
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 md:hidden transition-opacity duration-300 ease-in-out"
+        />
+      )}
+
+      <aside 
+        className={twMerge(
+          clsx(
+            "w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 h-screen flex flex-col",
+            "fixed inset-y-0 left-0 z-50 transform md:static md:translate-x-0 transition-transform duration-300 ease-in-out",
+            isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+          )
+        )}
+      >
+        <div className="p-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400">
+              Ölçü ERP
+            </h1>
+            <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+              V1.0 SAHA PİLOT
+            </span>
+          </div>
+          <button
+            onClick={() => setMobileMenuOpen(false)}
+            className="md:hidden p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            aria-label="Menüyü Kapat"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
       
       <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
         {visibleMenuItems.map((item) => {
@@ -72,6 +102,7 @@ export function Sidebar() {
             <Link
               key={item.name}
               href={item.href}
+              onClick={() => setMobileMenuOpen(false)}
               className={twMerge(
                 clsx(
                   "flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm font-medium",
@@ -113,7 +144,7 @@ export function Sidebar() {
             {MOCK_USERS.map(user => (
               <button
                 key={user.id}
-                onClick={() => { switchUser(user.id); setShowUserPicker(false); }}
+                onClick={() => { switchUser(user.id); setShowUserPicker(false); setMobileMenuOpen(false); }}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${
                   currentUser.id === user.id 
                     ? 'bg-blue-50 dark:bg-blue-900/20' 
@@ -136,5 +167,6 @@ export function Sidebar() {
         )}
       </div>
     </aside>
+    </>
   );
 }
