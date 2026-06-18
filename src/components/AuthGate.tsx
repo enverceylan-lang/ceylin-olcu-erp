@@ -159,7 +159,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           </div>
           <div className="space-y-2">
             <h3 className="text-xl font-bold text-white">Erişim Engellendi</h3>
-            <p className="text-sm text-slate-450">Bu bölüme erişim yetkiniz yok.</p>
+            <p className="text-sm text-slate-400">Bu bölüme erişim yetkiniz yok.</p>
             <p className="text-xs text-slate-500">Hesabınızın yetki tanımları bu sayfayı görüntülemek için yeterli değildir.</p>
           </div>
           <button

@@ -218,7 +218,7 @@ export default function AyarlarPage() {
           <div className="overflow-x-auto text-xs">
             <table className="w-full text-left border-collapse min-w-[600px]">
               <thead>
-                <tr className="bg-gray-50 dark:bg-gray-800/40 border-b border-gray-200 dark:border-gray-800 text-gray-505 dark:text-gray-400 font-bold">
+                <tr className="bg-gray-50 dark:bg-gray-800/40 border-b border-gray-200 dark:border-gray-800 text-gray-500 dark:text-gray-400 font-bold">
                   <th className="p-4">Adı Soyadı</th>
                   <th className="p-4">Kullanıcı Adı</th>
                   <th className="p-4">PIN / Şifre</th>
@@ -304,7 +304,7 @@ export default function AyarlarPage() {
                           {isEditing ? (
                             <>
                               <button onClick={() => handleSaveEdit(u.id)} className="text-green-500 hover:text-green-700 p-1 cursor-pointer" title="Kaydet"><Check className="w-4 h-4" /></button>
-                              <button onClick={() => setEditingUserId(null)} className="text-gray-400 hover:text-gray-650 p-1 cursor-pointer" title="İptal"><X className="w-4 h-4" /></button>
+                              <button onClick={() => setEditingUserId(null)} className="text-gray-400 hover:text-gray-500 p-1 cursor-pointer" title="İptal"><X className="w-4 h-4" /></button>
                             </>
                           ) : (
                             <>

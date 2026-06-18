@@ -34,7 +34,7 @@ const menuItems = [
 ];
 
 const ROLE_COLORS: Record<string, string> = {
-  ADMIN: 'bg-red-655',
+  ADMIN: 'bg-red-600',
   OFFICE: 'bg-orange-500',
   SALES: 'bg-orange-500',
   FIELD: 'bg-blue-600',
