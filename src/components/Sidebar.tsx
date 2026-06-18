@@ -13,11 +13,12 @@ import {
   FileText, 
   Settings,
   ChevronDown,
-  X
+  X,
+  LogOut
 } from "lucide-react";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { useAuthStore, ROLE_PERMISSIONS, canViewModule, normalizeUser } from "@/store/useAuthStore";
+import { useAuthStore, ROLE_PERMISSIONS, canViewModule, normalizeUser, normalizeRole } from "@/store/useAuthStore";
 import { useUiStore } from "@/store/useUiStore";
 import { useState, useEffect } from "react";
 
@@ -125,27 +126,42 @@ export function Sidebar() {
         })}
       </nav>
       
-      {/* User Switcher */}
+      {/* User Switcher / Profile */}
       <div className="p-4 border-t border-gray-200 dark:border-gray-800 relative">
-        <button 
-          onClick={() => setShowUserPicker(!showUserPicker)}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-        >
-          <div className={`w-8 h-8 rounded-full ${mounted ? ROLE_COLORS[currentUser.role] : 'bg-gray-500'} flex items-center justify-center text-white font-bold text-sm`}>
-            {mounted ? currentUser.name.charAt(0).toUpperCase() : 'U'}
-          </div>
-          <div className="text-sm text-left flex-1 min-w-0">
-            <p className="font-medium text-gray-900 dark:text-white truncate">{mounted ? currentUser.name : 'Kullanıcı'}</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">{mounted ? permissions.label : 'Yükleniyor'}</p>
-          </div>
-          <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showUserPicker ? 'rotate-180' : ''}`} />
-        </button>
+        <div className="flex items-center justify-between gap-2">
+          <button 
+            disabled={normalizeRole(currentUser.role) !== 'ADMIN'}
+            onClick={() => setShowUserPicker(!showUserPicker)}
+            className="flex items-center gap-3 px-2 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-850 transition-colors text-left flex-1 min-w-0 disabled:hover:bg-transparent disabled:cursor-default"
+          >
+            <div className={`w-8 h-8 rounded-full ${mounted ? ROLE_COLORS[currentUser.role] : 'bg-gray-500'} flex items-center justify-center text-white font-bold text-sm shrink-0`}>
+              {mounted ? currentUser.name.charAt(0).toUpperCase() : 'U'}
+            </div>
+            <div className="text-sm flex-1 min-w-0">
+              <p className="font-medium text-gray-900 dark:text-white truncate">{mounted ? currentUser.name : 'Kullanıcı'}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{mounted ? permissions.label : 'Yükleniyor'}</p>
+            </div>
+            {normalizeRole(currentUser.role) === 'ADMIN' && (
+              <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showUserPicker ? 'rotate-180' : ''} shrink-0`} />
+            )}
+          </button>
+          
+          {normalizeRole(currentUser.role) !== 'ADMIN' && (
+            <button 
+              onClick={() => logout()}
+              className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer shrink-0"
+              title="Çıkış Yap"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
+          )}
+        </div>
 
-        {/* User Picker Dropdown */}
-        {showUserPicker && mounted && (
+        {/* User Picker Dropdown (Only for ADMIN) */}
+        {showUserPicker && mounted && normalizeRole(currentUser.role) === 'ADMIN' && (
           <div className="absolute bottom-full left-4 right-4 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden z-50 max-h-72 overflow-y-auto">
             <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">
-              <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">Kullanıcı Değiştir (Demo)</span>
+              <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">Kullanıcı Değiştir (Admin)</span>
             </div>
             {users.map(u => normalizeUser(u)).filter(u => u.isActive).map(user => (
               <button

@@ -231,7 +231,7 @@ export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
       users: INITIAL_USERS,
-      currentUser: INITIAL_USERS[0], // Keep first user logged in by default
+      currentUser: null, // Start logged out by default
       auditLog: [],
       
       login: (username: string, pin: string) => {

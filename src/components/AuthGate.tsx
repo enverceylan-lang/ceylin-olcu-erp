@@ -117,24 +117,6 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
               Giriş Yap <ArrowRight className="w-4 h-4" />
             </button>
           </form>
-
-          {/* Quick Login selector for local demo/pilot testing */}
-          <div className="border-t border-slate-800/80 pt-4 space-y-2">
-            <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">Hızlı Giriş (Demo/Test)</span>
-            <div className="grid grid-cols-2 gap-2">
-              {users.map(u => normalizeUser(u)).map((user) => (
-                <button
-                  key={user.id}
-                  onClick={() => handleQuickLogin(user)}
-                  type="button"
-                  className="px-3 py-2 bg-slate-950/40 hover:bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-xl text-left text-xs transition-all flex flex-col cursor-pointer"
-                >
-                  <span className="font-semibold text-slate-200 truncate">{user.name}</span>
-                  <span className="text-[10px] text-slate-500 mt-0.5">{user.username} (P: {user.password})</span>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     );
