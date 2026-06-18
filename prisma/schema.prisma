@@ -3,11 +3,25 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id          String   @id @default(cuid())
+  name        String
+  username    String   @unique
+  password    String   // Hashed password/PIN
+  role        String   // ADMIN, OFFICE, SALES, FIELD, MEASUREMENT, TAILOR, PRODUCTION, INSTALLER, INSTALLATION
+  isActive    Boolean  @default(true)
+  permissions String[] // Permitted modules
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model Customer {
-  id          String   @id @default(cuid())
+  id          String   @id // Zustand UUID
   name        String
   phone       String?
   address     String?
@@ -21,37 +35,84 @@ model Customer {
 }
 
 model Room {
-  id          String        @id @default(cuid())
-  name        String
-  customerId  String
-  customer    Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  imageUrl    String?       // Customer room image
-  notes       String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id         String     @id // Zustand UUID
+  name       String
+  customerId String
+  customer   Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  photos     String[]
+  videos     String[]
+  openings   Opening[]
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+}
 
+model Opening {
+  id           String        @id // Zustand UUID
+  name         String
+  roomId       String
+  room         Room          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  width        Float?
+  height       Float?
+  fieldNotes   String?
+  photos       String[]
+  videos       String[]
   measurements Measurement[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 }
 
 model Measurement {
-  id          String   @id @default(cuid())
-  roomId      String
-  room        Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  width       Float    // in cm
-  height      Float    // in cm
-  productType String?
-  notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id               String     @id // Zustand UUID
+  openingId        String
+  opening          Opening    @relation(fields: [openingId], references: [id], onDelete: Cascade)
+  templateType     String
+  rawValues        Json
+  productId        String?
+  productGroup     String?
+  productType      String?
+  calculatedWidth  Float?
+  calculatedHeight Float?
+  details          Json?
+  notes            String
+  status           String
+  measuredBy       String
+  measuredById     String?
+  createdById      String?
+  measuredDate     DateTime   @default(now())
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  notesHistory     Json[]     // Array of Note history objects
+  photos           String[]
+  videos           String[]
 
-  saleItems   SaleItem[]
+  saleItems        SaleItem[]
+}
+
+model Media {
+  id          String   @id @default(cuid())
+  type        String   // "photo" | "video"
+  storagePath String
+  url         String
+  entityType  String   // "Room" | "Opening" | "Measurement"
+  entityId    String
+  createdBy   String?
+  createdAt   DateTime @default(now())
+}
+
+model Note {
+  id         String   @id @default(cuid())
+  entityType String   // "Customer" | "Measurement"
+  entityId   String
+  author     String
+  content    String
+  createdAt  DateTime @default(now())
 }
 
 model Product {
   id               String   @id @default(cuid())
   stockCode        String   @unique
   name             String
-  unit             String   // e.g. meter, piece
+  unit             String
   cashPrice        Float
   installmentPrice Float
   dealerPrice      Float
@@ -76,19 +137,19 @@ model Sale {
 }
 
 model SaleItem {
-  id              String      @id @default(cuid())
+  id              String       @id @default(cuid())
   saleId          String
-  sale            Sale        @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  sale            Sale         @relation(fields: [saleId], references: [id], onDelete: Cascade)
   measurementId   String?
   measurement     Measurement? @relation(fields: [measurementId], references: [id], onDelete: SetNull)
   productId       String
-  product         Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
-  pleatType       String      // SPARSE, NORMAL, TIGHT, or NONE
-  pleatMultiplier Float       // e.g. 2.1, 2.6, 3.1, or 1.0
-  quantity        Float       // calculated based on width and multiplier
+  product         Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  pleatType       String
+  pleatMultiplier Float
+  quantity        Float
   unitPrice       Float
   lineTotal       Float
 
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 }
