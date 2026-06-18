@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useAuthStore, normalizeRole, canViewModule, INITIAL_USERS } from "@/store/useAuthStore";
+import { useAuthStore, normalizeRole, canViewModule, INITIAL_USERS, normalizeUser } from "@/store/useAuthStore";
 import { usePathname, useRouter } from "next/navigation";
 import { ShieldAlert, Lock, User, KeyRound, ArrowRight } from "lucide-react";
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
-  const { currentUser, login, users } = useAuthStore();
+  const { currentUser: rawCurrentUser, login, users } = useAuthStore();
   const pathname = usePathname();
   const router = useRouter();
   
@@ -14,6 +14,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+
+  const currentUser = rawCurrentUser ? normalizeUser(rawCurrentUser) : null;
 
   useEffect(() => {
     setMounted(true);
@@ -120,7 +122,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           <div className="border-t border-slate-800/80 pt-4 space-y-2">
             <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">Hızlı Giriş (Demo/Test)</span>
             <div className="grid grid-cols-2 gap-2">
-              {users.map((user) => (
+              {users.map(u => normalizeUser(u)).map((user) => (
                 <button
                   key={user.id}
                   onClick={() => handleQuickLogin(user)}

@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { useAuthStore, ROLE_PERMISSIONS, canViewModule } from "@/store/useAuthStore";
+import { useAuthStore, ROLE_PERMISSIONS, canViewModule, normalizeUser } from "@/store/useAuthStore";
 import { useUiStore } from "@/store/useUiStore";
 import { useState, useEffect } from "react";
 
@@ -47,14 +47,16 @@ const ROLE_COLORS: Record<string, string> = {
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { currentUser, switchUser, users, logout } = useAuthStore();
+  const { currentUser: rawCurrentUser, switchUser, users, logout } = useAuthStore();
   const { isMobileMenuOpen, setMobileMenuOpen } = useUiStore();
   const [showUserPicker, setShowUserPicker] = useState(false);
   const [mounted, setMounted] = useState(false);
   
   useEffect(() => setMounted(true), []);
 
-  if (!currentUser) return null;
+  if (!rawCurrentUser) return null;
+  
+  const currentUser = normalizeUser(rawCurrentUser);
 
   const permissions = ROLE_PERMISSIONS[currentUser.role] || { label: 'Kullanıcı' };
   const visibleMenuItems = menuItems.filter(item => 
@@ -145,7 +147,7 @@ export function Sidebar() {
             <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">
               <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">Kullanıcı Değiştir (Demo)</span>
             </div>
-            {users.filter(u => u.isActive).map(user => (
+            {users.map(u => normalizeUser(u)).filter(u => u.isActive).map(user => (
               <button
                 key={user.id}
                 onClick={() => { switchUser(user.id); setShowUserPicker(false); setMobileMenuOpen(false); }}

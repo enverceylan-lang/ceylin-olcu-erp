@@ -3,7 +3,7 @@
 import { useTheme } from "next-themes";
 import { Moon, Sun, Menu, Bell } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useAuthStore, ROLE_PERMISSIONS } from "@/store/useAuthStore";
+import { useAuthStore, ROLE_PERMISSIONS, normalizeUser } from "@/store/useAuthStore";
 import { useUiStore } from "@/store/useUiStore";
 
 const ROLE_BADGE_COLORS: Record<string, string> = {
@@ -20,13 +20,15 @@ const ROLE_BADGE_COLORS: Record<string, string> = {
 
 export function Topbar() {
   const { theme, setTheme } = useTheme();
-  const { currentUser } = useAuthStore();
+  const { currentUser: rawCurrentUser } = useAuthStore();
   const { toggleMobileMenu } = useUiStore();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => setMounted(true), []);
 
-  if (!currentUser) return null;
+  if (!rawCurrentUser) return null;
+
+  const currentUser = normalizeUser(rawCurrentUser);
 
   return (
     <header className="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-4 lg:px-8">
