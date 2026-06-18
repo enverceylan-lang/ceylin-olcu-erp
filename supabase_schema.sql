@@ -1,5 +1,6 @@
 -- Supabase Schema Setup Script for Ölçü ERP
 -- Run this script in the Supabase SQL Editor to create the required tables.
+-- SECURITY: RLS is enabled on all tables. Data access is restricted to server-side API routes using the Supabase Service Role key.
 
 -- 1. Create users table
 CREATE TABLE IF NOT EXISTS users (
@@ -88,10 +89,25 @@ CREATE TABLE IF NOT EXISTS media (
     "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
--- Disable Row Level Security (RLS) for the pilot to allow direct client sync
-ALTER TABLE users DISABLE ROW LEVEL SECURITY;
-ALTER TABLE customers DISABLE ROW LEVEL SECURITY;
-ALTER TABLE rooms DISABLE ROW LEVEL SECURITY;
-ALTER TABLE openings DISABLE ROW LEVEL SECURITY;
-ALTER TABLE measurements DISABLE ROW LEVEL SECURITY;
-ALTER TABLE media DISABLE ROW LEVEL SECURITY;
+-- Enable Row Level Security (RLS) on all tables
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rooms ENABLE ROW LEVEL SECURITY;
+ALTER TABLE openings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE measurements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE media ENABLE ROW LEVEL SECURITY;
+
+-- Note: No public policies are created because database access is strictly
+-- server-side only through Next.js API endpoints using the Supabase Service Role.
+
+-- Performance and sync optimization indexes (on updatedAt)
+CREATE INDEX IF NOT EXISTS idx_users_updated_at ON users("updatedAt");
+CREATE INDEX IF NOT EXISTS idx_customers_updated_at ON customers("updatedAt");
+CREATE INDEX IF NOT EXISTS idx_rooms_updated_at ON rooms("updatedAt");
+CREATE INDEX IF NOT EXISTS idx_openings_updated_at ON openings("updatedAt");
+CREATE INDEX IF NOT EXISTS idx_measurements_updated_at ON measurements("updatedAt");
+
+-- Foreign key lookup indexes
+CREATE INDEX IF NOT EXISTS idx_rooms_customer_id ON rooms("customerId");
+CREATE INDEX IF NOT EXISTS idx_openings_room_id ON openings("roomId");
+CREATE INDEX IF NOT EXISTS idx_measurements_opening_id ON measurements("openingId");
