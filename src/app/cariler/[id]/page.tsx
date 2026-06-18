@@ -4,11 +4,9 @@ import React, { useState, useEffect } from "react";
 import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, ChevronRight, Layers, Camera, Video, FileText, CheckCircle, Shield, AlertTriangle, MapPin, MessageCircle } from "lucide-react";
 import Link from "next/link";
 import { useStore, WindowItem, MEASUREMENT_TEMPLATES, ProductMeasurement } from "@/store/useStore";
-import { useAuthStore, ROLE_PERMISSIONS, MOCK_USERS } from "@/store/useAuthStore";
+import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer } from "@/store/useAuthStore";
 import { getMeasurementDimensions, getTemplateLabel, getGoogleMapsUrl, getWorkflowStatusLabel, getWorkflowStatusColorClass, WORKFLOW_STATUS_LABELS } from "@/lib/measurementAdapter";
 import { fileToDataUrl } from "@/lib/fileStorage";
-
-const MEASUREMENT_EMPLOYEES = MOCK_USERS.filter(u => u.role === 'MEASUREMENT' || u.role === 'ADMIN');
 
 export default function CariDetayPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
@@ -16,11 +14,15 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   
   const store = useStore();
   const { customers, addRoom, deleteRoom, addWindow, deleteWindow, updateRoomAttachments, updateWindowItem, addProductMeasurement, updateProductMeasurement, deleteProductMeasurement } = store;
-  const { currentUser, addAuditEntry } = useAuthStore();
+  const { currentUser, addAuditEntry, users } = useAuthStore();
+  const user = currentUser!;
   
   const [mounted, setMounted] = useState(false);
-  const permissions = ROLE_PERMISSIONS[currentUser.role];
-  const [mode, setMode] = useState<"MEASUREMENT" | "OFFICE">(permissions.canAccessOfficeMode ? "MEASUREMENT" : "MEASUREMENT");
+  const permissions = ROLE_PERMISSIONS[currentUser?.role || "FIELD"] || { label: "Kullanıcı", canAccessOfficeMode: false, canOverrideMeasuredBy: false };
+  const [mode, setMode] = useState<"MEASUREMENT" | "OFFICE">("MEASUREMENT");
+
+  const measurementEmployees = users.filter(u => normalizeRole(u.role) === 'FIELD' || normalizeRole(u.role) === 'ADMIN');
+
 
   const [activeRoomIdForWindow, setActiveRoomIdForWindow] = useState<string | null>(null);
   const [activeWindowIdForProduct, setActiveWindowIdForProduct] = useState<string | null>(null);
@@ -32,7 +34,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const [selectedTemplate, setSelectedTemplate] = useState("CURTAIN_DETAIL");
   const [rawValues, setRawValues] = useState<Record<string, any>>({});
   // For ADMIN/SALES entering on behalf of someone else
-  const [overrideMeasuredById, setOverrideMeasuredById] = useState(currentUser.id);
+  const [overrideMeasuredById, setOverrideMeasuredById] = useState(currentUser?.id || "");
   const [measurementNotes, setMeasurementNotes] = useState("");
 
   // Office Config Form State
@@ -51,6 +53,16 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   if (!mounted) return <div className="p-8 text-center">Yükleniyor...</div>;
 
   const customer = customers.find(c => c.id === id);
+
+  if (customer && currentUser && !canViewCustomer(currentUser, customer)) {
+    return (
+      <div className="p-8 text-center space-y-4 bg-slate-900 border border-slate-800 rounded-2xl max-w-md mx-auto my-12">
+        <p className="text-red-500 font-bold text-lg">Erişim Engellendi</p>
+        <p className="text-slate-350 text-sm">Bu müşterinin bilgilerini görüntüleme yetkiniz yok.</p>
+        <Link href="/cariler" className="inline-block bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-sm font-semibold transition-colors">Listeye Dön</Link>
+      </div>
+    );
+  }
 
   if (!customer) {
     return (
@@ -180,13 +192,13 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     setSelectedTemplate("CURTAIN_DETAIL");
     setRawValues({});
     setMeasurementNotes("");
-    setOverrideMeasuredById(currentUser.id);
+    setOverrideMeasuredById(user.id);
   };
 
   const handleSaveMeasurement = (roomId: string, windowId: string) => {
     // Determine who actually measured
-    const isOfficeEntry = permissions.canAccessOfficeMode && overrideMeasuredById !== currentUser.id;
-    const measuredByUser = MOCK_USERS.find(u => u.id === overrideMeasuredById) || currentUser;
+    const isOfficeEntry = permissions.canAccessOfficeMode && overrideMeasuredById !== user.id;
+    const measuredByUser = users.find(u => u.id === overrideMeasuredById) || user;
     const now = new Date().toISOString();
 
     const parsedRawValues: Record<string, number> = {};
@@ -203,7 +215,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       status: "MEASURED",
       measuredBy: measuredByUser.name,
       measuredById: measuredByUser.id,
-      createdById: currentUser.id,
+      createdById: user.id,
       measuredDate: now,
       createdAt: now,
       updatedAt: now,
@@ -216,7 +228,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
   const handleAddNote = (roomId: string, windowId: string, m: ProductMeasurement) => {
     if (!newNote.trim()) return;
-    const note = { date: new Date().toISOString(), note: newNote, author: currentUser.name };
+    const note = { date: new Date().toISOString(), note: newNote, author: user.name };
     updateProductMeasurement(customer.id, roomId, windowId, m.id, {
       notesHistory: [...(m.notesHistory || []), note],
       updatedAt: new Date().toISOString(),
@@ -226,7 +238,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
   const handleCorrectionSave = (roomId: string, windowId: string, m: ProductMeasurement) => {
     if (!correctionNewUserId || !correctionReason.trim()) return;
-    const newUser = MOCK_USERS.find(u => u.id === correctionNewUserId);
+    const newUser = users.find(u => u.id === correctionNewUserId);
     if (!newUser) return;
 
     addAuditEntry({
@@ -235,7 +247,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       field: 'measuredById',
       previousValue: `${m.measuredBy} (${m.measuredById || 'N/A'})`,
       newValue: `${newUser.name} (${newUser.id})`,
-      changedBy: currentUser.name,
+      changedBy: user.name,
       changedAt: new Date().toISOString(),
       reason: correctionReason,
     });
@@ -465,7 +477,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                     <span>Ölçen: <span className="font-medium text-gray-700 dark:text-gray-300">{p.measuredBy}</span></span>
                                     {p.measuredDate && <span>Tarih: {new Date(p.measuredDate).toLocaleDateString()}</span>}
                                     {p.createdById && p.createdById !== p.measuredById && (
-                                      <span className="text-orange-500">Kaydeden: {MOCK_USERS.find(u => u.id === p.createdById)?.name || p.createdById}</span>
+                                      <span className="text-orange-500">Kaydeden: {users.find(u => u.id === p.createdById)?.name || p.createdById}</span>
                                     )}
                                   </div>
                                 </div>
@@ -523,7 +535,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                             className="w-full p-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-red-500 outline-none"
                                           >
                                             <option value="">Yeni sorumlu seç...</option>
-                                            {MEASUREMENT_EMPLOYEES.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                                            {measurementEmployees.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                                           </select>
                                           <input 
                                             type="text"
@@ -657,13 +669,13 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                         onChange={(e) => setOverrideMeasuredById(e.target.value)}
                                         className="w-full p-2 border rounded-lg bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                                       >
-                                        {MEASUREMENT_EMPLOYEES.map(u => <option key={u.id} value={u.id}>{u.name} ({ROLE_PERMISSIONS[u.role].label})</option>)}
+                                        {measurementEmployees.map(u => <option key={u.id} value={u.id}>{u.name} ({(ROLE_PERMISSIONS[u.role] || { label: u.role }).label})</option>)}
                                       </select>
                                     ) : (
                                       /* Normal users see their own name, read-only */
                                       <div className="w-full p-2 border rounded-lg bg-gray-100 dark:bg-gray-900/50 dark:border-gray-700 text-gray-800 dark:text-gray-200 text-sm font-medium flex items-center gap-2">
                                         <Shield className="w-3.5 h-3.5 text-blue-500" />
-                                        {currentUser.name}
+                                        {currentUser?.name || "Bilinmiyor"}
                                         <span className="text-[10px] text-gray-500 dark:text-gray-500 ml-auto">Otomatik</span>
                                       </div>
                                     )}

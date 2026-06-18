@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { useAuthStore, MOCK_USERS, ROLE_PERMISSIONS } from "@/store/useAuthStore";
+import { useAuthStore, ROLE_PERMISSIONS, canViewModule } from "@/store/useAuthStore";
 import { useUiStore } from "@/store/useUiStore";
 import { useState, useEffect } from "react";
 
@@ -34,27 +34,31 @@ const menuItems = [
 ];
 
 const ROLE_COLORS: Record<string, string> = {
-  ADMIN: 'bg-red-600',
+  ADMIN: 'bg-red-655',
+  OFFICE: 'bg-orange-500',
   SALES: 'bg-orange-500',
+  FIELD: 'bg-blue-600',
   MEASUREMENT: 'bg-blue-600',
+  TAILOR: 'bg-purple-600',
   PRODUCTION: 'bg-purple-600',
+  INSTALLER: 'bg-green-600',
   INSTALLATION: 'bg-green-600',
 };
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { currentUser, switchUser } = useAuthStore();
+  const { currentUser, switchUser, users, logout } = useAuthStore();
   const { isMobileMenuOpen, setMobileMenuOpen } = useUiStore();
   const [showUserPicker, setShowUserPicker] = useState(false);
   const [mounted, setMounted] = useState(false);
   
   useEffect(() => setMounted(true), []);
 
-  const permissions = ROLE_PERMISSIONS[currentUser.role];
+  if (!currentUser) return null;
+
+  const permissions = ROLE_PERMISSIONS[currentUser.role] || { label: 'Kullanıcı' };
   const visibleMenuItems = menuItems.filter(item => 
-    permissions.allowedRoutes.some(route => 
-      route === item.href || (item.href !== '/' && route.startsWith(item.href))
-    )
+    canViewModule(currentUser.role, item.href)
   );
 
   return (
@@ -141,28 +145,36 @@ export function Sidebar() {
             <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">
               <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">Kullanıcı Değiştir (Demo)</span>
             </div>
-            {MOCK_USERS.map(user => (
+            {users.filter(u => u.isActive).map(user => (
               <button
                 key={user.id}
                 onClick={() => { switchUser(user.id); setShowUserPicker(false); setMobileMenuOpen(false); }}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${
                   currentUser.id === user.id 
                     ? 'bg-blue-50 dark:bg-blue-900/20' 
-                    : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                    : 'hover:bg-gray-50 dark:hover:bg-gray-750/50'
                 }`}
               >
-                <div className={`w-7 h-7 rounded-full ${ROLE_COLORS[user.role]} flex items-center justify-center text-white font-bold text-xs`}>
+                <div className={`w-7 h-7 rounded-full ${ROLE_COLORS[user.role] || 'bg-gray-500'} flex items-center justify-center text-white font-bold text-xs`}>
                   {user.name.charAt(0)}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{user.name}</p>
-                  <p className="text-[10px] text-gray-500 dark:text-gray-400">{ROLE_PERMISSIONS[user.role].label}</p>
+                  <p className="text-[10px] text-gray-500 dark:text-gray-400">{(ROLE_PERMISSIONS[user.role] || { label: user.role }).label}</p>
                 </div>
                 {currentUser.id === user.id && (
                   <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">AKTİF</span>
                 )}
               </button>
             ))}
+            <div className="border-t border-gray-200 dark:border-gray-700 p-2 bg-gray-50 dark:bg-gray-800/50">
+              <button 
+                onClick={() => { logout(); setShowUserPicker(false); setMobileMenuOpen(false); }}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
+              >
+                Çıkış Yap
+              </button>
+            </div>
           </div>
         )}
       </div>

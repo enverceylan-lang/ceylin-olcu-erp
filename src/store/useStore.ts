@@ -153,6 +153,7 @@ export interface MontageTask {
   date: string;
   time: string;
   status: string;
+  installerAssignedTo?: string;
 }
 
 export interface ProductionIssue {
@@ -229,6 +230,7 @@ interface AppState {
   addSale: (saleData: { customerId: string; amount: number; items: SaleItem[]; address: string }) => void;
   updateProductionStatus: (id: string, status: string) => void;
   updateMontageStatus: (id: string, status: string) => void;
+  updateMontageTask: (id: string, data: Partial<MontageTask>) => void;
   
   addProductionItem: (item: ProductionItem) => void;
   updateProductionItem: (id: string, data: Partial<ProductionItem>) => void;
@@ -502,7 +504,7 @@ export const useStore = create<AppState>()(
             ...state.productionTasks
           ],
           montageTasks: [
-            { id: crypto.randomUUID(), saleId, customerId: saleData.customerId, address: saleData.address, date: montageDate, time: '10:00', status: 'Planlandı' },
+            { id: crypto.randomUUID(), saleId, customerId: saleData.customerId, address: saleData.address, date: montageDate, time: '10:00', status: 'Planlandı', installerAssignedTo: 'user-montaj1' },
             ...state.montageTasks
           ],
           productionItems: [
@@ -554,6 +556,10 @@ export const useStore = create<AppState>()(
 
       updateMontageStatus: (id, status) => set((state) => ({
         montageTasks: state.montageTasks.map(t => t.id === id ? { ...t, status } : t)
+      })),
+
+      updateMontageTask: (id, data) => set((state) => ({
+        montageTasks: state.montageTasks.map(t => t.id === id ? { ...t, ...data } : t)
       })),
 
     }),

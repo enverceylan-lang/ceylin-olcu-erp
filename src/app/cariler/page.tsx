@@ -5,9 +5,11 @@ import Link from "next/link";
 import { useStore } from "@/store/useStore";
 import { useEffect, useState } from "react";
 import { getGoogleMapsUrl } from "@/lib/measurementAdapter";
+import { useAuthStore, canViewCustomer, normalizeRole } from "@/store/useAuthStore";
 
 export default function CarilerPage() {
   const { customers, deleteCustomer } = useStore();
+  const { currentUser } = useAuthStore();
   const [mounted, setMounted] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -17,10 +19,13 @@ export default function CarilerPage() {
 
   if (!mounted) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
 
-  const filteredCustomers = customers.filter(c => 
-    c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    c.phone.includes(searchTerm)
-  );
+  const filteredCustomers = customers.filter(c => {
+    if (currentUser && !canViewCustomer(currentUser, c)) return false;
+    return (
+      c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+      c.phone.includes(searchTerm)
+    );
+  });
 
   return (
     <div className="space-y-6">
@@ -114,9 +119,11 @@ export default function CarilerPage() {
                         <Link href={`/cariler/${customer.id}`} className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium">
                           Ölçüler
                         </Link>
-                        <button onClick={() => deleteCustomer(customer.id)} className="text-sm text-red-500 hover:text-red-700 transition-colors">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {currentUser && normalizeRole(currentUser.role) === 'ADMIN' && (
+                          <button onClick={() => deleteCustomer(customer.id)} className="text-sm text-red-500 hover:text-red-700 transition-colors" title="Sil">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

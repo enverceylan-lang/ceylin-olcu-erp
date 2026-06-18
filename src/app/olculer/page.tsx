@@ -5,9 +5,11 @@ import Link from "next/link";
 import { useStore, MEASUREMENT_TEMPLATES } from "@/store/useStore";
 import { useEffect, useState } from "react";
 import { getMeasurementDimensions, getTemplateLabel } from "@/lib/measurementAdapter";
+import { useAuthStore, canViewCustomer } from "@/store/useAuthStore";
 
 export default function OlculerPage() {
   const { customers } = useStore();
+  const { currentUser } = useAuthStore();
   const [mounted, setMounted] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [expandedCustomers, setExpandedCustomers] = useState<Record<string, boolean>>({});
@@ -22,6 +24,7 @@ export default function OlculerPage() {
 
   // Process customer stats and search
   const customerStats = customers
+    .filter(c => !currentUser || canViewCustomer(currentUser, c))
     .map(customer => {
       const roomCount = customer.rooms.length;
       let openingCount = 0;

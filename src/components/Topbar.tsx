@@ -8,9 +8,13 @@ import { useUiStore } from "@/store/useUiStore";
 
 const ROLE_BADGE_COLORS: Record<string, string> = {
   ADMIN: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+  OFFICE: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
   SALES: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
+  FIELD: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
   MEASUREMENT: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+  TAILOR: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
   PRODUCTION: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
+  INSTALLER: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
   INSTALLATION: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
 };
 
@@ -21,6 +25,8 @@ export function Topbar() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => setMounted(true), []);
+
+  if (!currentUser) return null;
 
   return (
     <header className="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-4 lg:px-8">
@@ -38,8 +44,8 @@ export function Topbar() {
             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
               Giriş: <span className="font-bold text-gray-900 dark:text-white">{currentUser.name}</span>
             </span>
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ROLE_BADGE_COLORS[currentUser.role]}`}>
-              {ROLE_PERMISSIONS[currentUser.role].label}
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ROLE_BADGE_COLORS[currentUser.role] || 'bg-gray-150 text-gray-700'}`}>
+              {(ROLE_PERMISSIONS[currentUser.role] || { label: currentUser.role }).label}
             </span>
           </div>
         )}

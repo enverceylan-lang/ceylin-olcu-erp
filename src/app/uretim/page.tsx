@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import { Factory, Search, ChevronDown, ChevronUp, Check, AlertTriangle, AlertCircle, RefreshCw, Clock, Scissors, Package, CheckCircle2, DollarSign, Image as ImageIcon, Plus, X } from "lucide-react";
 import { useStore, ProductionItem, ProductionIssue, Sale } from "@/store/useStore";
 import { getTemplateLabel } from "@/lib/measurementAdapter";
-import { MOCK_USERS } from "@/store/useAuthStore";
+import { useAuthStore, normalizeRole } from "@/store/useAuthStore";
 
 const STATUS_LABELS: Record<string, string> = {
   WAITING_MATERIAL: "Malzeme Bekliyor",
@@ -62,6 +62,7 @@ const WORKSHOPS = [
 
 export default function UretimPage() {
   const { sales, customers, products, productionItems, setProductionItems, updateProductionItem } = useStore();
+  const { currentUser, users } = useAuthStore();
   const [mounted, setMounted] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [expandedOrders, setExpandedOrders] = useState<Record<string, boolean>>({});
@@ -238,7 +239,13 @@ export default function UretimPage() {
   // Group items by order
   const ordersData = sales.map(sale => {
     const customer = customers.find(c => c.id === sale.customerId);
-    const orderItems = productionItems.filter(item => item.orderId === sale.id);
+    const orderItems = productionItems.filter(item => {
+      if (item.orderId !== sale.id) return false;
+      if (currentUser && normalizeRole(currentUser.role) === 'TAILOR') {
+        return item.assignedEmployeeId === currentUser.id;
+      }
+      return true;
+    });
     
     const totalCount = orderItems.length;
     const readyCount = orderItems.filter(i => i.productionStatus === 'READY' || i.productionStatus === 'CANCELLED').length;
@@ -258,8 +265,10 @@ export default function UretimPage() {
       items: orderItems
     };
   }).filter(o => 
-    o.sale.id.includes(searchTerm) || 
-    o.customerName.toLowerCase().includes(searchTerm.toLowerCase())
+    o.items.length > 0 && (
+      o.sale.id.includes(searchTerm) || 
+      o.customerName.toLowerCase().includes(searchTerm.toLowerCase())
+    )
   );
 
   return (
@@ -392,7 +401,7 @@ export default function UretimPage() {
                                 className="bg-transparent border-none outline-none font-medium text-gray-800 dark:text-gray-200 cursor-pointer"
                               >
                                 <option value="" className="bg-gray-900 text-white">Terzi Seçilmedi</option>
-                                {MOCK_USERS.map(u => <option key={u.id} value={u.id} className="bg-gray-900 text-white">{u.name}</option>)}
+                                {users.filter(u => normalizeRole(u.role) === 'TAILOR' || normalizeRole(u.role) === 'ADMIN').map(u => <option key={u.id} value={u.id} className="bg-gray-900 text-white">{u.name}</option>)}
                               </select>
                             </div>
 
@@ -420,7 +429,9 @@ export default function UretimPage() {
                                 <div className="flex items-center gap-2 font-medium text-gray-800 dark:text-gray-200 mt-1">
                                   <span>Dikiş: {item.sewingFee || 0} ₺</span>
                                   <span>Ek İş: {item.approvedExtraWorkFee || 0} ₺</span>
-                                  <button onClick={() => startEditingFee(item)} className="text-blue-500 hover:underline text-[10px] ml-1">Düzenle</button>
+                                  {currentUser && (normalizeRole(currentUser.role) === 'ADMIN' || normalizeRole(currentUser.role) === 'OFFICE') && (
+                                    <button onClick={() => startEditingFee(item)} className="text-blue-500 hover:underline text-[10px] ml-1">Düzenle</button>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -510,7 +521,7 @@ export default function UretimPage() {
                             </div>
                             <p className="text-gray-800 dark:text-gray-300 font-medium">Açıklama: {item.issue.issueDescription}</p>
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] text-gray-500 dark:text-gray-400 pt-1 border-t dark:border-red-900/30">
-                              <div>Sorumlu: <span className="font-semibold text-gray-800 dark:text-gray-200">{MOCK_USERS.find(u => u.id === item.issue?.responsibleEmployeeId)?.name || item.issue?.responsibleEmployeeId || 'Belirtilmedi'}</span></div>
+                              <div>Sorumlu: <span className="font-semibold text-gray-800 dark:text-gray-200">{users.find(u => u.id === item.issue?.responsibleEmployeeId)?.name || item.issue?.responsibleEmployeeId || 'Belirtilmedi'}</span></div>
                               {item.issue.expectedResolutionDate && <div>Çözüm Hedefi: <span className="font-semibold text-gray-855 dark:text-gray-250">{new Date(item.issue.expectedResolutionDate).toLocaleDateString('tr-TR')}</span></div>}
                               {item.issue.expectedMaterialArrivalDate && <div>Kumaş/Mlz Geliş: <span className="font-semibold text-gray-855 dark:text-gray-250">{new Date(item.issue.expectedMaterialArrivalDate).toLocaleDateString('tr-TR')}</span></div>}
                               {item.issue.additionalCost > 0 && <div className="text-rose-600 dark:text-rose-400">Ekstra Maliyet: <span className="font-bold">{item.issue.additionalCost} ₺</span></div>}
@@ -580,7 +591,7 @@ export default function UretimPage() {
                     className="w-full p-2 border rounded-lg bg-gray-50 dark:bg-gray-950 dark:border-gray-800 text-gray-900 dark:text-white text-xs outline-none focus:ring-2 focus:ring-red-500"
                   >
                     <option value="">Seçiniz...</option>
-                    {MOCK_USERS.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                   </select>
                 </div>
               </div>
