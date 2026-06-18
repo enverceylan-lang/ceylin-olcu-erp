@@ -28,6 +28,12 @@ export function normalizeRole(role: UserRole | undefined): 'ADMIN' | 'OFFICE' | 
   return role as any;
 }
 
+export function getRoleDefaultPermissions(role: UserRole): string[] {
+  const normRole = normalizeRole(role);
+  const modules = ['dashboard', 'cariler', 'olculer', 'stok', 'satis', 'uretim', 'montaj', 'raporlar', 'ayarlar'];
+  return modules.filter(m => canViewModule(normRole, m === 'dashboard' ? '' : m));
+}
+
 export function normalizeUser(user: any): MockUser {
   if (!user) {
     return {
@@ -36,16 +42,25 @@ export function normalizeUser(user: any): MockUser {
       username: 'admin',
       role: 'ADMIN',
       isActive: true,
-      permissions: []
+      permissions: ['dashboard', 'cariler', 'olculer', 'stok', 'satis', 'uretim', 'montaj', 'raporlar', 'ayarlar']
     };
   }
 
-  const role = user.role || 'ADMIN';
+  const role = user.role || (user.id === 'user-admin' ? 'ADMIN' : 'FIELD');
   const isActive = typeof user.isActive === 'boolean' ? user.isActive : true;
-  const permissions = Array.isArray(user.permissions) ? user.permissions : [];
+  const username = (user.username || user.name || user.id || '').trim().toLowerCase().replace(/\s+/g, '');
+  const password = (user.password || '123').trim();
+  
+  const permissions = Array.isArray(user.permissions) && user.permissions.length > 0
+    ? user.permissions 
+    : getRoleDefaultPermissions(role);
 
   return {
     ...user,
+    id: user.id || 'user-' + Math.random().toString(36).substring(2, 9),
+    name: user.name || 'İsimsiz Kullanıcı',
+    username,
+    password,
     role,
     isActive,
     permissions
@@ -235,7 +250,16 @@ export const useAuthStore = create<AuthState>()(
       auditLog: [],
       
       login: (username: string, pin: string) => {
-        const user = get().users.find((u: MockUser) => u.username.toLowerCase() === username.toLowerCase() && u.password === pin);
+        const cleanInputUsername = (username || '').trim().toLowerCase();
+        const cleanInputPin = (pin || '').trim();
+        
+        const usersList = get().users.map((u: MockUser) => normalizeUser(u));
+        const user = usersList.find((u: MockUser) => {
+          const userUsername = (u.username || '').trim().toLowerCase();
+          const userPassword = (u.password || '').trim();
+          return userUsername === cleanInputUsername && userPassword === cleanInputPin;
+        });
+
         if (user && user.isActive) {
           set({ currentUser: user });
           return true;
@@ -248,7 +272,7 @@ export const useAuthStore = create<AuthState>()(
       switchUser: (userId: string) => set((state: AuthState) => {
         const user = state.users.find((u: MockUser) => u.id === userId);
         if (!user || !user.isActive) return {};
-        return { currentUser: user };
+        return { currentUser: normalizeUser(user) };
       }),
       
       addAuditEntry: (entry: Omit<AuditEntry, 'id'>) => set((state: AuthState) => ({
@@ -258,16 +282,28 @@ export const useAuthStore = create<AuthState>()(
         ]
       })),
       
-      addUser: (user: Omit<MockUser, 'id'>) => set((state: AuthState) => ({
-        users: [...state.users, { ...user, id: 'user-' + Math.random().toString(36).substring(2, 9) }]
-      })),
+      addUser: (user: Omit<MockUser, 'id'>) => set((state: AuthState) => {
+        const newUser = normalizeUser({
+          ...user,
+          isActive: true
+        });
+        return {
+          users: [...state.users, newUser]
+        };
+      }),
       
       updateUser: (id: string, data: Partial<MockUser>) => set((state: AuthState) => {
-        const updatedUsers = state.users.map((u: MockUser) => u.id === id ? { ...u, ...data } : u);
-        // Sync currentUser if it's the one modified
+        const updatedUsers = state.users.map((u: MockUser) => {
+          if (u.id === id) {
+            return normalizeUser({ ...u, ...data });
+          }
+          return u;
+        });
+        
         const updatedCurrentUser = state.currentUser && state.currentUser.id === id 
-          ? { ...state.currentUser, ...data } 
+          ? normalizeUser({ ...state.currentUser, ...data }) 
           : state.currentUser;
+          
         return {
           users: updatedUsers,
           currentUser: updatedCurrentUser
