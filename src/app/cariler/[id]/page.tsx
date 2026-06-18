@@ -7,6 +7,7 @@ import { useStore, WindowItem, MEASUREMENT_TEMPLATES, ProductMeasurement } from 
 import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer } from "@/store/useAuthStore";
 import { getMeasurementDimensions, getTemplateLabel, getGoogleMapsUrl, getWorkflowStatusLabel, getWorkflowStatusColorClass, WORKFLOW_STATUS_LABELS } from "@/lib/measurementAdapter";
 import { fileToDataUrl } from "@/lib/fileStorage";
+import { MediaPreviewModal } from "@/components/MediaPreviewModal";
 
 export default function CariDetayPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
@@ -31,6 +32,10 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   // Media Upload Choice Modal State
   const [mediaUploadType, setMediaUploadType] = useState<'photo' | 'video' | null>(null);
   const [mediaUploadCallback, setMediaUploadCallback] = useState<((url: string) => void) | null>(null);
+
+  // Media Preview Modal State
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewType, setPreviewType] = useState<'photo' | 'video' | null>(null);
 
   const [windowName, setWindowName] = useState("");
 
@@ -431,13 +436,22 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                   {isExpanded && (
                     <div className="mt-4 flex flex-wrap gap-2 items-center">
                       {room.photos?.map((url, i) => (
-                        <div key={i} className="relative w-16 h-16 rounded overflow-hidden border">
+                        <div 
+                          key={i} 
+                          onClick={() => { setPreviewUrl(url); setPreviewType('photo'); }}
+                          className="relative w-16 h-16 rounded overflow-hidden border cursor-pointer hover:opacity-85 transition-opacity"
+                        >
                           <img src={url} className="w-full h-full object-cover" />
                         </div>
                       ))}
                       {room.videos?.map((url, i) => (
-                        <div key={i} className="relative w-16 h-16 rounded overflow-hidden border bg-black flex items-center justify-center">
-                          <video src={url} className="w-full h-full object-cover" controls />
+                        <div 
+                          key={i} 
+                          onClick={() => { setPreviewUrl(url); setPreviewType('video'); }}
+                          className="relative w-16 h-16 rounded overflow-hidden border bg-black flex items-center justify-center cursor-pointer hover:opacity-85 transition-opacity"
+                        >
+                          <video src={url} className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white text-xs">▶</div>
                         </div>
                       ))}
                       {mode === 'MEASUREMENT' && (
@@ -501,8 +515,25 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                         {/* Display Window Attachments */}
                         {((window.photos && window.photos.length > 0) || (window.videos && window.videos.length > 0)) && (
                           <div className="flex gap-2 flex-wrap">
-                            {window.photos?.map((url, i) => <img key={i} src={url} className="w-12 h-12 rounded object-cover border" />)}
-                            {window.videos?.map((url, i) => <video key={i} src={url} className="w-12 h-12 rounded object-cover border bg-black" controls />)}
+                            {window.photos?.map((url, i) => (
+                              <div
+                                key={i}
+                                onClick={() => { setPreviewUrl(url); setPreviewType('photo'); }}
+                                className="relative w-12 h-12 rounded overflow-hidden border cursor-pointer hover:opacity-85 transition-opacity"
+                              >
+                                <img src={url} className="w-full h-full object-cover" />
+                              </div>
+                            ))}
+                            {window.videos?.map((url, i) => (
+                              <div
+                                key={i}
+                                onClick={() => { setPreviewUrl(url); setPreviewType('video'); }}
+                                className="relative w-12 h-12 rounded overflow-hidden border bg-black flex items-center justify-center cursor-pointer hover:opacity-85 transition-opacity"
+                              >
+                                <video src={url} className="w-full h-full object-cover" />
+                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white text-xs">▶</div>
+                              </div>
+                            ))}
                           </div>
                         )}
 
@@ -555,8 +586,25 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                               {/* Display Measurement Attachments */}
                               {((p.photos && p.photos.length > 0) || (p.videos && p.videos.length > 0)) && (
                                 <div className="flex gap-2 flex-wrap mb-3">
-                                  {p.photos?.map((url, i) => <img key={i} src={url} className="w-12 h-12 rounded object-cover border" />)}
-                                  {p.videos?.map((url, i) => <video key={i} src={url} className="w-12 h-12 rounded object-cover border bg-black" controls />)}
+                                  {p.photos?.map((url, i) => (
+                                    <div
+                                      key={i}
+                                      onClick={() => { setPreviewUrl(url); setPreviewType('photo'); }}
+                                      className="relative w-12 h-12 rounded overflow-hidden border cursor-pointer hover:opacity-85 transition-opacity"
+                                    >
+                                      <img src={url} className="w-full h-full object-cover" />
+                                    </div>
+                                  ))}
+                                  {p.videos?.map((url, i) => (
+                                    <div
+                                      key={i}
+                                      onClick={() => { setPreviewUrl(url); setPreviewType('video'); }}
+                                      className="relative w-12 h-12 rounded overflow-hidden border bg-black flex items-center justify-center cursor-pointer hover:opacity-85 transition-opacity"
+                                    >
+                                      <video src={url} className="w-full h-full object-cover" />
+                                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white text-xs">▶</div>
+                                    </div>
+                                  ))}
                                 </div>
                               )}
 
@@ -880,6 +928,13 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
             </div>
           </div>
         )}
+
+        {/* Media Preview Modal */}
+        <MediaPreviewModal 
+          url={previewUrl} 
+          type={previewType} 
+          onClose={() => { setPreviewUrl(null); setPreviewType(null); }} 
+        />
       </div>
     </div>
   );
