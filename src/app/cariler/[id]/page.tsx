@@ -28,6 +28,10 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const [activeWindowIdForProduct, setActiveWindowIdForProduct] = useState<string | null>(null);
   const [expandedRooms, setExpandedRooms] = useState<Record<string, boolean>>({});
 
+  // Media Upload Choice Modal State
+  const [mediaUploadType, setMediaUploadType] = useState<'photo' | 'video' | null>(null);
+  const [mediaUploadCallback, setMediaUploadCallback] = useState<((url: string) => void) | null>(null);
+
   const [windowName, setWindowName] = useState("");
 
   // Measurement Template Form State
@@ -169,10 +173,23 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     setWindowName("");
   };
 
-  const handleFileUpload = (type: 'photo' | 'video', callback: (url: string) => void) => {
+  const triggerFileSelector = (useCamera: boolean) => {
+    if (!mediaUploadType || !mediaUploadCallback) return;
+    
+    const type = mediaUploadType;
+    const callback = mediaUploadCallback;
+    
+    // Close the modal
+    setMediaUploadType(null);
+    setMediaUploadCallback(null);
+    
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = type === 'photo' ? 'image/*' : 'video/*';
+    if (useCamera) {
+      input.setAttribute('capture', 'environment');
+    }
+    
     input.onchange = async (event) => {
       const file = (event.target as HTMLInputElement).files?.[0];
       if (!file) return;
@@ -184,7 +201,13 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
         window.alert(error instanceof Error ? error.message : 'Dosya kaydedilemedi.');
       }
     };
+    
     input.click();
+  };
+
+  const handleFileUpload = (type: 'photo' | 'video', callback: (url: string) => void) => {
+    setMediaUploadType(type);
+    setMediaUploadCallback(() => callback);
   };
 
   const openMeasurementForm = (w: WindowItem) => {
@@ -406,20 +429,34 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                   
                   {/* Room Attachments */}
                   {isExpanded && (
-                    <div className="mt-4 flex gap-2 overflow-x-auto pb-2">
+                    <div className="mt-4 flex flex-wrap gap-2 items-center">
                       {room.photos?.map((url, i) => (
                         <div key={i} className="relative w-16 h-16 rounded overflow-hidden border">
                           <img src={url} className="w-full h-full object-cover" />
                         </div>
                       ))}
+                      {room.videos?.map((url, i) => (
+                        <div key={i} className="relative w-16 h-16 rounded overflow-hidden border bg-black flex items-center justify-center">
+                          <video src={url} className="w-full h-full object-cover" controls />
+                        </div>
+                      ))}
                       {mode === 'MEASUREMENT' && (
-                        <button 
-                          onClick={() => handleFileUpload('photo', (url) => updateRoomAttachments(customer.id, room.id, [...(room.photos||[]), url], room.videos||[]))}
-                          className="w-16 h-16 border-2 border-dashed border-gray-400 dark:border-gray-600 rounded flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                        >
-                          <Camera className="w-4 h-4" />
-                          <span className="text-[10px]">İsteğe Bağlı</span>
-                        </button>
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => handleFileUpload('photo', (url) => updateRoomAttachments(customer.id, room.id, [...(room.photos||[]), url], room.videos||[]))}
+                            className="w-16 h-16 border-2 border-dashed border-gray-400 dark:border-gray-600 rounded flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                          >
+                            <Camera className="w-4 h-4" />
+                            <span className="text-[10px] mt-1">Foto Ekle</span>
+                          </button>
+                          <button 
+                            onClick={() => handleFileUpload('video', (url) => updateRoomAttachments(customer.id, room.id, room.photos||[], [...(room.videos||[]), url]))}
+                            className="w-16 h-16 border-2 border-dashed border-gray-400 dark:border-gray-600 rounded flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                          >
+                            <Video className="w-4 h-4" />
+                            <span className="text-[10px] mt-1">Video Ekle</span>
+                          </button>
+                        </div>
                       )}
                     </div>
                   )}
@@ -440,12 +477,20 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                             
                             {/* Window Attachments Button */}
                             {mode === 'MEASUREMENT' && (
-                              <button 
-                                onClick={() => handleFileUpload('photo', (url) => updateWindowItem(customer.id, room.id, window.id, { photos: [...(window.photos||[]), url] }))}
-                                className="text-xs bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 px-2 py-1 rounded text-gray-600 dark:text-gray-400 flex items-center gap-1 transition-colors"
-                              >
-                                <Camera className="w-3 h-3" /> Foto Ekle (İsteğe Bağlı)
-                              </button>
+                              <div className="flex gap-2">
+                                <button 
+                                  onClick={() => handleFileUpload('photo', (url) => updateWindowItem(customer.id, room.id, window.id, { photos: [...(window.photos||[]), url] }))}
+                                  className="text-xs bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 px-2 py-1 rounded text-gray-600 dark:text-gray-400 flex items-center gap-1 transition-colors"
+                                >
+                                  <Camera className="w-3 h-3" /> Foto Ekle
+                                </button>
+                                <button 
+                                  onClick={() => handleFileUpload('video', (url) => updateWindowItem(customer.id, room.id, window.id, { videos: [...(window.videos||[]), url] }))}
+                                  className="text-xs bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 px-2 py-1 rounded text-gray-600 dark:text-gray-400 flex items-center gap-1 transition-colors"
+                                >
+                                  <Video className="w-3 h-3" /> Video Ekle
+                                </button>
+                              </div>
                             )}
                           </div>
                           <button onClick={() => deleteWindow(customer.id, room.id, window.id)} className="text-red-400 hover:text-red-600">
@@ -454,9 +499,10 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                         </div>
                         
                         {/* Display Window Attachments */}
-                        {window.photos && window.photos.length > 0 && (
-                          <div className="flex gap-2">
-                            {window.photos.map((url, i) => <img key={i} src={url} className="w-12 h-12 rounded object-cover border" />)}
+                        {((window.photos && window.photos.length > 0) || (window.videos && window.videos.length > 0)) && (
+                          <div className="flex gap-2 flex-wrap">
+                            {window.photos?.map((url, i) => <img key={i} src={url} className="w-12 h-12 rounded object-cover border" />)}
+                            {window.videos?.map((url, i) => <video key={i} src={url} className="w-12 h-12 rounded object-cover border bg-black" controls />)}
                           </div>
                         )}
 
@@ -505,6 +551,40 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                   </div>
                                 )}
                               </div>
+
+                              {/* Display Measurement Attachments */}
+                              {((p.photos && p.photos.length > 0) || (p.videos && p.videos.length > 0)) && (
+                                <div className="flex gap-2 flex-wrap mb-3">
+                                  {p.photos?.map((url, i) => <img key={i} src={url} className="w-12 h-12 rounded object-cover border" />)}
+                                  {p.videos?.map((url, i) => <video key={i} src={url} className="w-12 h-12 rounded object-cover border bg-black" controls />)}
+                                </div>
+                              )}
+
+                              {/* Measurement Media Upload Buttons */}
+                              {mode === 'MEASUREMENT' && (
+                                <div className="flex gap-2 mb-3">
+                                  <button
+                                    onClick={() => handleFileUpload('photo', (url) => {
+                                      updateProductMeasurement(customer.id, room.id, window.id, p.id, {
+                                        photos: [...(p.photos || []), url]
+                                      });
+                                    })}
+                                    className="text-xs bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 px-2.5 py-1.5 rounded text-gray-700 dark:text-gray-300 flex items-center gap-1 transition-colors border border-gray-200 dark:border-gray-700"
+                                  >
+                                    <Camera className="w-3.5 h-3.5" /> Foto Ekle
+                                  </button>
+                                  <button
+                                    onClick={() => handleFileUpload('video', (url) => {
+                                      updateProductMeasurement(customer.id, room.id, window.id, p.id, {
+                                        videos: [...(p.videos || []), url]
+                                      });
+                                    })}
+                                    className="text-xs bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 px-2.5 py-1.5 rounded text-gray-700 dark:text-gray-300 flex items-center gap-1 transition-colors border border-gray-200 dark:border-gray-700"
+                                  >
+                                    <Video className="w-3.5 h-3.5" /> Video Ekle
+                                  </button>
+                                </div>
+                              )}
 
                               {/* Office Assignment Info */}
                               {p.productId || p.productType ? (
@@ -757,6 +837,49 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
             );
           })}
         </div>
+
+        {/* Media Upload Modal */}
+        {mediaUploadType && (
+          <div 
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-4 z-50 animate-fade-in"
+            onClick={() => { setMediaUploadType(null); setMediaUploadCallback(null); }}
+          >
+            <div 
+              className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-t-2xl sm:rounded-2xl p-6 space-y-4 shadow-2xl animate-slide-up"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-center space-y-1">
+                <h4 className="text-md font-bold text-white">
+                  {mediaUploadType === 'photo' ? 'Fotoğraf Yükle' : 'Video Yükle'}
+                </h4>
+                <p className="text-xs text-slate-400">
+                  Lütfen medya kaynağını seçin.
+                </p>
+              </div>
+
+              <div className="space-y-2 pt-2">
+                <button
+                  onClick={() => triggerFileSelector(true)}
+                  className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-sm transition-colors cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Camera className="w-4 h-4" /> Kameradan Çek
+                </button>
+                <button
+                  onClick={() => triggerFileSelector(false)}
+                  className="w-full py-3 bg-slate-800 hover:bg-slate-750 text-white font-bold rounded-xl text-sm transition-colors border border-slate-750 cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Plus className="w-4 h-4" /> Galeriden Seç
+                </button>
+                <button
+                  onClick={() => { setMediaUploadType(null); setMediaUploadCallback(null); }}
+                  className="w-full py-3 bg-transparent text-slate-400 hover:text-white font-semibold rounded-xl text-sm transition-colors cursor-pointer"
+                >
+                  İptal
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
