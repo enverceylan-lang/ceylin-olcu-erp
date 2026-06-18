@@ -1,0 +1,97 @@
+-- Supabase Schema Setup Script for Ölçü ERP
+-- Run this script in the Supabase SQL Editor to create the required tables.
+
+-- 1. Create users table
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    role TEXT NOT NULL,
+    "isActive" BOOLEAN DEFAULT TRUE NOT NULL,
+    permissions TEXT[] DEFAULT '{}'::TEXT[] NOT NULL,
+    "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+-- 2. Create customers table
+CREATE TABLE IF NOT EXISTS customers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    phone TEXT,
+    address TEXT,
+    "mapLocation" TEXT,
+    notes TEXT,
+    "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+-- 3. Create rooms table
+CREATE TABLE IF NOT EXISTS rooms (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    "customerId" TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    photos TEXT[] DEFAULT '{}'::TEXT[] NOT NULL,
+    videos TEXT[] DEFAULT '{}'::TEXT[] NOT NULL,
+    "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+-- 4. Create openings table
+CREATE TABLE IF NOT EXISTS openings (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    "roomId" TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+    width DOUBLE PRECISION,
+    height DOUBLE PRECISION,
+    "fieldNotes" TEXT,
+    photos TEXT[] DEFAULT '{}'::TEXT[] NOT NULL,
+    videos TEXT[] DEFAULT '{}'::TEXT[] NOT NULL,
+    "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+-- 5. Create measurements table
+CREATE TABLE IF NOT EXISTS measurements (
+    id TEXT PRIMARY KEY,
+    "openingId" TEXT NOT NULL REFERENCES openings(id) ON DELETE CASCADE,
+    "templateType" TEXT NOT NULL,
+    "rawValues" JSONB NOT NULL,
+    "productId" TEXT,
+    "productGroup" TEXT,
+    "productType" TEXT,
+    "calculatedWidth" DOUBLE PRECISION,
+    "calculatedHeight" DOUBLE PRECISION,
+    details JSONB,
+    notes TEXT NOT NULL,
+    status TEXT NOT NULL,
+    "measuredBy" TEXT NOT NULL,
+    "measuredById" TEXT,
+    "createdById" TEXT,
+    "measuredDate" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "notesHistory" JSONB[] DEFAULT '{}'::JSONB[] NOT NULL,
+    photos TEXT[] DEFAULT '{}'::TEXT[] NOT NULL,
+    videos TEXT[] DEFAULT '{}'::TEXT[] NOT NULL
+);
+
+-- 6. Create media table
+CREATE TABLE IF NOT EXISTS media (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    "storagePath" TEXT NOT NULL,
+    url TEXT NOT NULL,
+    "entityType" TEXT NOT NULL,
+    "entityId" TEXT NOT NULL,
+    "createdBy" TEXT,
+    "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+-- Disable Row Level Security (RLS) for the pilot to allow direct client sync
+ALTER TABLE users DISABLE ROW LEVEL SECURITY;
+ALTER TABLE customers DISABLE ROW LEVEL SECURITY;
+ALTER TABLE rooms DISABLE ROW LEVEL SECURITY;
+ALTER TABLE openings DISABLE ROW LEVEL SECURITY;
+ALTER TABLE measurements DISABLE ROW LEVEL SECURITY;
+ALTER TABLE media DISABLE ROW LEVEL SECURITY;

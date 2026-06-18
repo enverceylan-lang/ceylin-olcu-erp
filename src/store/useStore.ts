@@ -73,6 +73,8 @@ export interface WindowItem {
   photos: string[];
   videos: string[];
   products: ProductMeasurement[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Room {
@@ -81,6 +83,8 @@ export interface Room {
   photos: string[];
   videos: string[];
   windows: WindowItem[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Customer {
@@ -91,6 +95,8 @@ export interface Customer {
   mapLocation: string;
   notes: string;
   rooms: Room[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Product {
@@ -209,6 +215,8 @@ interface AppState {
   productionTasks: ProductionTask[];
   montageTasks: MontageTask[];
   productionItems: ProductionItem[];
+  pendingDeletes: { id: string; table: 'customers' | 'rooms' | 'openings' | 'measurements' }[];
+  syncStatus: 'synced' | 'pending' | 'offline';
 
   addCustomer: (customer: Omit<Customer, 'id' | 'rooms'>) => void;
   updateCustomer: (id: string, data: Partial<Customer>) => void;
@@ -235,6 +243,10 @@ interface AppState {
   addProductionItem: (item: ProductionItem) => void;
   updateProductionItem: (id: string, data: Partial<ProductionItem>) => void;
   setProductionItems: (items: ProductionItem[]) => void;
+
+  setSyncStatus: (status: 'synced' | 'pending' | 'offline') => void;
+  setCustomers: (customers: Customer[]) => void;
+  clearPendingDeletes: () => void;
 }
 
 const mockProducts: Product[] = [
@@ -257,198 +269,316 @@ export const useStore = create<AppState>()(
       productionTasks: [],
       montageTasks: [],
       productionItems: [],
+      pendingDeletes: [],
+      syncStatus: 'synced',
 
-      addCustomer: (data) => set((state) => ({
-        customers: [{ ...data, id: crypto.randomUUID(), rooms: [] }, ...state.customers]
-      })),
+      addCustomer: (data) => set((state) => {
+        const now = new Date().toISOString();
+        const newCustomer: Customer = {
+          ...data,
+          id: crypto.randomUUID(),
+          rooms: [],
+          createdAt: now,
+          updatedAt: now
+        };
+        return {
+          customers: [newCustomer, ...state.customers],
+          syncStatus: 'pending'
+        };
+      }),
       
-      updateCustomer: (id, data) => set((state) => ({
-        customers: state.customers.map(c => c.id === id ? { ...c, ...data } : c)
-      })),
+      updateCustomer: (id, data) => set((state) => {
+        const now = new Date().toISOString();
+        const updatedCustomers = state.customers.map(c => 
+          c.id === id ? { ...c, ...data, updatedAt: now } : c
+        );
+        return {
+          customers: updatedCustomers,
+          syncStatus: 'pending'
+        };
+      }),
 
       deleteCustomer: (id) => set((state) => ({
-        customers: state.customers.filter(c => c.id !== id)
+        customers: state.customers.filter(c => c.id !== id),
+        pendingDeletes: [...state.pendingDeletes, { id, table: 'customers' }],
+        syncStatus: 'pending'
       })),
 
-      addRoom: (customerId, roomName) => set((state) => ({
-        customers: state.customers.map(c => {
-          if (c.id === customerId) {
-            return { ...c, rooms: [...c.rooms, { id: crypto.randomUUID(), name: roomName, photos: [], videos: [], windows: [] }] };
-          }
-          return c;
-        })
-      })),
+      addRoom: (customerId, roomName) => set((state) => {
+        const now = new Date().toISOString();
+        const newRoom: Room = {
+          id: crypto.randomUUID(),
+          name: roomName,
+          photos: [],
+          videos: [],
+          windows: [],
+          createdAt: now,
+          updatedAt: now
+        };
+        return {
+          customers: state.customers.map(c => {
+            if (c.id === customerId) {
+              return {
+                ...c,
+                updatedAt: now,
+                rooms: [...c.rooms, newRoom]
+              };
+            }
+            return c;
+          }),
+          syncStatus: 'pending'
+        };
+      }),
 
-      deleteRoom: (customerId, roomId) => set((state) => ({
-        customers: state.customers.map(c => {
-          if (c.id === customerId) {
-            return { ...c, rooms: c.rooms.filter(r => r.id !== roomId) };
-          }
-          return c;
-        })
-      })),
+      deleteRoom: (customerId, roomId) => set((state) => {
+        const now = new Date().toISOString();
+        return {
+          customers: state.customers.map(c => {
+            if (c.id === customerId) {
+              return {
+                ...c,
+                updatedAt: now,
+                rooms: c.rooms.filter(r => r.id !== roomId)
+              };
+            }
+            return c;
+          }),
+          pendingDeletes: [...state.pendingDeletes, { id: roomId, table: 'rooms' }],
+          syncStatus: 'pending'
+        };
+      }),
 
-      addWindow: (customerId, roomId, windowName) => set((state) => ({
-        customers: state.customers.map(c => {
-          if (c.id === customerId) {
-            return {
-              ...c,
-              rooms: c.rooms.map(r => {
-                if (r.id === roomId) {
-                  return {
-                    ...r,
-                    windows: [...r.windows, { id: crypto.randomUUID(), name: windowName, photos: [], videos: [], products: [] }]
-                  };
-                }
-                return r;
-              })
-            };
-          }
-          return c;
-        })
-      })),
+      addWindow: (customerId, roomId, windowName) => set((state) => {
+        const now = new Date().toISOString();
+        const newWindow: WindowItem = {
+          id: crypto.randomUUID(),
+          name: windowName,
+          photos: [],
+          videos: [],
+          products: [],
+          createdAt: now,
+          updatedAt: now
+        };
+        return {
+          customers: state.customers.map(c => {
+            if (c.id === customerId) {
+              return {
+                ...c,
+                updatedAt: now,
+                rooms: c.rooms.map(r => {
+                  if (r.id === roomId) {
+                    return {
+                      ...r,
+                      updatedAt: now,
+                      windows: [...r.windows, newWindow]
+                    };
+                  }
+                  return r;
+                })
+              };
+            }
+            return c;
+          }),
+          syncStatus: 'pending'
+        };
+      }),
 
-      deleteWindow: (customerId, roomId, windowId) => set((state) => ({
-        customers: state.customers.map(c => {
-          if (c.id === customerId) {
-            return {
-              ...c,
-              rooms: c.rooms.map(r => {
-                if (r.id === roomId) {
-                  return { ...r, windows: r.windows.filter(w => w.id !== windowId) };
-                }
-                return r;
-              })
-            };
-          }
-          return c;
-        })
-      })),
+      deleteWindow: (customerId, roomId, windowId) => set((state) => {
+        const now = new Date().toISOString();
+        return {
+          customers: state.customers.map(c => {
+            if (c.id === customerId) {
+              return {
+                ...c,
+                updatedAt: now,
+                rooms: c.rooms.map(r => {
+                  if (r.id === roomId) {
+                    return {
+                      ...r,
+                      updatedAt: now,
+                      windows: r.windows.filter(w => w.id !== windowId)
+                    };
+                  }
+                  return r;
+                })
+              };
+            }
+            return c;
+          }),
+          pendingDeletes: [...state.pendingDeletes, { id: windowId, table: 'openings' }],
+          syncStatus: 'pending'
+        };
+      }),
 
-      updateRoomAttachments: (customerId, roomId, photos, videos) => set((state) => ({
-        customers: state.customers.map(c => {
-          if (c.id === customerId) {
-            return {
-              ...c,
-              rooms: c.rooms.map(r => {
-                if (r.id === roomId) {
-                  return { ...r, photos, videos };
-                }
-                return r;
-              })
-            };
-          }
-          return c;
-        })
-      })),
+      updateRoomAttachments: (customerId, roomId, photos, videos) => set((state) => {
+        const now = new Date().toISOString();
+        return {
+          customers: state.customers.map(c => {
+            if (c.id === customerId) {
+              return {
+                ...c,
+                updatedAt: now,
+                rooms: c.rooms.map(r => {
+                  if (r.id === roomId) {
+                    return { ...r, photos, videos, updatedAt: now };
+                  }
+                  return r;
+                })
+              };
+            }
+            return c;
+          }),
+          syncStatus: 'pending'
+        };
+      }),
 
-      updateWindowItem: (customerId, roomId, windowId, data) => set((state) => ({
-        customers: state.customers.map(c => {
-          if (c.id === customerId) {
-            return {
-              ...c,
-              rooms: c.rooms.map(r => {
-                if (r.id === roomId) {
-                  return {
-                    ...r,
-                    windows: r.windows.map(w => {
-                      if (w.id === windowId) {
-                        return { ...w, ...data };
-                      }
-                      return w;
-                    })
-                  };
-                }
-                return r;
-              })
-            };
-          }
-          return c;
-        })
-      })),
+      updateWindowItem: (customerId, roomId, windowId, data) => set((state) => {
+        const now = new Date().toISOString();
+        return {
+          customers: state.customers.map(c => {
+            if (c.id === customerId) {
+              return {
+                ...c,
+                updatedAt: now,
+                rooms: c.rooms.map(r => {
+                  if (r.id === roomId) {
+                    return {
+                      ...r,
+                      updatedAt: now,
+                      windows: r.windows.map(w => {
+                        if (w.id === windowId) {
+                          return { ...w, ...data, updatedAt: now };
+                        }
+                        return w;
+                      })
+                    };
+                  }
+                  return r;
+                })
+              };
+            }
+            return c;
+          }),
+          syncStatus: 'pending'
+        };
+      }),
 
-      addProductMeasurement: (customerId, roomId, windowId, measurement) => set((state) => ({
-        customers: state.customers.map(c => {
-          if (c.id === customerId) {
-            return {
-              ...c,
-              rooms: c.rooms.map(r => {
-                if (r.id === roomId) {
-                  return {
-                    ...r,
-                    windows: r.windows.map(w => {
-                      if (w.id === windowId) {
-                        return { ...w, products: [...w.products, { ...measurement, id: crypto.randomUUID() }] };
-                      }
-                      return w;
-                    })
-                  };
-                }
-                return r;
-              })
-            };
-          }
-          return c;
-        })
-      })),
+      addProductMeasurement: (customerId, roomId, windowId, measurement) => set((state) => {
+        const now = new Date().toISOString();
+        const newMeas: ProductMeasurement = {
+          ...measurement,
+          id: crypto.randomUUID(),
+          createdAt: now,
+          updatedAt: now
+        };
+        return {
+          customers: state.customers.map(c => {
+            if (c.id === customerId) {
+              return {
+                ...c,
+                updatedAt: now,
+                rooms: c.rooms.map(r => {
+                  if (r.id === roomId) {
+                    return {
+                      ...r,
+                      updatedAt: now,
+                      windows: r.windows.map(w => {
+                        if (w.id === windowId) {
+                          return {
+                            ...w,
+                            updatedAt: now,
+                            products: [...w.products, newMeas]
+                          };
+                        }
+                        return w;
+                      })
+                    };
+                  }
+                  return r;
+                })
+              };
+            }
+            return c;
+          }),
+          syncStatus: 'pending'
+        };
+      }),
 
-      updateProductMeasurement: (customerId, roomId, windowId, measurementId, data) => set((state) => ({
-        customers: state.customers.map(c => {
-          if (c.id === customerId) {
-            return {
-              ...c,
-              rooms: c.rooms.map(r => {
-                if (r.id === roomId) {
-                  return {
-                    ...r,
-                    windows: r.windows.map(w => {
-                      if (w.id === windowId) {
-                        return {
-                          ...w,
-                          products: w.products.map(p => {
-                            if (p.id === measurementId) {
-                              return { ...p, ...data };
-                            }
-                            return p;
-                          })
-                        };
-                      }
-                      return w;
-                    })
-                  };
-                }
-                return r;
-              })
-            };
-          }
-          return c;
-        })
-      })),
+      updateProductMeasurement: (customerId, roomId, windowId, measurementId, data) => set((state) => {
+        const now = new Date().toISOString();
+        return {
+          customers: state.customers.map(c => {
+            if (c.id === customerId) {
+              return {
+                ...c,
+                updatedAt: now,
+                rooms: c.rooms.map(r => {
+                  if (r.id === roomId) {
+                    return {
+                      ...r,
+                      updatedAt: now,
+                      windows: r.windows.map(w => {
+                        if (w.id === windowId) {
+                          return {
+                            ...w,
+                            updatedAt: now,
+                            products: w.products.map(p => {
+                              if (p.id === measurementId) {
+                                return { ...p, ...data, updatedAt: now };
+                              }
+                              return p;
+                            })
+                          };
+                        }
+                        return w;
+                      })
+                    };
+                  }
+                  return r;
+                })
+              };
+            }
+            return c;
+          }),
+          syncStatus: 'pending'
+        };
+      }),
 
-      deleteProductMeasurement: (customerId, roomId, windowId, measurementId) => set((state) => ({
-        customers: state.customers.map(c => {
-          if (c.id === customerId) {
-            return {
-              ...c,
-              rooms: c.rooms.map(r => {
-                if (r.id === roomId) {
-                  return {
-                    ...r,
-                    windows: r.windows.map(w => {
-                      if (w.id === windowId) {
-                        return { ...w, products: w.products.filter(p => p.id !== measurementId) };
-                      }
-                      return w;
-                    })
-                  };
-                }
-                return r;
-              })
-            };
-          }
-          return c;
-        })
-      })),
+      deleteProductMeasurement: (customerId, roomId, windowId, measurementId) => set((state) => {
+        const now = new Date().toISOString();
+        return {
+          customers: state.customers.map(c => {
+            if (c.id === customerId) {
+              return {
+                ...c,
+                updatedAt: now,
+                rooms: c.rooms.map(r => {
+                  if (r.id === roomId) {
+                    return {
+                      ...r,
+                      updatedAt: now,
+                      windows: r.windows.map(w => {
+                        if (w.id === windowId) {
+                          return {
+                            ...w,
+                            updatedAt: now,
+                            products: w.products.filter(p => p.id !== measurementId)
+                          };
+                        }
+                        return w;
+                      })
+                    };
+                  }
+                  return r;
+                })
+              };
+            }
+            return c;
+          }),
+          pendingDeletes: [...state.pendingDeletes, { id: measurementId, table: 'measurements' }],
+          syncStatus: 'pending'
+        };
+      }),
 
       addSale: (saleData) => set((state) => {
         const saleId = Math.floor(1000 + Math.random() * 9000).toString();
@@ -562,6 +692,9 @@ export const useStore = create<AppState>()(
         montageTasks: state.montageTasks.map(t => t.id === id ? { ...t, ...data } : t)
       })),
 
+      setSyncStatus: (status) => set({ syncStatus: status }),
+      setCustomers: (customers) => set({ customers }),
+      clearPendingDeletes: () => set({ pendingDeletes: [] }),
     }),
     {
       name: 'curtain-erp-storage-v3', // V3 format

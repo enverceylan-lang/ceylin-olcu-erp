@@ -17,6 +17,8 @@ export interface MockUser {
   role: UserRole;
   isActive: boolean;
   permissions?: string[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export function normalizeRole(role: UserRole | undefined): 'ADMIN' | 'OFFICE' | 'FIELD' | 'TAILOR' | 'INSTALLER' {
@@ -35,6 +37,7 @@ export function getRoleDefaultPermissions(role: UserRole): string[] {
 }
 
 export function normalizeUser(user: any): MockUser {
+  const now = new Date().toISOString();
   if (!user) {
     return {
       id: 'user-admin',
@@ -42,7 +45,9 @@ export function normalizeUser(user: any): MockUser {
       username: 'admin',
       role: 'ADMIN',
       isActive: true,
-      permissions: ['dashboard', 'cariler', 'olculer', 'stok', 'satis', 'uretim', 'montaj', 'raporlar', 'ayarlar']
+      permissions: ['dashboard', 'cariler', 'olculer', 'stok', 'satis', 'uretim', 'montaj', 'raporlar', 'ayarlar'],
+      createdAt: now,
+      updatedAt: now
     };
   }
 
@@ -63,7 +68,9 @@ export function normalizeUser(user: any): MockUser {
     password,
     role,
     isActive,
-    permissions
+    permissions,
+    createdAt: user.createdAt || now,
+    updatedAt: user.updatedAt || now
   };
 }
 
@@ -283,9 +290,12 @@ export const useAuthStore = create<AuthState>()(
       })),
       
       addUser: (user: Omit<MockUser, 'id'>) => set((state: AuthState) => {
+        const now = new Date().toISOString();
         const newUser = normalizeUser({
           ...user,
-          isActive: true
+          isActive: true,
+          createdAt: now,
+          updatedAt: now
         });
         return {
           users: [...state.users, newUser]
@@ -293,15 +303,16 @@ export const useAuthStore = create<AuthState>()(
       }),
       
       updateUser: (id: string, data: Partial<MockUser>) => set((state: AuthState) => {
+        const now = new Date().toISOString();
         const updatedUsers = state.users.map((u: MockUser) => {
           if (u.id === id) {
-            return normalizeUser({ ...u, ...data });
+            return normalizeUser({ ...u, ...data, updatedAt: now });
           }
           return u;
         });
         
         const updatedCurrentUser = state.currentUser && state.currentUser.id === id 
-          ? normalizeUser({ ...state.currentUser, ...data }) 
+          ? normalizeUser({ ...state.currentUser, ...data, updatedAt: now }) 
           : state.currentUser;
           
         return {

@@ -1,10 +1,11 @@
 "use client";
 
 import { useTheme } from "next-themes";
-import { Moon, Sun, Menu, Bell } from "lucide-react";
+import { Moon, Sun, Menu, Bell, Cloud, CloudOff, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuthStore, ROLE_PERMISSIONS, normalizeUser } from "@/store/useAuthStore";
 import { useUiStore } from "@/store/useUiStore";
+import { useStore } from "@/store/useStore";
 
 const ROLE_BADGE_COLORS: Record<string, string> = {
   ADMIN: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
@@ -22,6 +23,7 @@ export function Topbar() {
   const { theme, setTheme } = useTheme();
   const { currentUser: rawCurrentUser } = useAuthStore();
   const { toggleMobileMenu } = useUiStore();
+  const syncStatus = useStore((state) => state.syncStatus);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => setMounted(true), []);
@@ -49,6 +51,27 @@ export function Topbar() {
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ROLE_BADGE_COLORS[currentUser.role] || 'bg-gray-150 text-gray-700'}`}>
               {(ROLE_PERMISSIONS[currentUser.role] || { label: currentUser.role }).label}
             </span>
+
+            <div className="flex items-center gap-1.5 border-l border-gray-200 dark:border-gray-800 pl-3 ml-1">
+              {syncStatus === 'synced' && (
+                <span className="flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400" title="Senkronize edildi">
+                  <Cloud className="w-3.5 h-3.5" />
+                  <span className="hidden md:inline">Senkronize edildi</span>
+                </span>
+              )}
+              {syncStatus === 'pending' && (
+                <span className="flex items-center gap-1 text-xs font-medium text-amber-650 dark:text-amber-400" title="Bekleyen kayıt var">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span className="hidden md:inline">Bekleyen kayıt var</span>
+                </span>
+              )}
+              {syncStatus === 'offline' && (
+                <span className="flex items-center gap-1 text-xs font-medium text-red-500 dark:text-red-400" title="İnternet yok">
+                  <CloudOff className="w-3.5 h-3.5" />
+                  <span className="hidden md:inline">İnternet yok</span>
+                </span>
+              )}
+            </div>
           </div>
         )}
       </div>

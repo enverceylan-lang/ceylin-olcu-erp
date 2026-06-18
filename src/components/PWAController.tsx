@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { WifiOff, Download, RefreshCw, X, HelpCircle, AlertCircle } from "lucide-react";
+import { initSync } from "@/lib/syncService";
 
 export function PWAController() {
   const [isOffline, setIsOffline] = useState(false);
@@ -12,8 +13,10 @@ export function PWAController() {
   const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
 
   useEffect(() => {
+    let cleanupSync: (() => void) | undefined;
     // 1. Check offline status
     if (typeof window !== "undefined") {
+      cleanupSync = initSync();
       setIsOffline(!navigator.onLine);
 
       const handleOnline = () => setIsOffline(false);
@@ -99,6 +102,7 @@ export function PWAController() {
       }
 
       return () => {
+        if (cleanupSync) cleanupSync();
         window.removeEventListener("online", handleOnline);
         window.removeEventListener("offline", handleOffline);
         window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
