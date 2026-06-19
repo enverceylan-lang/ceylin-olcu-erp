@@ -1,6 +1,31 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+// ─── Store Change Notification for Sync ───
+type StoreChangeListener = () => void;
+const storeChangeListeners: StoreChangeListener[] = [];
+
+export function subscribeToStoreChanges(listener: StoreChangeListener) {
+  storeChangeListeners.push(listener);
+  return () => {
+    const idx = storeChangeListeners.indexOf(listener);
+    if (idx !== -1) storeChangeListeners.splice(idx, 1);
+  };
+}
+
+function notifyStoreChanges() {
+  setTimeout(() => {
+    storeChangeListeners.forEach(listener => {
+      try {
+        listener();
+      } catch (e) {
+        console.error("Store change listener failed:", e);
+      }
+    });
+  }, 100);
+}
+
+
 export interface Note {
   date: string;
   note: string;
@@ -216,7 +241,7 @@ interface AppState {
   montageTasks: MontageTask[];
   productionItems: ProductionItem[];
   pendingDeletes: { id: string; table: 'customers' | 'rooms' | 'openings' | 'measurements' }[];
-  syncStatus: 'synced' | 'pending' | 'offline';
+  syncStatus: 'synced' | 'pending' | 'offline' | 'error';
 
   addCustomer: (customer: Omit<Customer, 'id' | 'rooms'>) => void;
   updateCustomer: (id: string, data: Partial<Customer>) => void;
@@ -244,7 +269,7 @@ interface AppState {
   updateProductionItem: (id: string, data: Partial<ProductionItem>) => void;
   setProductionItems: (items: ProductionItem[]) => void;
 
-  setSyncStatus: (status: 'synced' | 'pending' | 'offline') => void;
+  setSyncStatus: (status: 'synced' | 'pending' | 'offline' | 'error') => void;
   setCustomers: (customers: Customer[]) => void;
   clearPendingDeletes: () => void;
 }
@@ -281,6 +306,7 @@ export const useStore = create<AppState>()(
           createdAt: now,
           updatedAt: now
         };
+        notifyStoreChanges();
         return {
           customers: [newCustomer, ...state.customers],
           syncStatus: 'pending'
@@ -292,17 +318,21 @@ export const useStore = create<AppState>()(
         const updatedCustomers = state.customers.map(c => 
           c.id === id ? { ...c, ...data, updatedAt: now } : c
         );
+        notifyStoreChanges();
         return {
           customers: updatedCustomers,
           syncStatus: 'pending'
         };
       }),
 
-      deleteCustomer: (id) => set((state) => ({
-        customers: state.customers.filter(c => c.id !== id),
-        pendingDeletes: [...state.pendingDeletes, { id, table: 'customers' }],
-        syncStatus: 'pending'
-      })),
+      deleteCustomer: (id) => set((state) => {
+        notifyStoreChanges();
+        return {
+          customers: state.customers.filter(c => c.id !== id),
+          pendingDeletes: [...state.pendingDeletes, { id, table: 'customers' }],
+          syncStatus: 'pending'
+        };
+      }),
 
       addRoom: (customerId, roomName) => set((state) => {
         const now = new Date().toISOString();
@@ -315,6 +345,7 @@ export const useStore = create<AppState>()(
           createdAt: now,
           updatedAt: now
         };
+        notifyStoreChanges();
         return {
           customers: state.customers.map(c => {
             if (c.id === customerId) {
@@ -332,6 +363,7 @@ export const useStore = create<AppState>()(
 
       deleteRoom: (customerId, roomId) => set((state) => {
         const now = new Date().toISOString();
+        notifyStoreChanges();
         return {
           customers: state.customers.map(c => {
             if (c.id === customerId) {
@@ -359,6 +391,7 @@ export const useStore = create<AppState>()(
           createdAt: now,
           updatedAt: now
         };
+        notifyStoreChanges();
         return {
           customers: state.customers.map(c => {
             if (c.id === customerId) {
@@ -385,6 +418,7 @@ export const useStore = create<AppState>()(
 
       deleteWindow: (customerId, roomId, windowId) => set((state) => {
         const now = new Date().toISOString();
+        notifyStoreChanges();
         return {
           customers: state.customers.map(c => {
             if (c.id === customerId) {
@@ -412,6 +446,7 @@ export const useStore = create<AppState>()(
 
       updateRoomAttachments: (customerId, roomId, photos, videos) => set((state) => {
         const now = new Date().toISOString();
+        notifyStoreChanges();
         return {
           customers: state.customers.map(c => {
             if (c.id === customerId) {
@@ -434,6 +469,7 @@ export const useStore = create<AppState>()(
 
       updateWindowItem: (customerId, roomId, windowId, data) => set((state) => {
         const now = new Date().toISOString();
+        notifyStoreChanges();
         return {
           customers: state.customers.map(c => {
             if (c.id === customerId) {
@@ -471,6 +507,7 @@ export const useStore = create<AppState>()(
           createdAt: now,
           updatedAt: now
         };
+        notifyStoreChanges();
         return {
           customers: state.customers.map(c => {
             if (c.id === customerId) {
@@ -506,6 +543,7 @@ export const useStore = create<AppState>()(
 
       updateProductMeasurement: (customerId, roomId, windowId, measurementId, data) => set((state) => {
         const now = new Date().toISOString();
+        notifyStoreChanges();
         return {
           customers: state.customers.map(c => {
             if (c.id === customerId) {
@@ -546,6 +584,7 @@ export const useStore = create<AppState>()(
 
       deleteProductMeasurement: (customerId, roomId, windowId, measurementId) => set((state) => {
         const now = new Date().toISOString();
+        notifyStoreChanges();
         return {
           customers: state.customers.map(c => {
             if (c.id === customerId) {

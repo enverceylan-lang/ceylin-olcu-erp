@@ -1,4 +1,4 @@
-import { useStore } from '@/store/useStore';
+import { useStore, subscribeToStoreChanges } from '@/store/useStore';
 import { useAuthStore } from '@/store/useAuthStore';
 
 // Track if a sync is currently in progress
@@ -34,6 +34,23 @@ export async function syncNow() {
       return;
     }
 
+    // Calculate payload counts for logging
+    let roomCount = 0;
+    let openingCount = 0;
+    let measurementCount = 0;
+    localCustomers.forEach(c => {
+      roomCount += (c.rooms || []).length;
+      (c.rooms || []).forEach(r => {
+        openingCount += (r.windows || []).length;
+        (r.windows || []).forEach(w => {
+          measurementCount += (w.products || []).length;
+        });
+      });
+    });
+
+    console.log("Sync started...");
+    console.log(`Payload counts: customers=${localCustomers.length}, rooms=${roomCount}, openings=${openingCount}, measurements=${measurementCount}, users=${localUsers.length}`);
+
     // Construct Authorization header: Bearer base64(username:password)
     const token = btoa(`${currentUser.username}:${currentUser.password}`);
 
@@ -51,11 +68,14 @@ export async function syncNow() {
     });
 
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Sync failed with status ${response.status}: ${errorText}`);
       throw new Error(`Sync API returned status ${response.status}`);
     }
 
     const result = await response.json();
     if (result.success) {
+      console.log("Sync success!");
       // Update local store with merged data
       if (result.customers) {
         store.setCustomers(result.customers);
@@ -66,11 +86,12 @@ export async function syncNow() {
       store.clearPendingDeletes();
       store.setSyncStatus('synced');
     } else {
+      console.error("Sync failed with error:", result.error || 'Sync service failed');
       throw new Error(result.error || 'Sync service failed');
     }
   } catch (error) {
     console.error('Sync error:', error);
-    store.setSyncStatus('pending');
+    store.setSyncStatus('error');
   } finally {
     isSyncing = false;
   }
@@ -99,6 +120,11 @@ export function initSync() {
   window.addEventListener('online', handleOnline);
   window.addEventListener('offline', handleOffline);
 
+  // Subscribe to store changes to trigger sync immediately
+  const unsubscribeStore = subscribeToStoreChanges(() => {
+    syncNow();
+  });
+
   // Periodic sync every 30 seconds
   const interval = setInterval(() => {
     syncNow();
@@ -107,6 +133,8 @@ export function initSync() {
   return () => {
     window.removeEventListener('online', handleOnline);
     window.removeEventListener('offline', handleOffline);
+    unsubscribeStore();
     clearInterval(interval);
   };
 }
+

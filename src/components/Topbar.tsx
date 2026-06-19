@@ -1,11 +1,12 @@
 "use client";
 
 import { useTheme } from "next-themes";
-import { Moon, Sun, Menu, Bell, Cloud, CloudOff, RefreshCw } from "lucide-react";
+import { Moon, Sun, Menu, Bell, Cloud, CloudOff, RefreshCw, AlertCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuthStore, ROLE_PERMISSIONS, normalizeUser } from "@/store/useAuthStore";
 import { useUiStore } from "@/store/useUiStore";
 import { useStore } from "@/store/useStore";
+import { syncNow } from "@/lib/syncService";
 
 const ROLE_BADGE_COLORS: Record<string, string> = {
   ADMIN: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
@@ -60,17 +61,32 @@ export function Topbar() {
                 </span>
               )}
               {syncStatus === 'pending' && (
-                <span className="flex items-center gap-1 text-xs font-medium text-amber-650 dark:text-amber-400" title="Bekleyen kayıt var">
+                <span className="flex items-center gap-1 text-xs font-medium text-amber-650 dark:text-amber-400" title="Senkron bekliyor">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span className="hidden md:inline">Bekleyen kayıt var</span>
+                  <span className="hidden md:inline">Senkron bekliyor</span>
                 </span>
               )}
               {syncStatus === 'offline' && (
-                <span className="flex items-center gap-1 text-xs font-medium text-red-500 dark:text-red-400" title="İnternet yok">
+                <span className="flex items-center gap-1 text-xs font-medium text-gray-500 dark:text-gray-400" title="Çevrimdışı">
                   <CloudOff className="w-3.5 h-3.5" />
-                  <span className="hidden md:inline">İnternet yok</span>
+                  <span className="hidden md:inline">Çevrimdışı</span>
                 </span>
               )}
+              {syncStatus === 'error' && (
+                <span className="flex items-center gap-1 text-xs font-medium text-red-500 dark:text-red-400" title="Senkron hatası">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  <span className="hidden md:inline">Senkron hatası</span>
+                </span>
+              )}
+
+              <button
+                onClick={() => syncNow()}
+                className="flex items-center gap-1 text-xs font-semibold px-2 py-0.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/30 text-indigo-650 dark:text-indigo-400 rounded-md transition-colors cursor-pointer border border-indigo-200/50 dark:border-indigo-800/30 ml-2"
+                title="El ile senkronizasyonu başlat"
+              >
+                <RefreshCw className="w-3 h-3" />
+                <span>Senkronize Et</span>
+              </button>
             </div>
           </div>
         )}
