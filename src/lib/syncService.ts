@@ -130,22 +130,37 @@ export function initSync() {
     store.setSyncStatus('offline');
   };
 
+  const handleAppResume = () => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+      console.log("[Sync Service] App resume / tab focused. Triggering auto-sync.");
+      syncNow();
+    }
+  };
+
   window.addEventListener('online', handleOnline);
   window.addEventListener('offline', handleOffline);
+  window.addEventListener('focus', handleAppResume);
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handleAppResume);
+  }
 
   // Subscribe to store changes to trigger sync immediately
   const unsubscribeStore = subscribeToStoreChanges(() => {
     syncNow();
   });
 
-  // Periodic sync every 30 seconds
+  // Periodic sync every 60 seconds (as requested for first version)
   const interval = setInterval(() => {
     syncNow();
-  }, 30000);
+  }, 60000);
 
   return () => {
     window.removeEventListener('online', handleOnline);
     window.removeEventListener('offline', handleOffline);
+    window.removeEventListener('focus', handleAppResume);
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', handleAppResume);
+    }
     unsubscribeStore();
     clearInterval(interval);
   };
