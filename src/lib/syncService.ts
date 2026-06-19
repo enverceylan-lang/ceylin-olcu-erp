@@ -229,9 +229,16 @@ export async function syncNow() {
       console.log("Sync success!");
       // Update local store with merged data
       if (result.customers) {
+        console.log(`[Client Sync] Received ${result.customers.length} customers from server.`);
+        result.customers.forEach((c: any) => {
+          console.log(`[Client Sync] Server Customer: ${c.name} (id: ${c.id}, rooms: ${c.rooms?.length})`);
+        });
         const currentCustomers = useStore.getState().customers || [];
+        console.log(`[Client Sync] Current local customers count: ${currentCustomers.length}`);
         const merged = mergeCustomers(currentCustomers, result.customers);
+        console.log(`[Client Sync] Merged customers count: ${merged.length}`);
         store.setCustomers(merged);
+        console.log("[Client Sync] Local store setCustomers completed successfully.");
       }
       if (result.users) {
         useAuthStore.setState({ users: result.users });
