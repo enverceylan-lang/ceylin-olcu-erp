@@ -23,7 +23,7 @@ export default function CarilerPage() {
     if (currentUser && !canViewCustomer(currentUser, c)) return false;
     return (
       c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      c.phone.includes(searchTerm)
+      (c.phone && c.phone.includes(searchTerm))
     );
   });
 

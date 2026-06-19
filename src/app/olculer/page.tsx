@@ -71,7 +71,7 @@ export default function OlculerPage() {
     })
     .filter(item => 
       item.customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.customer.phone.includes(searchTerm)
+      (item.customer.phone && item.customer.phone.includes(searchTerm))
     );
 
   return (
