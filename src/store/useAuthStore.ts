@@ -159,41 +159,14 @@ export function canEditModule(role: UserRole | undefined, modulePath: string): b
 export function canViewCustomer(user: any, customer: any): boolean {
   const safeUser = normalizeUser(user);
   const normRole = normalizeRole(safeUser.role);
-  if (normRole === 'ADMIN' || normRole === 'OFFICE') return true;
-  if (normRole === 'FIELD') {
-    // If a customer has no rooms/openings/measurements, any field personnel can see them to start
-    if (!customer.rooms || customer.rooms.length === 0) return true;
-    
-    const hasMeasurements = customer.rooms.some((r: any) => 
-      r.windows && r.windows.some((w: any) => w.products && w.products.length > 0)
-    );
-    if (!hasMeasurements) return true;
-    
-    // Otherwise, must have been created or measured by this user
-    return customer.rooms.some((r: any) => 
-      r.windows && r.windows.some((w: any) => 
-        w.products && w.products.some((p: any) => 
-          p.measuredById === safeUser.id || 
-          p.createdById === safeUser.id || 
-          p.measuredBy === safeUser.name
-        )
-      )
-    );
-  }
+  if (normRole === 'ADMIN' || normRole === 'OFFICE' || normRole === 'FIELD') return true;
   return false;
 }
 
 export function canViewMeasurement(user: any, measurement: any): boolean {
   const safeUser = normalizeUser(user);
   const normRole = normalizeRole(safeUser.role);
-  if (normRole === 'ADMIN' || normRole === 'OFFICE') return true;
-  if (normRole === 'FIELD') {
-    return (
-      measurement.measuredById === safeUser.id ||
-      measurement.createdById === safeUser.id ||
-      measurement.measuredBy === safeUser.name
-    );
-  }
+  if (normRole === 'ADMIN' || normRole === 'OFFICE' || normRole === 'FIELD') return true;
   return false;
 }
 
