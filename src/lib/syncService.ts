@@ -34,6 +34,19 @@ export async function syncNow() {
       return;
     }
 
+    // Add diagnostic console logs without exposing full password
+    const usernameUsed = currentUser.username;
+    const credentialPresent = !!currentUser.password;
+    console.log(`[Sync Diagnostics] Username: ${usernameUsed}, Credential present: ${credentialPresent}`);
+
+    if (!currentUser.password) {
+      console.warn("Sync auth missing credential. Please logout and login again.");
+      store.setSyncStatus('error');
+      isSyncing = false;
+      authStore.logout();
+      return;
+    }
+
     // Calculate payload counts for logging
     let roomCount = 0;
     let openingCount = 0;

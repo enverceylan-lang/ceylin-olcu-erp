@@ -14,13 +14,31 @@ const supabaseServer = createClient(supabaseUrl, supabaseServiceKey, {
 
 // Helper to verify auth using Supabase users table
 async function verifySupabaseAuth(req: NextRequest) {
+  let reason = "";
   try {
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
+    const authHeaderExists = !!authHeader;
+    console.log(`[Diagnostics] 1. authHeader exists: ${authHeaderExists}`);
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      reason = `Auth header missing or invalid format (startsWith Bearer: ${authHeader?.startsWith("Bearer ")})`;
+      return { user: null, reason };
+    }
+
     const token = authHeader.substring(7);
     const decoded = Buffer.from(token, "base64").toString("utf-8");
     const [username, credential] = decoded.split(":");
-    if (!username || !credential) return null;
+    const decodedUsername = username || "";
+    const credentialPresent = !!credential;
+    const credentialLength = credential ? credential.length : 0;
+
+    console.log(`[Diagnostics] 2. decoded username: ${decodedUsername}`);
+    console.log(`[Diagnostics] 3. credential present: ${credentialPresent}`);
+    console.log(`[Diagnostics] 4. credential length: ${credentialLength}`);
+
+    if (!username || !credential) {
+      reason = `Decoded username or credential missing (username: ${!!username}, credential: ${!!credential})`;
+      return { user: null, reason };
+    }
 
     // Fetch user from Supabase using the server client
     const { data: user, error } = await supabaseServer
@@ -29,25 +47,58 @@ async function verifySupabaseAuth(req: NextRequest) {
       .eq("username", username.toLowerCase().trim())
       .single();
 
-    if (error || !user || !user.isActive) return null;
+    const dbUserFound = !!user;
+    const dbErrorMessage = error ? error.message : "None";
+    console.log(`[Diagnostics] 5. database user found: ${dbUserFound}`);
+    console.log(`[Diagnostics] 6. database error message: ${dbErrorMessage}`);
+
+    if (error) {
+      reason = `Database query error: ${error.message}`;
+      return { user: null, reason };
+    }
+    if (!user) {
+      reason = `User ${username} not found in database`;
+      return { user: null, reason };
+    }
+
+    console.log(`[Diagnostics] 7. user.isActive: ${user.isActive}`);
+    if (!user.isActive) {
+      reason = `User ${username} is not active`;
+      return { user: null, reason };
+    }
 
     const isHashed = credential.length === 128;
     const hashedPassword = isHashed ? credential : hashPassword(credential);
 
-    if (user.password !== hashedPassword) return null;
-    return user;
-  } catch (e) {
+    const generatedHashedFirst12 = hashedPassword.substring(0, 12);
+    const dbPasswordFirst12 = user.password ? user.password.substring(0, 12) : "None";
+    const passwordMatches = user.password === hashedPassword;
+
+    console.log(`[Diagnostics] 8. generated hashedPassword (first 12): ${generatedHashedFirst12}`);
+    console.log(`[Diagnostics] 9. db password (first 12): ${dbPasswordFirst12}`);
+    console.log(`[Diagnostics] 10. passwordMatches: ${passwordMatches}`);
+
+    if (!passwordMatches) {
+      reason = `Password mismatch. Generated hash starts with: ${generatedHashedFirst12}, DB hash starts with: ${dbPasswordFirst12}`;
+      return { user: null, reason };
+    }
+
+    return { user, reason: "Authenticated successfully" };
+  } catch (e: any) {
     console.error("verifySupabaseAuth failed:", e);
-    return null;
+    return { user: null, reason: `Exception: ${e.message}` };
   }
 }
 
 export async function POST(req: NextRequest) {
-  const user = await verifySupabaseAuth(req);
-  if (!user) {
-    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  const authResult = await verifySupabaseAuth(req);
+  if (!authResult.user) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized", reason: authResult.reason },
+      { status: 401 }
+    );
   }
-
+  const user = authResult.user;
   try {
     const { customers: localCustomers, pendingDeletes, users: localUsers } = await req.json();
 

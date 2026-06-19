@@ -52,17 +52,25 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     }
   }, [mounted, currentUser, pathname, router]);
 
+  // Force logout if currentUser is logged in but has no password credential stored
+  useEffect(() => {
+    if (mounted && currentUser && !currentUser.password) {
+      console.warn("User has no password credential stored. Forcing logout to restore sync credential.");
+      useAuthStore.getState().logout();
+    }
+  }, [mounted, currentUser]);
+
   if (!mounted) {
     return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">Yükleniyor...</div>;
   }
 
   // 1. Render Login screen if not authenticated
   if (!currentUser) {
-    const handleLoginSubmit = (e: React.FormEvent) => {
+    const handleLoginSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       setError("");
       
-      const success = login(username, password);
+      const success = await login(username, password);
       if (!success) {
         setError("Kullanıcı adı veya şifre hatalı, ya da hesap aktif değil.");
         // If login failed, check if database needs bootstrap

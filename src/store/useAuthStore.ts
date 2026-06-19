@@ -54,7 +54,7 @@ export function normalizeUser(user: any): MockUser {
   const role = user.role || (user.id === 'user-admin' ? 'ADMIN' : 'FIELD');
   const isActive = typeof user.isActive === 'boolean' ? user.isActive : true;
   const username = (user.username || user.name || user.id || '').trim().toLowerCase().replace(/\s+/g, '');
-  const password = (user.password || '123').trim();
+  const password = typeof user.password === 'string' ? user.password.trim() : user.password;
   
   const permissions = Array.isArray(user.permissions) && user.permissions.length > 0
     ? user.permissions 
@@ -238,7 +238,7 @@ interface AuthState {
   currentUser: MockUser | null;
   auditLog: AuditEntry[];
   
-  login: (username: string, pin: string) => boolean;
+  login: (username: string, pin: string) => Promise<boolean>;
   logout: () => void;
   switchUser: (userId: string) => void;
   addAuditEntry: (entry: Omit<AuditEntry, 'id'>) => void;
@@ -256,20 +256,42 @@ export const useAuthStore = create<AuthState>()(
       currentUser: null, // Start logged out by default
       auditLog: [],
       
-      login: (username: string, pin: string) => {
+      login: async (username: string, pin: string) => {
         const cleanInputUsername = (username || '').trim().toLowerCase();
         const cleanInputPin = (pin || '').trim();
         
+        // 1. Try local authentication first (for mock/unsynced users, or if offline with local credentials)
         const usersList = get().users.map((u: MockUser) => normalizeUser(u));
-        const user = usersList.find((u: MockUser) => {
+        const localUser = usersList.find((u: MockUser) => {
           const userUsername = (u.username || '').trim().toLowerCase();
           const userPassword = (u.password || '').trim();
           return userUsername === cleanInputUsername && userPassword === cleanInputPin;
         });
 
-        if (user && user.isActive) {
-          set({ currentUser: user });
+        if (localUser && localUser.isActive) {
+          const loggedInUser = { ...localUser, password: cleanInputPin };
+          set({ currentUser: loggedInUser });
           return true;
+        }
+
+        // 2. If local auth fails, try server authentication
+        try {
+          const response = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: cleanInputUsername, password: cleanInputPin })
+          });
+
+          if (response.ok) {
+            const result = await response.json();
+            if (result.success && result.user) {
+              const loggedInUser = { ...result.user, password: cleanInputPin };
+              set({ currentUser: loggedInUser });
+              return true;
+            }
+          }
+        } catch (err) {
+          console.error("Client server-login failed:", err);
         }
         return false;
       },

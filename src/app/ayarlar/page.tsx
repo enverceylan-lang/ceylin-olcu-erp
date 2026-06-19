@@ -2,7 +2,7 @@
 
 import { Download, Settings, Upload, ShieldCheck, AlertTriangle, UserPlus, Trash2, Check, X, Shield } from "lucide-react";
 import { useRef, useState, useEffect } from "react";
-import { useAuthStore, ROLE_PERMISSIONS, normalizeRole } from "@/store/useAuthStore";
+import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, MockUser } from "@/store/useAuthStore";
 
 const DATA_KEYS = ["curtain-erp-storage-v3", "curtain-erp-auth-v1"];
 
@@ -108,14 +108,19 @@ export default function AyarlarPage() {
   };
 
   const handleSaveEdit = (id: string) => {
-    if (!editName.trim() || !editUsername.trim() || !editPassword.trim()) return;
+    if (!editName.trim() || !editUsername.trim()) return;
 
-    updateUser(id, {
+    const updateData: Partial<MockUser> = {
       name: editName.trim(),
       username: editUsername.trim().toLowerCase(),
-      password: editPassword.trim(),
       role: editRole as any
-    });
+    };
+
+    if (editPassword.trim()) {
+      updateData.password = editPassword.trim();
+    }
+
+    updateUser(id, updateData);
 
     setEditingUserId(null);
     setMessage("Kullanıcı güncellendi.");
@@ -185,7 +190,7 @@ export default function AyarlarPage() {
                 <div>
                   <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1">PIN / Şifre</label>
                   <input 
-                    type="text" 
+                    type="password" 
                     required 
                     value={newPassword} 
                     onChange={e => setNewPassword(e.target.value)}
@@ -259,13 +264,13 @@ export default function AyarlarPage() {
                       <td className="p-4 text-gray-500 dark:text-gray-400 font-mono">
                         {isEditing ? (
                           <input 
-                            type="text" 
+                            type="password" 
                             value={editPassword} 
                             onChange={e => setEditPassword(e.target.value)}
                             className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 text-gray-900 dark:text-white text-xs w-24 outline-none" 
                           />
                         ) : (
-                          u.password || '-'
+                          u.password ? "••••" : "-"
                         )}
                       </td>
                       <td className="p-4 font-medium">
