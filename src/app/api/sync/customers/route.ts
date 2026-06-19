@@ -2,16 +2,33 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { hashPassword } from "@/lib/authHelper";
 
-// Server-side service-role client that bypasses RLS
-const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder-project.supabase.co";
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "placeholder-service-key";
+function decodeJwtPayload(token: string) {
+  try {
+    const parts = token.split(".");
+    if (parts.length < 2) return null;
 
-const supabaseServer = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
+    const payload = parts[1]
+      .replace(/-/g, "+")
+      .replace(/_/g, "/");
+
+    const decoded = Buffer.from(payload, "base64").toString("utf-8");
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+}
+
+// Helper to get or create client with current environment variables
+function getSupabaseServer() {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder-project.supabase.co";
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "placeholder-service-key";
+  return createClient(supabaseUrl, supabaseServiceKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+}
 
 // Helper to verify auth using Supabase users table
 async function verifySupabaseAuth(req: NextRequest) {
@@ -41,6 +58,7 @@ async function verifySupabaseAuth(req: NextRequest) {
       return { user: null, reason };
     }
 
+    const supabaseServer = getSupabaseServer();
     // Fetch user from Supabase using the server client
     const { data: user, error } = await supabaseServer
       .from("users")
@@ -92,7 +110,22 @@ async function verifySupabaseAuth(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl) {
+    console.error("[Sync Config Error] Missing SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL");
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Server configuration error",
+        reason: "Missing SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL"
+      },
+      { status: 500 }
+    );
+  }
+
+  if (!supabaseServiceKey) {
     console.error("[Sync Config Error] Missing SUPABASE_SERVICE_ROLE_KEY");
     return NextResponse.json(
       {
@@ -104,9 +137,29 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Diagnostic log for key validation (safe, no secret exposure)
-  const keyType = process.env.SUPABASE_SERVICE_ROLE_KEY.startsWith("eyJhbGci") ? "service_role (valid JWT)" : "invalid format (not JWT)";
-  console.log(`[Sync Client Init] URL present: ${!!process.env.SUPABASE_URL || !!process.env.NEXT_PUBLIC_SUPABASE_URL}, Service Role Key present: true, Key format: ${keyType}`);
+  const servicePayload = decodeJwtPayload(supabaseServiceKey);
+
+  console.log("[Supabase Config Diagnostics]", {
+    supabaseUrlPresent: !!supabaseUrl,
+    serviceKeyPresent: !!supabaseServiceKey,
+    serviceKeyLooksJwt: supabaseServiceKey.startsWith("eyJ"),
+    serviceKeyRole: servicePayload?.role || null,
+    serviceKeyRef: servicePayload?.ref || null,
+  });
+
+  if (!servicePayload || servicePayload.role !== "service_role") {
+    console.error(`[Sync Config Error] SUPABASE_SERVICE_ROLE_KEY is not a service_role key. Decoded role: ${servicePayload?.role || "null"}`);
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Server configuration error",
+        reason: "SUPABASE_SERVICE_ROLE_KEY is not a service_role key"
+      },
+      { status: 500 }
+    );
+  }
+
+  const supabaseServer = getSupabaseServer();
 
   const authResult = await verifySupabaseAuth(req);
   if (!authResult.user) {
