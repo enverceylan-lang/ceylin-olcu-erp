@@ -14,12 +14,29 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [needsBootstrap, setNeedsBootstrap] = useState(false);
+  const [bootstrapLoading, setBootstrapLoading] = useState(false);
+  const [bootstrapMessage, setBootstrapMessage] = useState("");
 
   const currentUser = rawCurrentUser ? normalizeUser(rawCurrentUser) : null;
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Check if system needs bootstrap
+  useEffect(() => {
+    if (mounted && !currentUser) {
+      fetch("/api/admin/bootstrap")
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && data.needsBootstrap) {
+            setNeedsBootstrap(true);
+          }
+        })
+        .catch((err) => console.error("Failed to check bootstrap status:", err));
+    }
+  }, [mounted, currentUser]);
 
   // Auto-redirect tailors and installers when they land on the root "/" route
   useEffect(() => {
@@ -48,6 +65,35 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       const success = login(username, password);
       if (!success) {
         setError("Kullanıcı adı veya şifre hatalı, ya da hesap aktif değil.");
+        // If login failed, check if database needs bootstrap
+        fetch("/api/admin/bootstrap")
+          .then((res) => res.json())
+          .then((data) => {
+            if (data.success && data.needsBootstrap) {
+              setNeedsBootstrap(true);
+            }
+          })
+          .catch((err) => console.error("Failed to check bootstrap status:", err));
+      }
+    };
+
+    const handleBootstrapClick = async () => {
+      setBootstrapLoading(true);
+      setBootstrapMessage("");
+      setError("");
+      try {
+        const res = await fetch("/api/admin/bootstrap", { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+          setBootstrapMessage("İlk kurulum başarıyla tamamlandı. Artık 'admin' kullanıcı adı ve '123' şifresiyle giriş yapabilirsiniz.");
+          setNeedsBootstrap(false);
+        } else {
+          setError(data.error || "Kurulum başlatılamadı.");
+        }
+      } catch (err: any) {
+        setError(err.message || "Ağ hatası oluştu.");
+      } finally {
+        setBootstrapLoading(false);
       }
     };
 
@@ -116,6 +162,26 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             >
               Giriş Yap <ArrowRight className="w-4 h-4" />
             </button>
+
+            {needsBootstrap && (
+              <div className="pt-2 border-t border-slate-800/60 mt-4 space-y-2">
+                <p className="text-[10px] text-slate-400 text-center">Veritabanı bağlantısı boş görünüyor. İlk kurulumu başlatabilirsiniz.</p>
+                <button
+                  type="button"
+                  onClick={handleBootstrapClick}
+                  disabled={bootstrapLoading}
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white font-bold py-2.5 rounded-xl text-xs transition-colors flex items-center justify-center gap-2 border border-emerald-500/20 cursor-pointer"
+                >
+                  {bootstrapLoading ? "Kuruluyor..." : "İlk Kurulumu Başlat"}
+                </button>
+              </div>
+            )}
+
+            {bootstrapMessage && (
+              <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 text-xs text-emerald-400 mt-4 text-center">
+                {bootstrapMessage}
+              </div>
+            )}
           </form>
         </div>
       </div>
