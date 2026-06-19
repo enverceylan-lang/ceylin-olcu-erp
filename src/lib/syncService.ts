@@ -296,6 +296,20 @@ export function initSync() {
     syncNow();
   });
 
+  // Subscribe to auth store changes to trigger sync immediately on login
+  let lastUser = useAuthStore.getState().currentUser;
+  const unsubscribeAuth = useAuthStore.subscribe((state) => {
+    const user = state.currentUser;
+    const lastUserId = lastUser ? lastUser.id : null;
+    const currentUserId = user ? user.id : null;
+    
+    if (currentUserId && lastUserId !== currentUserId) {
+      console.log("[Sync Service] User logged in or switched. Triggering immediate sync.");
+      syncNow();
+    }
+    lastUser = user;
+  });
+
   // Periodic sync every 60 seconds (as requested for first version)
   const interval = setInterval(() => {
     syncNow();
@@ -309,6 +323,7 @@ export function initSync() {
       document.removeEventListener('visibilitychange', handleAppResume);
     }
     unsubscribeStore();
+    unsubscribeAuth();
     clearInterval(interval);
   };
 }

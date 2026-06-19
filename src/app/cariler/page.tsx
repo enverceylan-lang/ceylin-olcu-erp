@@ -7,15 +7,30 @@ import { useEffect, useState } from "react";
 import { getGoogleMapsUrl } from "@/lib/measurementAdapter";
 import { useAuthStore, canViewCustomer, normalizeRole } from "@/store/useAuthStore";
 
+import { syncNow } from "@/lib/syncService";
+import { RefreshCw, CheckCircle, AlertCircle, WifiOff } from "lucide-react";
+
 export default function CarilerPage() {
-  const { customers, deleteCustomer } = useStore();
+  const { customers, deleteCustomer, syncStatus } = useStore();
   const { currentUser } = useAuthStore();
   const [mounted, setMounted] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  const handleManualSync = async () => {
+    setSyncing(true);
+    try {
+      await syncNow();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   if (!mounted) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
 
@@ -34,10 +49,33 @@ export default function CarilerPage() {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Cariler</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">Müşterilerinizi yönetin ve yeni müşteri ekleyin.</p>
         </div>
-        <Link href="/cariler/yeni" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors font-medium text-sm shadow-sm">
-          <Plus className="w-4 h-4" />
-          Yeni Cari Ekle
-        </Link>
+        <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+          <div className="text-xs text-gray-500 bg-gray-100 dark:bg-gray-800 dark:text-gray-400 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700/50">
+            Zustand Store: <span className="font-bold">{customers.length}</span> | Listelenen: <span className="font-bold">{filteredCustomers.length}</span>
+          </div>
+
+          <button
+            onClick={handleManualSync}
+            disabled={syncing}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+              syncStatus === 'synced' ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 hover:bg-emerald-500/20' :
+              syncStatus === 'pending' || syncing ? 'bg-blue-500/10 text-blue-600 border-blue-500/20 animate-pulse' :
+              syncStatus === 'error' ? 'bg-red-500/10 text-red-600 border-red-500/20 hover:bg-red-500/20' :
+              'bg-amber-500/10 text-amber-600 border-amber-500/20 hover:bg-amber-500/20'
+            }`}
+            title="Senkronizasyonu Tetikle"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${syncing || syncStatus === 'pending' ? 'animate-spin' : ''}`} />
+            {syncStatus === 'synced' ? 'Eşitlendi' :
+             syncStatus === 'pending' || syncing ? 'Eşitleniyor...' :
+             syncStatus === 'error' ? 'Senkronizasyon Hatası' : 'Çevrimdışı'}
+          </button>
+
+          <Link href="/cariler/yeni" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors font-medium text-sm shadow-sm">
+            <Plus className="w-4 h-4" />
+            Yeni Cari Ekle
+          </Link>
+        </div>
       </div>
 
       <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden shadow-sm">
