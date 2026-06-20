@@ -42,6 +42,12 @@ export default function CarilerPage() {
     );
   });
 
+  const sortedCustomers = [...filteredCustomers].sort((a, b) => {
+    const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+    const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+    return dateB - dateA;
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -51,7 +57,7 @@ export default function CarilerPage() {
         </div>
         <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
           <div className="text-xs text-gray-500 bg-gray-100 dark:bg-gray-800 dark:text-gray-400 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700/50">
-            Zustand Store: <span className="font-bold">{customers.length}</span> | Listelenen: <span className="font-bold">{filteredCustomers.length}</span>
+            Zustand Store: <span className="font-bold">{customers.length}</span> | Listelenen: <span className="font-bold">{sortedCustomers.length}</span>
           </div>
 
           <button
@@ -103,14 +109,14 @@ export default function CarilerPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredCustomers.length === 0 ? (
+              {sortedCustomers.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="p-8 text-center text-gray-500 dark:text-gray-400">
                     Henüz kayıtlı müşteri bulunmuyor.
                   </td>
                 </tr>
               ) : (
-                filteredCustomers.map((customer) => (
+                sortedCustomers.map((customer) => (
                   <tr key={customer.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                     <td className="p-4">
                       <Link href={`/cariler/${customer.id}`} className="font-medium text-blue-600 dark:text-blue-400 hover:underline">

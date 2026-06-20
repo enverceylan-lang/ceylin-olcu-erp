@@ -171,6 +171,7 @@ export async function POST(req: NextRequest) {
   const user = authResult.user;
   try {
     const { customers: localCustomers, pendingDeletes, users: localUsers } = await req.json();
+    console.log("[Sync API POST] Received payload. Local customers count:", localCustomers?.length, "pendingDeletes count:", pendingDeletes?.length);
 
     // 1. Process deletions
     if (Array.isArray(pendingDeletes)) {
@@ -435,7 +436,7 @@ export async function POST(req: NextRequest) {
       // Customer
       const dbCustomer = remoteCustomers?.find(dc => dc.id === c.id);
       if (!dbCustomer || new Date(c.updatedAt || 0) > new Date(dbCustomer.updatedAt)) {
-        await supabaseServer.from("customers").upsert({
+        const { error } = await supabaseServer.from("customers").upsert({
           id: c.id,
           name: c.name,
           phone: c.phone,
@@ -445,13 +446,17 @@ export async function POST(req: NextRequest) {
           createdAt: c.createdAt,
           updatedAt: c.updatedAt
         });
+        if (error) {
+          console.error(`[Sync DB Error] Customer upsert failed for ${c.name} (${c.id}):`, error);
+          throw new Error(`Customer upsert failed: ${error.message}`);
+        }
       }
 
       // Rooms
       for (const r of c.rooms) {
         const dbRoom = remoteRooms?.find(dr => dr.id === r.id);
         if (!dbRoom || new Date(r.updatedAt || 0) > new Date(dbRoom.updatedAt)) {
-          await supabaseServer.from("rooms").upsert({
+          const { error } = await supabaseServer.from("rooms").upsert({
             id: r.id,
             name: r.name,
             customerId: c.id,
@@ -460,13 +465,17 @@ export async function POST(req: NextRequest) {
             createdAt: r.createdAt,
             updatedAt: r.updatedAt
           });
+          if (error) {
+            console.error(`[Sync DB Error] Room upsert failed for ${r.name} (${r.id}):`, error);
+            throw new Error(`Room upsert failed: ${error.message}`);
+          }
         }
 
         // Openings
         for (const o of r.windows) {
           const dbOpening = remoteOpenings?.find(do_ => do_.id === o.id);
           if (!dbOpening || new Date(o.updatedAt || 0) > new Date(dbOpening.updatedAt)) {
-            await supabaseServer.from("openings").upsert({
+            const { error } = await supabaseServer.from("openings").upsert({
               id: o.id,
               name: o.name,
               roomId: r.id,
@@ -478,13 +487,17 @@ export async function POST(req: NextRequest) {
               createdAt: o.createdAt,
               updatedAt: o.updatedAt
             });
+            if (error) {
+              console.error(`[Sync DB Error] Opening upsert failed for ${o.name} (${o.id}):`, error);
+              throw new Error(`Opening upsert failed: ${error.message}`);
+            }
           }
 
           // Measurements
           for (const m of o.products) {
             const dbMeasurement = remoteMeasurements?.find(dm => dm.id === m.id);
             if (!dbMeasurement || new Date(m.updatedAt || 0) > new Date(dbMeasurement.updatedAt)) {
-              await supabaseServer.from("measurements").upsert({
+              const { error } = await supabaseServer.from("measurements").upsert({
                 id: m.id,
                 openingId: o.id,
                 templateType: m.templateType,
@@ -507,6 +520,10 @@ export async function POST(req: NextRequest) {
                 photos: m.photos || [],
                 videos: m.videos || []
               });
+              if (error) {
+                console.error(`[Sync DB Error] Measurement upsert failed for ${m.id}:`, error);
+                throw new Error(`Measurement upsert failed: ${error.message}`);
+              }
             }
           }
         }
