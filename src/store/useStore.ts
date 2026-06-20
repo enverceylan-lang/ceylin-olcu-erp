@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { useAuthStore } from './useAuthStore';
 
 // ─── Store Change Notification for Sync ───
 type StoreChangeListener = () => void;
@@ -122,6 +123,19 @@ export interface Customer {
   rooms: Room[];
   createdAt?: string;
   updatedAt?: string;
+
+  // Assignment metadata
+  createdById?: string;
+  createdByName?: string;
+  assignedSalesId?: string;
+  assignedSalesName?: string;
+  assignedMeasureId?: string;
+  assignedMeasureName?: string;
+  assignedTailorId?: string;
+  assignedTailorName?: string;
+  assignedInstallerId?: string;
+  assignedInstallerName?: string;
+  workflowStatus?: string;
 }
 
 export interface Product {
@@ -299,12 +313,24 @@ export const useStore = create<AppState>()(
 
       addCustomer: (data) => set((state) => {
         const now = new Date().toISOString();
+        const currentUser = useAuthStore.getState().currentUser;
         const newCustomer: Customer = {
           ...data,
           id: crypto.randomUUID(),
           rooms: [],
           createdAt: now,
-          updatedAt: now
+          updatedAt: now,
+          createdById: currentUser?.id || "",
+          createdByName: currentUser?.name || "",
+          assignedSalesId: "",
+          assignedSalesName: "",
+          assignedMeasureId: "",
+          assignedMeasureName: "",
+          assignedTailorId: "",
+          assignedTailorName: "",
+          assignedInstallerId: "",
+          assignedInstallerName: "",
+          workflowStatus: "YENI"
         };
         notifyStoreChanges();
         return {

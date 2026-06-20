@@ -23,6 +23,17 @@ CREATE TABLE IF NOT EXISTS customers (
     address TEXT,
     "mapLocation" TEXT,
     notes TEXT,
+    "createdById" TEXT,
+    "createdByName" TEXT,
+    "assignedSalesId" TEXT,
+    "assignedSalesName" TEXT,
+    "assignedMeasureId" TEXT,
+    "assignedMeasureName" TEXT,
+    "assignedTailorId" TEXT,
+    "assignedTailorName" TEXT,
+    "assignedInstallerId" TEXT,
+    "assignedInstallerName" TEXT,
+    "workflowStatus" TEXT DEFAULT 'YENI',
     "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
