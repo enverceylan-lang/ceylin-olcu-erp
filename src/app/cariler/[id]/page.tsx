@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, ChevronRight, Layers, Camera, Video, FileText, CheckCircle, Shield, AlertTriangle, MapPin, MessageCircle } from "lucide-react";
 import Link from "next/link";
 import { useStore, WindowItem, MEASUREMENT_TEMPLATES, ProductMeasurement } from "@/store/useStore";
-import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer } from "@/store/useAuthStore";
+import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer, canViewCustomerWorkflowReport, canViewCustomerFinancialReport } from "@/store/useAuthStore";
 import { getMeasurementDimensions, getTemplateLabel, getGoogleMapsUrl, getWorkflowStatusLabel, getWorkflowStatusColorClass, WORKFLOW_STATUS_LABELS } from "@/lib/measurementAdapter";
 import { fileToDataUrl } from "@/lib/fileStorage";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
@@ -17,10 +17,24 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const { customers, addRoom, deleteRoom, addWindow, deleteWindow, updateRoomAttachments, updateWindowItem, addProductMeasurement, updateProductMeasurement, deleteProductMeasurement } = store;
   const { currentUser, addAuditEntry, users } = useAuthStore();
   const user = currentUser!;
+  const customer = customers.find(c => c.id === id);
   
   const [mounted, setMounted] = useState(false);
   const permissions = ROLE_PERMISSIONS[currentUser?.role || "FIELD"] || { label: "Kullanıcı", canAccessOfficeMode: false, canOverrideMeasuredBy: false };
   const [mode, setMode] = useState<"MEASUREMENT" | "OFFICE">("MEASUREMENT");
+  const [activeTab, setActiveTab] = useState<"rooms" | "timeline" | "financial">("rooms");
+
+  const CUSTOMER_WORKFLOW_LABELS: Record<string, string> = {
+    YENI: "Yeni",
+    OLCU_BEKLIYOR: "Ölçü Bekleniyor",
+    OLCU_ALINDI: "Ölçü Alındı",
+    SATISTA: "Satışta",
+    DIKIMDE: "Dikimde/Üretimde",
+    MONTAJ_BEKLIYOR: "Montaj Bekleniyor",
+    MONTAJDA: "Montajda",
+    TAMAMLANDI: "Tamamlandı",
+    IPTAL: "İptal"
+  };
 
   const measurementEmployees = users.filter(u => normalizeRole(u.role) === 'FIELD' || normalizeRole(u.role) === 'ADMIN');
 
@@ -57,11 +71,20 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const [correctionNewUserId, setCorrectionNewUserId] = useState("");
   const [correctionReason, setCorrectionReason] = useState("");
 
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "timeline" && customer && currentUser && !canViewCustomerWorkflowReport(currentUser, customer)) {
+      setActiveTab("rooms");
+    }
+    if (activeTab === "financial" && currentUser && !canViewCustomerFinancialReport(currentUser)) {
+      setActiveTab("rooms");
+    }
+  }, [activeTab, customer, currentUser]);
 
   if (!mounted) return <div className="p-8 text-center">Yükleniyor...</div>;
-
-  const customer = customers.find(c => c.id === id);
 
   if (customer && currentUser && !canViewCustomer(currentUser, customer)) {
     return (
@@ -81,6 +104,59 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       </div>
     );
   }
+
+  const getJobDurationDays = () => {
+    if (!customer.createdAt) return 0;
+    const start = new Date(customer.createdAt).getTime();
+    const isFinished = customer.workflowStatus === "TAMAMLANDI" || customer.workflowStatus === "IPTAL";
+    const end = isFinished && customer.updatedAt ? new Date(customer.updatedAt).getTime() : Date.now();
+    const diffTime = Math.max(0, end - start);
+    return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  };
+
+  const getTimelineEvents = () => {
+    const events: { date: string; action: string; description: string; personnel: string }[] = [];
+
+    // 1. Customer Created
+    if (customer.createdAt) {
+      events.push({
+        date: customer.createdAt,
+        action: "Cari Açıldı",
+        description: "Müşteri kaydı oluşturuldu ve ERP sistemine kaydedildi.",
+        personnel: customer.createdByName || "Bilinmiyor"
+      });
+    }
+
+    // 2. Measurements
+    customer.rooms.forEach(room => {
+      room.windows?.forEach(win => {
+        win.products?.forEach(p => {
+          const date = p.measuredDate || p.createdAt || customer.createdAt || "";
+          if (date) {
+            events.push({
+              date,
+              action: `Ölçü Eklendi (${room.name} - ${win.name})`,
+              description: `Şablon: ${getTemplateLabel(p.templateType)}. Notlar: ${p.notes || 'Yok'}`,
+              personnel: p.measuredBy || "Bilinmiyor"
+            });
+          }
+        });
+      });
+    });
+
+    // 3. Last update (if different from createdAt)
+    if (customer.updatedAt && customer.createdAt && customer.updatedAt !== customer.createdAt) {
+      events.push({
+        date: customer.updatedAt,
+        action: "Son Güncelleme",
+        description: `Cari kartı veya ERP verileri güncellendi. (Mevcut Durum: ${CUSTOMER_WORKFLOW_LABELS[customer.workflowStatus || 'YENI'] || customer.workflowStatus})`,
+        personnel: "-"
+      });
+    }
+
+    // Sort events by date descending (newest first)
+    return events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  };
 
   const buildWhatsAppReport = () => {
     const lines: string[] = [
@@ -360,12 +436,30 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
           <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 shadow-sm">
             <h2 className="font-semibold text-gray-900 dark:text-white mb-4">Müşteri Kartı</h2>
             <div className="space-y-4 text-sm">
+              {customer.customerCode && (
+                <div>
+                  <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">Cari Kodu</span>
+                  <span className="font-medium text-gray-900 dark:text-white">{customer.customerCode}</span>
+                </div>
+              )}
+              {customer.taxNumber && (
+                <div>
+                  <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">TC / Vergi No</span>
+                  <span className="font-medium text-gray-900 dark:text-white">{customer.taxNumber}</span>
+                </div>
+              )}
               <div>
-                <span className="block text-gray-500 dark:text-gray-400">Telefon</span>
+                <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">Telefon</span>
                 <span className="font-medium text-gray-900 dark:text-white">{customer.phone || '-'}</span>
               </div>
+              {customer.phone2 && (
+                <div>
+                  <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">Telefon 2</span>
+                  <span className="font-medium text-gray-900 dark:text-white">{customer.phone2}</span>
+                </div>
+              )}
               <div>
-                <span className="block text-gray-500 dark:text-gray-400 mb-1">Adres</span>
+                <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase mb-1">Adres</span>
                 {(() => {
                   const mapsUrl = getGoogleMapsUrl(customer);
                   if (mapsUrl) {
@@ -393,6 +487,18 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                   );
                 })()}
               </div>
+              {customer.extraDescription && (
+                <div>
+                  <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">Ek Açıklama</span>
+                  <span className="font-medium text-gray-900 dark:text-white">{customer.extraDescription}</span>
+                </div>
+              )}
+              {customer.generalNote && (
+                <div>
+                  <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">Genel Açıklama</span>
+                  <span className="font-medium text-gray-900 dark:text-white break-words">{customer.generalNote}</span>
+                </div>
+              )}
             </div>
           </div>
           
@@ -403,13 +509,53 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
         </div>
 
         {/* Main Content Area */}
-        <div className="lg:col-span-3 space-y-4">
-          {customer.rooms.length === 0 ? (
-            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-12 text-center text-gray-500">
-              <Layers className="w-12 h-12 text-gray-300 mb-4 mx-auto" />
-              <p>Oda bulunamadı. Lütfen yeni oda ekleyin.</p>
-            </div>
-          ) : null}
+        <div className="lg:col-span-3 space-y-6">
+          {/* Tabs Navigation */}
+          <div className="flex border-b border-gray-200 dark:border-gray-800 mb-4 gap-6">
+            <button
+              onClick={() => setActiveTab("rooms")}
+              className={`pb-3 text-sm font-semibold border-b-2 transition-colors cursor-pointer ${
+                activeTab === "rooms"
+                  ? "border-blue-500 text-blue-600 dark:text-blue-400"
+                  : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400"
+              }`}
+            >
+              Odalar & Ölçüler
+            </button>
+            {canViewCustomerWorkflowReport(currentUser, customer) && (
+              <button
+                onClick={() => setActiveTab("timeline")}
+                className={`pb-3 text-sm font-semibold border-b-2 transition-colors cursor-pointer ${
+                  activeTab === "timeline"
+                    ? "border-blue-500 text-blue-600 dark:text-blue-400"
+                    : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400"
+                }`}
+              >
+                Cari İş Akış Raporu
+              </button>
+            )}
+            {canViewCustomerFinancialReport(currentUser) && (
+              <button
+                onClick={() => setActiveTab("financial")}
+                className={`pb-3 text-sm font-semibold border-b-2 transition-colors cursor-pointer ${
+                  activeTab === "financial"
+                    ? "border-blue-500 text-blue-600 dark:text-blue-400"
+                    : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400"
+                }`}
+              >
+                Cari Rapor / Ekstre
+              </button>
+            )}
+          </div>
+
+          {activeTab === "rooms" && (
+            <>
+              {customer.rooms.length === 0 ? (
+                <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-12 text-center text-gray-500">
+                  <Layers className="w-12 h-12 text-gray-300 mb-4 mx-auto" />
+                  <p>Oda bulunamadı. Lütfen yeni oda ekleyin.</p>
+                </div>
+              ) : null}
 
           {customer.rooms.map((room) => {
             const isExpanded = expandedRooms[room.id] !== false;
@@ -884,6 +1030,102 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
               </div>
             );
           })}
+            </>
+          )}
+
+          {activeTab === "timeline" && canViewCustomerWorkflowReport(currentUser, customer) && (
+            <div className="space-y-6">
+              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 shadow-sm">
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Cari İş Akış Analizi</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                  <div className="p-4 bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/30 rounded-xl">
+                    <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 block mb-1">TOPLAM İŞ SÜRESİ</span>
+                    <span className="text-2xl font-bold text-gray-900 dark:text-white">{getJobDurationDays()} Gün</span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 block mt-1">Cari oluşturulma tarihi ile bugün arasındaki süre</span>
+                  </div>
+                  <div className="p-4 bg-gray-50 dark:bg-gray-800/40 border border-gray-200/60 dark:border-gray-800 rounded-xl">
+                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 block mb-1">İŞ AKIŞ DURUMU</span>
+                    <span className="text-lg font-bold text-gray-800 dark:text-gray-200">{CUSTOMER_WORKFLOW_LABELS[customer.workflowStatus || 'YENI'] || customer.workflowStatus}</span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 block mt-1">Müşterinin güncel operasyonel aşaması</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden shadow-sm">
+                <div className="p-5 border-b border-gray-200 dark:border-gray-800">
+                  <h4 className="font-bold text-gray-900 dark:text-white">Operasyonel Zaman Tüneli</h4>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-800 text-gray-500 dark:text-gray-400 font-bold">
+                        <th className="p-4 font-semibold">Tarih</th>
+                        <th className="p-4 font-semibold">İşlem</th>
+                        <th className="p-4 font-semibold">Açıklama</th>
+                        <th className="p-4 font-semibold">Personel</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-150 dark:divide-gray-800">
+                      {getTimelineEvents().map((e, index) => (
+                        <tr key={index} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
+                          <td className="p-4 whitespace-nowrap text-gray-600 dark:text-gray-400">
+                            {new Date(e.date).toLocaleString('tr-TR')}
+                          </td>
+                          <td className="p-4 font-semibold text-gray-900 dark:text-white">
+                            {e.action}
+                          </td>
+                          <td className="p-4 text-gray-600 dark:text-gray-300">
+                            {e.description}
+                          </td>
+                          <td className="p-4 whitespace-nowrap text-gray-600 dark:text-gray-400">
+                            {e.personnel}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "financial" && canViewCustomerFinancialReport(currentUser) && (
+            <div className="space-y-6">
+              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden shadow-sm">
+                <div className="p-5 border-b border-gray-200 dark:border-gray-800">
+                  <h4 className="font-bold text-gray-900 dark:text-white">Cari Hesap Ekstresi (Finansal Hareketler)</h4>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-sm min-w-[700px]">
+                    <thead>
+                      <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-800 text-gray-500 dark:text-gray-400 font-bold">
+                        <th className="p-4 font-semibold">Tarih</th>
+                        <th className="p-4 font-semibold">Belge Türü</th>
+                        <th className="p-4 font-semibold">Belge No</th>
+                        <th className="p-4 font-semibold">Açıklama</th>
+                        <th className="p-4 font-semibold text-right">Borç (Tutar)</th>
+                        <th className="p-4 font-semibold text-right">Alacak (Ödeme)</th>
+                        <th className="p-4 font-semibold text-right">Bakiye</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td colSpan={7} className="p-12 text-center text-gray-500 dark:text-gray-400">
+                          <div className="max-w-md mx-auto space-y-2">
+                            <FileText className="w-10 h-10 text-gray-300 mx-auto" />
+                            <p className="font-bold text-gray-800 dark:text-gray-200 text-sm">Kayıt Bulunamadı</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              Henüz satış, fatura veya tahsilat kaydı bulunmuyor. Satış modülü aktif olduğunda cari hareketleri burada görünecek.
+                            </p>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Media Upload Modal */}

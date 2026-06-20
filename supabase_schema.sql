@@ -34,6 +34,11 @@ CREATE TABLE IF NOT EXISTS customers (
     "assignedInstallerId" TEXT,
     "assignedInstallerName" TEXT,
     "workflowStatus" TEXT DEFAULT 'YENI',
+    "customerCode" TEXT,
+    "taxNumber" TEXT,
+    "phone2" TEXT,
+    "extraDescription" TEXT,
+    "generalNote" TEXT,
     "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );

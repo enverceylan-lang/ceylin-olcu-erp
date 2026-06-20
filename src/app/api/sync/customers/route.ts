@@ -281,6 +281,11 @@ export async function POST(req: NextRequest) {
           assignedInstallerId: remote.assignedInstallerId || "",
           assignedInstallerName: remote.assignedInstallerName || "",
           workflowStatus: remote.workflowStatus || "YENI",
+          customerCode: remote.customerCode || "",
+          taxNumber: remote.taxNumber || "",
+          phone2: remote.phone2 || "",
+          extraDescription: remote.extraDescription || "",
+          generalNote: remote.generalNote || "",
           createdAt: remote.createdAt,
           updatedAt: remote.updatedAt,
           rooms: []
@@ -304,6 +309,11 @@ export async function POST(req: NextRequest) {
           assignedInstallerId: remote.assignedInstallerId || "",
           assignedInstallerName: remote.assignedInstallerName || "",
           workflowStatus: remote.workflowStatus || "YENI",
+          customerCode: remote.customerCode || "",
+          taxNumber: remote.taxNumber || "",
+          phone2: remote.phone2 || "",
+          extraDescription: remote.extraDescription || "",
+          generalNote: remote.generalNote || "",
           createdAt: remote.createdAt,
           updatedAt: remote.updatedAt
         });
@@ -476,6 +486,11 @@ export async function POST(req: NextRequest) {
           assignedInstallerId: c.assignedInstallerId || null,
           assignedInstallerName: c.assignedInstallerName || null,
           workflowStatus: c.workflowStatus || "YENI",
+          customerCode: c.customerCode || null,
+          taxNumber: c.taxNumber || null,
+          phone2: c.phone2 || null,
+          extraDescription: c.extraDescription || null,
+          generalNote: c.generalNote || null,
           createdAt: c.createdAt,
           updatedAt: c.updatedAt
         });

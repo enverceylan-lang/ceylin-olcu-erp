@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowLeft, Save } from "lucide-react";
+import { ArrowLeft, Save, MapPin, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useStore } from "@/store/useStore";
@@ -15,8 +15,39 @@ export default function YeniCariPage() {
     phone: "",
     address: "",
     mapLocation: "",
-    notes: ""
+    notes: "",
+    customerCode: "",
+    taxNumber: "",
+    phone2: "",
+    extraDescription: "",
+    generalNote: ""
   });
+
+  const [fetchingLocation, setFetchingLocation] = useState(false);
+
+  const handleGetLocation = () => {
+    if (!navigator.geolocation) {
+      alert("Tarayıcınız konum bilgisini desteklemiyor.");
+      return;
+    }
+    setFetchingLocation(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        setFormData(prev => ({
+          ...prev,
+          mapLocation: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
+        }));
+        setFetchingLocation(false);
+      },
+      (error) => {
+        console.error(error);
+        alert("Konum bilgisi alınamadı. Lütfen konum izinlerini kontrol edin.");
+        setFetchingLocation(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,7 +73,18 @@ export default function YeniCariPage() {
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Müşteri Adı *</label>
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Cari Kodu</label>
+              <input 
+                type="text" 
+                value={formData.customerCode}
+                onChange={e => setFormData({...formData, customerCode: e.target.value})}
+                className="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 focus:ring-2 focus:ring-blue-500 outline-none transition-shadow" 
+                placeholder="CARI-001" 
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Müşteri Adı / Cari Adı *</label>
               <input 
                 type="text" 
                 required 
@@ -54,7 +96,18 @@ export default function YeniCariPage() {
             </div>
             
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Telefon Numarası</label>
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Cari TC / Vergi Kimlik No</label>
+              <input 
+                type="text" 
+                value={formData.taxNumber}
+                onChange={e => setFormData({...formData, taxNumber: e.target.value})}
+                className="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 focus:ring-2 focus:ring-blue-500 outline-none transition-shadow" 
+                placeholder="12345678901" 
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Cari Telefon</label>
               <input 
                 type="tel" 
                 value={formData.phone}
@@ -63,12 +116,50 @@ export default function YeniCariPage() {
                 placeholder="0555 123 45 67" 
               />
             </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Cari Telefon 2</label>
+              <input 
+                type="tel" 
+                value={formData.phone2}
+                onChange={e => setFormData({...formData, phone2: e.target.value})}
+                className="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 focus:ring-2 focus:ring-blue-500 outline-none transition-shadow" 
+                placeholder="0555 987 65 43" 
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Cari Konum</label>
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  value={formData.mapLocation}
+                  onChange={e => setFormData({...formData, mapLocation: e.target.value})}
+                  className="flex-1 px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 focus:ring-2 focus:ring-blue-500 outline-none transition-shadow text-sm" 
+                  placeholder="39.9334, 32.8597 veya https://maps.app.goo.gl/..." 
+                />
+                <button
+                  type="button"
+                  onClick={handleGetLocation}
+                  disabled={fetchingLocation}
+                  className="flex items-center gap-1 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 transition-colors text-xs font-semibold cursor-pointer"
+                  title="Mevcut Konumu Al"
+                >
+                  {fetchingLocation ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <MapPin className="w-4 h-4 text-red-500" />
+                  )}
+                  {fetchingLocation ? "Alınıyor..." : "Konum Al"}
+                </button>
+              </div>
+            </div>
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Adres</label>
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Cari Adresi</label>
             <textarea 
-              rows={3} 
+              rows={2} 
               value={formData.address}
               onChange={e => setFormData({...formData, address: e.target.value})}
               className="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 focus:ring-2 focus:ring-blue-500 outline-none transition-shadow" 
@@ -76,18 +167,28 @@ export default function YeniCariPage() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Google Haritalar Konumu</label>
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Ek Açıklama</label>
             <input 
-              type="url" 
-              value={formData.mapLocation}
-              onChange={e => setFormData({...formData, mapLocation: e.target.value})}
+              type="text" 
+              value={formData.extraDescription}
+              onChange={e => setFormData({...formData, extraDescription: e.target.value})}
               className="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 focus:ring-2 focus:ring-blue-500 outline-none transition-shadow" 
-              placeholder="https://maps.app.goo.gl/..." 
+              placeholder="Müşteri grubu, referans vb." 
             />
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Notlar</label>
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Cari Genel Açıklama</label>
+            <textarea 
+              rows={2} 
+              value={formData.generalNote}
+              onChange={e => setFormData({...formData, generalNote: e.target.value})}
+              className="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 focus:ring-2 focus:ring-blue-500 outline-none transition-shadow" 
+              placeholder="Önemli cari detayları..."></textarea>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Notlar (Geçmiş Notlar)</label>
             <textarea 
               rows={2} 
               value={formData.notes}

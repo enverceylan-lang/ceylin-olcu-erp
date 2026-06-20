@@ -136,6 +136,13 @@ export interface Customer {
   assignedInstallerId?: string;
   assignedInstallerName?: string;
   workflowStatus?: string;
+
+  // New customer card fields
+  customerCode?: string;
+  taxNumber?: string;
+  phone2?: string;
+  extraDescription?: string;
+  generalNote?: string;
 }
 
 export interface Product {
@@ -330,7 +337,12 @@ export const useStore = create<AppState>()(
           assignedTailorName: "",
           assignedInstallerId: "",
           assignedInstallerName: "",
-          workflowStatus: "YENI"
+          workflowStatus: "YENI",
+          customerCode: data.customerCode || "",
+          taxNumber: data.taxNumber || "",
+          phone2: data.phone2 || "",
+          extraDescription: data.extraDescription || "",
+          generalNote: data.generalNote || ""
         };
         notifyStoreChanges();
         return {

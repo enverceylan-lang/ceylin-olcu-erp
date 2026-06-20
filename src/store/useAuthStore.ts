@@ -163,6 +163,54 @@ export function canViewCustomer(user: any, customer: any): boolean {
   return false;
 }
 
+export function canViewCustomerWorkflowReport(user: any, customer: any): boolean {
+  if (!user || !customer) return false;
+  const safeUser = normalizeUser(user);
+  const role = safeUser.role;
+  const normRole = normalizeRole(role);
+  const userId = safeUser.id;
+  
+  // ADMIN görür, OFFICE görür, SALES görür
+  if (normRole === 'ADMIN' || normRole === 'OFFICE') return true;
+  
+  // FIELD / MEASUREMENT sadece kendine atanmışsa, kendi oluşturduysa veya ölçüsünü aldıysa görür
+  if (normRole === 'FIELD') {
+    const isAssignedMeasure = customer.assignedMeasureId === userId;
+    const isCreator = customer.createdById === userId;
+    const tookMeasurement = customer.rooms?.some((room: any) =>
+      room.windows?.some((win: any) =>
+        win.products?.some((p: any) => p.measuredById === userId)
+      )
+    );
+    return isAssignedMeasure || isCreator || !!tookMeasurement;
+  }
+  
+  // TAILOR / PRODUCTION sadece assignedTailorId kendisiyse görür
+  if (normRole === 'TAILOR') {
+    return customer.assignedTailorId === userId;
+  }
+  
+  // INSTALLER / INSTALLATION sadece assignedInstallerId kendisiyse görür
+  if (normRole === 'INSTALLER') {
+    return customer.assignedInstallerId === userId;
+  }
+  
+  return false;
+}
+
+export function canViewCustomerFinancialReport(user: any): boolean {
+  if (!user) return false;
+  const safeUser = normalizeUser(user);
+  const role = safeUser.role;
+  const normRole = normalizeRole(role);
+  
+  // ADMIN, OFFICE, SALES, ACCOUNTING can see it
+  if (normRole === 'ADMIN' || normRole === 'OFFICE' || (role as string) === 'ACCOUNTING') {
+    return true;
+  }
+  return false;
+}
+
 export function canViewMeasurement(user: any, measurement: any): boolean {
   const safeUser = normalizeUser(user);
   const normRole = normalizeRole(safeUser.role);
