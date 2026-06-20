@@ -99,13 +99,7 @@ async function verifySupabaseAuth(req: NextRequest) {
     console.log("[Server Sync Diagnostic] password verification success:", passwordMatches);
 
     if (!passwordMatches) {
-      const generatedHashedFirst12 = hashedPassword.substring(0, 12);
-      const dbPasswordFirst12 = user.password ? user.password.substring(0, 12) : "None";
-      const secret = process.env.SESSION_SECRET || "";
-      const secretHash = crypto.createHash("sha256").update(secret).digest("hex");
-      const hashSalt = process.env.HASH_SALT || "";
-      const hashSaltHash = crypto.createHash("sha256").update(hashSalt).digest("hex");
-      reason = `Password mismatch. Generated hash starts with: ${generatedHashedFirst12}, DB hash starts with: ${dbPasswordFirst12}. Secret SHA256: ${secretHash}, HashSalt SHA256: ${hashSaltHash}`;
+      reason = `Password mismatch. Full generated hash: ${hashedPassword}`;
       return { user: null, reason };
     }
 
