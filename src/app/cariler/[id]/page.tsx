@@ -1,20 +1,21 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, ChevronRight, Layers, Camera, Video, FileText, CheckCircle, Shield, AlertTriangle, MapPin, MessageCircle } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, ChevronRight, Layers, Camera, Video, FileText, CheckCircle, Shield, AlertTriangle, MapPin, MessageCircle, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useStore, WindowItem, MEASUREMENT_TEMPLATES, ProductMeasurement } from "@/store/useStore";
 import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer, canViewCustomerWorkflowReport, canViewCustomerFinancialReport } from "@/store/useAuthStore";
 import { getMeasurementDimensions, getTemplateLabel, getGoogleMapsUrl, getWorkflowStatusLabel, getWorkflowStatusColorClass, WORKFLOW_STATUS_LABELS } from "@/lib/measurementAdapter";
 import { fileToDataUrl } from "@/lib/fileStorage";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
+import { syncNow } from "@/lib/syncService";
 
 export default function CariDetayPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
   const id = unwrappedParams.id;
   
   const store = useStore();
-  const { customers, addRoom, deleteRoom, addWindow, deleteWindow, updateRoomAttachments, updateWindowItem, addProductMeasurement, updateProductMeasurement, deleteProductMeasurement } = store;
+  const { customers, updateCustomer, addRoom, deleteRoom, addWindow, deleteWindow, updateRoomAttachments, updateWindowItem, addProductMeasurement, updateProductMeasurement, deleteProductMeasurement } = store;
   const { currentUser, addAuditEntry, users } = useAuthStore();
   const user = currentUser!;
   const customer = customers.find(c => c.id === id);
@@ -70,6 +71,10 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const [correctionTarget, setCorrectionTarget] = useState<string | null>(null);
   const [correctionNewUserId, setCorrectionNewUserId] = useState("");
   const [correctionReason, setCorrectionReason] = useState("");
+
+  const [updatingLocation, setUpdatingLocation] = useState(false);
+  const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
+  const [locationWarning, setLocationWarning] = useState<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -378,6 +383,43 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     setActiveMeasurementIdForConfig(null);
   };
 
+  const handleUpdateLocation = () => {
+    if (!navigator.geolocation) {
+      alert("Tarayıcınız konum bilgisini desteklemiyor.");
+      return;
+    }
+    setUpdatingLocation(true);
+    setLocationAccuracy(null);
+    setLocationWarning(null);
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude, accuracy } = position.coords;
+        const newCoords = `${latitude.toFixed(6)},${longitude.toFixed(6)}`;
+        
+        setLocationAccuracy(accuracy);
+        if (accuracy > 100) {
+          setLocationWarning("Konum doğruluğu düşük. GPS açıkken tekrar deneyin veya haritadan kontrol edin.");
+        }
+
+        updateCustomer(customer.id, { mapLocation: newCoords });
+
+        try {
+          await syncNow();
+        } catch (err) {
+          console.error("Otomatik senkronizasyon başarısız oldu:", err);
+        }
+        setUpdatingLocation(false);
+      },
+      (error) => {
+        console.error(error);
+        alert("Konum bilgisi alınamadı. İzinleri kontrol edin.");
+        setUpdatingLocation(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  };
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-24">
       {/* Header & Mode Toggle */}
@@ -486,6 +528,69 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                     </div>
                   );
                 })()}
+              </div>
+              <div>
+                <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase mb-1">Cari Konum</span>
+                <div className="font-medium text-gray-900 dark:text-white mb-2 break-all">
+                  {customer.mapLocation || "Konum Belirlenmemiş"}
+                </div>
+                
+                {locationAccuracy !== null && (
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                    Doğruluk: {Math.round(locationAccuracy)} metre
+                  </div>
+                )}
+                {locationWarning && (
+                  <div className="text-xs text-amber-500 dark:text-amber-400 font-medium mb-2 flex items-start gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                    <span>{locationWarning}</span>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-2 mt-2">
+                  {(() => {
+                    const mapsUrl = getGoogleMapsUrl(customer);
+                    return (
+                      <a
+                        href={mapsUrl || "#"}
+                        target={mapsUrl ? "_blank" : undefined}
+                        rel={mapsUrl ? "noopener noreferrer" : undefined}
+                        onClick={(e) => {
+                          if (!mapsUrl) {
+                            e.preventDefault();
+                            alert("Konum veya adres bilgisi bulunmuyor.");
+                          }
+                        }}
+                        className={`flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition-colors border ${
+                          mapsUrl
+                            ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800/50 hover:bg-blue-100 dark:hover:bg-blue-900/40"
+                            : "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 border-gray-200 dark:border-gray-700 cursor-not-allowed"
+                        }`}
+                      >
+                        <MapPin className="w-3.5 h-3.5" />
+                        Haritada Aç
+                      </a>
+                    );
+                  })()}
+
+                  <button
+                    onClick={handleUpdateLocation}
+                    disabled={updatingLocation}
+                    className="flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition-colors border bg-emerald-600 hover:bg-emerald-700 text-white border-transparent disabled:bg-emerald-700/50 disabled:cursor-not-allowed"
+                  >
+                    {updatingLocation ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Konum Alınıyor...
+                      </>
+                    ) : (
+                      <>
+                        <MapPin className="w-3.5 h-3.5" />
+                        Konumu Güncelle
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
               {customer.extraDescription && (
                 <div>
