@@ -147,6 +147,7 @@ export interface Customer {
   // ERP V2 fields
   cariType?: 'CUSTOMER' | 'SUPPLIER' | 'TAILOR' | 'INSTALLER' | 'STAFF' | 'OTHER';
   approvalStatus?: 'PENDING_APPROVAL' | 'APPROVED';
+  addressPhotos?: string[];
 }
 
 export interface Product {
@@ -357,7 +358,8 @@ export const useStore = create<AppState>()(
           extraDescription: data.extraDescription || "",
           generalNote: data.generalNote || "",
           cariType: data.cariType || "CUSTOMER",
-          approvalStatus: data.approvalStatus || initialApprovalStatus
+          approvalStatus: data.approvalStatus || initialApprovalStatus,
+          addressPhotos: data.addressPhotos || []
         };
         notifyStoreChanges();
         return {

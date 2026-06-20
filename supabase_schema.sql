@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS customers (
     "generalNote" TEXT,
     "cariType" TEXT DEFAULT 'CUSTOMER' NOT NULL,
     "approvalStatus" TEXT DEFAULT 'APPROVED' NOT NULL,
+    "addressPhotos" JSONB DEFAULT '[]'::jsonb,
     "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
@@ -133,3 +134,7 @@ CREATE INDEX IF NOT EXISTS idx_measurements_opening_id ON measurements("openingI
 -- ERP V2 type and approval status indexes
 CREATE INDEX IF NOT EXISTS idx_customers_cari_type ON customers("cariType");
 CREATE INDEX IF NOT EXISTS idx_customers_approval_status ON customers("approvalStatus");
+
+-- Add addressPhotos column to existing customers table if it doesn't exist
+ALTER TABLE customers
+ADD COLUMN IF NOT EXISTS "addressPhotos" JSONB DEFAULT '[]'::jsonb;

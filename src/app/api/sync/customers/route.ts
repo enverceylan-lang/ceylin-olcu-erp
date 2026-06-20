@@ -288,6 +288,7 @@ export async function POST(req: NextRequest) {
           generalNote: remote.generalNote || "",
           cariType: remote.cariType || "CUSTOMER",
           approvalStatus: remote.approvalStatus || "APPROVED",
+          addressPhotos: remote.addressPhotos || [],
           createdAt: remote.createdAt,
           updatedAt: remote.updatedAt,
           rooms: []
@@ -318,6 +319,7 @@ export async function POST(req: NextRequest) {
           generalNote: remote.generalNote || "",
           cariType: remote.cariType || "CUSTOMER",
           approvalStatus: remote.approvalStatus || "APPROVED",
+          addressPhotos: remote.addressPhotos || [],
           createdAt: remote.createdAt,
           updatedAt: remote.updatedAt
         });
@@ -497,6 +499,7 @@ export async function POST(req: NextRequest) {
           generalNote: c.generalNote || null,
           cariType: c.cariType || "CUSTOMER",
           approvalStatus: c.approvalStatus || "APPROVED",
+          addressPhotos: c.addressPhotos || [],
           createdAt: c.createdAt,
           updatedAt: c.updatedAt
         });
