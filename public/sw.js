@@ -60,10 +60,15 @@ self.addEventListener('activate', (event) => {
 function shouldBypassCache(url, method) {
   if (method !== 'GET') return true;
 
-  const urlObj = new URL(url);
+  let urlObj;
+  try {
+    urlObj = new URL(url);
+  } catch {
+    return true; // Bypass invalid URLs
+  }
 
-  // Do not cache blob URLs
-  if (urlObj.protocol === 'blob:') return true;
+  // Only allow http: and https: schemes (prevents chrome-extension: crashes)
+  if (urlObj.protocol !== 'http:' && urlObj.protocol !== 'https:') return true;
 
   // Do not cache WhatsApp URLs
   if (urlObj.hostname.includes('whatsapp.com') || urlObj.hostname.includes('wa.me')) {

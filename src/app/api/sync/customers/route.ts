@@ -316,38 +316,44 @@ export async function POST(req: NextRequest) {
           updatedAt: remote.updatedAt,
           rooms: []
         });
-      } else if (new Date(remote.updatedAt) > new Date(local.updatedAt || 0)) {
-        mergedCustomersMap.set(remote.id, {
-          ...local,
-          name: remote.name,
-          phone: remote.phone || "",
-          address: remote.address || "",
-          mapLocation: remote.mapLocation || "",
-          notes: remote.notes || "",
-          createdById: remote.createdById || "",
-          createdByName: remote.createdByName || "",
-          assignedSalesId: remote.assignedSalesId || "",
-          assignedSalesName: remote.assignedSalesName || "",
-          assignedMeasureId: remote.assignedMeasureId || "",
-          assignedMeasureName: remote.assignedMeasureName || "",
-          assignedTailorId: remote.assignedTailorId || "",
-          assignedTailorName: remote.assignedTailorName || "",
-          assignedInstallerId: remote.assignedInstallerId || "",
-          assignedInstallerName: remote.assignedInstallerName || "",
-          workflowStatus: remote.workflowStatus || "YENI",
-          customerCode: remote.customerCode || "",
-          taxNumber: remote.taxNumber || "",
-          phone2: remote.phone2 || "",
-          extraDescription: remote.extraDescription || "",
-          generalNote: remote.generalNote || "",
-          cariType: remote.cariType || "CUSTOMER",
-          approvalStatus: remote.approvalStatus || "APPROVED",
-          addressPhotos: remote.addressPhotos || [],
-          isDeleted: remote.isDeleted || false,
-          deletedAt: remote.deletedAt || null,
-          createdAt: remote.createdAt,
-          updatedAt: remote.updatedAt
-        });
+      } else {
+        // If local has empty/missing media, preserve from remote database
+        if (!local.addressPhotos || local.addressPhotos.length === 0) {
+          local.addressPhotos = remote.addressPhotos || [];
+        }
+
+        if (new Date(remote.updatedAt) > new Date(local.updatedAt || 0)) {
+          mergedCustomersMap.set(remote.id, {
+            ...local,
+            name: remote.name,
+            phone: remote.phone || "",
+            address: remote.address || "",
+            mapLocation: remote.mapLocation || "",
+            notes: remote.notes || "",
+            createdById: remote.createdById || "",
+            createdByName: remote.createdByName || "",
+            assignedSalesId: remote.assignedSalesId || "",
+            assignedSalesName: remote.assignedSalesName || "",
+            assignedMeasureId: remote.assignedMeasureId || "",
+            assignedMeasureName: remote.assignedMeasureName || "",
+            assignedTailorId: remote.assignedTailorId || "",
+            assignedTailorName: remote.assignedTailorName || "",
+            assignedInstallerId: remote.assignedInstallerId || "",
+            assignedInstallerName: remote.assignedInstallerName || "",
+            workflowStatus: remote.workflowStatus || "YENI",
+            customerCode: remote.customerCode || "",
+            taxNumber: remote.taxNumber || "",
+            phone2: remote.phone2 || "",
+            extraDescription: remote.extraDescription || "",
+            generalNote: remote.generalNote || "",
+            cariType: remote.cariType || "CUSTOMER",
+            approvalStatus: remote.approvalStatus || "APPROVED",
+            isDeleted: remote.isDeleted || false,
+            deletedAt: remote.deletedAt || null,
+            createdAt: remote.createdAt,
+            updatedAt: remote.updatedAt
+          });
+        }
       }
     });
 
@@ -372,15 +378,22 @@ export async function POST(req: NextRequest) {
             createdAt: dr.createdAt,
             updatedAt: dr.updatedAt
           });
-        } else if (new Date(dr.updatedAt) > new Date(lr.updatedAt || 0)) {
-          mergedRoomsMap.set(dr.id, {
-            ...lr,
-            name: dr.name,
-            photos: dr.photos || [],
-            videos: dr.videos || [],
-            createdAt: dr.createdAt,
-            updatedAt: dr.updatedAt
-          });
+        } else {
+          if (!lr.photos || lr.photos.length === 0) {
+            lr.photos = dr.photos || [];
+          }
+          if (!lr.videos || lr.videos.length === 0) {
+            lr.videos = dr.videos || [];
+          }
+
+          if (new Date(dr.updatedAt) > new Date(lr.updatedAt || 0)) {
+            mergedRoomsMap.set(dr.id, {
+              ...lr,
+              name: dr.name,
+              createdAt: dr.createdAt,
+              updatedAt: dr.updatedAt
+            });
+          }
         }
       });
 
@@ -408,18 +421,25 @@ export async function POST(req: NextRequest) {
               createdAt: do_.createdAt,
               updatedAt: do_.updatedAt
             });
-          } else if (new Date(do_.updatedAt) > new Date(lo.updatedAt || 0)) {
-            mergedOpeningsMap.set(do_.id, {
-              ...lo,
-              name: do_.name,
-              width: do_.width || undefined,
-              height: do_.height || undefined,
-              fieldNotes: do_.fieldNotes || "",
-              photos: do_.photos || [],
-              videos: do_.videos || [],
-              createdAt: do_.createdAt,
-              updatedAt: do_.updatedAt
-            });
+          } else {
+            if (!lo.photos || lo.photos.length === 0) {
+              lo.photos = do_.photos || [];
+            }
+            if (!lo.videos || lo.videos.length === 0) {
+              lo.videos = do_.videos || [];
+            }
+
+            if (new Date(do_.updatedAt) > new Date(lo.updatedAt || 0)) {
+              mergedOpeningsMap.set(do_.id, {
+                ...lo,
+                name: do_.name,
+                width: do_.width || undefined,
+                height: do_.height || undefined,
+                fieldNotes: do_.fieldNotes || "",
+                createdAt: do_.createdAt,
+                updatedAt: do_.updatedAt
+              });
+            }
           }
         });
 
@@ -459,29 +479,36 @@ export async function POST(req: NextRequest) {
                 createdAt: dm.createdAt,
                 updatedAt: dm.updatedAt
               });
-            } else if (new Date(dm.updatedAt) > new Date(lm.updatedAt || 0)) {
-              mergedMeasurementsMap.set(dm.id, {
-                ...lm,
-                templateType: dm.templateType,
-                rawValues: dm.rawValues || {},
-                productId: dm.productId || undefined,
-                productGroup: dm.productGroup || undefined,
-                productType: dm.productType || undefined,
-                calculatedWidth: dm.calculatedWidth || undefined,
-                calculatedHeight: dm.calculatedHeight || undefined,
-                details: dm.details || {},
-                notes: dm.notes || "",
-                status: dm.status || "",
-                measuredBy: dm.measuredBy || "",
-                measuredById: dm.measuredById || undefined,
-                createdById: dm.createdById || undefined,
-                measuredDate: normalizedMeasuredDate,
-                notesHistory: dm.notesHistory || [],
-                photos: dm.photos || [],
-                videos: dm.videos || [],
-                createdAt: dm.createdAt,
-                updatedAt: dm.updatedAt
-              });
+            } else {
+              if (!lm.photos || lm.photos.length === 0) {
+                lm.photos = dm.photos || [];
+              }
+              if (!lm.videos || lm.videos.length === 0) {
+                lm.videos = dm.videos || [];
+              }
+
+              if (new Date(dm.updatedAt) > new Date(lm.updatedAt || 0)) {
+                mergedMeasurementsMap.set(dm.id, {
+                  ...lm,
+                  templateType: dm.templateType,
+                  rawValues: dm.rawValues || {},
+                  productId: dm.productId || undefined,
+                  productGroup: dm.productGroup || undefined,
+                  productType: dm.productType || undefined,
+                  calculatedWidth: dm.calculatedWidth || undefined,
+                  calculatedHeight: dm.calculatedHeight || undefined,
+                  details: dm.details || {},
+                  notes: dm.notes || "",
+                  status: dm.status || "",
+                  measuredBy: dm.measuredBy || "",
+                  measuredById: dm.measuredById || undefined,
+                  createdById: dm.createdById || undefined,
+                  measuredDate: normalizedMeasuredDate,
+                  notesHistory: dm.notesHistory || [],
+                  createdAt: dm.createdAt,
+                  updatedAt: dm.updatedAt
+                });
+              }
             }
           });
 
@@ -524,7 +551,7 @@ export async function POST(req: NextRequest) {
           generalNote: c.generalNote || null,
           cariType: c.cariType || "CUSTOMER",
           approvalStatus: c.approvalStatus || "APPROVED",
-          addressPhotos: c.addressPhotos || [],
+          addressPhotos: (c.addressPhotos && c.addressPhotos.length > 0) ? c.addressPhotos : (dbCustomer?.addressPhotos || []),
           isDeleted: c.isDeleted || false,
           deletedAt: c.deletedAt || null,
           createdAt: c.createdAt,
@@ -544,8 +571,8 @@ export async function POST(req: NextRequest) {
             id: r.id,
             name: r.name,
             customerId: c.id,
-            photos: r.photos || [],
-            videos: r.videos || [],
+            photos: (r.photos && r.photos.length > 0) ? r.photos : (dbRoom?.photos || []),
+            videos: (r.videos && r.videos.length > 0) ? r.videos : (dbRoom?.videos || []),
             createdAt: r.createdAt,
             updatedAt: r.updatedAt
           });
@@ -566,8 +593,8 @@ export async function POST(req: NextRequest) {
               width: o.width || null,
               height: o.height || null,
               fieldNotes: o.fieldNotes || "",
-              photos: o.photos || [],
-              videos: o.videos || [],
+              photos: (o.photos && o.photos.length > 0) ? o.photos : (dbOpening?.photos || []),
+              videos: (o.videos && o.videos.length > 0) ? o.videos : (dbOpening?.videos || []),
               createdAt: o.createdAt,
               updatedAt: o.updatedAt
             });
@@ -601,8 +628,8 @@ export async function POST(req: NextRequest) {
                 createdAt: m.createdAt,
                 updatedAt: m.updatedAt,
                 notesHistory: m.notesHistory || [],
-                photos: m.photos || [],
-                videos: m.videos || []
+                photos: (m.photos && m.photos.length > 0) ? m.photos : (dbMeasurement?.photos || []),
+                videos: (m.videos && m.videos.length > 0) ? m.videos : (dbMeasurement?.videos || [])
               });
               if (error) {
                 console.error(`[Sync DB Error] Measurement upsert failed for ${m.id}:`, error);

@@ -17,6 +17,22 @@ export default function CarilerPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [selectedTypeFilter, setSelectedTypeFilter] = useState("ALL");
+  const [customerToDelete, setCustomerToDelete] = useState<any>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (!customerToDelete || isDeleting) return;
+    setIsDeleting(true);
+    try {
+      deleteCustomer(customerToDelete.id);
+      await syncNow();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsDeleting(false);
+      setCustomerToDelete(null);
+    }
+  };
 
   useEffect(() => {
     setMounted(true);
@@ -38,7 +54,7 @@ export default function CarilerPage() {
   const handleManualSync = async () => {
     setSyncing(true);
     try {
-      await syncNow();
+      await syncNow(true);
     } catch (err) {
       console.error(err);
     } finally {
@@ -49,6 +65,7 @@ export default function CarilerPage() {
   if (!mounted) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
 
   const filteredCustomers = customers.filter(c => {
+    if (c.isDeleted) return false;
     if (currentUser && !canViewCustomer(currentUser, c)) return false;
     
     const cType = c.cariType || "CUSTOMER";
@@ -238,8 +255,8 @@ export default function CarilerPage() {
                         <Link href={`/cariler/${customer.id}`} className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium">
                           Ölçüler
                         </Link>
-                        {currentUser && normalizeRole(currentUser.role) === 'ADMIN' && (
-                          <button onClick={() => deleteCustomer(customer.id)} className="text-sm text-red-500 hover:text-red-700 transition-colors" title="Sil">
+                        {currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'OFFICE' || currentUser.role === 'ACCOUNTING') && (
+                          <button onClick={() => setCustomerToDelete(customer)} className="text-sm text-red-500 hover:text-red-700 transition-colors" title="Sil">
                             <Trash2 className="w-4 h-4" />
                           </button>
                         )}
@@ -252,6 +269,39 @@ export default function CarilerPage() {
           </table>
         </div>
       </div>
+
+      {customerToDelete && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="w-full max-w-sm bg-white dark:bg-gray-900 border border-gray-250 dark:border-gray-800 rounded-2xl p-6 space-y-4 shadow-2xl animate-scale-in text-gray-950 dark:text-white">
+            <div className="text-center space-y-2">
+              <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-950/30 flex items-center justify-center text-red-500 mx-auto">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <h4 className="text-lg font-bold">Cariyi Sil</h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Bu cariyi silmek istediğinize emin misiniz?<br />
+                <span className="font-semibold text-red-500">Bu işlem senkronize edilecek.</span>
+              </p>
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setCustomerToDelete(null)}
+                disabled={isDeleting}
+                className="flex-1 py-2.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-250 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-semibold rounded-xl text-sm transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Vazgeç
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-750 text-white font-bold rounded-xl text-sm transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                {isDeleting ? "Siliniyor..." : "Evet, Sil"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -4,6 +4,9 @@ import { useAuthStore } from '@/store/useAuthStore';
 // Track if a sync is currently in progress
 let isSyncing = false;
 
+// Track last 413 Payload Too Large error timestamp
+let last413Time = 0;
+
 // Helper to encode base64 safely with UTF-8 support (avoids Turkish character btoa crashes)
 // btoa() fails on non-Latin1 characters (e.g. Ş, Ğ, İ, Ü, Ö, Ç).
 // This implementation encodes the string as UTF-8 bytes first, then base64-encodes the bytes.
@@ -11,6 +14,36 @@ function utf8ToBase64(str: string): string {
   return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (_, p1) => {
     return String.fromCharCode(parseInt(p1, 16));
   }));
+}
+
+// Deep clone payload and strip any raw base64 data URLs / media arrays
+function stripMediaAndDataUrls(obj: any): any {
+  if (obj === null || obj === undefined) return obj;
+
+  if (typeof obj === 'string') {
+    if (obj.startsWith('data:image/') || obj.startsWith('data:video/') || obj.startsWith('data:application/')) {
+      return '';
+    }
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(item => stripMediaAndDataUrls(item));
+  }
+
+  if (typeof obj === 'object') {
+    const res: any = {};
+    for (const key of Object.keys(obj)) {
+      if (['addressPhotos', 'photos', 'videos'].includes(key) && Array.isArray(obj[key])) {
+        res[key] = [];
+      } else {
+        res[key] = stripMediaAndDataUrls(obj[key]);
+      }
+    }
+    return res;
+  }
+
+  return obj;
 }
 
 // ─── Client-side merge helpers — "latest updatedAt wins" strategy ───
@@ -153,8 +186,18 @@ function mergeProducts(local: ProductMeasurement[], remote: ProductMeasurement[]
 
 // ─── Main Sync Function ───
 
-export async function syncNow() {
+export async function syncNow(isManual: boolean = false) {
   if (isSyncing) return;
+
+  // ── Auto-sync throttle after 413 payload error ──
+  if (!isManual && last413Time > 0) {
+    const elapsed = Date.now() - last413Time;
+    if (elapsed < 60000) {
+      console.log(`[Client Sync] Auto-sync throttled: last sync failed with 413 Payload Too Large (${Math.ceil((60000 - elapsed) / 1000)}s remaining).`);
+      return;
+    }
+  }
+
   isSyncing = true;
 
   const store = useStore.getState();
@@ -202,8 +245,6 @@ export async function syncNow() {
       console.warn('[Client Sync] currentUser has no stored credential. Sync aborted — please log out and log in again.');
       store.setSyncStatus('error');
       isSyncing = false;
-      // Do NOT call authStore.logout() here — preserve the UI session so the user
-      // can see the error and act. Only force logout if explicitly triggered.
       return;
     }
 
@@ -230,6 +271,65 @@ export async function syncNow() {
       pendingDeletes: pendingDeletes.length
     });
 
+    // ── Task A: Measure raw payload size and section breakdown ──
+    const getObjSize = (obj: any): number => {
+      try {
+        const str = JSON.stringify(obj);
+        return typeof Blob !== 'undefined' ? new Blob([str]).size : str.length;
+      } catch {
+        return 0;
+      }
+    };
+
+    const sizeCustomers = getObjSize(localCustomers);
+    const sizeUsers = getObjSize(localUsers);
+    const sizePendingDeletes = getObjSize(pendingDeletes);
+
+    // Extract flat arrays of sub-entities to measure their sizes
+    const roomsFlat: any[] = [];
+    const openingsFlat: any[] = [];
+    const measurementsFlat: any[] = [];
+    localCustomers.forEach(c => {
+      if (c.rooms) {
+        roomsFlat.push(...c.rooms.map(({ windows, ...rest }: any) => rest));
+        c.rooms.forEach((r: any) => {
+          if (r.windows) {
+            openingsFlat.push(...r.windows.map(({ products, ...rest }: any) => rest));
+            r.windows.forEach((w: any) => {
+              if (w.products) {
+                measurementsFlat.push(...w.products);
+              }
+            });
+          }
+        });
+      }
+    });
+
+    const sizeRooms = getObjSize(roomsFlat);
+    const sizeOpenings = getObjSize(openingsFlat);
+    const sizeMeasurements = getObjSize(measurementsFlat);
+    const rawTotalSize = sizeCustomers + sizeUsers + sizePendingDeletes;
+
+    console.log('[Client Sync Size Info] Raw Section Sizes (approximate):', {
+      customersTotalBranch: (sizeCustomers / 1024).toFixed(2) + ' KB',
+      roomsOnlyFlat: (sizeRooms / 1024).toFixed(2) + ' KB',
+      openingsOnlyFlat: (sizeOpenings / 1024).toFixed(2) + ' KB',
+      measurementsOnlyFlat: (sizeMeasurements / 1024).toFixed(2) + ' KB',
+      usersSection: (sizeUsers / 1024).toFixed(2) + ' KB',
+      pendingDeletesSection: (sizePendingDeletes / 1024).toFixed(2) + ' KB',
+      totalRawPayload: (rawTotalSize / 1024).toFixed(2) + ' KB'
+    });
+
+    // ── Task B: Sanitizing outgoing sync payload by stripping media ──
+    const sanitizedCustomers = stripMediaAndDataUrls(localCustomers);
+    const sanitizedPayload = {
+      customers: sanitizedCustomers,
+      pendingDeletes: pendingDeletes,
+      users: localUsers
+    };
+    const sanitizedJsonSize = getObjSize(sanitizedPayload);
+    console.log('[Client Sync Size Info] Sanitized Payload Size:', (sanitizedJsonSize / 1024).toFixed(2) + ' KB');
+
     // ── Build Authorization header using UTF-8-safe base64 ──
     // Prevents btoa crash on Turkish characters (Ş, Ğ, İ, Ü, Ö, Ç) in usernames/passwords.
     const token = utf8ToBase64(`${currentUser.username}:${currentUser.password}`);
@@ -240,20 +340,24 @@ export async function syncNow() {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify({
-        customers: localCustomers,
-        pendingDeletes: pendingDeletes,
-        users: localUsers
-      })
+      body: JSON.stringify(sanitizedPayload)
     });
 
     console.log('[Client Sync] response status:', response.status);
+
+    // ── Task E: Handle 413 Payload Too Large explicitly ──
+    if (response.status === 413) {
+      last413Time = Date.now();
+      console.error('[Client Sync] response error 413: Request Entity Too Large. Senkronizasyon paketi çok büyük. Fotoğraf/video verileri ayrı aktarılmalı.');
+      store.setSyncStatus('error');
+      isSyncing = false;
+      return;
+    }
 
     // ── HTTP error — do NOT set "synced" — set error ──
     if (!response.ok) {
       const errorText = await response.text();
       console.error('[Client Sync] response error:', errorText);
-      // Do not throw here so the finally block runs cleanly
       store.setSyncStatus('error');
       isSyncing = false;
       return;

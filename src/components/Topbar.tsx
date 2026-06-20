@@ -80,7 +80,7 @@ export function Topbar() {
               )}
 
               <button
-                onClick={() => syncNow()}
+                onClick={() => syncNow(true)}
                 className="flex items-center gap-1 text-xs font-semibold px-2 py-0.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/30 text-indigo-650 dark:text-indigo-400 rounded-md transition-colors cursor-pointer border border-indigo-200/50 dark:border-indigo-800/30 ml-2"
                 title="El ile senkronizasyonu başlat"
               >
