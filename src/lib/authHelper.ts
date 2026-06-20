@@ -5,7 +5,7 @@ import { prisma } from "./prisma";
 // Safe, native SHA-512 pbkdf2 password hashing (no external binary dependencies)
 export function hashPassword(password: string): string {
   const cleanPassword = (password || "").trim();
-  const salt = process.env.SESSION_SECRET || "olcu-erp-salt-1293";
+  const salt = process.env.HASH_SALT || process.env.SESSION_SECRET || "olcu-erp-salt-1293";
   return crypto.pbkdf2Sync(cleanPassword, salt, 1000, 64, "sha512").toString("hex");
 }
 
