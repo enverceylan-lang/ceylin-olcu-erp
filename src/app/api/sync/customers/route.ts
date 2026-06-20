@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { hashPassword } from "@/lib/authHelper";
+import crypto from "crypto";
+
 
 function decodeJwtPayload(token: string) {
   try {
@@ -99,7 +101,9 @@ async function verifySupabaseAuth(req: NextRequest) {
     if (!passwordMatches) {
       const generatedHashedFirst12 = hashedPassword.substring(0, 12);
       const dbPasswordFirst12 = user.password ? user.password.substring(0, 12) : "None";
-      reason = `Password mismatch. Generated hash starts with: ${generatedHashedFirst12}, DB hash starts with: ${dbPasswordFirst12}`;
+      const secret = process.env.SESSION_SECRET || "";
+      const secretHash = crypto.createHash("sha256").update(secret).digest("hex");
+      reason = `Password mismatch. Generated hash starts with: ${generatedHashedFirst12}, DB hash starts with: ${dbPasswordFirst12}. Secret SHA256: ${secretHash}`;
       return { user: null, reason };
     }
 
