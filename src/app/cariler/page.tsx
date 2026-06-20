@@ -1,11 +1,11 @@
 "use client";
 
-import { Plus, Search, MapPin, Phone, Trash2 } from "lucide-react";
+import { Plus, Search, MapPin, Phone, Trash2, AlertTriangle } from "lucide-react";
 import Link from "next/link";
 import { useStore } from "@/store/useStore";
 import { useEffect, useState } from "react";
 import { getGoogleMapsUrl } from "@/lib/measurementAdapter";
-import { useAuthStore, canViewCustomer, normalizeRole } from "@/store/useAuthStore";
+import { useAuthStore, canViewCustomer, normalizeRole, canViewCariType } from "@/store/useAuthStore";
 
 import { syncNow } from "@/lib/syncService";
 import { RefreshCw, CheckCircle, AlertCircle, WifiOff } from "lucide-react";
@@ -16,10 +16,24 @@ export default function CarilerPage() {
   const [mounted, setMounted] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [selectedTypeFilter, setSelectedTypeFilter] = useState("ALL");
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  const allowedCariTypes = [
+    { value: "CUSTOMER", label: "Müşteriler" },
+    { value: "SUPPLIER", label: "Tedarikçiler" },
+    { value: "TAILOR", label: "Terziler" },
+    { value: "INSTALLER", label: "Montajcılar" },
+    { value: "STAFF", label: "Personel" },
+    { value: "OTHER", label: "Diğer" }
+  ].filter(t => canViewCariType(currentUser, t.value));
+
+  const filterTabs = allowedCariTypes.length > 1
+    ? [{ value: "ALL", label: "Tüm Cariler" }, ...allowedCariTypes]
+    : allowedCariTypes;
 
   const handleManualSync = async () => {
     setSyncing(true);
@@ -36,6 +50,12 @@ export default function CarilerPage() {
 
   const filteredCustomers = customers.filter(c => {
     if (currentUser && !canViewCustomer(currentUser, c)) return false;
+    
+    const cType = c.cariType || "CUSTOMER";
+    if (allowedCariTypes.length > 1 && selectedTypeFilter !== "ALL" && cType !== selectedTypeFilter) {
+      return false;
+    }
+
     return (
       c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
       (c.phone && c.phone.includes(searchTerm))
@@ -47,6 +67,28 @@ export default function CarilerPage() {
     const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime();
     return dateB - dateA;
   });
+
+  const getCariTypeLabel = (type?: string) => {
+    switch (type) {
+      case 'SUPPLIER': return 'Tedarikçi';
+      case 'TAILOR': return 'Terzi';
+      case 'INSTALLER': return 'Montajcı';
+      case 'STAFF': return 'Personel';
+      case 'OTHER': return 'Diğer';
+      default: return 'Müşteri';
+    }
+  };
+
+  const getCariTypeColor = (type?: string) => {
+    switch (type) {
+      case 'SUPPLIER': return 'bg-amber-100 text-amber-800 dark:bg-amber-950/30 dark:text-amber-400 border border-amber-200 dark:border-amber-900/30';
+      case 'TAILOR': return 'bg-purple-100 text-purple-800 dark:bg-purple-950/30 dark:text-purple-400 border border-purple-200 dark:border-purple-900/30';
+      case 'INSTALLER': return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/30 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-900/30';
+      case 'STAFF': return 'bg-teal-100 text-teal-800 dark:bg-teal-950/30 dark:text-teal-400 border border-teal-200 dark:border-teal-900/30';
+      case 'OTHER': return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 border border-gray-200 dark:border-gray-700/50';
+      default: return 'bg-blue-100 text-blue-800 dark:bg-blue-950/30 dark:text-blue-400 border border-blue-200 dark:border-blue-900/30';
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -84,6 +126,24 @@ export default function CarilerPage() {
         </div>
       </div>
 
+      {allowedCariTypes.length > 1 && (
+        <div className="flex flex-wrap gap-2 border-b border-gray-200 dark:border-gray-800 pb-2">
+          {filterTabs.map(t => (
+            <button
+              key={t.value}
+              onClick={() => setSelectedTypeFilter(t.value)}
+              className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors cursor-pointer ${
+                selectedTypeFilter === t.value
+                  ? "bg-blue-600 text-white shadow"
+                  : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800/50"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden shadow-sm">
         <div className="p-4 border-b border-gray-200 dark:border-gray-800">
           <div className="relative max-w-md">
@@ -119,9 +179,24 @@ export default function CarilerPage() {
                 sortedCustomers.map((customer) => (
                   <tr key={customer.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                     <td className="p-4">
-                      <Link href={`/cariler/${customer.id}`} className="font-medium text-blue-600 dark:text-blue-400 hover:underline">
-                        {customer.name}
-                      </Link>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Link href={`/cariler/${customer.id}`} className="font-medium text-blue-600 dark:text-blue-400 hover:underline">
+                          {customer.name}
+                        </Link>
+                        
+                        {allowedCariTypes.length > 1 && (
+                          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold border ${getCariTypeColor(customer.cariType)}`}>
+                            {getCariTypeLabel(customer.cariType)}
+                          </span>
+                        )}
+
+                        {customer.approvalStatus === 'PENDING_APPROVAL' && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-200 dark:border-amber-900/30">
+                            <AlertTriangle className="w-2.5 h-2.5 flex-shrink-0 text-amber-500" />
+                            Onay Bekliyor
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="p-4 text-gray-600 dark:text-gray-300">
                       <div className="flex items-center gap-2">

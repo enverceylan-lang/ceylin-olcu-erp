@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS customers (
     "phone2" TEXT,
     "extraDescription" TEXT,
     "generalNote" TEXT,
+    "cariType" TEXT DEFAULT 'CUSTOMER' NOT NULL,
+    "approvalStatus" TEXT DEFAULT 'APPROVED' NOT NULL,
     "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
@@ -127,3 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_measurements_updated_at ON measurements("updatedA
 CREATE INDEX IF NOT EXISTS idx_rooms_customer_id ON rooms("customerId");
 CREATE INDEX IF NOT EXISTS idx_openings_room_id ON openings("roomId");
 CREATE INDEX IF NOT EXISTS idx_measurements_opening_id ON measurements("openingId");
+
+-- ERP V2 type and approval status indexes
+CREATE INDEX IF NOT EXISTS idx_customers_cari_type ON customers("cariType");
+CREATE INDEX IF NOT EXISTS idx_customers_approval_status ON customers("approvalStatus");

@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, ChevronRight, Layers, Camera, Video, FileText, CheckCircle, Shield, AlertTriangle, MapPin, MessageCircle, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useStore, WindowItem, MEASUREMENT_TEMPLATES, ProductMeasurement } from "@/store/useStore";
-import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer, canViewCustomerWorkflowReport, canViewCustomerFinancialReport } from "@/store/useAuthStore";
+import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer, canViewCustomerWorkflowReport, canViewCustomerFinancialReport, canViewCustomerContactFields, canViewFinancialAreas } from "@/store/useAuthStore";
 import { getMeasurementDimensions, getTemplateLabel, getGoogleMapsUrl, getWorkflowStatusLabel, getWorkflowStatusColorClass, WORKFLOW_STATUS_LABELS } from "@/lib/measurementAdapter";
 import { fileToDataUrl } from "@/lib/fileStorage";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
@@ -19,6 +19,28 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const { currentUser, addAuditEntry, users } = useAuthStore();
   const user = currentUser!;
   const customer = customers.find(c => c.id === id);
+
+  const getCariTypeLabel = (type?: string) => {
+    switch (type) {
+      case 'SUPPLIER': return 'Tedarikçi';
+      case 'TAILOR': return 'Terzi';
+      case 'INSTALLER': return 'Montajcı';
+      case 'STAFF': return 'Personel';
+      case 'OTHER': return 'Diğer';
+      default: return 'Müşteri';
+    }
+  };
+
+  const getCariTypeColor = (type?: string) => {
+    switch (type) {
+      case 'SUPPLIER': return 'bg-amber-100 text-amber-800 dark:bg-amber-950/30 dark:text-amber-400 border border-amber-200 dark:border-amber-900/30';
+      case 'TAILOR': return 'bg-purple-100 text-purple-800 dark:bg-purple-950/30 dark:text-purple-400 border border-purple-200 dark:border-purple-900/30';
+      case 'INSTALLER': return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/30 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-900/30';
+      case 'STAFF': return 'bg-teal-100 text-teal-800 dark:bg-teal-950/30 dark:text-teal-400 border border-teal-200 dark:border-teal-900/30';
+      case 'OTHER': return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 border border-gray-200 dark:border-gray-700/50';
+      default: return 'bg-blue-100 text-blue-800 dark:bg-blue-950/30 dark:text-blue-400 border border-blue-200 dark:border-blue-900/30';
+    }
+  };
   
   const [mounted, setMounted] = useState(false);
   const permissions = ROLE_PERMISSIONS[currentUser?.role || "FIELD"] || { label: "Kullanıcı", canAccessOfficeMode: false, canOverrideMeasuredBy: false };
@@ -478,120 +500,155 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
           <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 shadow-sm">
             <h2 className="font-semibold text-gray-900 dark:text-white mb-4">Müşteri Kartı</h2>
             <div className="space-y-4 text-sm">
+              <div>
+                <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase mb-1">Cari Tipi</span>
+                <span className={`inline-block px-2.5 py-1 rounded-lg text-xs font-semibold border ${getCariTypeColor(customer.cariType)}`}>
+                  {getCariTypeLabel(customer.cariType)}
+                </span>
+              </div>
+
+              {customer.approvalStatus === 'PENDING_APPROVAL' && (
+                <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-250 dark:border-amber-900/30 rounded-xl space-y-2">
+                  <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400 text-xs font-bold">
+                    <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                    Yönetici Onayı Bekliyor
+                  </div>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                    Saha ekibi tarafından oluşturuldu. Onaylanmadan diğer modüller ve çalışanlar tarafından görüntülenemez.
+                  </p>
+                  {currentUser && (normalizeRole(currentUser.role) === 'ADMIN' || normalizeRole(currentUser.role) === 'OFFICE' || currentUser.role === 'ACCOUNTING') && (
+                    <button
+                      onClick={() => {
+                        updateCustomer(customer.id, { approvalStatus: 'APPROVED' });
+                      }}
+                      className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-1.5 rounded-lg text-xs transition-colors cursor-pointer"
+                    >
+                      Cariyi Onayla
+                    </button>
+                  )}
+                </div>
+              )}
+
               {customer.customerCode && (
                 <div>
                   <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">Cari Kodu</span>
                   <span className="font-medium text-gray-900 dark:text-white">{customer.customerCode}</span>
                 </div>
               )}
-              {customer.taxNumber && (
+              {canViewCustomerContactFields(currentUser, customer) && customer.taxNumber && (
                 <div>
                   <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">TC / Vergi No</span>
                   <span className="font-medium text-gray-900 dark:text-white">{customer.taxNumber}</span>
                 </div>
               )}
-              <div>
-                <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">Telefon</span>
-                <span className="font-medium text-gray-900 dark:text-white">{customer.phone || '-'}</span>
-              </div>
-              {customer.phone2 && (
+              {canViewCustomerContactFields(currentUser, customer) && (
+                <div>
+                  <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">Telefon</span>
+                  <span className="font-medium text-gray-900 dark:text-white">{customer.phone || '-'}</span>
+                </div>
+              )}
+              {canViewCustomerContactFields(currentUser, customer) && customer.phone2 && (
                 <div>
                   <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">Telefon 2</span>
                   <span className="font-medium text-gray-900 dark:text-white">{customer.phone2}</span>
                 </div>
               )}
-              <div>
-                <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase mb-1">Adres</span>
-                {(() => {
-                  const mapsUrl = getGoogleMapsUrl(customer);
-                  if (mapsUrl) {
-                    return (
-                      <a 
-                        href={mapsUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-start gap-1.5 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium group"
-                        title="Haritada Göster"
-                      >
-                        <MapPin className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
-                        <span className="group-hover:underline break-words">{customer.address || customer.mapLocation || '-'}</span>
-                      </a>
-                    );
-                  }
-                  return (
-                    <div 
-                      className="flex items-start gap-1.5 text-gray-400 dark:text-gray-600 cursor-not-allowed" 
-                      title="Konum eklenmemiş"
-                    >
-                      <MapPin className="w-4 h-4 text-gray-300 dark:text-gray-700 flex-shrink-0 mt-0.5" />
-                      <span className="break-words">{customer.address || '-'}</span>
-                    </div>
-                  );
-                })()}
-              </div>
-              <div>
-                <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase mb-1">Cari Konum</span>
-                <div className="font-medium text-gray-900 dark:text-white mb-2 break-all">
-                  {customer.mapLocation || "Konum Belirlenmemiş"}
-                </div>
-                
-                {locationAccuracy !== null && (
-                  <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                    Doğruluk: {Math.round(locationAccuracy)} metre
-                  </div>
-                )}
-                {locationWarning && (
-                  <div className="text-xs text-amber-500 dark:text-amber-400 font-medium mb-2 flex items-start gap-1">
-                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                    <span>{locationWarning}</span>
-                  </div>
-                )}
-
-                <div className="flex flex-col gap-2 mt-2">
+              {canViewCustomerContactFields(currentUser, customer) && (
+                <div>
+                  <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase mb-1">Adres</span>
                   {(() => {
                     const mapsUrl = getGoogleMapsUrl(customer);
+                    if (mapsUrl) {
+                      return (
+                        <a 
+                          href={mapsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-start gap-1.5 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium group"
+                          title="Haritada Göster"
+                        >
+                          <MapPin className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
+                          <span className="group-hover:underline break-words">{customer.address || customer.mapLocation || '-'}</span>
+                        </a>
+                      );
+                    }
                     return (
-                      <a
-                        href={mapsUrl || "#"}
-                        target={mapsUrl ? "_blank" : undefined}
-                        rel={mapsUrl ? "noopener noreferrer" : undefined}
-                        onClick={(e) => {
-                          if (!mapsUrl) {
-                            e.preventDefault();
-                            alert("Konum veya adres bilgisi bulunmuyor.");
-                          }
-                        }}
-                        className={`flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition-colors border ${
-                          mapsUrl
-                            ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800/50 hover:bg-blue-100 dark:hover:bg-blue-900/40"
-                            : "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 border-gray-200 dark:border-gray-700 cursor-not-allowed"
-                        }`}
+                      <div 
+                        className="flex items-start gap-1.5 text-gray-400 dark:text-gray-600 cursor-not-allowed" 
+                        title="Konum eklenmemiş"
                       >
-                        <MapPin className="w-3.5 h-3.5" />
-                        Haritada Aç
-                      </a>
+                        <MapPin className="w-4 h-4 text-gray-300 dark:text-gray-700 flex-shrink-0 mt-0.5" />
+                        <span className="break-words">{customer.address || '-'}</span>
+                      </div>
                     );
                   })()}
-
-                  <button
-                    onClick={handleUpdateLocation}
-                    disabled={updatingLocation}
-                    className="flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition-colors border bg-emerald-600 hover:bg-emerald-700 text-white border-transparent disabled:bg-emerald-700/50 disabled:cursor-not-allowed"
-                  >
-                    {updatingLocation ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        Konum Alınıyor...
-                      </>
-                    ) : (
-                      <>
-                        <MapPin className="w-3.5 h-3.5" />
-                        Konumu Güncelle
-                      </>
-                    )}
-                  </button>
                 </div>
-              </div>
+              )}
+              {canViewCustomerContactFields(currentUser, customer) && (
+                <div>
+                  <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase mb-1">Cari Konum</span>
+                  <div className="font-medium text-gray-900 dark:text-white mb-2 break-all">
+                    {customer.mapLocation || "Konum Belirlenmemiş"}
+                  </div>
+                  
+                  {locationAccuracy !== null && (
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                      Doğruluk: {Math.round(locationAccuracy)} metre
+                    </div>
+                  )}
+                  {locationWarning && (
+                    <div className="text-xs text-amber-500 dark:text-amber-400 font-medium mb-2 flex items-start gap-1">
+                      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                      <span>{locationWarning}</span>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-2 mt-2">
+                    {(() => {
+                      const mapsUrl = getGoogleMapsUrl(customer);
+                      return (
+                        <a
+                          href={mapsUrl || "#"}
+                          target={mapsUrl ? "_blank" : undefined}
+                          rel={mapsUrl ? "noopener noreferrer" : undefined}
+                          onClick={(e) => {
+                            if (!mapsUrl) {
+                              e.preventDefault();
+                              alert("Konum veya adres bilgisi bulunmuyor.");
+                            }
+                          }}
+                          className={`flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition-colors border ${
+                            mapsUrl
+                              ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800/50 hover:bg-blue-100 dark:hover:bg-blue-900/40"
+                              : "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 border-gray-250 dark:border-gray-700 cursor-not-allowed"
+                          }`}
+                        >
+                          <MapPin className="w-3.5 h-3.5" />
+                          Haritada Aç
+                        </a>
+                      );
+                    })()}
+
+                    <button
+                      onClick={handleUpdateLocation}
+                      disabled={updatingLocation}
+                      className="flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition-colors border bg-emerald-600 hover:bg-emerald-700 text-white border-transparent disabled:bg-emerald-700/50 disabled:cursor-not-allowed"
+                    >
+                      {updatingLocation ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Konum Alınıyor...
+                        </>
+                      ) : (
+                        <>
+                          <MapPin className="w-3.5 h-3.5" />
+                          Konumu Güncelle
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
               {customer.extraDescription && (
                 <div>
                   <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">Ek Açıklama</span>

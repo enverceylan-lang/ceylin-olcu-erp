@@ -286,6 +286,8 @@ export async function POST(req: NextRequest) {
           phone2: remote.phone2 || "",
           extraDescription: remote.extraDescription || "",
           generalNote: remote.generalNote || "",
+          cariType: remote.cariType || "CUSTOMER",
+          approvalStatus: remote.approvalStatus || "APPROVED",
           createdAt: remote.createdAt,
           updatedAt: remote.updatedAt,
           rooms: []
@@ -314,6 +316,8 @@ export async function POST(req: NextRequest) {
           phone2: remote.phone2 || "",
           extraDescription: remote.extraDescription || "",
           generalNote: remote.generalNote || "",
+          cariType: remote.cariType || "CUSTOMER",
+          approvalStatus: remote.approvalStatus || "APPROVED",
           createdAt: remote.createdAt,
           updatedAt: remote.updatedAt
         });
@@ -491,6 +495,8 @@ export async function POST(req: NextRequest) {
           phone2: c.phone2 || null,
           extraDescription: c.extraDescription || null,
           generalNote: c.generalNote || null,
+          cariType: c.cariType || "CUSTOMER",
+          approvalStatus: c.approvalStatus || "APPROVED",
           createdAt: c.createdAt,
           updatedAt: c.updatedAt
         });

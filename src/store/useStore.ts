@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { useAuthStore } from './useAuthStore';
+import { useAuthStore, normalizeRole } from './useAuthStore';
 
 // ─── Store Change Notification for Sync ───
 type StoreChangeListener = () => void;
@@ -143,6 +143,10 @@ export interface Customer {
   phone2?: string;
   extraDescription?: string;
   generalNote?: string;
+
+  // ERP V2 fields
+  cariType?: 'CUSTOMER' | 'SUPPLIER' | 'TAILOR' | 'INSTALLER' | 'STAFF' | 'OTHER';
+  approvalStatus?: 'PENDING_APPROVAL' | 'APPROVED';
 }
 
 export interface Product {
@@ -321,6 +325,15 @@ export const useStore = create<AppState>()(
       addCustomer: (data) => set((state) => {
         const now = new Date().toISOString();
         const currentUser = useAuthStore.getState().currentUser;
+        
+        let initialApprovalStatus: 'PENDING_APPROVAL' | 'APPROVED' = 'APPROVED';
+        if (currentUser) {
+          const normRole = normalizeRole(currentUser.role);
+          if (normRole === 'FIELD') {
+            initialApprovalStatus = 'PENDING_APPROVAL';
+          }
+        }
+
         const newCustomer: Customer = {
           ...data,
           id: crypto.randomUUID(),
@@ -342,7 +355,9 @@ export const useStore = create<AppState>()(
           taxNumber: data.taxNumber || "",
           phone2: data.phone2 || "",
           extraDescription: data.extraDescription || "",
-          generalNote: data.generalNote || ""
+          generalNote: data.generalNote || "",
+          cariType: data.cariType || "CUSTOMER",
+          approvalStatus: data.approvalStatus || initialApprovalStatus
         };
         notifyStoreChanges();
         return {

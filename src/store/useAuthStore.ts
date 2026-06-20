@@ -7,7 +7,8 @@ export type UserRole =
   | 'OFFICE' | 'SALES'
   | 'FIELD' | 'MEASUREMENT' 
   | 'TAILOR' | 'PRODUCTION' 
-  | 'INSTALLER' | 'INSTALLATION';
+  | 'INSTALLER' | 'INSTALLATION'
+  | 'ACCOUNTING';
 
 export interface MockUser {
   id: string;
@@ -21,13 +22,13 @@ export interface MockUser {
   updatedAt?: string;
 }
 
-export function normalizeRole(role: UserRole | undefined): 'ADMIN' | 'OFFICE' | 'FIELD' | 'TAILOR' | 'INSTALLER' {
+export function normalizeRole(role: UserRole | undefined): 'ADMIN' | 'OFFICE' | 'FIELD' | 'TAILOR' | 'INSTALLER' | 'ACCOUNTING' {
   if (!role) return 'ADMIN';
   if (role === 'SALES') return 'OFFICE';
   if (role === 'MEASUREMENT') return 'FIELD';
   if (role === 'PRODUCTION') return 'TAILOR';
   if (role === 'INSTALLATION') return 'INSTALLER';
-  return role as any;
+  return role;
 }
 
 export function getRoleDefaultPermissions(role: UserRole): string[] {
@@ -156,11 +157,192 @@ export function canEditModule(role: UserRole | undefined, modulePath: string): b
   return false;
 }
 
-export function canViewCustomer(user: any, customer: any): boolean {
+export function canCreateCariType(user: any, cariType: string): boolean {
+  if (!user) return false;
   const safeUser = normalizeUser(user);
-  const normRole = normalizeRole(safeUser.role);
-  if (normRole === 'ADMIN' || normRole === 'OFFICE' || normRole === 'FIELD') return true;
+  const role = safeUser.role;
+  
+  if (role === 'SALES') {
+    return cariType === 'CUSTOMER';
+  }
+  
+  const normRole = normalizeRole(role);
+  if (normRole === 'ADMIN' || normRole === 'OFFICE' || role === 'ACCOUNTING') {
+    return true;
+  }
+  if (normRole === 'FIELD') {
+    return cariType === 'CUSTOMER';
+  }
   return false;
+}
+
+export function canViewCariType(user: any, cariType: string): boolean {
+  if (!user) return false;
+  const safeUser = normalizeUser(user);
+  const role = safeUser.role;
+  
+  if (role === 'SALES') {
+    return cariType === 'CUSTOMER';
+  }
+  
+  const normRole = normalizeRole(role);
+  if (normRole === 'ADMIN' || normRole === 'OFFICE' || role === 'ACCOUNTING') {
+    return true;
+  }
+  if (normRole === 'FIELD') {
+    return cariType === 'CUSTOMER';
+  }
+  if (normRole === 'TAILOR' || normRole === 'INSTALLER') {
+    return cariType === 'CUSTOMER';
+  }
+  return false;
+}
+
+export function canViewCariCard(user: any, customer: any): boolean {
+  if (!user || !customer) return false;
+  const safeUser = normalizeUser(user);
+  const role = safeUser.role;
+  const userId = safeUser.id;
+  
+  const cType = customer.cariType || 'CUSTOMER';
+  
+  if (role === 'SALES') {
+    return cType === 'CUSTOMER';
+  }
+  
+  if (!canViewCariType(safeUser, cType)) {
+    return false;
+  }
+
+  const normRole = normalizeRole(role);
+
+  if (normRole === 'ADMIN' || normRole === 'OFFICE' || role === 'ACCOUNTING') {
+    return true;
+  }
+
+  if (normRole === 'FIELD') {
+    if (cType !== 'CUSTOMER') return false;
+    
+    const isAssigned = customer.assignedMeasureId === userId;
+    const isCreator = customer.createdById === userId;
+    const isPendingApproval = customer.approvalStatus === 'PENDING_APPROVAL';
+    
+    const tookMeasurement = customer.rooms?.some((room: any) =>
+      room.windows?.some((win: any) =>
+        win.products?.some((p: any) => p.measuredById === userId)
+      )
+    );
+    
+    return isAssigned || !!tookMeasurement || (isCreator && isPendingApproval);
+  }
+
+  if (normRole === 'TAILOR') {
+    if (cType !== 'CUSTOMER') return false;
+    return customer.assignedTailorId === userId;
+  }
+
+  if (normRole === 'INSTALLER') {
+    if (cType !== 'CUSTOMER') return false;
+    return customer.assignedInstallerId === userId;
+  }
+
+  return false;
+}
+
+export function canViewFinancialAreas(user: any): boolean {
+  if (!user) return false;
+  const safeUser = normalizeUser(user);
+  const role = safeUser.role;
+  const normRole = normalizeRole(role);
+  
+  if (role === 'SALES') return false;
+  
+  return normRole === 'ADMIN' || normRole === 'OFFICE' || role === 'ACCOUNTING';
+}
+
+export function canEditCustomerCoreFields(user: any, customer: any): boolean {
+  if (!user || !customer) return false;
+  const safeUser = normalizeUser(user);
+  const role = safeUser.role;
+  const normRole = normalizeRole(role);
+  
+  if (normRole === 'ADMIN' || normRole === 'OFFICE' || role === 'ACCOUNTING') {
+    return true;
+  }
+  return false;
+}
+
+export function canEditCustomerLocation(user: any, customer: any): boolean {
+  if (!user || !customer) return false;
+  const safeUser = normalizeUser(user);
+  const role = safeUser.role;
+  const normRole = normalizeRole(role);
+  
+  if (normRole === 'ADMIN' || normRole === 'OFFICE' || role === 'ACCOUNTING') {
+    return true;
+  }
+  
+  if (normRole === 'FIELD') {
+    return canViewCariCard(safeUser, customer);
+  }
+  
+  return false;
+}
+
+export function canEditCustomerExtraDescription(user: any, customer: any): boolean {
+  return canEditCustomerLocation(user, customer);
+}
+
+export function canViewCustomerContactFields(user: any, customer: any): boolean {
+  if (!user || !customer) return false;
+  const safeUser = normalizeUser(user);
+  const role = safeUser.role;
+  const normRole = normalizeRole(role);
+  
+  if (normRole === 'TAILOR') {
+    return false;
+  }
+  return true;
+}
+
+export function canViewMeasurementForWork(user: any, customer: any): boolean {
+  if (!user || !customer) return false;
+  const safeUser = normalizeUser(user);
+  return canViewCariCard(safeUser, customer);
+}
+
+export function canViewProductionFields(user: any, customer: any): boolean {
+  if (!user || !customer) return false;
+  const safeUser = normalizeUser(user);
+  const role = safeUser.role;
+  const normRole = normalizeRole(role);
+  
+  if (normRole === 'TAILOR') {
+    return true;
+  }
+  if (normRole === 'ADMIN' || normRole === 'OFFICE' || role === 'ACCOUNTING') {
+    return true;
+  }
+  return false;
+}
+
+export function canViewInstallationFields(user: any, customer: any): boolean {
+  if (!user || !customer) return false;
+  const safeUser = normalizeUser(user);
+  const role = safeUser.role;
+  const normRole = normalizeRole(role);
+  
+  if (normRole === 'INSTALLER') {
+    return true;
+  }
+  if (normRole === 'ADMIN' || normRole === 'OFFICE' || role === 'ACCOUNTING') {
+    return true;
+  }
+  return false;
+}
+
+export function canViewCustomer(user: any, customer: any): boolean {
+  return canViewCariCard(user, customer);
 }
 
 export function canViewCustomerWorkflowReport(user: any, customer: any): boolean {
@@ -170,10 +352,8 @@ export function canViewCustomerWorkflowReport(user: any, customer: any): boolean
   const normRole = normalizeRole(role);
   const userId = safeUser.id;
   
-  // ADMIN görür, OFFICE görür, SALES görür
   if (normRole === 'ADMIN' || normRole === 'OFFICE') return true;
   
-  // FIELD / MEASUREMENT sadece kendine atanmışsa, kendi oluşturduysa veya ölçüsünü aldıysa görür
   if (normRole === 'FIELD') {
     const isAssignedMeasure = customer.assignedMeasureId === userId;
     const isCreator = customer.createdById === userId;
@@ -185,12 +365,10 @@ export function canViewCustomerWorkflowReport(user: any, customer: any): boolean
     return isAssignedMeasure || isCreator || !!tookMeasurement;
   }
   
-  // TAILOR / PRODUCTION sadece assignedTailorId kendisiyse görür
   if (normRole === 'TAILOR') {
     return customer.assignedTailorId === userId;
   }
   
-  // INSTALLER / INSTALLATION sadece assignedInstallerId kendisiyse görür
   if (normRole === 'INSTALLER') {
     return customer.assignedInstallerId === userId;
   }
@@ -204,11 +382,9 @@ export function canViewCustomerFinancialReport(user: any): boolean {
   const role = safeUser.role;
   const normRole = normalizeRole(role);
   
-  // ADMIN, OFFICE, SALES, ACCOUNTING can see it
-  if (normRole === 'ADMIN' || normRole === 'OFFICE' || (role as string) === 'ACCOUNTING') {
-    return true;
-  }
-  return false;
+  if (role === 'SALES') return false;
+  
+  return normRole === 'ADMIN' || normRole === 'OFFICE' || role === 'ACCOUNTING';
 }
 
 export function canViewMeasurement(user: any, measurement: any): boolean {

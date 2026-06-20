@@ -5,12 +5,35 @@ import { ArrowLeft, Save, MapPin, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useStore } from "@/store/useStore";
+import { useAuthStore, canCreateCariType } from "@/store/useAuthStore";
 
 export default function YeniCariPage() {
   const router = useRouter();
   const addCustomer = useStore((state) => state.addCustomer);
+  const { currentUser } = useAuthStore();
 
-  const [formData, setFormData] = useState({
+  const canCreateAny = currentUser && (
+    canCreateCariType(currentUser, 'CUSTOMER') || 
+    canCreateCariType(currentUser, 'SUPPLIER') || 
+    canCreateCariType(currentUser, 'TAILOR') || 
+    canCreateCariType(currentUser, 'INSTALLER') || 
+    canCreateCariType(currentUser, 'STAFF') || 
+    canCreateCariType(currentUser, 'OTHER')
+  );
+
+  const [formData, setFormData] = useState<{
+    name: string;
+    phone: string;
+    address: string;
+    mapLocation: string;
+    notes: string;
+    customerCode: string;
+    taxNumber: string;
+    phone2: string;
+    extraDescription: string;
+    generalNote: string;
+    cariType: 'CUSTOMER' | 'SUPPLIER' | 'TAILOR' | 'INSTALLER' | 'STAFF' | 'OTHER';
+  }>({
     name: "",
     phone: "",
     address: "",
@@ -20,7 +43,8 @@ export default function YeniCariPage() {
     taxNumber: "",
     phone2: "",
     extraDescription: "",
-    generalNote: ""
+    generalNote: "",
+    cariType: "CUSTOMER"
   });
 
   const [fetchingLocation, setFetchingLocation] = useState(false);
@@ -57,6 +81,16 @@ export default function YeniCariPage() {
     router.push("/cariler");
   };
 
+  if (!currentUser || !canCreateAny) {
+    return (
+      <div className="p-8 text-center space-y-4 max-w-md mx-auto my-12 bg-slate-900 border border-slate-800 rounded-2xl">
+        <p className="text-red-500 font-bold text-lg">Erişim Engellendi</p>
+        <p className="text-slate-350 text-sm">Cari kartı oluşturma yetkiniz yok.</p>
+        <Link href="/cariler" className="inline-block bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-sm font-semibold transition-colors">Geri Dön</Link>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 max-w-3xl mx-auto">
       <div className="flex items-center gap-4">
@@ -82,6 +116,42 @@ export default function YeniCariPage() {
                 placeholder="CARI-001" 
               />
             </div>
+
+            {(() => {
+              const availableCariTypes = [
+                { value: "CUSTOMER", label: "Müşteri" },
+                { value: "SUPPLIER", label: "Satıcı / Tedarikçi" },
+                { value: "TAILOR", label: "Terzi" },
+                { value: "INSTALLER", label: "Montajcı" },
+                { value: "STAFF", label: "Personel" },
+                { value: "OTHER", label: "Diğer" }
+              ].filter(t => canCreateCariType(currentUser, t.value));
+
+              if (availableCariTypes.length > 1) {
+                return (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Cari Tipi</label>
+                    <select
+                      value={formData.cariType}
+                      onChange={e => setFormData({...formData, cariType: e.target.value as 'CUSTOMER' | 'SUPPLIER' | 'TAILOR' | 'INSTALLER' | 'STAFF' | 'OTHER'})}
+                      className="w-full px-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 focus:ring-2 focus:ring-blue-500 outline-none transition-shadow text-sm cursor-pointer"
+                    >
+                      {availableCariTypes.map(t => (
+                        <option key={t.value} value={t.value}>{t.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              }
+              return (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Cari Tipi</label>
+                  <div className="w-full px-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800/50 text-gray-500 dark:text-gray-400 text-sm font-medium">
+                    {availableCariTypes[0]?.label || "Müşteri"}
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="space-y-2">
               <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Müşteri Adı / Cari Adı *</label>
