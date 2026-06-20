@@ -148,6 +148,8 @@ export interface Customer {
   cariType?: 'CUSTOMER' | 'SUPPLIER' | 'TAILOR' | 'INSTALLER' | 'STAFF' | 'OTHER';
   approvalStatus?: 'PENDING_APPROVAL' | 'APPROVED';
   addressPhotos?: string[];
+  isDeleted?: boolean;
+  deletedAt?: string;
 }
 
 export interface Product {
@@ -381,22 +383,34 @@ export const useStore = create<AppState>()(
       }),
 
       deleteCustomer: (id) => set((state) => {
+        const now = new Date().toISOString();
+        const updatedCustomers = state.customers.map(c => 
+          c.id === id ? { ...c, isDeleted: true, deletedAt: now, updatedAt: now } : c
+        );
         notifyStoreChanges();
         return {
-          customers: state.customers.filter(c => c.id !== id),
-          pendingDeletes: [...state.pendingDeletes, { id, table: 'customers' }],
+          customers: updatedCustomers,
           syncStatus: 'pending'
         };
       }),
 
       addRoom: (customerId, roomName) => set((state) => {
         const now = new Date().toISOString();
+        const defaultWindow: WindowItem = {
+          id: crypto.randomUUID(),
+          name: "Pencere 1",
+          photos: [],
+          videos: [],
+          products: [],
+          createdAt: now,
+          updatedAt: now
+        };
         const newRoom: Room = {
           id: crypto.randomUUID(),
           name: roomName,
           photos: [],
           videos: [],
-          windows: [],
+          windows: [defaultWindow],
           createdAt: now,
           updatedAt: now
         };
