@@ -4,39 +4,48 @@ import { useAuthStore } from '@/store/useAuthStore';
 // Track if a sync is currently in progress
 let isSyncing = false;
 
-// Helper functions for client-side merging using "latest updatedAt wins" strategy
+// Helper to encode base64 safely with UTF-8 support (avoids Turkish character btoa crashes)
+// btoa() fails on non-Latin1 characters (e.g. Ş, Ğ, İ, Ü, Ö, Ç).
+// This implementation encodes the string as UTF-8 bytes first, then base64-encodes the bytes.
+function utf8ToBase64(str: string): string {
+  return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (_, p1) => {
+    return String.fromCharCode(parseInt(p1, 16));
+  }));
+}
+
+// ─── Client-side merge helpers — "latest updatedAt wins" strategy ───
+
 function mergeCustomers(local: Customer[], remote: Customer[]): Customer[] {
   const mergedMap = new Map<string, Customer>();
 
-  // Add all local customers to the map
+  // Seed map with all local customers
   local.forEach(lc => {
     mergedMap.set(lc.id, { ...lc });
   });
 
-  // Merge remote customers
+  // Merge remote customers on top
   remote.forEach(rc => {
     const lc = mergedMap.get(rc.id);
     if (!lc) {
-      // If not present locally, add it
+      // Only exists remotely — add it
       mergedMap.set(rc.id, rc);
     } else {
-      // If present in both, compare updatedAt
       const lcTime = new Date(lc.updatedAt || 0).getTime();
       const rcTime = new Date(rc.updatedAt || 0).getTime();
-      
+
       let finalCustomer: Customer;
       if (rcTime > lcTime) {
-        // Remote is newer, take remote but keep local rooms to merge them below
+        // Remote is newer — take remote fields but merge rooms separately
         finalCustomer = {
           ...rc,
           rooms: lc.rooms || []
         };
       } else {
-        // Local is newer or equal, take local
+        // Local is newer or equal — keep local
         finalCustomer = { ...lc };
       }
 
-      // Merge rooms
+      // Always merge rooms from both sides
       const mergedRooms = mergeRooms(lc.rooms || [], rc.rooms || []);
       finalCustomer.rooms = mergedRooms;
 
@@ -142,6 +151,8 @@ function mergeProducts(local: ProductMeasurement[], remote: ProductMeasurement[]
   return Array.from(mergedMap.values());
 }
 
+// ─── Main Sync Function ───
+
 export async function syncNow() {
   if (isSyncing) return;
   isSyncing = true;
@@ -149,7 +160,7 @@ export async function syncNow() {
   const store = useStore.getState();
   const authStore = useAuthStore.getState();
 
-  // Check network connection
+  // Check network connection — set offline status and abort early if no connection
   if (typeof window !== 'undefined' && !window.navigator.onLine) {
     store.setSyncStatus('offline');
     isSyncing = false;
@@ -164,28 +175,39 @@ export async function syncNow() {
     const localUsers = authStore.users || [];
     const currentUser = authStore.currentUser;
 
+    // ── Diagnostic logs (no secret values printed) ──
+    console.log('[Client Sync] currentUser exists:', !!currentUser);
+    if (currentUser) {
+      console.log('[Client Sync] currentUser.username:', currentUser.username);
+      console.log('[Client Sync] currentUser.role:', currentUser.role);
+      console.log('[Client Sync] credential/password exists:', !!currentUser.password);
+    }
+    console.log('[Client Sync] Authorization header will be sent:', !!(currentUser && currentUser.password));
+
+    // ── Guard: no user logged in ──
+    // Do NOT set status to 'synced' here — no sync actually occurred.
+    // Use 'offline' as a neutral non-error state while unauthenticated.
     if (!currentUser) {
-      // If no user is logged in, we cannot authenticate the request.
-      // Simply complete the run as synced for now.
-      store.setSyncStatus('synced');
+      console.log('[Client Sync] No user logged in — sync skipped.');
+      store.setSyncStatus('offline');
       isSyncing = false;
       return;
     }
 
-    // Add diagnostic console logs without exposing full password
-    const usernameUsed = currentUser.username;
-    const credentialPresent = !!currentUser.password;
-    console.log(`[Sync Diagnostics] Username: ${usernameUsed}, Credential present: ${credentialPresent}`);
-
+    // ── Guard: user has no stored credential ──
+    // This can happen when sanitized remote users overwrite the local users list
+    // and the currentUser's password gets lost. Force re-login rather than
+    // silently failing or showing a false "synced" status.
     if (!currentUser.password) {
-      console.warn("Sync auth missing credential. Please logout and login again.");
+      console.warn('[Client Sync] currentUser has no stored credential. Sync aborted — please log out and log in again.');
       store.setSyncStatus('error');
       isSyncing = false;
-      authStore.logout();
+      // Do NOT call authStore.logout() here — preserve the UI session so the user
+      // can see the error and act. Only force logout if explicitly triggered.
       return;
     }
 
-    // Calculate payload counts for logging
+    // ── Payload diagnostics (counts only, no data values) ──
     let roomCount = 0;
     let openingCount = 0;
     let measurementCount = 0;
@@ -199,11 +221,18 @@ export async function syncNow() {
       });
     });
 
-    console.log("Sync started...");
-    console.log(`Payload counts: customers=${localCustomers.length}, rooms=${roomCount}, openings=${openingCount}, measurements=${measurementCount}, users=${localUsers.length}`);
+    console.log('[Client Sync] payload counts:', {
+      customers: localCustomers.length,
+      rooms: roomCount,
+      openings: openingCount,
+      measurements: measurementCount,
+      users: localUsers.length,
+      pendingDeletes: pendingDeletes.length
+    });
 
-    // Construct Authorization header: Bearer base64(username:password)
-    const token = btoa(`${currentUser.username}:${currentUser.password}`);
+    // ── Build Authorization header using UTF-8-safe base64 ──
+    // Prevents btoa crash on Turkish characters (Ş, Ğ, İ, Ü, Ö, Ç) in usernames/passwords.
+    const token = utf8ToBase64(`${currentUser.username}:${currentUser.password}`);
 
     const response = await fetch('/api/sync/customers', {
       method: 'POST',
@@ -218,68 +247,135 @@ export async function syncNow() {
       })
     });
 
+    console.log('[Client Sync] response status:', response.status);
+
+    // ── HTTP error — do NOT set "synced" — set error ──
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`Sync failed with status ${response.status}: ${errorText}`);
-      throw new Error(`Sync API returned status ${response.status}`);
+      console.error('[Client Sync] response error:', errorText);
+      // Do not throw here so the finally block runs cleanly
+      store.setSyncStatus('error');
+      isSyncing = false;
+      return;
     }
 
     const result = await response.json();
-    if (result.success) {
-      console.log("Sync success!");
-      // Update local store with merged data
-      if (result.customers) {
-        console.log(`[Client Sync] Received ${result.customers.length} customers from server.`);
-        result.customers.forEach((c: any) => {
-          console.log(`[Client Sync] Server Customer: ${c.name} (id: ${c.id}, rooms: ${c.rooms?.length})`);
-        });
-        const currentCustomers = useStore.getState().customers || [];
-        console.log(`[Client Sync] Current local customers count: ${currentCustomers.length}`);
-        const merged = mergeCustomers(currentCustomers, result.customers);
-        console.log(`[Client Sync] Merged customers count: ${merged.length}`);
-        store.setCustomers(merged);
-        console.log("[Client Sync] Local store setCustomers completed successfully.");
-      }
-      if (result.users) {
-        useAuthStore.setState({ users: result.users });
-      }
-      store.clearPendingDeletes();
-      store.setSyncStatus('synced');
-    } else {
-      console.error("Sync failed with error:", result.error || 'Sync service failed');
-      throw new Error(result.error || 'Sync service failed');
+    console.log('[Client Sync] response body success:', !!result.success);
+
+    // ── API returned success: false — do NOT set "synced" ──
+    if (!result.success) {
+      console.error('[Client Sync] Sync API returned success: false —', result.error || 'unknown error');
+      store.setSyncStatus('error');
+      isSyncing = false;
+      return;
     }
+
+    // ── Confirmed success — apply merged data ──
+    console.log('[Client Sync] counts received from server:', {
+      customers: result.customers?.length ?? 0,
+      users: result.users?.length ?? 0
+    });
+
+    if (result.customers) {
+      const currentCustomers = useStore.getState().customers || [];
+      const merged = mergeCustomers(currentCustomers, result.customers);
+      store.setCustomers(merged);
+    }
+
+    // ── Safe user merge — never overwrite valid local credentials ──
+    if (result.users) {
+      const latestLocalUsers = useAuthStore.getState().users || [];
+      // Keep a reference to the active session password BEFORE modifying the users list.
+      // currentUser.password is the plain-text PIN/password entered at login time and
+      // is never included in sanitized server responses. We must preserve it.
+      const activeSessionPassword = currentUser.password;
+      const activeUserId = currentUser.id;
+
+      const mergedUsers = result.users.map((remoteUser: any) => {
+        const localUser = latestLocalUsers.find((u: any) => u.id === remoteUser.id);
+
+        // Priority for credential resolution:
+        // 1. Active session user's password (most trustworthy — was just used to authenticate)
+        // 2. Existing local users list password (may be plain-text or hashed)
+        // 3. Remote user's password (only if server did not sanitize it — should not happen)
+        // Never assign undefined, null, or empty string as the password.
+        let preservedPassword: string | undefined;
+        if (remoteUser.id === activeUserId) {
+          // This is the currently logged-in user — always use the session password
+          preservedPassword = activeSessionPassword;
+        } else {
+          // For other users, use what's already locally stored
+          preservedPassword = localUser?.password || remoteUser.password;
+        }
+
+        if (!preservedPassword) {
+          console.warn(`[Client Sync] User "${remoteUser.username}" has no recoverable local credential.`);
+        }
+
+        return {
+          ...remoteUser,
+          password: preservedPassword  // may be undefined for users never locally logged in
+        };
+      });
+
+      useAuthStore.setState({ users: mergedUsers });
+
+      // Ensure currentUser in the session still has its password intact
+      // (it may have been partially overwritten by the setState above)
+      const updatedCurrentUser = mergedUsers.find((u: any) => u.id === activeUserId);
+      if (updatedCurrentUser && !updatedCurrentUser.password && activeSessionPassword) {
+        // Patch currentUser directly to restore the session password
+        useAuthStore.setState({
+          currentUser: {
+            ...useAuthStore.getState().currentUser!,
+            password: activeSessionPassword
+          }
+        });
+        console.log('[Client Sync] Restored session password for currentUser after merge.');
+      }
+    }
+
+    // ── Clear pending deletes only after a confirmed successful sync ──
+    store.clearPendingDeletes();
+
+    // ── Only set "synced" after all of the above succeeded ──
+    store.setSyncStatus('synced');
+
   } catch (error) {
-    console.error('Sync error:', error);
+    console.error('[Client Sync] Unexpected error during sync:', error);
     store.setSyncStatus('error');
   } finally {
     isSyncing = false;
   }
 }
 
+// ─── Sync Initializer — called once on app mount via PWAController ───
+
 export function initSync() {
   if (typeof window === 'undefined') return;
 
-  // Initial sync delay
+  // Initial sync with a short delay to let the app render first
   setTimeout(() => {
     syncNow();
   }, 1000);
 
-  // Connection status event listeners
+  // Re-sync when coming back online after being offline
   const handleOnline = () => {
     const store = useStore.getState();
     store.setSyncStatus('pending');
     syncNow();
   };
 
+  // Mark as offline immediately when network drops
   const handleOffline = () => {
     const store = useStore.getState();
     store.setSyncStatus('offline');
   };
 
+  // Re-sync when the app tab is focused / resumed from background
   const handleAppResume = () => {
     if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-      console.log("[Sync Service] App resume / tab focused. Triggering auto-sync.");
+      console.log('[Sync] App focused / tab resumed — triggering sync.');
       syncNow();
     }
   };
@@ -291,30 +387,28 @@ export function initSync() {
     document.addEventListener('visibilitychange', handleAppResume);
   }
 
-  // Subscribe to store changes to trigger sync immediately
+  // Sync whenever the main data store changes (customer add/edit/delete)
   const unsubscribeStore = subscribeToStoreChanges(() => {
     syncNow();
   });
 
-  // Subscribe to auth store changes to trigger sync immediately on login
-  let lastUser = useAuthStore.getState().currentUser;
+  // Sync when a user logs in or switches accounts
+  let lastUserId: string | null = useAuthStore.getState().currentUser?.id ?? null;
   const unsubscribeAuth = useAuthStore.subscribe((state) => {
-    const user = state.currentUser;
-    const lastUserId = lastUser ? lastUser.id : null;
-    const currentUserId = user ? user.id : null;
-    
-    if (currentUserId && lastUserId !== currentUserId) {
-      console.log("[Sync Service] User logged in or switched. Triggering immediate sync.");
+    const currentId = state.currentUser?.id ?? null;
+    if (currentId && lastUserId !== currentId) {
+      console.log('[Sync] User login or switch detected — triggering immediate sync.');
       syncNow();
     }
-    lastUser = user;
+    lastUserId = currentId;
   });
 
-  // Periodic sync every 60 seconds (as requested for first version)
+  // Periodic background sync every 60 seconds
   const interval = setInterval(() => {
     syncNow();
   }, 60000);
 
+  // Return cleanup function for use in React effects
   return () => {
     window.removeEventListener('online', handleOnline);
     window.removeEventListener('offline', handleOffline);
@@ -327,4 +421,3 @@ export function initSync() {
     clearInterval(interval);
   };
 }
-

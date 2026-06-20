@@ -36,7 +36,7 @@ async function verifySupabaseAuth(req: NextRequest) {
   try {
     const authHeader = req.headers.get("Authorization");
     const authHeaderExists = !!authHeader;
-    console.log(`[Diagnostics] 1. authHeader exists: ${authHeaderExists}`);
+    console.log("[Server Sync Diagnostic] Authorization header exists:", authHeaderExists);
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       reason = `Auth header missing or invalid format (startsWith Bearer: ${authHeader?.startsWith("Bearer ")})`;
       return { user: null, reason };
@@ -47,16 +47,19 @@ async function verifySupabaseAuth(req: NextRequest) {
     const [username, credential] = decoded.split(":");
     const decodedUsername = username || "";
     const credentialPresent = !!credential;
-    const credentialLength = credential ? credential.length : 0;
 
-    console.log(`[Diagnostics] 2. decoded username: ${decodedUsername}`);
-    console.log(`[Diagnostics] 3. credential present: ${credentialPresent}`);
-    console.log(`[Diagnostics] 4. credential length: ${credentialLength}`);
+    console.log("[Server Sync Diagnostic] Basic Auth decoded username:", decodedUsername);
+    console.log("[Server Sync Diagnostic] Basic Auth password exists:", credentialPresent);
 
     if (!username || !credential) {
       reason = `Decoded username or credential missing (username: ${!!username}, credential: ${!!credential})`;
       return { user: null, reason };
     }
+
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    console.log("[Server Sync Diagnostic] Supabase URL exists:", !!supabaseUrl);
+    console.log("[Server Sync Diagnostic] Supabase service role key exists:", !!supabaseServiceKey);
 
     const supabaseServer = getSupabaseServer();
     // Fetch user from Supabase using the server client
@@ -67,20 +70,21 @@ async function verifySupabaseAuth(req: NextRequest) {
       .single();
 
     const dbUserFound = !!user;
-    const dbErrorMessage = error ? error.message : "None";
-    console.log(`[Diagnostics] 5. database user found: ${dbUserFound}`);
-    console.log(`[Diagnostics] 6. database error message: ${dbErrorMessage}`);
-
+    console.log("[Server Sync Diagnostic] users query success:", !error);
     if (error) {
+      console.log("[Server Sync Diagnostic] users query error if any:", error.message);
       reason = `Database query error: ${error.message}`;
       return { user: null, reason };
+    } else {
+      console.log("[Server Sync Diagnostic] users query error if any:", null);
     }
+    console.log("[Server Sync Diagnostic] matched user found:", dbUserFound);
+
     if (!user) {
       reason = `User ${username} not found in database`;
       return { user: null, reason };
     }
 
-    console.log(`[Diagnostics] 7. user.isActive: ${user.isActive}`);
     if (!user.isActive) {
       reason = `User ${username} is not active`;
       return { user: null, reason };
@@ -89,15 +93,12 @@ async function verifySupabaseAuth(req: NextRequest) {
     const isHashed = credential.length === 128;
     const hashedPassword = isHashed ? credential : hashPassword(credential);
 
-    const generatedHashedFirst12 = hashedPassword.substring(0, 12);
-    const dbPasswordFirst12 = user.password ? user.password.substring(0, 12) : "None";
     const passwordMatches = user.password === hashedPassword;
-
-    console.log(`[Diagnostics] 8. generated hashedPassword (first 12): ${generatedHashedFirst12}`);
-    console.log(`[Diagnostics] 9. db password (first 12): ${dbPasswordFirst12}`);
-    console.log(`[Diagnostics] 10. passwordMatches: ${passwordMatches}`);
+    console.log("[Server Sync Diagnostic] password verification success:", passwordMatches);
 
     if (!passwordMatches) {
+      const generatedHashedFirst12 = hashedPassword.substring(0, 12);
+      const dbPasswordFirst12 = user.password ? user.password.substring(0, 12) : "None";
       reason = `Password mismatch. Generated hash starts with: ${generatedHashedFirst12}, DB hash starts with: ${dbPasswordFirst12}`;
       return { user: null, reason };
     }
@@ -110,11 +111,19 @@ async function verifySupabaseAuth(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  console.log("[Server Sync Diagnostic] request received");
   const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+  // Log existence of critical env vars — never print their values
+  console.log("[Server Config] SESSION_SECRET exists:", !!process.env.SESSION_SECRET);
+  console.log("[Server Config] SUPABASE_SERVICE_ROLE_KEY exists:", !!supabaseServiceKey);
+  console.log("[Server Config] SUPABASE_URL exists:", !!supabaseUrl);
+
+
   if (!supabaseUrl) {
     console.error("[Sync Config Error] Missing SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL");
+    console.log("[Server Sync Diagnostic] final response status and reason:", 500, "Missing SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL");
     return NextResponse.json(
       {
         success: false,
@@ -127,6 +136,7 @@ export async function POST(req: NextRequest) {
 
   if (!supabaseServiceKey) {
     console.error("[Sync Config Error] Missing SUPABASE_SERVICE_ROLE_KEY");
+    console.log("[Server Sync Diagnostic] final response status and reason:", 500, "Missing SUPABASE_SERVICE_ROLE_KEY");
     return NextResponse.json(
       {
         success: false,
@@ -149,6 +159,7 @@ export async function POST(req: NextRequest) {
 
   if (!servicePayload || servicePayload.role !== "service_role") {
     console.error(`[Sync Config Error] SUPABASE_SERVICE_ROLE_KEY is not a service_role key. Decoded role: ${servicePayload?.role || "null"}`);
+    console.log("[Server Sync Diagnostic] final response status and reason:", 500, "SUPABASE_SERVICE_ROLE_KEY is not a service_role key");
     return NextResponse.json(
       {
         success: false,
@@ -163,6 +174,7 @@ export async function POST(req: NextRequest) {
 
   const authResult = await verifySupabaseAuth(req);
   if (!authResult.user) {
+    console.log("[Server Sync Diagnostic] final response status and reason:", 401, authResult.reason);
     return NextResponse.json(
       { success: false, error: "Unauthorized", reason: authResult.reason },
       { status: 401 }
@@ -173,12 +185,15 @@ export async function POST(req: NextRequest) {
     const { customers: localCustomers, pendingDeletes, users: localUsers } = await req.json();
     console.log("[Sync API POST] Received payload. Local customers count:", localCustomers?.length, "pendingDeletes count:", pendingDeletes?.length);
 
-    // 1. Process deletions
+    // 1. Process deletions (Soft deleted customers are synced as isDeleted=true, not deleted via pendingDeletes)
     if (Array.isArray(pendingDeletes)) {
       for (const del of pendingDeletes) {
-        // Only allow deleting tables related to sync
-        if (["customers", "rooms", "openings", "measurements"].includes(del.table)) {
-          await supabaseServer.from(del.table).delete().eq("id", del.id);
+        // Only allow hard deleting child structures related to sync
+        if (["rooms", "openings", "measurements"].includes(del.table)) {
+          const { error } = await supabaseServer.from(del.table).delete().eq("id", del.id);
+          if (error) {
+            console.error(`[Sync Server Delete Error] Failed to delete from ${del.table} (id: ${del.id}):`, error.message);
+          }
         }
       }
     }
@@ -203,11 +218,17 @@ export async function POST(req: NextRequest) {
           if (pwd && pwd.length !== 128) {
             pwd = hashPassword(pwd);
           }
+          let finalPassword = pwd || (ru ? ru.password : null);
+          if (!finalPassword) {
+            console.error(`[Sync User Error] User "${lu.username}" has no password locally or in remote database. Password field cannot be null.`);
+            // Lock the account by setting a random high-entropy hash so no one can guess it
+            finalPassword = hashPassword(crypto.randomUUID());
+          }
           mergedUsersMap.set(lu.id, {
             id: lu.id,
             name: lu.name,
             username: lu.username,
-            password: pwd || (ru ? ru.password : hashPassword("123")),
+            password: finalPassword,
             role: lu.role,
             isActive: lu.isActive,
             permissions: lu.permissions || [],
@@ -289,6 +310,8 @@ export async function POST(req: NextRequest) {
           cariType: remote.cariType || "CUSTOMER",
           approvalStatus: remote.approvalStatus || "APPROVED",
           addressPhotos: remote.addressPhotos || [],
+          isDeleted: remote.isDeleted || false,
+          deletedAt: remote.deletedAt || null,
           createdAt: remote.createdAt,
           updatedAt: remote.updatedAt,
           rooms: []
@@ -320,6 +343,8 @@ export async function POST(req: NextRequest) {
           cariType: remote.cariType || "CUSTOMER",
           approvalStatus: remote.approvalStatus || "APPROVED",
           addressPhotos: remote.addressPhotos || [],
+          isDeleted: remote.isDeleted || false,
+          deletedAt: remote.deletedAt || null,
           createdAt: remote.createdAt,
           updatedAt: remote.updatedAt
         });
@@ -500,6 +525,8 @@ export async function POST(req: NextRequest) {
           cariType: c.cariType || "CUSTOMER",
           approvalStatus: c.approvalStatus || "APPROVED",
           addressPhotos: c.addressPhotos || [],
+          isDeleted: c.isDeleted || false,
+          deletedAt: c.deletedAt || null,
           createdAt: c.createdAt,
           updatedAt: c.updatedAt
         });
@@ -586,7 +613,7 @@ export async function POST(req: NextRequest) {
         }
       }
     }
-
+    console.log("[Server Sync Diagnostic] final response status and reason:", 200, "Success");
     return NextResponse.json({
       success: true,
       customers: finalCustomers,
@@ -595,6 +622,7 @@ export async function POST(req: NextRequest) {
 
   } catch (error: any) {
     console.error("POST sync failed:", error);
+    console.log("[Server Sync Diagnostic] final response status and reason:", 500, error.message || "Internal server error");
     return NextResponse.json(
       { success: false, error: error.message || "Internal server error" },
       { status: 500 }
