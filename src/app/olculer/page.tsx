@@ -77,11 +77,11 @@ export default function OlculerPage() {
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-12">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+        <h1 className="text-2xl font-bold heading-title flex items-center gap-2">
           <Ruler className="w-6 h-6 text-blue-500" />
           Ölçüler ve Projeler
         </h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
+        <p className="text-sm heading-subtitle">
           Müşteri bazında alınan saha ölçüleri ve durum takibi.
         </p>
       </div>

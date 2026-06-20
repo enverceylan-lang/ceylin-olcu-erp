@@ -5,8 +5,8 @@ export default function RaporlarPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Raporlar</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">İşletmenizin finansal ve operasyonel raporları.</p>
+          <h1 className="text-2xl font-bold heading-title">Raporlar</h1>
+          <p className="text-sm heading-subtitle">İşletmenizin finansal ve operasyonel raporları.</p>
         </div>
         <button className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors font-medium text-sm shadow-sm">
           <Download className="w-4 h-4" />

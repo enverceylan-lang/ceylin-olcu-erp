@@ -22,8 +22,8 @@ export default function StokPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Stok Yönetimi</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Ürünlerinizi ve fiyatlarınızı yönetin.</p>
+          <h1 className="text-2xl font-bold heading-title">Stok Yönetimi</h1>
+          <p className="text-sm heading-subtitle">Ürünlerinizi ve fiyatlarınızı yönetin.</p>
         </div>
         <button className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors font-medium text-sm shadow-sm">
           <Plus className="w-4 h-4" />

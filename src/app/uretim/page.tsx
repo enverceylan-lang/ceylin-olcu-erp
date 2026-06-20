@@ -275,11 +275,11 @@ export default function UretimPage() {
     <div className="space-y-6 max-w-7xl mx-auto pb-24">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-2xl font-bold heading-title flex items-center gap-2">
             <Factory className="w-6 h-6 text-blue-500" />
             Üretim Takip (İş Akışı)
           </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Atölye işçi seviyesinde parça detaylı üretim ve montaj öncesi takip.</p>
+          <p className="text-sm heading-subtitle">Atölye işçi seviyesinde parça detaylı üretim ve montaj öncesi takip.</p>
         </div>
 
         <div className="relative w-full sm:w-64">

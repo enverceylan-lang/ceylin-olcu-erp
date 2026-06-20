@@ -251,8 +251,8 @@ export default function YeniSatisPage() {
             <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-300" />
           </Link>
           <div>
-            <h1 className="text-2xl font-bold">Gelişmiş Satış & Hesaplama (V2)</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">Pencerelere birden fazla tül, güneşlik veya fon ekleyin ve hesaplayın.</p>
+            <h1 className="text-2xl font-bold heading-title">Gelişmiş Satış & Hesaplama (V2)</h1>
+            <p className="text-sm heading-subtitle">Pencerelere birden fazla tül, güneşlik veya fon ekleyin ve hesaplayın.</p>
           </div>
         </div>
         <button 

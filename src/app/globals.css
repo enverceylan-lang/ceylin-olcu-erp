@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #f8fafc; /* Premium cool light gray background */
   --foreground: #0f172a; /* Slate 900 dark text */
@@ -44,4 +46,20 @@ body {
 .animate-spin-slow {
   animation: spin 3s linear infinite;
 }
+
+/* Custom theme contrast helper classes for page headings */
+.heading-title {
+  color: #111827; /* gray-900 equivalent */
+}
+.dark .heading-title {
+  color: #ffffff; /* white equivalent */
+}
+
+.heading-subtitle {
+  color: #6b7280; /* gray-500 equivalent */
+}
+.dark .heading-subtitle {
+  color: #9ca3af; /* gray-400 equivalent */
+}
+
 

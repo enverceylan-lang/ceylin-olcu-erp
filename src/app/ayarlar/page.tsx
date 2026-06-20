@@ -129,8 +129,8 @@ export default function AyarlarPage() {
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-24">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Ayarlar</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400">Ölçü ERP V1.0 saha pilotu için cihaz verisi, kullanıcı hesapları ve güvenlik araçları.</p>
+        <h1 className="text-2xl font-bold heading-title">Ayarlar</h1>
+        <p className="text-sm heading-subtitle">Ölçü ERP V1.0 saha pilotu için cihaz verisi, kullanıcı hesapları ve güvenlik araçları.</p>
       </div>
 
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200">

@@ -82,6 +82,8 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const [activeRoomIdForWindow, setActiveRoomIdForWindow] = useState<string | null>(null);
   const [activeWindowIdForProduct, setActiveWindowIdForProduct] = useState<string | null>(null);
   const [expandedRooms, setExpandedRooms] = useState<Record<string, boolean>>({});
+  const [isAddingRoom, setIsAddingRoom] = useState(false);
+  const [newRoomName, setNewRoomName] = useState("");
 
   // Media Upload Choice Modal State
   const [mediaUploadType, setMediaUploadType] = useState<'photo' | 'video' | null>(null);
@@ -284,10 +286,11 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     setExpandedRooms(prev => ({ ...prev, [roomId]: !prev[roomId] }));
   };
 
-  const handleAddRoom = () => {
-    const name = window.prompt("Oda adı giriniz (örn: Salon, Yatak Odası):");
-    if (name && name.trim()) {
-      addRoom(customer.id, name);
+  const handleSaveRoom = () => {
+    if (newRoomName.trim()) {
+      addRoom(customer.id, newRoomName.trim());
+      setIsAddingRoom(false);
+      setNewRoomName("");
     }
   };
 
@@ -468,8 +471,8 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
             <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-300" />
           </Link>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{customer.name}</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">Ölçü & Proje Yönetimi (V2)</p>
+            <h1 className="text-2xl font-bold heading-title">{customer.name}</h1>
+            <p className="text-sm heading-subtitle">Ölçü & Proje Yönetimi (V2)</p>
           </div>
         </div>
         
@@ -747,10 +750,57 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
             </div>
           </div>
           
-          <button onClick={handleAddRoom} className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold shadow-sm transition-colors ${mode === 'MEASUREMENT' ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-800 dark:bg-gray-800 dark:text-white'}`}>
-            <Plus className="w-5 h-5" />
-            Yeni Oda Ekle
-          </button>
+          {isAddingRoom ? (
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 shadow-sm space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Oda Adı</label>
+                <input
+                  type="text"
+                  value={newRoomName}
+                  onChange={(e) => setNewRoomName(e.target.value)}
+                  placeholder="Örn: Salon, Yatak Odası, Mutfak"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-250 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSaveRoom();
+                    } else if (e.key === 'Escape') {
+                      setIsAddingRoom(false);
+                      setNewRoomName("");
+                    }
+                  }}
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsAddingRoom(false);
+                    setNewRoomName("");
+                  }}
+                  className="flex-1 px-3 py-2 border border-gray-250 dark:border-gray-750 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                >
+                  İptal
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveRoom}
+                  disabled={!newRoomName.trim()}
+                  className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:bg-blue-600/50 disabled:cursor-not-allowed"
+                >
+                  Kaydet
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button 
+              onClick={() => setIsAddingRoom(true)} 
+              className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold shadow-sm transition-colors cursor-pointer ${mode === 'MEASUREMENT' ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-800 dark:bg-gray-800 dark:text-white'}`}
+            >
+              <Plus className="w-5 h-5" />
+              Yeni Oda Ekle
+            </button>
+          )}
         </div>
 
         {/* Main Content Area */}

@@ -94,8 +94,8 @@ export default function CarilerPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Cariler</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Müşterilerinizi yönetin ve yeni müşteri ekleyin.</p>
+          <h1 className="text-2xl font-bold heading-title">Cariler</h1>
+          <p className="text-sm heading-subtitle">Müşterilerinizi yönetin ve yeni müşteri ekleyin.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
           <div className="text-xs text-gray-500 bg-gray-100 dark:bg-gray-800 dark:text-gray-400 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700/50">
