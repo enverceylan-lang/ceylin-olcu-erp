@@ -727,7 +727,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       customers: finalCustomers,
-      users: sanitizedUsers
+      users: sanitizedUsers,
+      metrics: {
+        incoming: {
+          customers: localCustomers?.length || 0,
+          rooms: incomingRoomsCount,
+          openings: incomingOpeningsCount,
+          measurements: incomingMeasurementsCount
+        },
+        fetched: {
+          customers: remoteCustomers?.length || 0,
+          rooms: remoteRooms?.length || 0,
+          openings: remoteOpenings?.length || 0,
+          measurements: remoteMeasurements?.length || 0
+        },
+        upserted: {
+          customers: customersUpsertedCount,
+          rooms: roomsUpsertedCount,
+          openings: openingsUpsertedCount,
+          measurements: measurementsUpsertedCount
+        },
+        response: {
+          customers: finalCustomers.length,
+          rooms: responseRoomsCount,
+          openings: responseOpeningsCount,
+          measurements: responseMeasurementsCount
+        }
+      }
     });
 
   } catch (error: any) {
