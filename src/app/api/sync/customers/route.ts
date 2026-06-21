@@ -189,7 +189,34 @@ export async function POST(req: NextRequest) {
   const user = authResult.user;
   try {
     const { customers: localCustomers, pendingDeletes, users: localUsers } = await req.json();
-    console.log("[Sync API POST] Received payload. Local customers count:", localCustomers?.length, "pendingDeletes count:", pendingDeletes?.length);
+    
+    let incomingRoomsCount = 0;
+    let incomingOpeningsCount = 0;
+    let incomingMeasurementsCount = 0;
+    if (Array.isArray(localCustomers)) {
+      localCustomers.forEach((c: any) => {
+        if (Array.isArray(c.rooms)) {
+          incomingRoomsCount += c.rooms.length;
+          c.rooms.forEach((r: any) => {
+            if (Array.isArray(r.windows)) {
+              incomingOpeningsCount += r.windows.length;
+              r.windows.forEach((w: any) => {
+                if (Array.isArray(w.products)) {
+                  incomingMeasurementsCount += w.products.length;
+                }
+              });
+            }
+          });
+        }
+      });
+    }
+
+    console.log("[Sync API POST] incoming counts:", {
+      customers: localCustomers?.length || 0,
+      rooms: incomingRoomsCount,
+      openings: incomingOpeningsCount,
+      measurements: incomingMeasurementsCount
+    });
 
     // 1. Process deletions (Soft deleted customers are synced as isDeleted=true, not deleted via pendingDeletes)
     if (Array.isArray(pendingDeletes)) {
@@ -210,6 +237,13 @@ export async function POST(req: NextRequest) {
     const { data: remoteOpenings } = await supabaseServer.from("openings").select("*");
     const { data: remoteMeasurements } = await supabaseServer.from("measurements").select("*");
     const { data: remoteUsers } = await supabaseServer.from("users").select("*");
+
+    console.log("[Sync API POST] fetched counts:", {
+      customers: remoteCustomers?.length || 0,
+      rooms: remoteRooms?.length || 0,
+      openings: remoteOpenings?.length || 0,
+      measurements: remoteMeasurements?.length || 0
+    });
 
     // 3. Sync Users list if user is ADMIN or OFFICE and localUsers is provided
     let finalUsers = remoteUsers || [];
@@ -528,6 +562,11 @@ export async function POST(req: NextRequest) {
     }
 
     // 5. Push local modifications to Supabase
+    let customersUpsertedCount = 0;
+    let roomsUpsertedCount = 0;
+    let openingsUpsertedCount = 0;
+    let measurementsUpsertedCount = 0;
+
     for (const c of finalCustomers) {
       // Customer
       const dbCustomer = remoteCustomers?.find(dc => dc.id === c.id);
@@ -567,6 +606,7 @@ export async function POST(req: NextRequest) {
           console.error(`[Sync DB Error] Customer upsert failed for ${c.name} (${c.id}):`, error);
           throw new Error(`Customer upsert failed: ${error.message}`);
         }
+        customersUpsertedCount++;
       }
 
       // Rooms
@@ -586,6 +626,7 @@ export async function POST(req: NextRequest) {
             console.error(`[Sync DB Error] Room upsert failed for ${r.name} (${r.id}):`, error);
             throw new Error(`Room upsert failed: ${error.message}`);
           }
+          roomsUpsertedCount++;
         }
 
         // Openings
@@ -608,6 +649,7 @@ export async function POST(req: NextRequest) {
               console.error(`[Sync DB Error] Opening upsert failed for ${o.name} (${o.id}):`, error);
               throw new Error(`Opening upsert failed: ${error.message}`);
             }
+            openingsUpsertedCount++;
           }
 
           // Measurements
@@ -641,11 +683,46 @@ export async function POST(req: NextRequest) {
                 console.error(`[Sync DB Error] Measurement upsert failed for ${m.id}:`, error);
                 throw new Error(`Measurement upsert failed: ${error.message}`);
               }
+              measurementsUpsertedCount++;
             }
           }
         }
       }
     }
+
+    console.log("[Sync API POST] upserted counts:", {
+      customers: customersUpsertedCount,
+      rooms: roomsUpsertedCount,
+      openings: openingsUpsertedCount,
+      measurements: measurementsUpsertedCount
+    });
+
+    let responseRoomsCount = 0;
+    let responseOpeningsCount = 0;
+    let responseMeasurementsCount = 0;
+    finalCustomers.forEach((c: any) => {
+      if (Array.isArray(c.rooms)) {
+        responseRoomsCount += c.rooms.length;
+        c.rooms.forEach((r: any) => {
+          if (Array.isArray(r.windows)) {
+            responseOpeningsCount += r.windows.length;
+            r.windows.forEach((w: any) => {
+              if (Array.isArray(w.products)) {
+                responseMeasurementsCount += w.products.length;
+              }
+            });
+          }
+        });
+      }
+    });
+
+    console.log("[Sync API POST] response counts:", {
+      customers: finalCustomers.length,
+      rooms: responseRoomsCount,
+      openings: responseOpeningsCount,
+      measurements: responseMeasurementsCount
+    });
+
     console.log("[Server Sync Diagnostic] final response status and reason:", 200, "Success");
     return NextResponse.json({
       success: true,

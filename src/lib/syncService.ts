@@ -381,8 +381,39 @@ export async function syncNow(isManual: boolean = false) {
     });
 
     if (result.customers) {
+      const getCounts = (list: any[]) => {
+        let rooms = 0;
+        let openings = 0;
+        let measurements = 0;
+        list.forEach(c => {
+          if (Array.isArray(c.rooms)) {
+            rooms += c.rooms.length;
+            c.rooms.forEach((r: any) => {
+              if (Array.isArray(r.windows)) {
+                openings += r.windows.length;
+                r.windows.forEach((w: any) => {
+                  if (Array.isArray(w.products)) {
+                    measurements += w.products.length;
+                  }
+                });
+              }
+            });
+          }
+        });
+        return { customers: list.length, rooms, openings, measurements };
+      };
+
       const currentCustomers = useStore.getState().customers || [];
+      const beforeCounts = getCounts(currentCustomers);
+      const remoteCounts = getCounts(result.customers);
+
       const merged = mergeCustomers(currentCustomers, result.customers);
+      const afterCounts = getCounts(merged);
+
+      console.log('[Client Sync] before local counts:', beforeCounts);
+      console.log('[Client Sync] remote counts:', remoteCounts);
+      console.log('[Client Sync] after local counts:', afterCounts);
+
       store.setCustomers(merged);
     }
 
