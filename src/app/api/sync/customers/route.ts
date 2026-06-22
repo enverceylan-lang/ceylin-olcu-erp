@@ -258,6 +258,9 @@ export async function POST(req: NextRequest) {
       openings: incomingOpeningsCount,
       measurements: incomingMeasurementsCount
     });
+    console.log("[Sync API POST - Step 4] incoming rooms count:", incomingRoomsCount);
+    console.log("[Sync API POST - Step 4] incoming openings/windows count:", incomingOpeningsCount);
+    console.log("[Sync API POST - Step 4] incoming measurements/products count:", incomingMeasurementsCount);
 
     // 1. Process deletions (Soft deleted customers are synced as isDeleted=true, not deleted via pendingDeletes)
     if (Array.isArray(pendingDeletes)) {
@@ -285,6 +288,9 @@ export async function POST(req: NextRequest) {
       openings: remoteOpenings?.length || 0,
       measurements: remoteMeasurements?.length || 0
     });
+    console.log("[Sync API POST - Step 5] fetched rooms count:", remoteRooms?.length || 0);
+    console.log("[Sync API POST - Step 5] fetched openings count:", remoteOpenings?.length || 0);
+    console.log("[Sync API POST - Step 5] fetched measurements count:", remoteMeasurements?.length || 0);
 
     // 3. Sync Users list if user is ADMIN or OFFICE and localUsers is provided
     let finalUsers = remoteUsers || [];
@@ -737,6 +743,9 @@ export async function POST(req: NextRequest) {
       openings: openingsUpsertedCount,
       measurements: measurementsUpsertedCount
     });
+    console.log("[Sync API POST - Step 4] upserted rooms count:", roomsUpsertedCount);
+    console.log("[Sync API POST - Step 4] upserted openings count:", openingsUpsertedCount);
+    console.log("[Sync API POST - Step 4] upserted measurements count:", measurementsUpsertedCount);
 
     let responseRoomsCount = 0;
     let responseOpeningsCount = 0;
@@ -763,6 +772,10 @@ export async function POST(req: NextRequest) {
       openings: responseOpeningsCount,
       measurements: responseMeasurementsCount
     });
+    console.log("[Sync API POST - Step 5] response customers rooms count:", responseRoomsCount);
+    console.log("[Sync API POST - Step 5] response customers openings/windows count:", responseOpeningsCount);
+    console.log("[Sync API POST - Step 5] response customers measurements/products count:", responseMeasurementsCount);
+    console.log("[Sync API POST - Step 5] response customers has nested rooms/windows/products:", (responseRoomsCount > 0 && responseOpeningsCount > 0 && responseMeasurementsCount > 0));
 
     console.log("[Server Sync Diagnostic] final response status and reason:", 200, "Success");
     return NextResponse.json({

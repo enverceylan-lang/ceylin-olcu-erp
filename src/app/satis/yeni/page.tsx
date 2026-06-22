@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { ArrowLeft, Save, Plus, Trash2, HelpCircle, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useStore, SaleItem } from "@/store/useStore";
+import { useStore, SaleItem, generateUUID } from "@/store/useStore";
 import { getMeasurementDimensions, calculateFabricUsage, getTemplateLabel } from "@/lib/measurementAdapter";
 
 interface SalesRow extends SaleItem {
@@ -75,7 +75,7 @@ export default function YeniSatisPage() {
               const videoCount = (window.videos || []).length + (p.videos || []).length;
 
               initialItems.push({
-                id: crypto.randomUUID(),
+                id: generateUUID(),
                 roomName: room.name,
                 windowName: window.name,
                 productGroup: p.productGroup || "",
@@ -179,7 +179,7 @@ export default function YeniSatisPage() {
   // Add Product under existing measurement
   const addProductToWindow = (roomName: string, windowName: string, roomId: string, openingId: string, measurementId: string, originalWidth: number, originalHeight: number) => {
     const newItem: SalesRow = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       roomName,
       windowName,
       productGroup: "",
@@ -207,7 +207,7 @@ export default function YeniSatisPage() {
   // Add a fully manual item (Odasız Ek Kalem)
   const addNewBlankRow = () => {
     const newItem: SalesRow = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       roomName: "Odasız",
       windowName: "Ek Kalem",
       productGroup: "Ekstra",

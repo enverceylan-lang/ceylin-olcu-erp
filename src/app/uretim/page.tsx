@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { Factory, Search, ChevronDown, ChevronUp, Check, AlertTriangle, AlertCircle, RefreshCw, Clock, Scissors, Package, CheckCircle2, DollarSign, Image as ImageIcon, Plus, X } from "lucide-react";
-import { useStore, ProductionItem, ProductionIssue, Sale } from "@/store/useStore";
+import { useStore, ProductionItem, ProductionIssue, Sale, generateUUID } from "@/store/useStore";
 import { getTemplateLabel } from "@/lib/measurementAdapter";
 import { useAuthStore, normalizeRole } from "@/store/useAuthStore";
 
@@ -99,7 +99,7 @@ export default function UretimPage() {
           const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toLocaleDateString('tr-TR');
 
           migratedItems.push({
-            id: crypto.randomUUID(),
+            id: generateUUID(),
             orderId: sale.id,
             saleLineId: item.id,
             customerId: sale.customerId,

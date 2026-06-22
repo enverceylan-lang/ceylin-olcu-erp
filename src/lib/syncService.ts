@@ -3,6 +3,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 
 // Track if a sync is currently in progress
 let isSyncing = false;
+let hasPendingSync = false;
 
 // Track last 413 Payload Too Large error timestamp
 let last413Time = 0;
@@ -199,7 +200,10 @@ function mergeProducts(local: ProductMeasurement[], remote: ProductMeasurement[]
 // ─── Main Sync Function ───
 
 export async function syncNow(isManual: boolean = false) {
-  if (isSyncing) return;
+  if (isSyncing) {
+    hasPendingSync = true;
+    return;
+  }
 
   // ── Auto-sync throttle after 413 payload error ──
   if (!isManual && last413Time > 0) {
@@ -342,16 +346,47 @@ export async function syncNow(isManual: boolean = false) {
     const sanitizedJsonSize = getObjSize(sanitizedPayload);
     console.log('[Client Sync Size Info] Sanitized Payload Size:', (sanitizedJsonSize / 1024).toFixed(2) + ' KB');
 
-    // Outgoing diagnostic logs for target mobile records
-    const testMobileName = 'TEST MOBILE SAVE';
-    const localHasTestMobile = localCustomers.some((c: any) => c.name && c.name.toUpperCase().includes(testMobileName));
-    const payloadHasTestMobile = sanitizedPayload.customers.some((c: any) => c.name && c.name.toUpperCase().includes(testMobileName));
-    console.log('[Client Sync Target Diagnostic] Local customers count before sync:', localCustomers.length);
-    console.log('[Client Sync Target Diagnostic] Unsynced target customer present in local before sync:', localHasTestMobile);
-    console.log('[Client Sync Target Diagnostic] Target customer present in outgoing payload:', payloadHasTestMobile);
-    if (localHasTestMobile) {
-      console.log('[Client Sync Target Diagnostic] Target customer details:', localCustomers.filter((c: any) => c.name && c.name.toUpperCase().includes(testMobileName)));
+    // ── Diagnostic counts logging (exactly as requested) ──
+    const targetCustomerName = 'TEST'; // Match "TEST" or "TEST SYNC OLCU 001"
+    const targetCustomer = localCustomers.find((c: any) => c.name && c.name.toUpperCase().includes(targetCustomerName));
+    
+    let targetRoomsCount = 0;
+    let targetOpeningsCount = 0;
+    let targetMeasurementsCount = 0;
+    
+    if (targetCustomer) {
+      targetRoomsCount = (targetCustomer.rooms || []).length;
+      targetCustomer.rooms?.forEach((r: any) => {
+        targetOpeningsCount += (r.windows || []).length;
+        r.windows?.forEach((w: any) => {
+          targetMeasurementsCount += (w.products || []).length;
+        });
+      });
     }
+
+    console.log('[Client Sync Store Check] local customers count:', localCustomers.length);
+    console.log('[Client Sync Store Check] target customer found:', !!targetCustomer);
+    console.log('[Client Sync Store Check] target customer rooms count:', targetRoomsCount);
+    console.log('[Client Sync Store Check] target openings/windows count:', targetOpeningsCount);
+    console.log('[Client Sync Store Check] target measurements/products count:', targetMeasurementsCount);
+
+    let outgoingRoomsCount = 0;
+    let outgoingOpeningsCount = 0;
+    let outgoingMeasurementsCount = 0;
+    
+    sanitizedCustomers.forEach((c: any) => {
+      outgoingRoomsCount += (c.rooms || []).length;
+      c.rooms?.forEach((r: any) => {
+        outgoingOpeningsCount += (r.windows || []).length;
+        r.windows?.forEach((w: any) => {
+          outgoingMeasurementsCount += (w.products || []).length;
+        });
+      });
+    });
+
+    console.log('[Client Sync Outgoing Count] outgoing nested rooms count:', outgoingRoomsCount);
+    console.log('[Client Sync Outgoing Count] outgoing nested windows/openings count:', outgoingOpeningsCount);
+    console.log('[Client Sync Outgoing Count] outgoing nested products/measurements count:', outgoingMeasurementsCount);
 
     // ── Build Authorization header using UTF-8-safe base64 ──
     // Prevents btoa crash on Turkish characters (Ş, Ğ, İ, Ü, Ö, Ç) in usernames/passwords.
@@ -408,6 +443,7 @@ export async function syncNow(isManual: boolean = false) {
     });
     
     if (result.customers) {
+      const testMobileName = 'TEST';
       const remoteHasTestMobile = result.customers.some((c: any) => c.name && c.name.toUpperCase().includes(testMobileName));
       console.log('[Client Sync Target Diagnostic] Target customer present in server response body:', remoteHasTestMobile);
     }
@@ -535,6 +571,13 @@ export async function syncNow(isManual: boolean = false) {
     store.setSyncStatus('error');
   } finally {
     isSyncing = false;
+    if (hasPendingSync) {
+      hasPendingSync = false;
+      console.log('[Client Sync Queue] Triggering queued follow-up sync.');
+      setTimeout(() => {
+        syncNow();
+      }, 300);
+    }
   }
 }
 

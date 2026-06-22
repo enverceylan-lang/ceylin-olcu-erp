@@ -436,7 +436,7 @@ export const useStore = create<AppState>()(
       addRoom: (customerId, roomName) => set((state) => {
         const now = new Date().toISOString();
         const defaultWindow: WindowItem = {
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           name: "Pencere 1",
           photos: [],
           videos: [],
@@ -445,7 +445,7 @@ export const useStore = create<AppState>()(
           updatedAt: now
         };
         const newRoom: Room = {
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           name: roomName,
           photos: [],
           videos: [],
@@ -491,7 +491,7 @@ export const useStore = create<AppState>()(
       addWindow: (customerId, roomId, windowName) => set((state) => {
         const now = new Date().toISOString();
         const newWindow: WindowItem = {
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           name: windowName,
           photos: [],
           videos: [],
@@ -611,7 +611,7 @@ export const useStore = create<AppState>()(
         const now = new Date().toISOString();
         const newMeas: ProductMeasurement = {
           ...measurement,
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           createdAt: now,
           updatedAt: now
         };
@@ -740,7 +740,7 @@ export const useStore = create<AppState>()(
           const productName = prod ? prod.name : item.productType || 'Bilinmeyen Ürün';
 
           return {
-            id: crypto.randomUUID(),
+            id: generateUUID(),
             orderId: saleId,
             saleLineId: item.id,
             customerId: saleData.customerId,
@@ -777,11 +777,11 @@ export const useStore = create<AppState>()(
             ...state.sales
           ],
           productionTasks: [
-            { id: crypto.randomUUID(), saleId, customerId: saleData.customerId, items: itemsString, status: 'Kesim Bekliyor', deadline },
+            { id: generateUUID(), saleId, customerId: saleData.customerId, items: itemsString, status: 'Kesim Bekliyor', deadline },
             ...state.productionTasks
           ],
           montageTasks: [
-            { id: crypto.randomUUID(), saleId, customerId: saleData.customerId, address: saleData.address, date: montageDate, time: '10:00', status: 'Planlandı', installerAssignedTo: 'user-montaj1' },
+            { id: generateUUID(), saleId, customerId: saleData.customerId, address: saleData.address, date: montageDate, time: '10:00', status: 'Planlandı', installerAssignedTo: 'user-montaj1' },
             ...state.montageTasks
           ],
           productionItems: [

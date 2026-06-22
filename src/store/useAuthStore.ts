@@ -1,6 +1,18 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+// Fallback UUID v4 generator for insecure/HTTP mobile environments
+function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 // ─── Role Definitions ───
 export type UserRole = 
   | 'ADMIN' 
@@ -503,7 +515,7 @@ export const useAuthStore = create<AuthState>()(
       
       addAuditEntry: (entry: Omit<AuditEntry, 'id'>) => set((state: AuthState) => ({
         auditLog: [
-          { ...entry, id: crypto.randomUUID() },
+          { ...entry, id: generateUUID() },
           ...state.auditLog
         ]
       })),
