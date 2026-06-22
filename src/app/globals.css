@@ -62,4 +62,23 @@ body {
   color: #9ca3af; /* gray-400 equivalent */
 }
 
+/* Print CSS Styles */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  
+  /* Hide typical shell components when printing */
+  .no-print,
+  button,
+  nav,
+  header,
+  aside,
+  main > div:first-child, /* target sibling topbars/sidebars */
+  div.fixed.inset-0.bg-black\/60 { /* backdrop hide but keep children modal if printable */
+    background: transparent !important;
+  }
+}
+
 

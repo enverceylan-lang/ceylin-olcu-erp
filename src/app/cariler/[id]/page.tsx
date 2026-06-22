@@ -9,6 +9,8 @@ import { getMeasurementDimensions, getTemplateLabel, getGoogleMapsUrl, getWorkfl
 import { fileToDataUrl } from "@/lib/fileStorage";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
 import { syncNow } from "@/lib/syncService";
+import { buildWhatsAppShortReport } from "@/lib/reportFormatters";
+import { MeasurementVisualReport } from "@/components/reports/MeasurementVisualReport";
 
 export default function CariDetayPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
@@ -118,6 +120,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const [locationWarning, setLocationWarning] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isVisualReportOpen, setIsVisualReportOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<{
     type: 'room' | 'window' | 'measurement' | 'photo';
     data: any;
@@ -316,7 +319,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   };
 
   const handleShareWhatsAppReport = async () => {
-    const report = buildWhatsAppReport();
+    const report = buildWhatsAppShortReport(customer, users);
 
     try {
       if (navigator.share) {
@@ -562,11 +565,20 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
           <button
             onClick={handleShareWhatsAppReport}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-bold shadow-sm transition-colors"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-green-650 hover:bg-green-700 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer"
             title="Müşteri ölçü raporunu WhatsApp ile paylaş"
           >
             <MessageCircle className="w-4 h-4" />
-            WhatsApp Ölçü Raporu
+            WhatsApp Kısa Rapor
+          </button>
+
+          <button
+            onClick={() => setIsVisualReportOpen(true)}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer"
+            title="Görsel Ölçü Raporunu Görüntüle"
+          >
+            <FileText className="w-4 h-4" />
+            Görsel Ölçü Raporu
           </button>
 
           {/* MODE TOGGLE */}
@@ -1653,6 +1665,13 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
             <span>{toastMessage}</span>
           </div>
         )}
+
+        <MeasurementVisualReport
+          isOpen={isVisualReportOpen}
+          onClose={() => setIsVisualReportOpen(false)}
+          customer={customer}
+          users={users}
+        />
       </div>
     </div>
   );
