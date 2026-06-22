@@ -17,25 +17,37 @@ function utf8ToBase64(str: string): string {
 }
 
 // Deep clone payload and strip any raw base64 data URLs / media arrays
+// Helper to identify if a string is a base64 / data URL
+function isDataUrl(val: any): boolean {
+  if (typeof val !== 'string') return false;
+  return val.startsWith('data:image/') || val.startsWith('data:video/') || val.startsWith('data:application/') || val.startsWith('data:');
+}
+
+// Deep clone payload and strip any raw base64 data URLs / media arrays
+// TODO Future architecture: media files should be uploaded to Supabase Storage buckets, and only their public URLs/storage paths saved in DB/media_files table.
 function stripMediaAndDataUrls(obj: any): any {
   if (obj === null || obj === undefined) return obj;
 
   if (typeof obj === 'string') {
-    if (obj.startsWith('data:image/') || obj.startsWith('data:video/') || obj.startsWith('data:application/')) {
+    if (isDataUrl(obj)) {
       return '';
     }
     return obj;
   }
 
   if (Array.isArray(obj)) {
-    return obj.map(item => stripMediaAndDataUrls(item));
+    return obj
+      .map(item => stripMediaAndDataUrls(item))
+      .filter(item => item !== '');
   }
 
   if (typeof obj === 'object') {
     const res: any = {};
     for (const key of Object.keys(obj)) {
       if (['addressPhotos', 'photos', 'videos'].includes(key) && Array.isArray(obj[key])) {
-        res[key] = [];
+        res[key] = obj[key]
+          .map((item: any) => stripMediaAndDataUrls(item))
+          .filter((item: any) => item !== '');
       } else {
         res[key] = stripMediaAndDataUrls(obj[key]);
       }

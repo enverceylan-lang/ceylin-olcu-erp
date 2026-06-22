@@ -26,6 +26,19 @@ function notifyStoreChanges() {
   }, 100);
 }
 
+// Fallback UUID v4 generator for insecure/HTTP mobile environments
+export function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+
 
 export interface Note {
   date: string;
@@ -271,7 +284,7 @@ interface AppState {
   pendingDeletes: { id: string; table: 'customers' | 'rooms' | 'openings' | 'measurements' }[];
   syncStatus: 'synced' | 'pending' | 'offline' | 'error';
 
-  addCustomer: (customer: Omit<Customer, 'id' | 'rooms'>) => void;
+  addCustomer: (customer: Omit<Customer, 'rooms'> & { id?: string }) => void;
   updateCustomer: (id: string, data: Partial<Customer>) => void;
   deleteCustomer: (id: string) => void;
   
@@ -326,16 +339,24 @@ export const useStore = create<AppState>()(
       syncStatus: 'synced',
 
       addCustomer: (data) => set((state) => {
-        // Double-click/Duplicate submission protection:
-        // Ignore if a customer with the same name was created within the last 15 seconds.
+        const newCustomerId = data.id || generateUUID();
+        
+        // Submission/Id-based duplicate prevention:
+        const exists = state.customers.some(c => c.id === newCustomerId);
+        if (exists) {
+          console.warn('[Store] Duplicate customer add prevented (same ID exists):', newCustomerId);
+          return {};
+        }
+
+        // Secondary defense: Name-based duplicate protection (within 15 seconds)
         const nowMs = Date.now();
-        const isDuplicate = state.customers.some(c => {
+        const isDuplicateName = state.customers.some(c => {
           const nameMatches = c.name.trim().toLowerCase() === data.name.trim().toLowerCase();
           const createdRecently = nowMs - new Date(c.createdAt || 0).getTime() < 15000;
           return nameMatches && createdRecently;
         });
 
-        if (isDuplicate) {
+        if (isDuplicateName) {
           console.warn('[Store] Duplicate customer add prevented (same name recently created):', data.name);
           return {};
         }
@@ -353,7 +374,7 @@ export const useStore = create<AppState>()(
 
         const newCustomer: Customer = {
           ...data,
-          id: crypto.randomUUID(),
+          id: newCustomerId,
           rooms: [],
           createdAt: now,
           updatedAt: now,
@@ -378,6 +399,10 @@ export const useStore = create<AppState>()(
           addressPhotos: data.addressPhotos || []
         };
         notifyStoreChanges();
+        
+        const afterCount = state.customers.length + 1;
+        console.log('[Store Save Customer] Local customers count after add:', afterCount);
+
         return {
           customers: [newCustomer, ...state.customers],
           syncStatus: 'pending'

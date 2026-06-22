@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { ArrowLeft, Save, MapPin, Loader2, Camera, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useStore } from "@/store/useStore";
+import { useStore, generateUUID } from "@/store/useStore";
 import { useAuthStore, canCreateCariType, normalizeRole } from "@/store/useAuthStore";
 import { fileToDataUrl } from "@/lib/fileStorage";
 import { syncNow } from "@/lib/syncService";
@@ -17,6 +17,7 @@ export default function YeniCariPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showPhotoSourceModal, setShowPhotoSourceModal] = useState(false);
+  const [submitId, setSubmitId] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -51,6 +52,7 @@ export default function YeniCariPage() {
 
   useEffect(() => {
     setMounted(true);
+    setSubmitId(generateUUID());
   }, []);
 
   const canCreateAny = currentUser && (
@@ -127,24 +129,68 @@ export default function YeniCariPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    console.log('[UI Diagnostic] submit started');
+    console.log('[UI Diagnostic] isSaving before:', isSaving);
+    
     if (!formData.name || isSaving) return;
+    
     setIsSaving(true);
+    
+    const customerId = submitId || generateUUID();
+    if (!submitId) {
+      setSubmitId(customerId);
+    }
+    
+    console.log('[UI Diagnostic] generated customer id:', customerId);
+    
     try {
-      console.log('[UI Save Customer] Saving customer locally:', formData.name);
-      addCustomer(formData);
-      
-      console.log('[UI Save Customer] Saved locally. Redirecting to /cariler...');
-      // Run sync in the background without awaiting to keep UI responsive
-      syncNow().catch(syncErr => {
-        console.error('[UI Save Customer] Background sync failed:', syncErr);
+      addCustomer({
+        ...formData,
+        id: customerId
       });
-
+      console.log('[UI Diagnostic] addCustomer success: true');
+      console.log('[UI Diagnostic] local count after add:', useStore.getState().customers.length);
+      
+      // Reset form fields
+      setFormData({
+        name: "",
+        phone: "",
+        address: "",
+        mapLocation: "",
+        notes: "",
+        customerCode: "",
+        taxNumber: "",
+        phone2: "",
+        extraDescription: "",
+        generalNote: "",
+        cariType: "CUSTOMER",
+        addressPhotos: []
+      });
+      
+      // Generate a new submitId for future form usage
+      setSubmitId(generateUUID());
+      
+      console.log('[UI Diagnostic] router push called');
       router.push("/cariler");
     } catch (err) {
-      console.error('[UI Save Customer] Error saving customer:', err);
+      console.error('[UI Diagnostic] caught error stage: Local Save', err);
       showToast("Müşteri kaydedilirken bir hata oluştu.");
       setIsSaving(false);
+      return; // Stop execution here if local save failed
     }
+
+    // Trigger sync in the background with separate try/catch
+    console.log('[UI Diagnostic] background sync started');
+    (async () => {
+      try {
+        await syncNow();
+        console.log('[UI Diagnostic] background sync status: success');
+      } catch (syncErr) {
+        console.error('[UI Diagnostic] caught error stage: Background Sync', syncErr);
+        showToast("Kayıt cihazda kaydedildi, senkronizasyon daha sonra tekrar denenecek.");
+      }
+    })();
   };
 
   if (!mounted) {
