@@ -6,7 +6,7 @@ import crypto from "crypto";
 // Helper to identify if a string is a base64 / data URL
 function isDataUrl(val: any): boolean {
   if (typeof val !== 'string') return false;
-  return val.startsWith('data:image/') || val.startsWith('data:video/') || val.startsWith('data:application/') || val.startsWith('data:');
+  return val.startsWith('data:') || val.includes(';base64,') || val.length > 5000;
 }
 
 // Strip any raw base64 data URLs from nested objects/arrays

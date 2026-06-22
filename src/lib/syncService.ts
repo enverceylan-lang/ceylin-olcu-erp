@@ -21,7 +21,7 @@ function utf8ToBase64(str: string): string {
 // Helper to identify if a string is a base64 / data URL
 function isDataUrl(val: any): boolean {
   if (typeof val !== 'string') return false;
-  return val.startsWith('data:image/') || val.startsWith('data:video/') || val.startsWith('data:application/') || val.startsWith('data:');
+  return val.startsWith('data:') || val.includes(';base64,') || val.length > 5000;
 }
 
 // Deep clone payload and strip any raw base64 data URLs / media arrays
@@ -82,19 +82,27 @@ function mergeCustomers(local: Customer[], remote: Customer[]): Customer[] {
       let mergedCustomer: Customer;
       if (rcTime > lcTime) {
         // Remote is newer
-        mergedCustomer = { ...rc };
+        mergedCustomer = {
+          ...rc,
+          addressPhotos: (rc.addressPhotos && rc.addressPhotos.length > 0) ? rc.addressPhotos : (lc.addressPhotos || [])
+        };
       } else if (lcTime > rcTime) {
         // Local is newer
-        mergedCustomer = { ...lc };
+        mergedCustomer = {
+          ...lc,
+          addressPhotos: (lc.addressPhotos && lc.addressPhotos.length > 0) ? lc.addressPhotos : (rc.addressPhotos || [])
+        };
       } else {
         // Equal or missing timestamps. Dolu olanı tercih et.
         const localIsPopulated = (lc.rooms && lc.rooms.length > 0);
         const remoteIsPopulated = (rc.rooms && rc.rooms.length > 0);
-        if (remoteIsPopulated && !localIsPopulated) {
-          mergedCustomer = { ...rc };
-        } else {
-          mergedCustomer = { ...lc };
-        }
+        const base = (remoteIsPopulated && !localIsPopulated) ? rc : lc;
+        mergedCustomer = {
+          ...base,
+          addressPhotos: (base.addressPhotos && base.addressPhotos.length > 0)
+            ? base.addressPhotos
+            : (lc.addressPhotos || rc.addressPhotos || [])
+        };
       }
 
       // Always merge nested rooms
@@ -123,18 +131,27 @@ function mergeRooms(local: Room[], remote: Room[]): Room[] {
 
       let mergedRoom: Room;
       if (rrTime > lrTime) {
-        mergedRoom = { ...rr };
+        mergedRoom = {
+          ...rr,
+          photos: (rr.photos && rr.photos.length > 0) ? rr.photos : (lr.photos || []),
+          videos: (rr.videos && rr.videos.length > 0) ? rr.videos : (lr.videos || [])
+        };
       } else if (lrTime > rrTime) {
-        mergedRoom = { ...lr };
+        mergedRoom = {
+          ...lr,
+          photos: (lr.photos && lr.photos.length > 0) ? lr.photos : (rr.photos || []),
+          videos: (lr.videos && lr.videos.length > 0) ? lr.videos : (rr.videos || [])
+        };
       } else {
         // Equal or missing timestamps
         const localIsPopulated = (lr.windows && lr.windows.length > 0) || (lr.photos && lr.photos.length > 0);
         const remoteIsPopulated = (rr.windows && rr.windows.length > 0) || (rr.photos && rr.photos.length > 0);
-        if (remoteIsPopulated && !localIsPopulated) {
-          mergedRoom = { ...rr };
-        } else {
-          mergedRoom = { ...lr };
-        }
+        const base = (remoteIsPopulated && !localIsPopulated) ? rr : lr;
+        mergedRoom = {
+          ...base,
+          photos: (base.photos && base.photos.length > 0) ? base.photos : (lr.photos || rr.photos || []),
+          videos: (base.videos && base.videos.length > 0) ? base.videos : (lr.videos || rr.videos || [])
+        };
       }
 
       // Always merge nested windows
@@ -163,18 +180,27 @@ function mergeWindows(local: WindowItem[], remote: WindowItem[]): WindowItem[] {
 
       let mergedWindow: WindowItem;
       if (rwTime > lwTime) {
-        mergedWindow = { ...rw };
+        mergedWindow = {
+          ...rw,
+          photos: (rw.photos && rw.photos.length > 0) ? rw.photos : (lw.photos || []),
+          videos: (rw.videos && rw.videos.length > 0) ? rw.videos : (lw.videos || [])
+        };
       } else if (lwTime > rwTime) {
-        mergedWindow = { ...lw };
+        mergedWindow = {
+          ...lw,
+          photos: (lw.photos && lw.photos.length > 0) ? lw.photos : (rw.photos || []),
+          videos: (lw.videos && lw.videos.length > 0) ? lw.videos : (rw.videos || [])
+        };
       } else {
         // Equal or missing timestamps
         const localIsPopulated = (lw.products && lw.products.length > 0) || !!lw.width || !!lw.height || !!lw.fieldNotes;
         const remoteIsPopulated = (rw.products && rw.products.length > 0) || !!rw.width || !!rw.height || !!rw.fieldNotes;
-        if (remoteIsPopulated && !localIsPopulated) {
-          mergedWindow = { ...rw };
-        } else {
-          mergedWindow = { ...lw };
-        }
+        const base = (remoteIsPopulated && !localIsPopulated) ? rw : lw;
+        mergedWindow = {
+          ...base,
+          photos: (base.photos && base.photos.length > 0) ? base.photos : (lw.photos || rw.photos || []),
+          videos: (base.videos && base.videos.length > 0) ? base.videos : (lw.videos || rw.videos || [])
+        };
       }
 
       // Always merge nested products
@@ -203,18 +229,27 @@ function mergeProducts(local: ProductMeasurement[], remote: ProductMeasurement[]
 
       let mergedProduct: ProductMeasurement;
       if (rpTime > lpTime) {
-        mergedProduct = { ...rp };
+        mergedProduct = {
+          ...rp,
+          photos: (rp.photos && rp.photos.length > 0) ? rp.photos : (lp.photos || []),
+          videos: (rp.videos && rp.videos.length > 0) ? rp.videos : (lp.videos || [])
+        };
       } else if (lpTime > rpTime) {
-        mergedProduct = { ...lp };
+        mergedProduct = {
+          ...lp,
+          photos: (lp.photos && lp.photos.length > 0) ? lp.photos : (rp.photos || []),
+          videos: (lp.videos && lp.videos.length > 0) ? lp.videos : (rp.videos || [])
+        };
       } else {
         // Equal or missing timestamps
         const localIsPopulated = !!(lp.productId || lp.templateType || Object.keys(lp.rawValues || {}).length > 0);
         const remoteIsPopulated = !!(rp.productId || rp.templateType || Object.keys(rp.rawValues || {}).length > 0);
-        if (remoteIsPopulated && !localIsPopulated) {
-          mergedProduct = { ...rp };
-        } else {
-          mergedProduct = { ...lp };
-        }
+        const base = (remoteIsPopulated && !localIsPopulated) ? rp : lp;
+        mergedProduct = {
+          ...base,
+          photos: (base.photos && base.photos.length > 0) ? base.photos : (lp.photos || rp.photos || []),
+          videos: (base.videos && base.videos.length > 0) ? base.videos : (lp.videos || rp.videos || [])
+        };
       }
       mergedMap.set(rp.id, mergedProduct);
     }

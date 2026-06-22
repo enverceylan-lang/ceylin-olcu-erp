@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import { useAuthStore, normalizeRole } from './useAuthStore';
 
 // ─── Store Change Notification for Sync ───
@@ -37,6 +37,77 @@ export function generateUUID(): string {
     return v.toString(16);
   });
 }
+
+export function sanitizeCustomersForPersist(customers: Customer[]): Customer[] {
+  if (!Array.isArray(customers)) return [];
+  
+  const isMediaString = (val: any): boolean => {
+    if (typeof val !== 'string') return false;
+    return val.startsWith('data:') || val.includes(';base64,') || val.length > 5000;
+  };
+
+  return customers.map(customer => ({
+    ...customer,
+    addressPhotos: customer.addressPhotos?.filter(p => !isMediaString(p)) || [],
+    rooms: customer.rooms?.map(room => ({
+      ...room,
+      photos: room.photos?.filter(p => !isMediaString(p)) || [],
+      videos: room.videos?.filter(p => !isMediaString(p)) || [],
+      windows: room.windows?.map(w => ({
+        ...w,
+        photos: w.photos?.filter(p => !isMediaString(p)) || [],
+        videos: w.videos?.filter(p => !isMediaString(p)) || [],
+        products: w.products?.map(p => ({
+          ...p,
+          photos: p.photos?.filter(photo => !isMediaString(photo)) || [],
+          videos: p.videos?.filter(video => !isMediaString(video)) || [],
+        })) || []
+      })) || []
+    })) || []
+  }));
+}
+
+const customStoreStorage = {
+  getItem: (name: string) => {
+    try {
+      return localStorage.getItem(name);
+    } catch (e) {
+      console.error('[Zustand Storage] Error reading from localStorage:', e);
+      return null;
+    }
+  },
+  setItem: (name: string, value: string) => {
+    try {
+      localStorage.setItem(name, value);
+    } catch (error: any) {
+      if (error.name === 'QuotaExceededError' || error.code === 22 || error.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
+        console.warn('[Zustand Storage] QuotaExceededError detected. Cleaning up base64 media and retrying...');
+        try {
+          const parsed = JSON.parse(value);
+          if (parsed && parsed.state) {
+            if (parsed.state.customers) {
+              parsed.state.customers = sanitizeCustomersForPersist(parsed.state.customers);
+            }
+            const sanitizedValue = JSON.stringify(parsed);
+            localStorage.setItem(name, sanitizedValue);
+            console.log('[Zustand Storage] Successfully saved to localStorage after removing media.');
+            return;
+          }
+        } catch (innerError) {
+          console.error('[Zustand Storage] Failed to recover from QuotaExceededError:', innerError);
+        }
+      }
+      throw error;
+    }
+  },
+  removeItem: (name: string) => {
+    try {
+      localStorage.removeItem(name);
+    } catch (e) {
+      console.error('[Zustand Storage] Error removing from localStorage:', e);
+    }
+  }
+};
 
 
 
@@ -840,11 +911,19 @@ export const useStore = create<AppState>()(
       })),
 
       setSyncStatus: (status) => set({ syncStatus: status }),
-      setCustomers: (customers) => set({ customers }),
+      setCustomers: (customers) => {
+        const sanitized = sanitizeCustomersForPersist(customers);
+        set({ customers: sanitized });
+      },
       clearPendingDeletes: () => set({ pendingDeletes: [] }),
     }),
     {
       name: 'curtain-erp-storage-v3', // V3 format
+      partialize: (state) => ({
+        ...state,
+        customers: sanitizeCustomersForPersist(state.customers),
+      }),
+      storage: createJSONStorage(() => customStoreStorage),
     }
   )
 );
