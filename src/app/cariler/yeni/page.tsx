@@ -151,34 +151,31 @@ export default function YeniCariPage() {
       });
       console.log('[UI Diagnostic] addCustomer success: true');
       console.log('[UI Diagnostic] local count after add:', useStore.getState().customers.length);
-      
-      // Reset form fields
-      setFormData({
-        name: "",
-        phone: "",
-        address: "",
-        mapLocation: "",
-        notes: "",
-        customerCode: "",
-        taxNumber: "",
-        phone2: "",
-        extraDescription: "",
-        generalNote: "",
-        cariType: "CUSTOMER",
-        addressPhotos: []
-      });
-      
-      // Generate a new submitId for future form usage
-      setSubmitId(generateUUID());
-      
-      console.log('[UI Diagnostic] router push called');
-      router.push("/cariler");
     } catch (err) {
       console.error('[UI Diagnostic] caught error stage: Local Save', err);
       showToast("Müşteri kaydedilirken bir hata oluştu.");
       setIsSaving(false);
       return; // Stop execution here if local save failed
     }
+
+    // Reset form fields
+    setFormData({
+      name: "",
+      phone: "",
+      address: "",
+      mapLocation: "",
+      notes: "",
+      customerCode: "",
+      taxNumber: "",
+      phone2: "",
+      extraDescription: "",
+      generalNote: "",
+      cariType: "CUSTOMER",
+      addressPhotos: []
+    });
+    
+    // Generate a new submitId for future form usage
+    setSubmitId(generateUUID());
 
     // Trigger sync in the background with separate try/catch
     console.log('[UI Diagnostic] background sync started');
@@ -188,9 +185,17 @@ export default function YeniCariPage() {
         console.log('[UI Diagnostic] background sync status: success');
       } catch (syncErr) {
         console.error('[UI Diagnostic] caught error stage: Background Sync', syncErr);
-        showToast("Kayıt cihazda kaydedildi, senkronizasyon daha sonra tekrar denenecek.");
+        showToast("Kayıt cihazda kaydedildi. Senkronizasyon daha sonra tekrar denenecek.");
       }
     })();
+
+    console.log('[UI Diagnostic] router push called');
+    try {
+      router.push("/cariler");
+    } catch (pushErr) {
+      console.error('[UI Diagnostic] router.push failed, fallback to href', pushErr);
+      window.location.href = "/cariler";
+    }
   };
 
   if (!mounted) {

@@ -74,28 +74,32 @@ function mergeCustomers(local: Customer[], remote: Customer[]): Customer[] {
     const lc = mergedMap.get(rc.id);
     if (!lc) {
       // Only exists remotely — add it
-      mergedMap.set(rc.id, rc);
+      mergedMap.set(rc.id, { ...rc });
     } else {
       const lcTime = new Date(lc.updatedAt || 0).getTime();
       const rcTime = new Date(rc.updatedAt || 0).getTime();
 
-      let finalCustomer: Customer;
+      let mergedCustomer: Customer;
       if (rcTime > lcTime) {
-        // Remote is newer — take remote fields but merge rooms separately
-        finalCustomer = {
-          ...rc,
-          rooms: lc.rooms || []
-        };
+        // Remote is newer
+        mergedCustomer = { ...rc };
+      } else if (lcTime > rcTime) {
+        // Local is newer
+        mergedCustomer = { ...lc };
       } else {
-        // Local is newer or equal — keep local
-        finalCustomer = { ...lc };
+        // Equal or missing timestamps. Dolu olanı tercih et.
+        const localIsPopulated = (lc.rooms && lc.rooms.length > 0);
+        const remoteIsPopulated = (rc.rooms && rc.rooms.length > 0);
+        if (remoteIsPopulated && !localIsPopulated) {
+          mergedCustomer = { ...rc };
+        } else {
+          mergedCustomer = { ...lc };
+        }
       }
 
-      // Always merge rooms from both sides
-      const mergedRooms = mergeRooms(lc.rooms || [], rc.rooms || []);
-      finalCustomer.rooms = mergedRooms;
-
-      mergedMap.set(rc.id, finalCustomer);
+      // Always merge nested rooms
+      mergedCustomer.rooms = mergeRooms(lc.rooms || [], rc.rooms || []);
+      mergedMap.set(rc.id, mergedCustomer);
     }
   });
 
@@ -112,25 +116,30 @@ function mergeRooms(local: Room[], remote: Room[]): Room[] {
   remote.forEach(rr => {
     const lr = mergedMap.get(rr.id);
     if (!lr) {
-      mergedMap.set(rr.id, rr);
+      mergedMap.set(rr.id, { ...rr });
     } else {
       const lrTime = new Date(lr.updatedAt || 0).getTime();
       const rrTime = new Date(rr.updatedAt || 0).getTime();
 
-      let finalRoom: Room;
+      let mergedRoom: Room;
       if (rrTime > lrTime) {
-        finalRoom = {
-          ...rr,
-          windows: lr.windows || []
-        };
+        mergedRoom = { ...rr };
+      } else if (lrTime > rrTime) {
+        mergedRoom = { ...lr };
       } else {
-        finalRoom = { ...lr };
+        // Equal or missing timestamps
+        const localIsPopulated = (lr.windows && lr.windows.length > 0) || (lr.photos && lr.photos.length > 0);
+        const remoteIsPopulated = (rr.windows && rr.windows.length > 0) || (rr.photos && rr.photos.length > 0);
+        if (remoteIsPopulated && !localIsPopulated) {
+          mergedRoom = { ...rr };
+        } else {
+          mergedRoom = { ...lr };
+        }
       }
 
-      const mergedWindows = mergeWindows(lr.windows || [], rr.windows || []);
-      finalRoom.windows = mergedWindows;
-
-      mergedMap.set(rr.id, finalRoom);
+      // Always merge nested windows
+      mergedRoom.windows = mergeWindows(lr.windows || [], rr.windows || []);
+      mergedMap.set(rr.id, mergedRoom);
     }
   });
 
@@ -147,25 +156,30 @@ function mergeWindows(local: WindowItem[], remote: WindowItem[]): WindowItem[] {
   remote.forEach(rw => {
     const lw = mergedMap.get(rw.id);
     if (!lw) {
-      mergedMap.set(rw.id, rw);
+      mergedMap.set(rw.id, { ...rw });
     } else {
       const lwTime = new Date(lw.updatedAt || 0).getTime();
       const rwTime = new Date(rw.updatedAt || 0).getTime();
 
-      let finalWindow: WindowItem;
+      let mergedWindow: WindowItem;
       if (rwTime > lwTime) {
-        finalWindow = {
-          ...rw,
-          products: lw.products || []
-        };
+        mergedWindow = { ...rw };
+      } else if (lwTime > rwTime) {
+        mergedWindow = { ...lw };
       } else {
-        finalWindow = { ...lw };
+        // Equal or missing timestamps
+        const localIsPopulated = (lw.products && lw.products.length > 0) || !!lw.width || !!lw.height || !!lw.fieldNotes;
+        const remoteIsPopulated = (rw.products && rw.products.length > 0) || !!rw.width || !!rw.height || !!rw.fieldNotes;
+        if (remoteIsPopulated && !localIsPopulated) {
+          mergedWindow = { ...rw };
+        } else {
+          mergedWindow = { ...lw };
+        }
       }
 
-      const mergedProducts = mergeProducts(lw.products || [], rw.products || []);
-      finalWindow.products = mergedProducts;
-
-      mergedMap.set(rw.id, finalWindow);
+      // Always merge nested products
+      mergedWindow.products = mergeProducts(lw.products || [], rw.products || []);
+      mergedMap.set(rw.id, mergedWindow);
     }
   });
 
@@ -182,15 +196,27 @@ function mergeProducts(local: ProductMeasurement[], remote: ProductMeasurement[]
   remote.forEach(rp => {
     const lp = mergedMap.get(rp.id);
     if (!lp) {
-      mergedMap.set(rp.id, rp);
+      mergedMap.set(rp.id, { ...rp });
     } else {
       const lpTime = new Date(lp.updatedAt || 0).getTime();
       const rpTime = new Date(rp.updatedAt || 0).getTime();
 
+      let mergedProduct: ProductMeasurement;
       if (rpTime > lpTime) {
-        mergedMap.set(rp.id, rp);
+        mergedProduct = { ...rp };
+      } else if (lpTime > rpTime) {
+        mergedProduct = { ...lp };
+      } else {
+        // Equal or missing timestamps
+        const localIsPopulated = !!(lp.productId || lp.templateType || Object.keys(lp.rawValues || {}).length > 0);
+        const remoteIsPopulated = !!(rp.productId || rp.templateType || Object.keys(rp.rawValues || {}).length > 0);
+        if (remoteIsPopulated && !localIsPopulated) {
+          mergedProduct = { ...rp };
+        } else {
+          mergedProduct = { ...lp };
+        }
       }
-      // else keep local
+      mergedMap.set(rp.id, mergedProduct);
     }
   });
 
