@@ -116,6 +116,57 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const [updatingLocation, setUpdatingLocation] = useState(false);
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
   const [locationWarning, setLocationWarning] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    type: 'room' | 'window' | 'measurement' | 'photo';
+    data: any;
+  } | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 4000);
+  };
+
+  const executeDelete = async () => {
+    if (!deleteConfirm) return;
+    const { type, data } = deleteConfirm;
+    
+    if (type === 'room') {
+      deleteRoom(data.customerId, data.roomId);
+    } else if (type === 'window') {
+      deleteWindow(data.customerId, data.roomId, data.windowId);
+    } else if (type === 'measurement') {
+      deleteProductMeasurement(data.customerId, data.roomId, data.windowId, data.measurementId);
+    } else if (type === 'photo') {
+      if (data.type === 'measurement') {
+        const roomObj = customer?.rooms.find(r => r.id === data.roomId);
+        const winObj = roomObj?.windows.find(w => w.id === data.windowId);
+        const measObj = winObj?.products.find(p => p.id === data.measurementId);
+        if (measObj) {
+          const updatedPhotos = (measObj.photos || []).filter(u => u !== data.url);
+          const updatedVideos = (measObj.videos || []).filter(u => u !== data.url);
+          updateProductMeasurement(data.customerId, data.roomId, data.windowId, data.measurementId, {
+            photos: updatedPhotos,
+            videos: updatedVideos
+          });
+        }
+      } else {
+        const addressPhotos = customer?.addressPhotos || [];
+        const updated = addressPhotos.filter((_, idx) => idx !== data.index);
+        updateCustomer(data.customerId, { addressPhotos: updated });
+      }
+    }
+    
+    setDeleteConfirm(null);
+    try {
+      await syncNow();
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   useEffect(() => {
     setMounted(true);
@@ -286,19 +337,42 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     setExpandedRooms(prev => ({ ...prev, [roomId]: !prev[roomId] }));
   };
 
-  const handleSaveRoom = () => {
+  const handleSaveRoom = async () => {
+    if (isSaving) return;
     if (newRoomName.trim()) {
-      addRoom(customer.id, newRoomName.trim());
-      setIsAddingRoom(false);
-      setNewRoomName("");
+      setIsSaving(true);
+      try {
+        addRoom(customer.id, newRoomName.trim());
+        await syncNow();
+        setIsAddingRoom(false);
+        setNewRoomName("");
+      } catch (err) {
+        console.error(err);
+        showToast("Oda kaydedilirken senkronizasyon hatası oluştu.");
+      } finally {
+        setIsSaving(false);
+      }
     }
   };
 
-  const handleAddWindow = (roomId: string) => {
-    if (!windowName) return alert("Pencere adı zorunludur.");
-    addWindow(customer.id, roomId, windowName);
-    setActiveRoomIdForWindow(null);
-    setWindowName("");
+  const handleAddWindow = async (roomId: string) => {
+    if (isSaving) return;
+    if (!windowName) {
+      showToast("Pencere adı zorunludur.");
+      return;
+    }
+    setIsSaving(true);
+    try {
+      addWindow(customer.id, roomId, windowName);
+      await syncNow();
+      setActiveRoomIdForWindow(null);
+      setWindowName("");
+    } catch (err) {
+      console.error(err);
+      showToast("Pencere kaydedilirken senkronizasyon hatası oluştu.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const triggerFileSelector = (useCamera: boolean) => {
@@ -326,7 +400,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
         const dataUrl = await fileToDataUrl(file, type);
         callback(dataUrl);
       } catch (error) {
-        window.alert(error instanceof Error ? error.message : 'Dosya kaydedilemedi.');
+        showToast(error instanceof Error ? error.message : 'Dosya kaydedilemedi.');
       }
     };
     
@@ -346,35 +420,44 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     setOverrideMeasuredById(user.id);
   };
 
-  const handleSaveMeasurement = (roomId: string, windowId: string) => {
-    // Determine who actually measured
-    const isOfficeEntry = permissions.canAccessOfficeMode && overrideMeasuredById !== user.id;
-    const measuredByUser = users.find(u => u.id === overrideMeasuredById) || user;
-    const now = new Date().toISOString();
+  const handleSaveMeasurement = async (roomId: string, windowId: string) => {
+    if (isSaving) return;
+    setIsSaving(true);
+    try {
+      const isOfficeEntry = permissions.canAccessOfficeMode && overrideMeasuredById !== user.id;
+      const measuredByUser = users.find(u => u.id === overrideMeasuredById) || user;
+      const now = new Date().toISOString();
 
-    const parsedRawValues: Record<string, number> = {};
-    const templateFields = MEASUREMENT_TEMPLATES[selectedTemplate]?.fields || [];
-    templateFields.forEach(f => {
-      const val = rawValues[f.key];
-      parsedRawValues[f.key] = val !== undefined && val !== '' ? Number(val) : 0;
-    });
+      const parsedRawValues: Record<string, number> = {};
+      const templateFields = MEASUREMENT_TEMPLATES[selectedTemplate]?.fields || [];
+      templateFields.forEach(f => {
+        const val = rawValues[f.key];
+        parsedRawValues[f.key] = val !== undefined && val !== '' ? Number(val) : 0;
+      });
 
-    addProductMeasurement(customer.id, roomId, windowId, {
-      templateType: selectedTemplate,
-      rawValues: parsedRawValues,
-      notes: measurementNotes,
-      status: "MEASURED",
-      measuredBy: measuredByUser.name,
-      measuredById: measuredByUser.id,
-      createdById: user.id,
-      measuredDate: now,
-      createdAt: now,
-      updatedAt: now,
-      notesHistory: [],
-      photos: [],
-      videos: [],
-    });
-    setActiveWindowIdForProduct(null);
+      addProductMeasurement(customer.id, roomId, windowId, {
+        templateType: selectedTemplate,
+        rawValues: parsedRawValues,
+        notes: measurementNotes,
+        status: "MEASURED",
+        measuredBy: measuredByUser.name,
+        measuredById: measuredByUser.id,
+        createdById: user.id,
+        measuredDate: now,
+        createdAt: now,
+        updatedAt: now,
+        notesHistory: [],
+        photos: [],
+        videos: [],
+      });
+      await syncNow();
+      setActiveWindowIdForProduct(null);
+    } catch (err) {
+      console.error(err);
+      showToast("Ölçü kaydedilirken senkronizasyon hatası oluştu.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleAddNote = (roomId: string, windowId: string, m: ProductMeasurement) => {
@@ -427,7 +510,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
   const handleUpdateLocation = () => {
     if (!navigator.geolocation) {
-      alert("Tarayıcınız konum bilgisini desteklemiyor.");
+      showToast("Tarayıcınız konum bilgisini desteklemiyor.");
       return;
     }
     setUpdatingLocation(true);
@@ -455,7 +538,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       },
       (error) => {
         console.error(error);
-        alert("Konum bilgisi alınamadı. İzinleri kontrol edin.");
+        showToast("Konum bilgisi alınamadı. İzinleri kontrol edin.");
         setUpdatingLocation(false);
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
@@ -634,7 +717,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                           onClick={(e) => {
                             if (!mapsUrl) {
                               e.preventDefault();
-                              alert("Konum veya adres bilgisi bulunmuyor.");
+                              showToast("Konum veya adres bilgisi bulunmuyor.");
                             }
                           }}
                           className={`flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition-colors border ${
@@ -692,12 +775,10 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                               />
                               {canDeleteAddressPhoto && (
                                 <button
-                                  onClick={() => {
-                                    if (confirm("Bu fotoğrafı silmek istediğinize emin misiniz?")) {
-                                      const updated = addressPhotos.filter((_, idx) => idx !== i);
-                                      updateCustomer(customer.id, { addressPhotos: updated });
-                                    }
-                                  }}
+                                  onClick={() => setDeleteConfirm({
+                                    type: 'photo',
+                                    data: { customerId: customer.id, index: i }
+                                  })}
                                   className="absolute top-0.5 right-0.5 bg-red-650 hover:bg-red-700 text-white rounded-full p-0.5 shadow transition-colors cursor-pointer"
                                   title="Fotoğrafı Sil"
                                 >
@@ -868,7 +949,16 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                         {room.name}
                       </h3>
                     </div>
-                    <button onClick={(e) => { e.stopPropagation(); deleteRoom(customer.id, room.id); }} className="text-red-400 hover:text-red-600">
+                    <button 
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
+                        setDeleteConfirm({ 
+                          type: 'room', 
+                          data: { customerId: customer.id, roomId: room.id, roomName: room.name } 
+                        }); 
+                      }} 
+                      className="text-red-400 hover:text-red-600 cursor-pointer"
+                    >
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
@@ -920,38 +1010,69 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                 {/* WINDOWS / OPENINGS */}
                 {isExpanded && (
                   <div className="p-4 space-y-6">
-                    {room.windows.map(window => (
-                      <div key={window.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50/50 dark:bg-gray-900/50 space-y-4 ml-2">
-                        
-                        <div className="flex justify-between items-center pb-2 border-b border-gray-200 dark:border-gray-700">
-                          <div className="flex items-center gap-4">
-                            <h4 className="font-bold text-gray-900 dark:text-white flex items-center gap-2 text-md">
-                              <WindowIcon className="w-4 h-4 text-blue-500" />
-                              {window.name}
-                            </h4>
-                            
-                            {/* Window Attachments Button */}
-                            {mode === 'MEASUREMENT' && (
-                              <div className="flex gap-2">
-                                <button 
-                                  onClick={() => handleFileUpload('photo', (url) => updateWindowItem(customer.id, room.id, window.id, { photos: [...(window.photos||[]), url] }))}
-                                  className="text-xs bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 px-2 py-1 rounded text-gray-600 dark:text-gray-400 flex items-center gap-1 transition-colors"
-                                >
-                                  <Camera className="w-3 h-3" /> Foto Ekle
-                                </button>
-                                <button 
-                                  onClick={() => handleFileUpload('video', (url) => updateWindowItem(customer.id, room.id, window.id, { videos: [...(window.videos||[]), url] }))}
-                                  className="text-xs bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 px-2 py-1 rounded text-gray-600 dark:text-gray-400 flex items-center gap-1 transition-colors"
-                                >
-                                  <Video className="w-3 h-3" /> Video Ekle
-                                </button>
+                    {room.windows.length === 0 && (
+                      <div className="p-4 text-center">
+                        <button
+                          onClick={async () => {
+                            if (isSaving) return;
+                            setIsSaving(true);
+                            try {
+                              addWindow(customer.id, room.id, "Pencere 1");
+                              await syncNow();
+                            } catch (err) {
+                              console.error(err);
+                            } finally {
+                              setIsSaving(false);
+                            }
+                          }}
+                          className="text-sm font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 px-4 py-2 rounded-lg flex items-center gap-2 w-full justify-center border border-transparent dark:border-blue-800/50 transition-colors cursor-pointer"
+                        >
+                          <Plus className="w-4 h-4" /> Yeni Şablonla Ölçü Al
+                        </button>
+                      </div>
+                    )}
+                    {room.windows.map(window => {
+                      const isSingleDefault = room.windows.length === 1 && window.name === "Pencere 1";
+                      return (
+                        <div key={window.id} className={isSingleDefault ? "space-y-4" : "border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50/50 dark:bg-gray-900/50 space-y-4 ml-2"}>
+                          
+                          {!isSingleDefault && (
+                            <div className="flex justify-between items-center pb-2 border-b border-gray-200 dark:border-gray-700">
+                              <div className="flex items-center gap-4">
+                                <h4 className="font-bold text-gray-900 dark:text-white flex items-center gap-2 text-md">
+                                  <WindowIcon className="w-4 h-4 text-blue-500" />
+                                  {window.name}
+                                </h4>
+                                
+                                {/* Window Attachments Button */}
+                                {mode === 'MEASUREMENT' && (
+                                  <div className="flex gap-2">
+                                    <button 
+                                      onClick={() => handleFileUpload('photo', (url) => updateWindowItem(customer.id, room.id, window.id, { photos: [...(window.photos||[]), url] }))}
+                                      className="text-xs bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 px-2 py-1 rounded text-gray-600 dark:text-gray-400 flex items-center gap-1 transition-colors cursor-pointer"
+                                    >
+                                      <Camera className="w-3 h-3" /> Foto Ekle
+                                    </button>
+                                    <button 
+                                      onClick={() => handleFileUpload('video', (url) => updateWindowItem(customer.id, room.id, window.id, { videos: [...(window.videos||[]), url] }))}
+                                      className="text-xs bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 px-2 py-1 rounded text-gray-600 dark:text-gray-400 flex items-center gap-1 transition-colors cursor-pointer"
+                                    >
+                                      <Video className="w-3 h-3" /> Video Ekle
+                                    </button>
+                                  </div>
+                                )}
                               </div>
-                            )}
-                          </div>
-                          <button onClick={() => deleteWindow(customer.id, room.id, window.id)} className="text-red-400 hover:text-red-600">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
+                              <button 
+                                onClick={() => setDeleteConfirm({
+                                  type: 'window',
+                                  data: { customerId: customer.id, roomId: room.id, windowId: window.id, windowName: window.name }
+                                })} 
+                                className="text-red-400 hover:text-red-600 cursor-pointer"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
                         
                         {/* Display Window Attachments */}
                         {((window.photos && window.photos.length > 0) || (window.videos && window.videos.length > 0)) && (
@@ -999,13 +1120,19 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                     )}
                                   </div>
                                 </div>
-                                <button onClick={() => deleteProductMeasurement(customer.id, room.id, window.id, p.id)} className="text-red-400 hover:text-red-600 p-1">
-                                  <X className="w-4 h-4" />
-                                </button>
+                                <button 
+                                   onClick={() => setDeleteConfirm({
+                                     type: 'measurement',
+                                     data: { customerId: customer.id, roomId: room.id, windowId: window.id, measurementId: p.id }
+                                   })} 
+                                   className="text-red-400 hover:text-red-600 p-1 cursor-pointer font-bold animate-fade-in"
+                                 >
+                                   <X className="w-4 h-4" />
+                                 </button>
                               </div>
 
                               {/* Raw Values Grid */}
-                              <div className="bg-gray-50 dark:bg-gray-900 p-3 rounded grid grid-cols-2 md:grid-cols-3 gap-2 mb-3 border border-gray-200 dark:border-gray-700">
+                              <div className="bg-gray-50 dark:bg-gray-900 p-3 rounded grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3 border border-gray-200 dark:border-gray-700">
                                 {Object.entries(p.rawValues || {}).map(([key, val]) => {
                                   const template = MEASUREMENT_TEMPLATES[p.templateType] || (p.templateType === 'CURTAIN' ? MEASUREMENT_TEMPLATES['CURTAIN_DETAIL'] : undefined);
                                   const label = template?.fields.find(f => f.key === key)?.label || key;
@@ -1034,6 +1161,12 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                       className="relative w-12 h-12 rounded overflow-hidden border cursor-pointer hover:opacity-85 transition-opacity"
                                     >
                                       <img src={url} className="w-full h-full object-cover" />
+                                      <button 
+                                        onClick={(e) => { e.stopPropagation(); setDeleteConfirm({ type: 'photo', data: { url, type: 'measurement', customerId: customer.id, roomId: room.id, windowId: window.id, measurementId: p.id } }); }}
+                                        className="absolute top-0 right-0 bg-red-500 text-white rounded-bl p-0.5"
+                                      >
+                                        <X className="w-2 h-2" />
+                                      </button>
                                     </div>
                                   ))}
                                   {p.videos?.map((url, i) => (
@@ -1044,6 +1177,12 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                     >
                                       <video src={url} className="w-full h-full object-cover" />
                                       <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white text-xs">▶</div>
+                                      <button 
+                                        onClick={(e) => { e.stopPropagation(); setDeleteConfirm({ type: 'photo', data: { url, type: 'measurement', customerId: customer.id, roomId: room.id, windowId: window.id, measurementId: p.id } }); }}
+                                        className="absolute top-0 right-0 bg-red-500 text-white rounded-bl p-0.5"
+                                      >
+                                        <X className="w-2 h-2" />
+                                      </button>
                                     </div>
                                   ))}
                                 </div>
@@ -1251,7 +1390,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                   </div>
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-3 bg-gray-50 dark:bg-gray-800/50 p-3 rounded border dark:border-gray-700">
+                                <div className={`grid gap-3 bg-gray-50 dark:bg-gray-800/50 p-3 rounded border dark:border-gray-700 ${selectedTemplate === 'CURTAIN_DETAIL' ? 'grid-cols-3' : 'grid-cols-2'}`}>
                                   {MEASUREMENT_TEMPLATES[selectedTemplate]?.fields.map(f => (
                                     <div key={f.key}>
                                       <label className="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1">{f.label}</label>
@@ -1292,7 +1431,8 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                           )
                         )}
                       </div>
-                    ))}
+                    );
+                  })}
 
                     {/* Add Window Area */}
                     {activeRoomIdForWindow === room.id ? (
@@ -1472,6 +1612,47 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
           type={previewType} 
           onClose={() => { setPreviewUrl(null); setPreviewType(null); }} 
         />
+
+        {deleteConfirm && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+            <div className="w-full max-w-sm bg-white dark:bg-gray-900 border border-gray-250 dark:border-gray-800 rounded-2xl p-6 space-y-4 shadow-2xl animate-scale-in text-gray-950 dark:text-white">
+              <div className="text-center space-y-2">
+                <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-950/30 flex items-center justify-center text-red-500 mx-auto">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <h4 className="text-lg font-bold">Silme İşlemini Onayla</h4>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {deleteConfirm.type === 'photo' && "Bu fotoğrafı silmek istediğinize emin misiniz?"}
+                  {deleteConfirm.type === 'room' && `"${deleteConfirm.data.roomName}" odasını ve içindeki tüm açıklık ve ölçüleri silmek istediğinize emin misiniz?`}
+                  {deleteConfirm.type === 'window' && `"${deleteConfirm.data.windowName}" açıklığını ve içindeki tüm ölçüleri silmek istediğinize emin misiniz?`}
+                  {deleteConfirm.type === 'measurement' && "Bu ölçü kaydını silmek istediğinize emin misiniz?"}
+                  <br />
+                  <span className="font-semibold text-red-500">Bu işlem senkronize edilecek.</span>
+                </p>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => setDeleteConfirm(null)}
+                  className="flex-1 py-2.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-semibold rounded-xl text-sm transition-colors cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  onClick={executeDelete}
+                  className="flex-1 py-2.5 bg-red-600 hover:bg-red-750 text-white font-bold rounded-xl text-sm transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  Evet, Sil
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {toastMessage && (
+          <div className="fixed bottom-4 right-4 bg-gray-900 dark:bg-gray-800 text-white px-4 py-3 rounded-lg shadow-lg z-50 text-sm flex items-center gap-2 border border-gray-850 animate-slide-up">
+            <span>{toastMessage}</span>
+          </div>
+        )}
       </div>
     </div>
   );

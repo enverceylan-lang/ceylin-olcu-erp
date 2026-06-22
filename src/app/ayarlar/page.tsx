@@ -16,6 +16,8 @@ export default function AyarlarPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState("");
   const [mounted, setMounted] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [pendingBackupData, setPendingBackupData] = useState<BackupPayload | null>(null);
   
   // Auth Store
   const { currentUser, users, addUser, updateUser, deleteUser } = useAuthStore();
@@ -62,18 +64,22 @@ export default function AyarlarPage() {
       const parsed = JSON.parse(await file.text()) as BackupPayload;
       if (parsed.version !== "olcu-erp-v1" || !parsed.data) throw new Error("Geçersiz yedek dosyası.");
 
-      const approved = window.confirm("Mevcut cihaz verileri yedekteki verilerle değiştirilecek. Devam edilsin mi?");
-      if (!approved) return;
-
-      DATA_KEYS.forEach((key) => {
-        const value = parsed.data[key];
-        if (typeof value === "string") localStorage.setItem(key, value);
-      });
-      setMessage("Yedek geri yüklendi. Sayfa yenileniyor…");
-      window.setTimeout(() => window.location.reload(), 700);
+      setPendingBackupData(parsed);
+      setShowConfirmModal(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Yedek geri yüklenemedi.");
     }
+  };
+
+  const handleConfirmImport = () => {
+    if (!pendingBackupData) return;
+    DATA_KEYS.forEach((key) => {
+      const value = pendingBackupData.data[key];
+      if (typeof value === "string") localStorage.setItem(key, value);
+    });
+    setMessage("Yedek geri yüklendi. Sayfa yenileniyor…");
+    setShowConfirmModal(false);
+    window.setTimeout(() => window.location.reload(), 700);
   };
 
   // User Management Handlers
@@ -364,6 +370,38 @@ export default function AyarlarPage() {
           </div>
         </div>
       </div>
+      {showConfirmModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-gray-250 dark:border-slate-800 rounded-2xl p-6 space-y-4 shadow-2xl animate-scale-in text-gray-955 dark:text-white">
+            <div className="flex items-center gap-3 text-amber-500">
+              <AlertTriangle className="w-6 h-6 shrink-0 animate-bounce" />
+              <h4 className="text-lg font-bold">Yedeği Geri Yükle</h4>
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
+              Mevcut cihaz verileri yedekteki verilerle değiştirilecek. Devam etmek istediğinize emin misiniz?
+            </p>
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowConfirmModal(false);
+                  setPendingBackupData(null);
+                }}
+                className="px-4 py-2 text-xs font-semibold rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 transition-colors cursor-pointer"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmImport}
+                className="px-4 py-2 text-xs font-bold rounded-lg bg-blue-600 hover:bg-blue-500 text-white transition-colors cursor-pointer"
+              >
+                Evet, Yükle
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

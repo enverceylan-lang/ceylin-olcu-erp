@@ -326,6 +326,20 @@ export const useStore = create<AppState>()(
       syncStatus: 'synced',
 
       addCustomer: (data) => set((state) => {
+        // Double-click/Duplicate submission protection:
+        // Ignore if a customer with the same name was created within the last 15 seconds.
+        const nowMs = Date.now();
+        const isDuplicate = state.customers.some(c => {
+          const nameMatches = c.name.trim().toLowerCase() === data.name.trim().toLowerCase();
+          const createdRecently = nowMs - new Date(c.createdAt || 0).getTime() < 15000;
+          return nameMatches && createdRecently;
+        });
+
+        if (isDuplicate) {
+          console.warn('[Store] Duplicate customer add prevented (same name recently created):', data.name);
+          return {};
+        }
+
         const now = new Date().toISOString();
         const currentUser = useAuthStore.getState().currentUser;
         

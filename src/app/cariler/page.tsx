@@ -62,6 +62,43 @@ export default function CarilerPage() {
     }
   };
 
+  useEffect(() => {
+    if (typeof window !== 'undefined' && mounted) {
+      console.log('[Cariler UI Diagnostic] Current User:', currentUser ? {
+        id: currentUser.id,
+        username: currentUser.username,
+        role: currentUser.role,
+        normRole: normalizeRole(currentUser.role)
+      } : null);
+      console.log('[Cariler UI Diagnostic] Store Customers Count:', customers.length);
+
+      const targetNames = ['test tlf sync 01', 'TEST TELEFON SYNC'];
+      targetNames.forEach(name => {
+        const c = customers.find(x => x.name === name);
+        if (c) {
+          const isDel = !!c.isDeleted;
+          const allowedRole = currentUser ? canViewCustomer(currentUser, c) : false;
+          const cType = c.cariType || "CUSTOMER";
+          const allowedType = allowedCariTypes.some(t => t.value === cType);
+          const matchesFilter = selectedTypeFilter === "ALL" || cType === selectedTypeFilter;
+          const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) || (c.phone && c.phone.includes(searchTerm));
+          console.log(`[Cariler UI Target Debug] "${name}":`, {
+            foundInStore: true,
+            isDeleted: isDel,
+            canViewCustomer: allowedRole,
+            cariType: cType,
+            allowedCariTypesContainsType: allowedType,
+            selectedTypeFilterMatches: matchesFilter,
+            searchQueryMatches: matchesSearch,
+            visibleOnUI: !isDel && allowedRole && matchesFilter && matchesSearch
+          });
+        } else {
+          console.log(`[Cariler UI Target Debug] "${name}": Not found in Zustand store`);
+        }
+      });
+    }
+  }, [customers, currentUser, searchTerm, selectedTypeFilter, mounted]);
+
   if (!mounted) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
 
   const filteredCustomers = customers.filter(c => {

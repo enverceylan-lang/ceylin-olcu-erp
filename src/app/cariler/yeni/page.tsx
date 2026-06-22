@@ -7,12 +7,47 @@ import { useRouter } from "next/navigation";
 import { useStore } from "@/store/useStore";
 import { useAuthStore, canCreateCariType, normalizeRole } from "@/store/useAuthStore";
 import { fileToDataUrl } from "@/lib/fileStorage";
+import { syncNow } from "@/lib/syncService";
 
 export default function YeniCariPage() {
   const router = useRouter();
   const addCustomer = useStore((state) => state.addCustomer);
   const { currentUser } = useAuthStore();
   const [mounted, setMounted] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [showPhotoSourceModal, setShowPhotoSourceModal] = useState(false);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 4000);
+  };
+
+  const triggerPhotoInput = (useCamera: boolean) => {
+    setShowPhotoSourceModal(false);
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    if (useCamera) {
+      input.setAttribute('capture', 'environment');
+    }
+    input.onchange = async (event) => {
+      const file = (event.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      try {
+        const dataUrl = await fileToDataUrl(file, 'photo');
+        setFormData(prev => ({
+          ...prev,
+          addressPhotos: [...(prev.addressPhotos || []), dataUrl]
+        }));
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : 'Fotoğraf eklenemedi.');
+      }
+    };
+    input.click();
+  };
 
   useEffect(() => {
     setMounted(true);
@@ -68,7 +103,7 @@ export default function YeniCariPage() {
 
   const handleGetLocation = () => {
     if (!navigator.geolocation) {
-      alert("Tarayıcınız konum bilgisini desteklemiyor.");
+      showToast("Tarayıcınız konum bilgisini desteklemiyor.");
       return;
     }
     setFetchingLocation(true);
@@ -83,19 +118,33 @@ export default function YeniCariPage() {
       },
       (error) => {
         console.error(error);
-        alert("Konum bilgisi alınamadı. Lütfen konum izinlerini kontrol edin.");
+        showToast("Konum bilgisi alınamadı. Lütfen konum izinlerini kontrol edin.");
         setFetchingLocation(false);
       },
       { enableHighAccuracy: true, timeout: 10000 }
     );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name) return;
-    
-    addCustomer(formData);
-    router.push("/cariler");
+    if (!formData.name || isSaving) return;
+    setIsSaving(true);
+    try {
+      console.log('[UI Save Customer] Saving customer locally:', formData.name);
+      addCustomer(formData);
+      
+      console.log('[UI Save Customer] Saved locally. Redirecting to /cariler...');
+      // Run sync in the background without awaiting to keep UI responsive
+      syncNow().catch(syncErr => {
+        console.error('[UI Save Customer] Background sync failed:', syncErr);
+      });
+
+      router.push("/cariler");
+    } catch (err) {
+      console.error('[UI Save Customer] Error saving customer:', err);
+      showToast("Müşteri kaydedilirken bir hata oluştu.");
+      setIsSaving(false);
+    }
   };
 
   if (!mounted) {
@@ -295,25 +344,7 @@ export default function YeniCariPage() {
 
               <button
                 type="button"
-                onClick={() => {
-                  const input = document.createElement('input');
-                  input.type = 'file';
-                  input.accept = 'image/*';
-                  input.onchange = async (event) => {
-                    const file = (event.target as HTMLInputElement).files?.[0];
-                    if (!file) return;
-                    try {
-                      const dataUrl = await fileToDataUrl(file, 'photo');
-                      setFormData(prev => ({
-                        ...prev,
-                        addressPhotos: [...(prev.addressPhotos || []), dataUrl]
-                      }));
-                    } catch (error) {
-                      alert(error instanceof Error ? error.message : 'Fotoğraf eklenemedi.');
-                    }
-                  };
-                  input.click();
-                }}
+                onClick={() => setShowPhotoSourceModal(true)}
                 className="flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition-colors border border-gray-250 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-750 text-gray-700 dark:text-gray-300 cursor-pointer w-fit"
               >
                 <Camera className="w-3.5 h-3.5" />
@@ -357,13 +388,73 @@ export default function YeniCariPage() {
             <Link href="/cariler" className="px-6 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 font-medium transition-colors flex items-center">
               İptal
             </Link>
-            <button type="submit" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition-colors font-medium shadow-sm">
-              <Save className="w-4 h-4" />
-              Kaydet
+            <button 
+              type="submit" 
+              disabled={isSaving}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition-colors font-medium shadow-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Kaydediliyor...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  Kaydet
+                </>
+              )}
             </button>
           </div>
         </form>
       </div>
+
+      {showPhotoSourceModal && (
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-4 z-50 animate-fade-in"
+          onClick={() => setShowPhotoSourceModal(false)}
+        >
+          <div 
+            className="w-full max-w-sm bg-white dark:bg-gray-900 border border-gray-250 dark:border-gray-800 rounded-t-2xl sm:rounded-2xl p-6 space-y-4 shadow-2xl animate-scale-in text-gray-950 dark:text-white"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-center space-y-1">
+              <h4 className="text-md font-bold">Fotoğraf Ekle</h4>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Lütfen fotoğraf kaynağını seçin.</p>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <button
+                type="button"
+                onClick={() => triggerPhotoInput(true)}
+                className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-sm transition-colors cursor-pointer flex items-center justify-center gap-2"
+              >
+                <Camera className="w-4 h-4" /> Fotoğraf Çek
+              </button>
+              <button
+                type="button"
+                onClick={() => triggerPhotoInput(false)}
+                className="w-full py-3 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-750 text-gray-700 dark:text-gray-300 font-bold rounded-xl text-sm transition-colors border border-gray-250 dark:border-gray-750 cursor-pointer flex items-center justify-center gap-2"
+              >
+                Galeriden Seç
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowPhotoSourceModal(false)}
+                className="w-full py-3 bg-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-white font-semibold rounded-xl text-sm transition-colors cursor-pointer"
+              >
+                İptal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toastMessage && (
+        <div className="fixed bottom-4 right-4 bg-gray-900 dark:bg-gray-800 text-white px-4 py-3 rounded-lg shadow-lg z-50 text-sm flex items-center gap-2 border border-gray-800 animate-slide-up">
+          <span>{toastMessage}</span>
+        </div>
+      )}
     </div>
   );
 }

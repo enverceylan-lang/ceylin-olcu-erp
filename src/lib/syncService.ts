@@ -330,6 +330,17 @@ export async function syncNow(isManual: boolean = false) {
     const sanitizedJsonSize = getObjSize(sanitizedPayload);
     console.log('[Client Sync Size Info] Sanitized Payload Size:', (sanitizedJsonSize / 1024).toFixed(2) + ' KB');
 
+    // Outgoing diagnostic logs for target mobile records
+    const testMobileName = 'TEST MOBILE SAVE';
+    const localHasTestMobile = localCustomers.some((c: any) => c.name && c.name.toUpperCase().includes(testMobileName));
+    const payloadHasTestMobile = sanitizedPayload.customers.some((c: any) => c.name && c.name.toUpperCase().includes(testMobileName));
+    console.log('[Client Sync Target Diagnostic] Local customers count before sync:', localCustomers.length);
+    console.log('[Client Sync Target Diagnostic] Unsynced target customer present in local before sync:', localHasTestMobile);
+    console.log('[Client Sync Target Diagnostic] Target customer present in outgoing payload:', payloadHasTestMobile);
+    if (localHasTestMobile) {
+      console.log('[Client Sync Target Diagnostic] Target customer details:', localCustomers.filter((c: any) => c.name && c.name.toUpperCase().includes(testMobileName)));
+    }
+
     // ── Build Authorization header using UTF-8-safe base64 ──
     // Prevents btoa crash on Turkish characters (Ş, Ğ, İ, Ü, Ö, Ç) in usernames/passwords.
     const token = utf8ToBase64(`${currentUser.username}:${currentUser.password}`);
@@ -344,6 +355,8 @@ export async function syncNow(isManual: boolean = false) {
     });
 
     console.log('[Client Sync] response status:', response.status);
+    console.log('[Client Sync Target Diagnostic] Server response status:', response.status);
+    console.log('[Client Sync Target Diagnostic] Server response ok:', response.ok);
 
     // ── Task E: Handle 413 Payload Too Large explicitly ──
     if (response.status === 413) {
@@ -365,10 +378,12 @@ export async function syncNow(isManual: boolean = false) {
 
     const result = await response.json();
     console.log('[Client Sync] response body success:', !!result.success);
-
+    console.log('[Client Sync Target Diagnostic] Server response body success:', !!result.success);
+    
     // ── API returned success: false — do NOT set "synced" ──
     if (!result.success) {
       console.error('[Client Sync] Sync API returned success: false —', result.error || 'unknown error');
+      console.log('[Client Sync Target Diagnostic] Server error details:', { error: result.error, reason: result.reason });
       store.setSyncStatus('error');
       isSyncing = false;
       return;
@@ -379,6 +394,11 @@ export async function syncNow(isManual: boolean = false) {
       customers: result.customers?.length ?? 0,
       users: result.users?.length ?? 0
     });
+    
+    if (result.customers) {
+      const remoteHasTestMobile = result.customers.some((c: any) => c.name && c.name.toUpperCase().includes(testMobileName));
+      console.log('[Client Sync Target Diagnostic] Target customer present in server response body:', remoteHasTestMobile);
+    }
 
     if (result.customers) {
       const getCounts = (list: any[]) => {
@@ -413,6 +433,28 @@ export async function syncNow(isManual: boolean = false) {
       console.log('[Client Sync] before local counts:', beforeCounts);
       console.log('[Client Sync] remote counts:', remoteCounts);
       console.log('[Client Sync] after local counts:', afterCounts);
+
+      // Target verification check for specific test records
+      const targetNames = ['test tlf sync 01', 'TEST TELEFON SYNC', 'TEST MOBILE SAVE'];
+      targetNames.forEach(name => {
+        const inRemote = result.customers.find((c: any) => c.name && c.name.toUpperCase().includes(name.toUpperCase()));
+        const inBefore = currentCustomers.find((c: any) => c.name && c.name.toUpperCase().includes(name.toUpperCase()));
+        const inMerged = merged.find((c: any) => c.name && c.name.toUpperCase().includes(name.toUpperCase()));
+        console.log(`[Client Sync Target Check] "${name}":`, {
+          inRemotePayload: !!inRemote,
+          inLocalBeforeMerge: !!inBefore,
+          inLocalAfterMerge: !!inMerged,
+          detailsInMerged: inMerged ? {
+            id: inMerged.id,
+            name: inMerged.name,
+            isDeleted: inMerged.isDeleted,
+            approvalStatus: inMerged.approvalStatus,
+            cariType: inMerged.cariType,
+            createdById: inMerged.createdById,
+            assignedMeasureId: inMerged.assignedMeasureId
+          } : null
+        });
+      });
 
       store.setCustomers(merged);
     }
@@ -507,9 +549,16 @@ export function initSync() {
     store.setSyncStatus('offline');
   };
 
-  // Re-sync when the app tab is focused / resumed from background
+  // Re-sync when the app tab is focused / resumed from background (throttled to 15s)
+  let lastResumeSyncTime = 0;
   const handleAppResume = () => {
     if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+      const now = Date.now();
+      if (now - lastResumeSyncTime < 15000) {
+        console.log('[Sync] App focus/resume throttled (less than 15s since last resume sync).');
+        return;
+      }
+      lastResumeSyncTime = now;
       console.log('[Sync] App focused / tab resumed — triggering sync.');
       syncNow();
     }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ArrowLeft, Save, Plus, Trash2, HelpCircle } from "lucide-react";
+import { ArrowLeft, Save, Plus, Trash2, HelpCircle, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useStore, SaleItem } from "@/store/useStore";
@@ -30,6 +30,15 @@ export default function YeniSatisPage() {
   
   const [selectedCustomerId, setSelectedCustomerId] = useState(preselectedCustomerId || "");
   const [saleItems, setSaleItems] = useState<SalesRow[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 4000);
+  };
   
   useEffect(() => {
     setMounted(true);
@@ -221,20 +230,33 @@ export default function YeniSatisPage() {
   const grandTotal = saleItems.reduce((acc, item) => acc + item.totalPrice, 0);
 
   const handleSave = () => {
-    if (!selectedCustomerId) return alert("Lütfen müşteri seçiniz.");
-    if (saleItems.length === 0) return alert("Satışta hiç ürün yok.");
+    if (isSaving) return;
+    if (!selectedCustomerId) {
+      showToast("Lütfen müşteri seçiniz.");
+      return;
+    }
+    if (saleItems.length === 0) {
+      showToast("Satışta hiç ürün yok.");
+      return;
+    }
     
     const customer = customers.find(c => c.id === selectedCustomerId);
     if (!customer) return;
 
-    addSale({
-      customerId: selectedCustomerId,
-      amount: grandTotal,
-      items: saleItems,
-      address: customer.address || "Adres Belirtilmemiş"
-    });
-    
-    router.push("/satis");
+    setIsSaving(true);
+    try {
+      addSale({
+        customerId: selectedCustomerId,
+        amount: grandTotal,
+        items: saleItems,
+        address: customer.address || "Adres Belirtilmemiş"
+      });
+      router.push("/satis");
+    } catch (err) {
+      console.error(err);
+      showToast("Satış kaydedilirken bir hata oluştu.");
+      setIsSaving(false);
+    }
   };
 
   const customer = customers.find(c => c.id === selectedCustomerId);
@@ -257,11 +279,20 @@ export default function YeniSatisPage() {
         </div>
         <button 
           onClick={handleSave}
-          disabled={saleItems.length === 0}
+          disabled={saleItems.length === 0 || isSaving}
           className="w-full sm:w-auto flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-lg transition-colors font-bold shadow-md text-sm cursor-pointer"
         >
-          <Save className="w-4 h-4" />
-          Satışı Kaydet
+          {isSaving ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Kaydediliyor...
+            </>
+          ) : (
+            <>
+              <Save className="w-4 h-4" />
+              Satışı Kaydet
+            </>
+          )}
         </button>
       </div>
 
@@ -699,6 +730,11 @@ export default function YeniSatisPage() {
           </div>
         </div>
       </div>
+      {toastMessage && (
+        <div className="fixed bottom-4 right-4 bg-gray-900 dark:bg-gray-800 text-white px-4 py-3 rounded-lg shadow-lg z-50 text-sm flex items-center gap-2 border border-gray-800 animate-slide-up">
+          <span>{toastMessage}</span>
+        </div>
+      )}
     </div>
   );
 }
