@@ -103,6 +103,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   // For ADMIN/SALES entering on behalf of someone else
   const [overrideMeasuredById, setOverrideMeasuredById] = useState(currentUser?.id || "");
   const [measurementNotes, setMeasurementNotes] = useState("");
+  const [editingMeasurementId, setEditingMeasurementId] = useState<string | null>(null);
 
   // Office Config Form State
   const [activeMeasurementIdForConfig, setActiveMeasurementIdForConfig] = useState<string | null>(null);
@@ -201,6 +202,16 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       <div className="p-8 text-center space-y-4">
         <p className="text-red-500 font-medium">Müşteri bulunamadı.</p>
         <Link href="/cariler" className="text-blue-600 hover:underline">Listeye Dön</Link>
+      </div>
+    );
+  }
+
+  if (customer.isDeleted) {
+    return (
+      <div className="p-8 text-center space-y-4 bg-slate-900 border border-slate-800 rounded-2xl max-w-md mx-auto my-12 animate-fade-in">
+        <p className="text-red-500 font-bold text-lg">Cari Silinmiş</p>
+        <p className="text-slate-350 text-sm">Bu cari kartı silinmiştir ve işlem yapılamaz.</p>
+        <Link href="/cariler" className="inline-block bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-sm font-semibold transition-colors">Listeye Dön</Link>
       </div>
     );
   }
@@ -417,6 +428,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
   const openMeasurementForm = (w: WindowItem) => {
     setActiveWindowIdForProduct(w.id);
+    setEditingMeasurementId(null);
     setSelectedTemplate("CURTAIN_DETAIL");
     setRawValues({});
     setMeasurementNotes("");
@@ -438,23 +450,35 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
         parsedRawValues[f.key] = val !== undefined && val !== '' ? Number(val) : 0;
       });
 
-      addProductMeasurement(customer.id, roomId, windowId, {
-        templateType: selectedTemplate,
-        rawValues: parsedRawValues,
-        notes: measurementNotes,
-        status: "MEASURED",
-        measuredBy: measuredByUser.name,
-        measuredById: measuredByUser.id,
-        createdById: user.id,
-        measuredDate: now,
-        createdAt: now,
-        updatedAt: now,
-        notesHistory: [],
-        photos: [],
-        videos: [],
-      });
+      if (editingMeasurementId) {
+        updateProductMeasurement(customer.id, roomId, windowId, editingMeasurementId, {
+          templateType: selectedTemplate,
+          rawValues: parsedRawValues,
+          notes: measurementNotes,
+          measuredBy: measuredByUser.name,
+          measuredById: measuredByUser.id,
+          updatedAt: now,
+        });
+      } else {
+        addProductMeasurement(customer.id, roomId, windowId, {
+          templateType: selectedTemplate,
+          rawValues: parsedRawValues,
+          notes: measurementNotes,
+          status: "MEASURED",
+          measuredBy: measuredByUser.name,
+          measuredById: measuredByUser.id,
+          createdById: user.id,
+          measuredDate: now,
+          createdAt: now,
+          updatedAt: now,
+          notesHistory: [],
+          photos: [],
+          videos: [],
+        });
+      }
       await syncNow();
       setActiveWindowIdForProduct(null);
+      setEditingMeasurementId(null);
     } catch (err) {
       console.error(err);
       showToast("Ölçü kaydedilirken senkronizasyon hatası oluştu.");
@@ -1132,15 +1156,33 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                     )}
                                   </div>
                                 </div>
-                                <button 
-                                   onClick={() => setDeleteConfirm({
-                                     type: 'measurement',
-                                     data: { customerId: customer.id, roomId: room.id, windowId: window.id, measurementId: p.id }
-                                   })} 
-                                   className="text-red-400 hover:text-red-600 p-1 cursor-pointer font-bold animate-fade-in"
-                                 >
-                                   <X className="w-4 h-4" />
-                                 </button>
+                                <div className="flex items-center gap-2">
+                                   {mode === 'MEASUREMENT' && (
+                                     <button 
+                                       onClick={() => {
+                                         setEditingMeasurementId(p.id);
+                                         setActiveWindowIdForProduct(window.id);
+                                         setSelectedTemplate(p.templateType);
+                                         setRawValues(p.rawValues || {});
+                                         setMeasurementNotes(p.notes || "");
+                                         setOverrideMeasuredById(p.measuredById || currentUser?.id || "");
+                                       }}
+                                       className="text-blue-500 hover:text-blue-700 p-1 cursor-pointer font-bold text-xs flex items-center gap-1 transition-colors bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
+                                       title="Ölçüyü Düzenle"
+                                     >
+                                       Düzenle
+                                     </button>
+                                   )}
+                                   <button 
+                                      onClick={() => setDeleteConfirm({
+                                        type: 'measurement',
+                                        data: { customerId: customer.id, roomId: room.id, windowId: window.id, measurementId: p.id }
+                                      })} 
+                                      className="text-red-400 hover:text-red-600 p-1 cursor-pointer font-bold animate-fade-in"
+                                    >
+                                      <X className="w-4 h-4" />
+                                    </button>
+                                 </div>
                               </div>
 
                               {/* Raw Values Grid */}
@@ -1362,8 +1404,10 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                           activeWindowIdForProduct === window.id ? (
                             <div className="mt-4 border-2 border-blue-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-lg ml-6">
                               <div className="bg-blue-50 dark:bg-gray-900 p-3 border-b border-blue-100 dark:border-gray-700 flex justify-between items-center">
-                                <h5 className="font-bold text-blue-900 dark:text-gray-100">Saha Ölçü Formu</h5>
-                                <button onClick={() => setActiveWindowIdForProduct(null)}><X className="w-5 h-5 text-blue-400 hover:text-blue-600 dark:text-gray-400 dark:hover:text-gray-200" /></button>
+                                <h5 className="font-bold text-blue-900 dark:text-gray-100">
+                                  {editingMeasurementId ? "Saha Ölçüsü Düzenleme Formu" : "Saha Ölçü Formu"}
+                                </h5>
+                                <button onClick={() => { setActiveWindowIdForProduct(null); setEditingMeasurementId(null); }}><X className="w-5 h-5 text-blue-400 hover:text-blue-600 dark:text-gray-400 dark:hover:text-gray-200" /></button>
                               </div>
                               
                               <div className="p-4 space-y-4">
@@ -1430,7 +1474,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                 </div>
 
                                 <button onClick={() => handleSaveMeasurement(room.id, window.id)} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow-md transition-colors text-sm">
-                                  Saha Ölçüsünü Kaydet
+                                  {editingMeasurementId ? "Değişiklikleri Kaydet" : "Saha Ölçüsünü Kaydet"}
                                 </button>
                               </div>
                             </div>

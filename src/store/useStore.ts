@@ -172,6 +172,8 @@ export interface ProductMeasurement {
   notesHistory: Note[];
   photos: string[];
   videos: string[];
+  isDeleted?: boolean;
+  deletedAt?: string;
 }
 
 export interface WindowItem {
@@ -185,6 +187,8 @@ export interface WindowItem {
   products: ProductMeasurement[];
   createdAt?: string;
   updatedAt?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
 }
 
 export interface Room {
@@ -195,6 +199,8 @@ export interface Room {
   windows: WindowItem[];
   createdAt?: string;
   updatedAt?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
 }
 
 export interface Customer {
@@ -494,9 +500,35 @@ export const useStore = create<AppState>()(
 
       deleteCustomer: (id) => set((state) => {
         const now = new Date().toISOString();
-        const updatedCustomers = state.customers.map(c => 
-          c.id === id ? { ...c, isDeleted: true, deletedAt: now, updatedAt: now } : c
-        );
+        const updatedCustomers = state.customers.map(c => {
+          if (c.id === id) {
+            return {
+              ...c,
+              isDeleted: true,
+              deletedAt: now,
+              updatedAt: now,
+              rooms: c.rooms.map(r => ({
+                ...r,
+                isDeleted: true,
+                deletedAt: now,
+                updatedAt: now,
+                windows: r.windows.map(w => ({
+                  ...w,
+                  isDeleted: true,
+                  deletedAt: now,
+                  updatedAt: now,
+                  products: w.products.map(p => ({
+                    ...p,
+                    isDeleted: true,
+                    deletedAt: now,
+                    updatedAt: now
+                  }))
+                }))
+              }))
+            };
+          }
+          return c;
+        });
         notifyStoreChanges();
         return {
           customers: updatedCustomers,

@@ -84,12 +84,16 @@ function mergeCustomers(local: Customer[], remote: Customer[]): Customer[] {
         // Remote is newer
         mergedCustomer = {
           ...rc,
+          isDeleted: rc.isDeleted || false,
+          deletedAt: rc.deletedAt || undefined,
           addressPhotos: (rc.addressPhotos && rc.addressPhotos.length > 0) ? rc.addressPhotos : (lc.addressPhotos || [])
         };
       } else if (lcTime > rcTime) {
         // Local is newer
         mergedCustomer = {
           ...lc,
+          isDeleted: lc.isDeleted || false,
+          deletedAt: lc.deletedAt || undefined,
           addressPhotos: (lc.addressPhotos && lc.addressPhotos.length > 0) ? lc.addressPhotos : (rc.addressPhotos || [])
         };
       } else {
@@ -99,6 +103,8 @@ function mergeCustomers(local: Customer[], remote: Customer[]): Customer[] {
         const base = (remoteIsPopulated && !localIsPopulated) ? rc : lc;
         mergedCustomer = {
           ...base,
+          isDeleted: lc.isDeleted || rc.isDeleted || false,
+          deletedAt: lc.deletedAt || rc.deletedAt || undefined,
           addressPhotos: (base.addressPhotos && base.addressPhotos.length > 0)
             ? base.addressPhotos
             : (lc.addressPhotos || rc.addressPhotos || [])
@@ -106,7 +112,8 @@ function mergeCustomers(local: Customer[], remote: Customer[]): Customer[] {
       }
 
       // Always merge nested rooms
-      mergedCustomer.rooms = mergeRooms(lc.rooms || [], rc.rooms || []);
+      const customerDeleted = mergedCustomer.isDeleted || false;
+      mergedCustomer.rooms = mergeRooms(lc.rooms || [], rc.rooms || [], customerDeleted);
       mergedMap.set(rc.id, mergedCustomer);
     }
   });
@@ -114,7 +121,7 @@ function mergeCustomers(local: Customer[], remote: Customer[]): Customer[] {
   return Array.from(mergedMap.values());
 }
 
-function mergeRooms(local: Room[], remote: Room[]): Room[] {
+function mergeRooms(local: Room[], remote: Room[], parentDeleted: boolean = false): Room[] {
   const mergedMap = new Map<string, Room>();
 
   local.forEach(lr => {
@@ -133,12 +140,16 @@ function mergeRooms(local: Room[], remote: Room[]): Room[] {
       if (rrTime > lrTime) {
         mergedRoom = {
           ...rr,
+          isDeleted: rr.isDeleted || false,
+          deletedAt: rr.deletedAt || undefined,
           photos: (rr.photos && rr.photos.length > 0) ? rr.photos : (lr.photos || []),
           videos: (rr.videos && rr.videos.length > 0) ? rr.videos : (lr.videos || [])
         };
       } else if (lrTime > rrTime) {
         mergedRoom = {
           ...lr,
+          isDeleted: lr.isDeleted || false,
+          deletedAt: lr.deletedAt || undefined,
           photos: (lr.photos && lr.photos.length > 0) ? lr.photos : (rr.photos || []),
           videos: (lr.videos && lr.videos.length > 0) ? lr.videos : (rr.videos || [])
         };
@@ -149,21 +160,30 @@ function mergeRooms(local: Room[], remote: Room[]): Room[] {
         const base = (remoteIsPopulated && !localIsPopulated) ? rr : lr;
         mergedRoom = {
           ...base,
+          isDeleted: lr.isDeleted || rr.isDeleted || false,
+          deletedAt: lr.deletedAt || rr.deletedAt || undefined,
           photos: (base.photos && base.photos.length > 0) ? base.photos : (lr.photos || rr.photos || []),
           videos: (base.videos && base.videos.length > 0) ? base.videos : (lr.videos || rr.videos || [])
         };
       }
-
-      // Always merge nested windows
-      mergedRoom.windows = mergeWindows(lr.windows || [], rr.windows || []);
       mergedMap.set(rr.id, mergedRoom);
     }
   });
 
-  return Array.from(mergedMap.values());
+  return Array.from(mergedMap.values()).map(r => {
+    const isDeleted = parentDeleted || r.isDeleted || false;
+    const deletedAt = isDeleted ? (r.deletedAt || new Date().toISOString()) : r.deletedAt;
+    const remoteRoom = remote.find(rr => rr.id === r.id);
+    return {
+      ...r,
+      isDeleted,
+      deletedAt,
+      windows: mergeWindows(r.windows || [], remoteRoom?.windows || [], isDeleted)
+    };
+  });
 }
 
-function mergeWindows(local: WindowItem[], remote: WindowItem[]): WindowItem[] {
+function mergeWindows(local: WindowItem[], remote: WindowItem[], parentDeleted: boolean = false): WindowItem[] {
   const mergedMap = new Map<string, WindowItem>();
 
   local.forEach(lw => {
@@ -182,12 +202,16 @@ function mergeWindows(local: WindowItem[], remote: WindowItem[]): WindowItem[] {
       if (rwTime > lwTime) {
         mergedWindow = {
           ...rw,
+          isDeleted: rw.isDeleted || false,
+          deletedAt: rw.deletedAt || undefined,
           photos: (rw.photos && rw.photos.length > 0) ? rw.photos : (lw.photos || []),
           videos: (rw.videos && rw.videos.length > 0) ? rw.videos : (lw.videos || [])
         };
       } else if (lwTime > rwTime) {
         mergedWindow = {
           ...lw,
+          isDeleted: lw.isDeleted || false,
+          deletedAt: lw.deletedAt || undefined,
           photos: (lw.photos && lw.photos.length > 0) ? lw.photos : (rw.photos || []),
           videos: (lw.videos && lw.videos.length > 0) ? lw.videos : (rw.videos || [])
         };
@@ -198,21 +222,30 @@ function mergeWindows(local: WindowItem[], remote: WindowItem[]): WindowItem[] {
         const base = (remoteIsPopulated && !localIsPopulated) ? rw : lw;
         mergedWindow = {
           ...base,
+          isDeleted: lw.isDeleted || rw.isDeleted || false,
+          deletedAt: lw.deletedAt || rw.deletedAt || undefined,
           photos: (base.photos && base.photos.length > 0) ? base.photos : (lw.photos || rw.photos || []),
           videos: (base.videos && base.videos.length > 0) ? base.videos : (lw.videos || rw.videos || [])
         };
       }
-
-      // Always merge nested products
-      mergedWindow.products = mergeProducts(lw.products || [], rw.products || []);
       mergedMap.set(rw.id, mergedWindow);
     }
   });
 
-  return Array.from(mergedMap.values());
+  return Array.from(mergedMap.values()).map(w => {
+    const isDeleted = parentDeleted || w.isDeleted || false;
+    const deletedAt = isDeleted ? (w.deletedAt || new Date().toISOString()) : w.deletedAt;
+    const remoteWindow = remote.find(rw => rw.id === w.id);
+    return {
+      ...w,
+      isDeleted,
+      deletedAt,
+      products: mergeProducts(w.products || [], remoteWindow?.products || [], isDeleted)
+    };
+  });
 }
 
-function mergeProducts(local: ProductMeasurement[], remote: ProductMeasurement[]): ProductMeasurement[] {
+function mergeProducts(local: ProductMeasurement[], remote: ProductMeasurement[], parentDeleted: boolean = false): ProductMeasurement[] {
   const mergedMap = new Map<string, ProductMeasurement>();
 
   local.forEach(lp => {
@@ -231,12 +264,16 @@ function mergeProducts(local: ProductMeasurement[], remote: ProductMeasurement[]
       if (rpTime > lpTime) {
         mergedProduct = {
           ...rp,
+          isDeleted: rp.isDeleted || false,
+          deletedAt: rp.deletedAt || undefined,
           photos: (rp.photos && rp.photos.length > 0) ? rp.photos : (lp.photos || []),
           videos: (rp.videos && rp.videos.length > 0) ? rp.videos : (lp.videos || [])
         };
       } else if (lpTime > rpTime) {
         mergedProduct = {
           ...lp,
+          isDeleted: lp.isDeleted || false,
+          deletedAt: lp.deletedAt || undefined,
           photos: (lp.photos && lp.photos.length > 0) ? lp.photos : (rp.photos || []),
           videos: (lp.videos && lp.videos.length > 0) ? lp.videos : (rp.videos || [])
         };
@@ -247,6 +284,8 @@ function mergeProducts(local: ProductMeasurement[], remote: ProductMeasurement[]
         const base = (remoteIsPopulated && !localIsPopulated) ? rp : lp;
         mergedProduct = {
           ...base,
+          isDeleted: lp.isDeleted || rp.isDeleted || false,
+          deletedAt: lp.deletedAt || rp.deletedAt || undefined,
           photos: (base.photos && base.photos.length > 0) ? base.photos : (lp.photos || rp.photos || []),
           videos: (base.videos && base.videos.length > 0) ? base.videos : (lp.videos || rp.videos || [])
         };
@@ -255,7 +294,15 @@ function mergeProducts(local: ProductMeasurement[], remote: ProductMeasurement[]
     }
   });
 
-  return Array.from(mergedMap.values());
+  return Array.from(mergedMap.values()).map(p => {
+    const isDeleted = parentDeleted || p.isDeleted || false;
+    const deletedAt = isDeleted ? (p.deletedAt || new Date().toISOString()) : p.deletedAt;
+    return {
+      ...p,
+      isDeleted,
+      deletedAt
+    };
+  });
 }
 
 // ─── Main Sync Function ───

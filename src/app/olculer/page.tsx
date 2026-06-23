@@ -23,10 +23,12 @@ export default function OlculerPage() {
   };
 
   // Process customer stats and search
+  // Process customer stats and search
   const customerStats = customers
-    .filter(c => !currentUser || canViewCustomer(currentUser, c))
+    .filter(c => !c.isDeleted && (!currentUser || canViewCustomer(currentUser, c)))
     .map(customer => {
-      const roomCount = customer.rooms.length;
+      const activeRooms = (customer.rooms || []).filter(r => !r.isDeleted);
+      const roomCount = activeRooms.length;
       let openingCount = 0;
       let measurementCount = 0;
       let photoCount = 0;
@@ -34,17 +36,19 @@ export default function OlculerPage() {
       let latestDate: Date | null = null;
       let latestMeasuredBy = "";
 
-      for (const room of customer.rooms) {
+      for (const room of activeRooms) {
         photoCount += (room.photos || []).length;
         videoCount += (room.videos || []).length;
-        openingCount += room.windows.length;
+        const activeWindows = (room.windows || []).filter(w => !w.isDeleted);
+        openingCount += activeWindows.length;
 
-        for (const window of room.windows) {
+        for (const window of activeWindows) {
           photoCount += (window.photos || []).length;
           videoCount += (window.videos || []).length;
-          measurementCount += window.products.length;
+          const activeProducts = (window.products || []).filter(p => !p.isDeleted);
+          measurementCount += activeProducts.length;
 
-          for (const p of window.products) {
+          for (const p of activeProducts) {
             photoCount += (p.photos || []).length;
             videoCount += (p.videos || []).length;
             if (p.measuredDate) {
@@ -174,11 +178,11 @@ export default function OlculerPage() {
               {/* EXPANDED HIERARCHY */}
               {isExpanded && (
                 <div className="border-t border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-950/20 p-5 space-y-6">
-                  {customer.rooms.length === 0 ? (
+                  {customer.rooms.filter(r => !r.isDeleted).length === 0 ? (
                     <p className="text-sm text-gray-500 italic">Oda bulunamadı.</p>
                   ) : null}
 
-                  {customer.rooms.map(room => (
+                  {customer.rooms.filter(r => !r.isDeleted).map(room => (
                     <div key={room.id} className="space-y-3 pl-2 border-l-2 border-gray-200 dark:border-gray-800">
                       {/* Room Header */}
                       <h4 className="font-bold text-sm text-gray-800 dark:text-gray-200 flex items-center gap-2">
@@ -193,11 +197,11 @@ export default function OlculerPage() {
 
                       {/* Openings */}
                       <div className="space-y-4 pl-4">
-                        {room.windows.length === 0 ? (
+                        {room.windows.filter(w => !w.isDeleted).length === 0 ? (
                           <p className="text-xs text-gray-400 italic">Açıklık bulunmuyor.</p>
                         ) : null}
 
-                        {room.windows.map(window => (
+                        {room.windows.filter(w => !w.isDeleted).map(window => (
                           <div key={window.id} className="space-y-2">
                             <h5 className="font-semibold text-xs text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
                               <Layers className="w-3.5 h-3.5 text-gray-400" />
@@ -206,11 +210,11 @@ export default function OlculerPage() {
 
                             {/* Raw Measurements */}
                             <div className="space-y-2 pl-5">
-                              {window.products.length === 0 ? (
+                              {window.products.filter(p => !p.isDeleted).length === 0 ? (
                                 <p className="text-[11px] text-gray-400 italic">Alınmış ölçü kaydı yok.</p>
                               ) : null}
 
-                              {window.products.map(p => {
+                              {window.products.filter(p => !p.isDeleted).map(p => {
                                 const dims = getMeasurementDimensions(p);
                                 const isAssigned = !!(p.productId || p.productType);
 
