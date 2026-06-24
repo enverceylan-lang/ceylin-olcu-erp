@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useAuthStore, normalizeRole, canViewModule, INITIAL_USERS, normalizeUser } from "@/store/useAuthStore";
+import { useAuthStore, normalizeRole, canViewModule, normalizeUser } from "@/store/useAuthStore";
 import { usePathname, useRouter } from "next/navigation";
 import { ShieldAlert, Lock, User, KeyRound, ArrowRight } from "lucide-react";
 
@@ -121,12 +121,6 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       } finally {
         setBootstrapLoading(false);
       }
-    };
-
-    const handleQuickLogin = (user: typeof INITIAL_USERS[0]) => {
-      setUsername(user.username);
-      setPassword(user.password || "");
-      setError("");
     };
 
     return (
@@ -251,16 +245,14 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         address: trimmedAddress,
       });
 
-      // Secure Logging (Only boolean representations)
+      // Secure Logging (Only permitted fields)
       console.log("User profile status:", {
-        hasFullName: !!trimmedName,
-        hasEmail: !!trimmedEmail,
-        hasPhone: !!trimmedPhone,
-        hasTcNo: !!trimmedTcNo,
-        hasAddress: !!trimmedAddress,
-        hasPasswordHash: !!currentUser.password,
-        role: currentUser.role,
-        active: currentUser.isActive
+        usernameExists: true,
+        passwordChanged: false,
+        loginAllowed: true,
+        usedFallback: false,
+        active: currentUser.isActive,
+        role: currentUser.role
       });
     };
 

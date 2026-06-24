@@ -143,16 +143,14 @@ export default function AyarlarPage() {
     setShowAddForm(false);
     setMessage("Kullanıcı eklendi.");
 
-    // Secure Logging (Only boolean representations)
+    // Secure Logging (Only permitted fields)
     console.log("User profile status (admin created user):", {
-      hasFullName: true,
-      hasEmail: true,
-      hasPhone: true,
-      hasTcNo: !!newTcNo.trim(),
-      hasAddress: !!newAddress.trim(),
-      hasPasswordHash: true,
-      role: newRole,
-      active: true
+      usernameExists: true,
+      passwordChanged: true,
+      loginAllowed: true,
+      usedFallback: false,
+      active: true,
+      role: newRole
     });
   };
 
@@ -190,18 +188,15 @@ export default function AyarlarPage() {
 
     updateUser(id, updateData);
 
-    // Secure Logging (Only boolean representations)
+    // Secure Logging (Only permitted fields)
     const userRecord = users.find(x => x.id === id);
-    const finalHasPassword = !!(editPassword.trim() || userRecord?.password);
     console.log("User profile status (admin update):", {
-      hasFullName: !!updateData.name,
-      hasEmail: !!updateData.email,
-      hasPhone: !!updateData.phone,
-      hasTcNo: !!updateData.tcNo,
-      hasAddress: !!updateData.address,
-      hasPasswordHash: finalHasPassword,
-      role: updateData.role,
-      active: userRecord ? userRecord.isActive : true
+      usernameExists: true,
+      passwordChanged: !!editPassword.trim(),
+      loginAllowed: true,
+      usedFallback: false,
+      active: userRecord ? userRecord.isActive : true,
+      role: updateData.role
     });
 
     setEditingUserId(null);
@@ -238,16 +233,14 @@ export default function AyarlarPage() {
     setSelfMessage("Profil bilgileriniz başarıyla güncellendi.");
     setSelfPassword(""); // reset password input
 
-    // Secure Logging (Only boolean representations)
+    // Secure Logging (Only permitted fields)
     console.log("User profile status (self update):", {
-      hasFullName: !!updateData.name,
-      hasEmail: !!updateData.email,
-      hasPhone: !!updateData.phone,
-      hasTcNo: !!updateData.tcNo,
-      hasAddress: !!updateData.address,
-      hasPasswordHash: !!(selfPassword.trim() || currentUser.password),
-      role: currentUser.role,
-      active: currentUser.isActive
+      usernameExists: true,
+      passwordChanged: !!selfPassword.trim(),
+      loginAllowed: true,
+      usedFallback: false,
+      active: currentUser.isActive,
+      role: currentUser.role
     });
   };
 

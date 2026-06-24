@@ -111,12 +111,12 @@ export const ROLE_PERMISSIONS: Record<string, { label: string; canOverrideMeasur
 };
 
 export const INITIAL_USERS: MockUser[] = [
-  { id: 'user-admin', name: 'Yönetici (Admin)', username: 'admin', password: '123', role: 'ADMIN', isActive: true, permissions: [], email: 'admin@ceylin.com', phone: '05555555551' },
-  { id: 'user-sales', name: 'Ayşe (Satış)', username: 'satis', password: '123', role: 'OFFICE', isActive: true, permissions: [], email: 'satis@ceylin.com', phone: '05555555552' },
-  { id: 'user-nihat', name: 'Nihat (Ölçü)', username: 'nihat', password: '123', role: 'FIELD', isActive: true, permissions: [], email: 'nihat@ceylin.com', phone: '05555555553' },
-  { id: 'user-mehmet', name: 'Mehmet (Ölçü)', username: 'mehmet', password: '123', role: 'FIELD', isActive: true, permissions: [], email: 'mehmet@ceylin.com', phone: '05555555554' },
-  { id: 'user-uretim1', name: 'Hasan (Terzi)', username: 'terzi', password: '123', role: 'TAILOR', isActive: true, permissions: [], email: 'terzi@ceylin.com', phone: '05555555555' },
-  { id: 'user-montaj1', name: 'Ali (Montaj)', username: 'installer', password: '123', role: 'INSTALLER', isActive: true, permissions: [], email: 'installer@ceylin.com', phone: '05555555556' },
+  { id: 'user-admin', name: 'Yönetici (Admin)', username: 'admin', role: 'ADMIN', isActive: true, permissions: [], email: 'admin@ceylin.com', phone: '05555555551' },
+  { id: 'user-sales', name: 'Ayşe (Satış)', username: 'satis', role: 'OFFICE', isActive: true, permissions: [], email: 'satis@ceylin.com', phone: '05555555552' },
+  { id: 'user-nihat', name: 'Nihat (Ölçü)', username: 'nihat', role: 'FIELD', isActive: true, permissions: [], email: 'nihat@ceylin.com', phone: '05555555553' },
+  { id: 'user-mehmet', name: 'Mehmet (Ölçü)', username: 'mehmet', role: 'FIELD', isActive: true, permissions: [], email: 'mehmet@ceylin.com', phone: '05555555554' },
+  { id: 'user-uretim1', name: 'Hasan (Terzi)', username: 'terzi', role: 'TAILOR', isActive: true, permissions: [], email: 'terzi@ceylin.com', phone: '05555555555' },
+  { id: 'user-montaj1', name: 'Ali (Montaj)', username: 'installer', role: 'INSTALLER', isActive: true, permissions: [], email: 'installer@ceylin.com', phone: '05555555556' },
 ];
 
 // Re-export for legacy file compatibility
@@ -474,6 +474,14 @@ export const useAuthStore = create<AuthState>()(
         const cleanInputPin = (pin || '').trim();
         
         if (!cleanInputUsername || !cleanInputPin) {
+          console.log("Login attempt status:", {
+            usernameExists: false,
+            passwordChanged: false,
+            loginAllowed: false,
+            usedFallback: false,
+            active: false,
+            role: undefined
+          });
           return false;
         }
 
@@ -489,6 +497,14 @@ export const useAuthStore = create<AuthState>()(
           if (userPassword && userPassword === cleanInputPin) {
             const loggedInUser = { ...localUser, password: cleanInputPin };
             set({ currentUser: loggedInUser });
+            console.log("Login attempt status:", {
+              usernameExists: true,
+              passwordChanged: false,
+              loginAllowed: true,
+              usedFallback: false,
+              active: localUser.isActive,
+              role: localUser.role
+            });
             return true;
           }
         }
@@ -504,14 +520,71 @@ export const useAuthStore = create<AuthState>()(
           if (response.ok) {
             const result = await response.json();
             if (result.success && result.user) {
-              const loggedInUser = { ...result.user, password: cleanInputPin };
-              set({ currentUser: loggedInUser });
+              const remoteUser = normalizeUser(result.user);
+              
+              // If the user exists locally, we check if the local record is actually newer.
+              // If so, it means the password has been changed locally and not synced,
+              // rendering the server credentials obsolete. We reject.
+              if (localUser) {
+                const localUpdate = localUser.updatedAt ? new Date(localUser.updatedAt).getTime() : 0;
+                const remoteUpdate = remoteUser.updatedAt ? new Date(remoteUser.updatedAt).getTime() : 0;
+                
+                if (localUpdate > remoteUpdate) {
+                  console.log("Login attempt status:", {
+                    usernameExists: true,
+                    passwordChanged: false,
+                    loginAllowed: false,
+                    usedFallback: true,
+                    active: localUser.isActive,
+                    role: localUser.role
+                  });
+                  return false;
+                }
+              }
+
+              // Server has newer record, so update local store
+              const loggedInUser = { ...remoteUser, password: cleanInputPin };
+              
+              // Update in local users list
+              const updatedUsers = get().users.map((u: MockUser) => {
+                if (u.id === remoteUser.id) {
+                  return loggedInUser;
+                }
+                return u;
+              });
+              
+              // If not found in users list, append it
+              const exists = get().users.some((u: MockUser) => u.id === remoteUser.id);
+              const finalUsers = exists ? updatedUsers : [...get().users, loggedInUser];
+
+              set({ 
+                currentUser: loggedInUser,
+                users: finalUsers
+              });
+
+              console.log("Login attempt status:", {
+                usernameExists: true,
+                passwordChanged: false,
+                loginAllowed: true,
+                usedFallback: true,
+                active: remoteUser.isActive,
+                role: remoteUser.role
+              });
               return true;
             }
           }
         } catch (err) {
           console.error("Client server-login failed:", err);
         }
+
+        console.log("Login attempt status:", {
+          usernameExists: !!localUser,
+          passwordChanged: false,
+          loginAllowed: false,
+          usedFallback: true,
+          active: localUser ? localUser.isActive : false,
+          role: localUser ? localUser.role : undefined
+        });
         return false;
       },
       
