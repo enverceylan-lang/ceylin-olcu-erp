@@ -62,7 +62,7 @@ export default function AyarlarPage() {
       setSelfAddress(currentUser.address || "");
       setSelfPassword("");
     }
-  }, [currentUser]);
+  }, [currentUser?.id]);
 
   useEffect(() => {
     setMounted(true);

@@ -26,6 +26,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [profileError, setProfileError] = useState("");
 
   const currentUser = rawCurrentUser ? normalizeUser(rawCurrentUser) : null;
+  const currentUserId = currentUser?.id;
 
   useEffect(() => {
     if (currentUser) {
@@ -35,7 +36,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       setProfileTcNo(currentUser.tcNo || "");
       setProfileAddress(currentUser.address || "");
     }
-  }, [currentUser]);
+  }, [currentUserId]);
 
   useEffect(() => {
     setMounted(true);
