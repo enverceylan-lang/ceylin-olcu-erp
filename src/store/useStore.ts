@@ -172,9 +172,9 @@ export const MEASUREMENT_TEMPLATES: Record<string, MeasurementTemplate> = {
           'Diğer Mekanik Perde'
         ]
       },
+      { key: 'quantity', label: 'Adet', type: 'number', defaultValue: 1 },
       { key: 'width', label: 'En (cm)', type: 'number' },
       { key: 'height', label: 'Boy (cm)', type: 'number' },
-      { key: 'quantity', label: 'Adet', type: 'number', defaultValue: 1 },
       { key: 'notes', label: 'Not', type: 'text', defaultValue: '' }
     ]
   }
