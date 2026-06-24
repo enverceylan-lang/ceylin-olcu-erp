@@ -18,7 +18,24 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [bootstrapLoading, setBootstrapLoading] = useState(false);
   const [bootstrapMessage, setBootstrapMessage] = useState("");
 
+  const [profileName, setProfileName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [profilePhone, setProfilePhone] = useState("");
+  const [profileTcNo, setProfileTcNo] = useState("");
+  const [profileAddress, setProfileAddress] = useState("");
+  const [profileError, setProfileError] = useState("");
+
   const currentUser = rawCurrentUser ? normalizeUser(rawCurrentUser) : null;
+
+  useEffect(() => {
+    if (currentUser) {
+      setProfileName(currentUser.name || "");
+      setProfileEmail(currentUser.email || "");
+      setProfilePhone(currentUser.phone || "");
+      setProfileTcNo(currentUser.tcNo || "");
+      setProfileAddress(currentUser.address || "");
+    }
+  }, [currentUser]);
 
   useEffect(() => {
     setMounted(true);
@@ -190,6 +207,166 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
                 {bootstrapMessage}
               </div>
             )}
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // Check if profile is incomplete
+  const isAdmin = currentUser && normalizeRole(currentUser.role) === 'ADMIN';
+  const isSettingsPage = pathname.startsWith('/ayarlar');
+  
+  const isProfileIncomplete = currentUser && (
+    !currentUser.name?.trim() || 
+    !currentUser.email?.trim() || 
+    !currentUser.phone?.trim()
+  );
+  
+  const shouldBlock = isProfileIncomplete && !(isAdmin && isSettingsPage);
+
+  if (shouldBlock && currentUser) {
+    const handleProfileSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      setProfileError("");
+
+      const trimmedName = profileName.trim();
+      const trimmedEmail = profileEmail.trim();
+      const trimmedPhone = profilePhone.trim();
+      const trimmedTcNo = profileTcNo.trim();
+      const trimmedAddress = profileAddress.trim();
+
+      if (!trimmedName || !trimmedEmail || !trimmedPhone) {
+        setProfileError("Lütfen ad soyad, mail adresi ve telefon numarası alanlarını doldurunuz.");
+        return;
+      }
+
+      // Update user in the store
+      useAuthStore.getState().updateUser(currentUser.id, {
+        name: trimmedName,
+        email: trimmedEmail,
+        phone: trimmedPhone,
+        tcNo: trimmedTcNo,
+        address: trimmedAddress,
+      });
+
+      // Secure Logging (Only boolean representations)
+      console.log("User profile status:", {
+        hasFullName: !!trimmedName,
+        hasEmail: !!trimmedEmail,
+        hasPhone: !!trimmedPhone,
+        hasTcNo: !!trimmedTcNo,
+        hasAddress: !!trimmedAddress,
+        hasPasswordHash: !!currentUser.password,
+        role: currentUser.role,
+        active: currentUser.isActive
+      });
+    };
+
+    return (
+      <div className="min-h-screen w-full bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden">
+        {/* Soft decorative background glow */}
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="w-full max-w-lg bg-slate-900/90 border border-slate-800/80 rounded-2xl p-8 shadow-2xl backdrop-blur-md relative z-10 space-y-6">
+          <div className="text-center space-y-2">
+            <div className="w-12 h-12 bg-red-500/10 text-red-500 rounded-2xl flex items-center justify-center mx-auto border border-red-500/20 animate-pulse">
+              <ShieldAlert className="w-6 h-6" />
+            </div>
+            <h2 className="text-xl font-bold text-white">Erişim Kısıtlandı</h2>
+            <p className="text-sm text-red-400 max-w-md mx-auto leading-relaxed">
+              Güvenlik sebebiyle erişiminiz kısıtlanmıştır. Lütfen ad soyad, mail adresi ve telefon numarası bilgilerinizi tamamlayınız.
+            </p>
+          </div>
+
+          <form onSubmit={handleProfileSubmit} className="space-y-4 text-left">
+            {profileError && (
+              <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-xs text-red-400 flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 shrink-0" />
+                <span>{profileError}</span>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">Adı Soyadı</label>
+              <input
+                type="text"
+                required
+                value={profileName}
+                onChange={(e) => setProfileName(e.target.value)}
+                placeholder="Adınız ve soyadınız..."
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-800 bg-slate-950 text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow placeholder-slate-600"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">Mail Adresi</label>
+                <input
+                  type="email"
+                  required
+                  value={profileEmail}
+                  onChange={(e) => setProfileEmail(e.target.value)}
+                  placeholder="ornek@mail.com"
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-800 bg-slate-950 text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow placeholder-slate-600"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">Telefon Numarası</label>
+                <input
+                  type="tel"
+                  required
+                  value={profilePhone}
+                  onChange={(e) => setProfilePhone(e.target.value)}
+                  placeholder="05xx xxx xx xx"
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-800 bg-slate-950 text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow placeholder-slate-600"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider font-normal text-slate-400">TC Kimlik Numarası</label>
+              <input
+                type="text"
+                maxLength={11}
+                value={profileTcNo}
+                onChange={(e) => setProfileTcNo(e.target.value.replace(/\D/g, ""))}
+                placeholder="11 haneli TC kimlik no..."
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-800 bg-slate-950 text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow placeholder-slate-600"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider font-normal text-slate-400">Adres</label>
+              <textarea
+                value={profileAddress}
+                onChange={(e) => setProfileAddress(e.target.value)}
+                placeholder="Ev veya iş adresi..."
+                rows={2}
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-800 bg-slate-950 text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow placeholder-slate-600 resize-none"
+              />
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="submit"
+                className="w-full bg-indigo-655 hover:bg-indigo-600 text-white font-bold py-3 rounded-xl text-sm transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/25 cursor-pointer"
+              >
+                Bilgileri Kaydet ve Devam Et
+              </button>
+            </div>
+            
+            <div className="pt-2 text-center">
+              <button
+                type="button"
+                onClick={() => useAuthStore.getState().logout()}
+                className="text-xs text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                Farklı Kullanıcıyla Giriş Yap
+              </button>
+            </div>
           </form>
         </div>
       </div>

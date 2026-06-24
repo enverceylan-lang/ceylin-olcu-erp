@@ -32,6 +32,10 @@ export interface MockUser {
   permissions?: string[];
   createdAt?: string;
   updatedAt?: string;
+  email?: string;
+  phone?: string;
+  tcNo?: string;
+  address?: string;
 }
 
 export function normalizeRole(role: UserRole | undefined): 'ADMIN' | 'OFFICE' | 'FIELD' | 'TAILOR' | 'INSTALLER' | 'ACCOUNTING' {
@@ -107,12 +111,12 @@ export const ROLE_PERMISSIONS: Record<string, { label: string; canOverrideMeasur
 };
 
 export const INITIAL_USERS: MockUser[] = [
-  { id: 'user-admin', name: 'Yönetici (Admin)', username: 'admin', password: '123', role: 'ADMIN', isActive: true, permissions: [] },
-  { id: 'user-sales', name: 'Ayşe (Satış)', username: 'satis', password: '123', role: 'OFFICE', isActive: true, permissions: [] },
-  { id: 'user-nihat', name: 'Nihat (Ölçü)', username: 'nihat', password: '123', role: 'FIELD', isActive: true, permissions: [] },
-  { id: 'user-mehmet', name: 'Mehmet (Ölçü)', username: 'mehmet', password: '123', role: 'FIELD', isActive: true, permissions: [] },
-  { id: 'user-uretim1', name: 'Hasan (Terzi)', username: 'terzi', password: '123', role: 'TAILOR', isActive: true, permissions: [] },
-  { id: 'user-montaj1', name: 'Ali (Montaj)', username: 'installer', password: '123', role: 'INSTALLER', isActive: true, permissions: [] },
+  { id: 'user-admin', name: 'Yönetici (Admin)', username: 'admin', password: '123', role: 'ADMIN', isActive: true, permissions: [], email: 'admin@ceylin.com', phone: '05555555551' },
+  { id: 'user-sales', name: 'Ayşe (Satış)', username: 'satis', password: '123', role: 'OFFICE', isActive: true, permissions: [], email: 'satis@ceylin.com', phone: '05555555552' },
+  { id: 'user-nihat', name: 'Nihat (Ölçü)', username: 'nihat', password: '123', role: 'FIELD', isActive: true, permissions: [], email: 'nihat@ceylin.com', phone: '05555555553' },
+  { id: 'user-mehmet', name: 'Mehmet (Ölçü)', username: 'mehmet', password: '123', role: 'FIELD', isActive: true, permissions: [], email: 'mehmet@ceylin.com', phone: '05555555554' },
+  { id: 'user-uretim1', name: 'Hasan (Terzi)', username: 'terzi', password: '123', role: 'TAILOR', isActive: true, permissions: [], email: 'terzi@ceylin.com', phone: '05555555555' },
+  { id: 'user-montaj1', name: 'Ali (Montaj)', username: 'installer', password: '123', role: 'INSTALLER', isActive: true, permissions: [], email: 'installer@ceylin.com', phone: '05555555556' },
 ];
 
 // Re-export for legacy file compatibility
@@ -469,18 +473,24 @@ export const useAuthStore = create<AuthState>()(
         const cleanInputUsername = (username || '').trim().toLowerCase();
         const cleanInputPin = (pin || '').trim();
         
-        // 1. Try local authentication first (for mock/unsynced users, or if offline with local credentials)
+        if (!cleanInputUsername || !cleanInputPin) {
+          return false;
+        }
+
+        // 1. Try local authentication first
         const usersList = get().users.map((u: MockUser) => normalizeUser(u));
         const localUser = usersList.find((u: MockUser) => {
           const userUsername = (u.username || '').trim().toLowerCase();
-          const userPassword = (u.password || '').trim();
-          return userUsername === cleanInputUsername && userPassword === cleanInputPin;
+          return userUsername === cleanInputUsername;
         });
 
         if (localUser && localUser.isActive) {
-          const loggedInUser = { ...localUser, password: cleanInputPin };
-          set({ currentUser: loggedInUser });
-          return true;
+          const userPassword = (localUser.password || '').trim();
+          if (userPassword && userPassword === cleanInputPin) {
+            const loggedInUser = { ...localUser, password: cleanInputPin };
+            set({ currentUser: loggedInUser });
+            return true;
+          }
         }
 
         // 2. If local auth fails, try server authentication
@@ -535,16 +545,27 @@ export const useAuthStore = create<AuthState>()(
       
       updateUser: (id: string, data: Partial<MockUser>) => set((state: AuthState) => {
         const now = new Date().toISOString();
+        const dataCopy = { ...data };
+        
+        if (dataCopy.hasOwnProperty('password')) {
+          if (dataCopy.password === undefined || dataCopy.password === null || dataCopy.password.trim() === '') {
+            delete dataCopy.password;
+          } else {
+            dataCopy.password = dataCopy.password.trim();
+          }
+        }
+
         const updatedUsers = state.users.map((u: MockUser) => {
           if (u.id === id) {
-            return normalizeUser({ ...u, ...data, updatedAt: now });
+            return normalizeUser({ ...u, ...dataCopy, updatedAt: now });
           }
           return u;
         });
         
-        const updatedCurrentUser = state.currentUser && state.currentUser.id === id 
-          ? normalizeUser({ ...state.currentUser, ...data, updatedAt: now }) 
-          : state.currentUser;
+        let updatedCurrentUser = state.currentUser;
+        if (state.currentUser && state.currentUser.id === id) {
+          updatedCurrentUser = normalizeUser({ ...state.currentUser, ...dataCopy, updatedAt: now });
+        }
           
         return {
           users: updatedUsers,

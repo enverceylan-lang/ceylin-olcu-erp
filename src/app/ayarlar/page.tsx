@@ -1,7 +1,7 @@
 "use client";
 
 import { Download, Settings, Upload, ShieldCheck, AlertTriangle, UserPlus, Trash2, Check, X, Shield } from "lucide-react";
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, Fragment } from "react";
 import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, MockUser } from "@/store/useAuthStore";
 
 const DATA_KEYS = ["curtain-erp-storage-v3", "curtain-erp-auth-v1"];
@@ -22,12 +22,25 @@ export default function AyarlarPage() {
   // Auth Store
   const { currentUser, users, addUser, updateUser, deleteUser } = useAuthStore();
 
+  // Logged in user profile edit form states
+  const [selfName, setSelfName] = useState("");
+  const [selfEmail, setSelfEmail] = useState("");
+  const [selfPhone, setSelfPhone] = useState("");
+  const [selfTcNo, setSelfTcNo] = useState("");
+  const [selfAddress, setSelfAddress] = useState("");
+  const [selfPassword, setSelfPassword] = useState("");
+  const [selfMessage, setSelfMessage] = useState("");
+
   // Add User Form State
   const [showAddForm, setShowAddForm] = useState(false);
   const [newName, setNewName] = useState("");
   const [newUsername, setNewUsername] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newRole, setNewRole] = useState("FIELD");
+  const [newEmail, setNewEmail] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [newTcNo, setNewTcNo] = useState("");
+  const [newAddress, setNewAddress] = useState("");
 
   // Edit User State
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -35,6 +48,21 @@ export default function AyarlarPage() {
   const [editUsername, setEditUsername] = useState("");
   const [editPassword, setEditPassword] = useState("");
   const [editRole, setEditRole] = useState("FIELD");
+  const [editEmail, setEditEmail] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editTcNo, setEditTcNo] = useState("");
+  const [editAddress, setEditAddress] = useState("");
+
+  useEffect(() => {
+    if (currentUser) {
+      setSelfName(currentUser.name || "");
+      setSelfEmail(currentUser.email || "");
+      setSelfPhone(currentUser.phone || "");
+      setSelfTcNo(currentUser.tcNo || "");
+      setSelfAddress(currentUser.address || "");
+      setSelfPassword("");
+    }
+  }, [currentUser]);
 
   useEffect(() => {
     setMounted(true);
@@ -85,7 +113,10 @@ export default function AyarlarPage() {
   // User Management Handlers
   const handleAddUserSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName.trim() || !newUsername.trim() || !newPassword.trim()) return;
+    if (!newName.trim() || !newUsername.trim() || !newPassword.trim() || !newEmail.trim() || !newPhone.trim()) {
+      setMessage("Hata: Ad soyad, kullanıcı adı, şifre, mail adresi ve telefon numarası zorunludur.");
+      return;
+    }
 
     addUser({
       name: newName.trim(),
@@ -93,7 +124,11 @@ export default function AyarlarPage() {
       password: newPassword.trim(),
       role: newRole as any,
       isActive: true,
-      permissions: []
+      permissions: [],
+      email: newEmail.trim(),
+      phone: newPhone.trim(),
+      tcNo: newTcNo.trim(),
+      address: newAddress.trim()
     });
 
     // Reset Form
@@ -101,25 +136,52 @@ export default function AyarlarPage() {
     setNewUsername("");
     setNewPassword("");
     setNewRole("FIELD");
+    setNewEmail("");
+    setNewPhone("");
+    setNewTcNo("");
+    setNewAddress("");
     setShowAddForm(false);
     setMessage("Kullanıcı eklendi.");
+
+    // Secure Logging (Only boolean representations)
+    console.log("User profile status (admin created user):", {
+      hasFullName: true,
+      hasEmail: true,
+      hasPhone: true,
+      hasTcNo: !!newTcNo.trim(),
+      hasAddress: !!newAddress.trim(),
+      hasPasswordHash: true,
+      role: newRole,
+      active: true
+    });
   };
 
   const startEditingUser = (u: any) => {
     setEditingUserId(u.id);
     setEditName(u.name);
     setEditUsername(u.username);
-    setEditPassword(u.password || "");
+    setEditPassword(""); // Blank by default, so it's not pre-filled/exposed. If left empty, updateUser preserves the current password.
     setEditRole(u.role);
+    setEditEmail(u.email || "");
+    setEditPhone(u.phone || "");
+    setEditTcNo(u.tcNo || "");
+    setEditAddress(u.address || "");
   };
 
   const handleSaveEdit = (id: string) => {
-    if (!editName.trim() || !editUsername.trim()) return;
+    if (!editName.trim() || !editUsername.trim() || !editEmail.trim() || !editPhone.trim()) {
+      setMessage("Hata: Ad soyad, kullanıcı adı, mail adresi ve telefon numarası zorunludur.");
+      return;
+    }
 
     const updateData: Partial<MockUser> = {
       name: editName.trim(),
       username: editUsername.trim().toLowerCase(),
-      role: editRole as any
+      role: editRole as any,
+      email: editEmail.trim(),
+      phone: editPhone.trim(),
+      tcNo: editTcNo.trim(),
+      address: editAddress.trim()
     };
 
     if (editPassword.trim()) {
@@ -128,8 +190,65 @@ export default function AyarlarPage() {
 
     updateUser(id, updateData);
 
+    // Secure Logging (Only boolean representations)
+    const userRecord = users.find(x => x.id === id);
+    const finalHasPassword = !!(editPassword.trim() || userRecord?.password);
+    console.log("User profile status (admin update):", {
+      hasFullName: !!updateData.name,
+      hasEmail: !!updateData.email,
+      hasPhone: !!updateData.phone,
+      hasTcNo: !!updateData.tcNo,
+      hasAddress: !!updateData.address,
+      hasPasswordHash: finalHasPassword,
+      role: updateData.role,
+      active: userRecord ? userRecord.isActive : true
+    });
+
     setEditingUserId(null);
     setMessage("Kullanıcı güncellendi.");
+  };
+
+  const handleSelfUpdate = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSelfMessage("");
+
+    if (!currentUser) {
+      setSelfMessage("Hata: Oturum açık değil.");
+      return;
+    }
+
+    if (!selfName.trim() || !selfEmail.trim() || !selfPhone.trim()) {
+      setSelfMessage("Hata: Ad soyad, mail adresi ve telefon numarası zorunludur.");
+      return;
+    }
+
+    const updateData: Partial<MockUser> = {
+      name: selfName.trim(),
+      email: selfEmail.trim(),
+      phone: selfPhone.trim(),
+      tcNo: selfTcNo.trim(),
+      address: selfAddress.trim()
+    };
+
+    if (selfPassword.trim()) {
+      updateData.password = selfPassword.trim();
+    }
+
+    updateUser(currentUser.id, updateData);
+    setSelfMessage("Profil bilgileriniz başarıyla güncellendi.");
+    setSelfPassword(""); // reset password input
+
+    // Secure Logging (Only boolean representations)
+    console.log("User profile status (self update):", {
+      hasFullName: !!updateData.name,
+      hasEmail: !!updateData.email,
+      hasPhone: !!updateData.phone,
+      hasTcNo: !!updateData.tcNo,
+      hasAddress: !!updateData.address,
+      hasPasswordHash: !!(selfPassword.trim() || currentUser.password),
+      role: currentUser.role,
+      active: currentUser.isActive
+    });
   };
 
   return (
@@ -145,6 +264,113 @@ export default function AyarlarPage() {
           <p><strong>Pilot uyarısı:</strong> Veriler şimdilik bu cihazın tarayıcısında saklanır. Tarayıcı verilerini temizlemeden önce mutlaka yedek alın.</p>
         </div>
       </div>
+
+      {/* Profil Bilgilerim Panel */}
+      {currentUser && (
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 overflow-hidden text-xs">
+          <div className="border-b border-gray-200 p-5 dark:border-gray-800 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-indigo-500/10 text-indigo-650 dark:text-indigo-400 flex items-center justify-center font-bold">
+              {selfName ? selfName[0].toUpperCase() : "U"}
+            </div>
+            <div>
+              <h2 className="font-semibold text-gray-900 dark:text-white">Profil Bilgilerim</h2>
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">Kendi profil detaylarınızı ve şifrenizi güncelleyin.</p>
+            </div>
+          </div>
+          
+          <form onSubmit={handleSelfUpdate} className="p-5 space-y-4">
+            {selfMessage && (
+              <div className={`p-3 rounded-lg border text-[11px] ${
+                selfMessage.startsWith("Hata")
+                  ? "bg-red-500/10 border-red-500/20 text-red-500"
+                  : "bg-green-500/10 border-green-500/20 text-green-600 dark:text-green-400"
+              }`}>
+                {selfMessage}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="block font-bold text-gray-650 dark:text-gray-405 mb-1">Adı Soyadı</label>
+                <input
+                  type="text"
+                  required
+                  value={selfName}
+                  onChange={e => setSelfName(e.target.value)}
+                  className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
+                  placeholder="Nihat Ceylan"
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-gray-650 dark:text-gray-405 mb-1">Mail Adresi</label>
+                <input
+                  type="email"
+                  required
+                  value={selfEmail}
+                  onChange={e => setSelfEmail(e.target.value)}
+                  className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
+                  placeholder="ornek@mail.com"
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-gray-650 dark:text-gray-405 mb-1">Telefon Numarası</label>
+                <input
+                  type="tel"
+                  required
+                  value={selfPhone}
+                  onChange={e => setSelfPhone(e.target.value)}
+                  className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
+                  placeholder="05xx xxx xx xx"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-bold text-gray-650 dark:text-gray-405 mb-1 font-normal text-slate-500">TC Kimlik Numarası</label>
+                <input
+                  type="text"
+                  maxLength={11}
+                  value={selfTcNo}
+                  onChange={e => setSelfTcNo(e.target.value.replace(/\D/g, ""))}
+                  className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
+                  placeholder="11 haneli TC no..."
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-gray-655 dark:text-gray-405 mb-1 font-normal text-slate-500">Yeni Şifre (Mevcut şifreyi korumak için boş bırakın)</label>
+                <input
+                  type="password"
+                  value={selfPassword}
+                  onChange={e => setSelfPassword(e.target.value)}
+                  className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
+                  placeholder="Yeni şifreniz..."
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-bold text-gray-650 dark:text-gray-450 mb-1 font-normal text-slate-500">Adres</label>
+              <textarea
+                value={selfAddress}
+                onChange={e => setSelfAddress(e.target.value)}
+                rows={2}
+                className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none resize-none"
+                placeholder="Ev veya iş adresiniz..."
+              />
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2 rounded-lg text-xs cursor-pointer transition-colors shadow-md shadow-indigo-650/20"
+              >
+                Profil Bilgilerini Kaydet
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* User Management Panel (ADMIN Only) */}
       {currentUser && normalizeRole(currentUser.role) === 'ADMIN' && (
@@ -170,7 +396,7 @@ export default function AyarlarPage() {
           {showAddForm && (
             <form onSubmit={handleAddUserSubmit} className="p-5 border-b border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-950/20 space-y-4 text-xs">
               <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Yeni Kullanıcı Hesabı Ekle</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
                   <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1">Adı Soyadı</label>
                   <input 
@@ -218,6 +444,49 @@ export default function AyarlarPage() {
                     <option value="INSTALLER">Montaj Ekibi</option>
                   </select>
                 </div>
+                <div>
+                  <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1">Mail Adresi</label>
+                  <input 
+                    type="email" 
+                    required 
+                    value={newEmail} 
+                    onChange={e => setNewEmail(e.target.value)}
+                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
+                    placeholder="ornek@mail.com"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1">Telefon Numarası</label>
+                  <input 
+                    type="tel" 
+                    required 
+                    value={newPhone} 
+                    onChange={e => setNewPhone(e.target.value)}
+                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
+                    placeholder="05xx xxx xx xx"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1 font-normal text-slate-500">TC Kimlik Numarası</label>
+                  <input 
+                    type="text" 
+                    maxLength={11}
+                    value={newTcNo} 
+                    onChange={e => setNewTcNo(e.target.value.replace(/\D/g, ""))}
+                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
+                    placeholder="11 haneli TC no..."
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1 font-normal text-slate-500">Adres</label>
+                  <input 
+                    type="text" 
+                    value={newAddress} 
+                    onChange={e => setNewAddress(e.target.value)}
+                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
+                    placeholder="Ev/İş adresi..."
+                  />
+                </div>
               </div>
               <div className="flex justify-end gap-2">
                 <button type="submit" className="bg-indigo-600 hover:bg-indigo-550 text-white font-bold px-4 py-2 rounded-lg text-xs cursor-pointer transition-colors shadow-md shadow-indigo-650/20">Kaydet</button>
@@ -242,92 +511,144 @@ export default function AyarlarPage() {
                 {users.map((u) => {
                   const isEditing = editingUserId === u.id;
                   return (
-                    <tr key={u.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-800/20">
-                      <td className="p-4 font-semibold text-gray-900 dark:text-white">
-                        {isEditing ? (
-                          <input 
-                            type="text" 
-                            value={editName} 
-                            onChange={e => setEditName(e.target.value)}
-                            className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 text-gray-900 dark:text-white text-xs outline-none" 
-                          />
-                        ) : (
-                          u.name
-                        )}
-                      </td>
-                      <td className="p-4 text-gray-600 dark:text-gray-300">
-                        {isEditing ? (
-                          <input 
-                            type="text" 
-                            value={editUsername} 
-                            onChange={e => setEditUsername(e.target.value)}
-                            className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 text-gray-900 dark:text-white text-xs w-28 outline-none" 
-                          />
-                        ) : (
-                          u.username
-                        )}
-                      </td>
-                      <td className="p-4 text-gray-500 dark:text-gray-400 font-mono">
-                        {isEditing ? (
-                          <input 
-                            type="password" 
-                            value={editPassword} 
-                            onChange={e => setEditPassword(e.target.value)}
-                            className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 text-gray-900 dark:text-white text-xs w-24 outline-none" 
-                          />
-                        ) : (
-                          u.password ? "••••" : "-"
-                        )}
-                      </td>
-                      <td className="p-4 font-medium">
-                        {isEditing ? (
-                          <select 
-                            value={editRole} 
-                            onChange={e => setEditRole(e.target.value)}
-                            className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 text-gray-900 dark:text-white text-xs cursor-pointer outline-none"
-                          >
-                            <option value="ADMIN">Yönetici (Admin)</option>
-                            <option value="OFFICE">Ofis / Moderatör</option>
-                            <option value="FIELD">Saha / Plasiyer</option>
-                            <option value="TAILOR">Terzi / Üretici</option>
-                            <option value="INSTALLER">Montaj Ekibi</option>
-                          </select>
-                        ) : (
-                          <span className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded text-[10px] font-bold uppercase border dark:border-gray-800">
-                            {ROLE_PERMISSIONS[u.role]?.label || u.role}
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-4 text-center">
-                        <button
-                          onClick={() => updateUser(u.id, { isActive: !u.isActive })}
-                          className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase border cursor-pointer transition-colors ${
-                            u.isActive 
-                              ? 'bg-green-500/10 text-green-600 border-green-500/20 dark:text-green-400' 
-                              : 'bg-red-500/10 text-red-500 border-red-500/20 dark:text-red-400'
-                          }`}
-                        >
-                          {u.isActive ? "Aktif" : "Pasif"}
-                        </button>
-                      </td>
-                      <td className="p-4 text-right">
-                        <div className="flex items-center justify-end gap-2.5">
+                    <Fragment key={u.id}>
+                      <tr className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-800/20">
+                        <td className="p-4 font-semibold text-gray-900 dark:text-white">
                           {isEditing ? (
-                            <>
-                              <button onClick={() => handleSaveEdit(u.id)} className="text-green-500 hover:text-green-700 p-1 cursor-pointer" title="Kaydet"><Check className="w-4 h-4" /></button>
-                              <button onClick={() => setEditingUserId(null)} className="text-gray-400 hover:text-gray-500 p-1 cursor-pointer" title="İptal"><X className="w-4 h-4" /></button>
-                            </>
+                            <input 
+                              type="text" 
+                              value={editName} 
+                              onChange={e => setEditName(e.target.value)}
+                              className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 text-gray-900 dark:text-white text-xs outline-none" 
+                            />
                           ) : (
-                            <>
-                              <button onClick={() => startEditingUser(u)} className="text-blue-500 hover:underline cursor-pointer">Düzenle</button>
-                              {u.id !== 'user-admin' && (
-                                <button onClick={() => deleteUser(u.id)} className="text-red-500 hover:text-red-700 p-1 cursor-pointer" title="Kullanıcı Sil"><Trash2 className="w-4 h-4" /></button>
-                              )}
-                            </>
+                            u.name
                           )}
-                        </div>
-                      </td>
-                    </tr>
+                        </td>
+                        <td className="p-4 text-gray-600 dark:text-gray-300">
+                          {isEditing ? (
+                            <input 
+                              type="text" 
+                              value={editUsername} 
+                              onChange={e => setEditUsername(e.target.value)}
+                              className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 text-gray-900 dark:text-white text-xs w-28 outline-none" 
+                            />
+                          ) : (
+                            u.username
+                          )}
+                        </td>
+                        <td className="p-4 text-gray-500 dark:text-gray-400 font-mono">
+                          {isEditing ? (
+                            <input 
+                              type="password" 
+                              value={editPassword} 
+                              onChange={e => setEditPassword(e.target.value)}
+                              placeholder="Mevcut PIN..."
+                              className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 text-gray-900 dark:text-white text-xs w-24 outline-none placeholder-slate-650" 
+                            />
+                          ) : (
+                            u.password ? "••••" : "-"
+                          )}
+                        </td>
+                        <td className="p-4 font-medium">
+                          {isEditing ? (
+                            <select 
+                              value={editRole} 
+                              onChange={e => setEditRole(e.target.value)}
+                              className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 text-gray-900 dark:text-white text-xs cursor-pointer outline-none"
+                            >
+                              <option value="ADMIN">Yönetici (Admin)</option>
+                              <option value="OFFICE">Ofis / Moderatör</option>
+                              <option value="FIELD">Saha / Plasiyer</option>
+                              <option value="TAILOR">Terzi / Üretici</option>
+                              <option value="INSTALLER">Montaj Ekibi</option>
+                            </select>
+                          ) : (
+                            <span className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded text-[10px] font-bold uppercase border dark:border-gray-800">
+                              {ROLE_PERMISSIONS[u.role]?.label || u.role}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-4 text-center">
+                          <button
+                            onClick={() => updateUser(u.id, { isActive: !u.isActive })}
+                            className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase border cursor-pointer transition-colors ${
+                              u.isActive 
+                                ? 'bg-green-500/10 text-green-600 border-green-500/20 dark:text-green-400' 
+                                : 'bg-red-500/10 text-red-500 border-red-500/20 dark:text-red-400'
+                            }`}
+                          >
+                            {u.isActive ? "Aktif" : "Pasif"}
+                          </button>
+                        </td>
+                        <td className="p-4 text-right">
+                          <div className="flex items-center justify-end gap-2.5">
+                            {isEditing ? (
+                              <>
+                                <button onClick={() => handleSaveEdit(u.id)} className="text-green-500 hover:text-green-700 p-1 cursor-pointer" title="Kaydet"><Check className="w-4 h-4" /></button>
+                                <button onClick={() => setEditingUserId(null)} className="text-gray-400 hover:text-gray-500 p-1 cursor-pointer" title="İptal"><X className="w-4 h-4" /></button>
+                              </>
+                            ) : (
+                              <>
+                                <button onClick={() => startEditingUser(u)} className="text-blue-500 hover:underline cursor-pointer">Düzenle</button>
+                                {u.id !== 'user-admin' && (
+                                  <button onClick={() => deleteUser(u.id)} className="text-red-500 hover:text-red-700 p-1 cursor-pointer" title="Kullanıcı Sil"><Trash2 className="w-4 h-4" /></button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                      {isEditing && (
+                        <tr className="bg-gray-50/50 dark:bg-gray-800/10">
+                          <td colSpan={6} className="p-4 border-b border-gray-200 dark:border-gray-800">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                              <div>
+                                <label className="block font-semibold text-gray-650 dark:text-gray-400 mb-1">Mail Adresi</label>
+                                <input
+                                  type="email"
+                                  value={editEmail}
+                                  onChange={e => setEditEmail(e.target.value)}
+                                  className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
+                                  placeholder="ornek@mail.com"
+                                />
+                              </div>
+                              <div>
+                                <label className="block font-semibold text-gray-650 dark:text-gray-400 mb-1">Telefon Numarası</label>
+                                <input
+                                  type="tel"
+                                  value={editPhone}
+                                  onChange={e => setEditPhone(e.target.value)}
+                                  className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
+                                  placeholder="05xx xxx xx xx"
+                                />
+                              </div>
+                              <div>
+                                <label className="block font-semibold text-gray-650 dark:text-gray-400 mb-1 font-normal text-slate-500">TC Kimlik Numarası</label>
+                                <input
+                                  type="text"
+                                  maxLength={11}
+                                  value={editTcNo}
+                                  onChange={e => setEditTcNo(e.target.value.replace(/\D/g, ""))}
+                                  className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
+                                  placeholder="11 haneli TC no..."
+                                />
+                              </div>
+                              <div>
+                                <label className="block font-semibold text-gray-650 dark:text-gray-400 mb-1 font-normal text-slate-500">Adres</label>
+                                <input
+                                  type="text"
+                                  value={editAddress}
+                                  onChange={e => setEditAddress(e.target.value)}
+                                  className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
+                                  placeholder="Ev/İş adresi..."
+                                />
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>
