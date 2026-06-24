@@ -119,7 +119,14 @@ export interface Note {
 
 export interface MeasurementTemplate {
   type: string;
-  fields: { key: string; label: string; type: 'number' | 'text' }[];
+  fields: { 
+    key: string; 
+    label: string; 
+    type: 'number' | 'text' | 'select'; 
+    options?: string[]; 
+    defaultValue?: any; 
+    optional?: boolean; 
+  }[];
 }
 
 export const MEASUREMENT_TEMPLATES: Record<string, MeasurementTemplate> = {
@@ -146,6 +153,29 @@ export const MEASUREMENT_TEMPLATES: Record<string, MeasurementTemplate> = {
     fields: [
       { key: 'glassWidth', label: 'Cam Eni (cm)', type: 'number' },
       { key: 'glassHeight', label: 'Cam Boyu (cm)', type: 'number' },
+    ]
+  },
+  mechanical_curtain: {
+    type: 'mechanical_curtain',
+    fields: [
+      {
+        key: 'productType',
+        label: 'Ürün Tipi',
+        type: 'select',
+        options: [
+          'Stor Perde',
+          'Zebra Perde',
+          'Dikey Stor',
+          'Dikey Tül',
+          'Ahşap Jaluzi',
+          'Picasso',
+          'Diğer Mekanik Perde'
+        ]
+      },
+      { key: 'width', label: 'En (cm)', type: 'number' },
+      { key: 'height', label: 'Boy (cm)', type: 'number' },
+      { key: 'quantity', label: 'Adet', type: 'number', defaultValue: 1 },
+      { key: 'notes', label: 'Not', type: 'text', defaultValue: '' }
     ]
   }
 };

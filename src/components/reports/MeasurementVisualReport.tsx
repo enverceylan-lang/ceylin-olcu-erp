@@ -2,7 +2,7 @@ import React from 'react';
 import { X, Printer } from 'lucide-react';
 import { Customer, MEASUREMENT_TEMPLATES, WindowItem, ProductMeasurement } from '@/store/useStore';
 import { getTemplateLabel, getMeasurementDimensions } from '@/lib/measurementAdapter';
-import { calculatePlicellM2 } from '@/lib/reportFormatters';
+import { calculatePlicellM2, calculateMechanicalCurtainM2 } from '@/lib/reportFormatters';
 import { renderSimpleWidthHeightDiagram, renderCurtainDetailDiagram } from '@/lib/measurementDiagram';
 
 interface MeasurementVisualReportProps {
@@ -42,6 +42,8 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
 
   let globalPlicellCount = 0;
   let globalPlicellM2 = 0;
+  let globalMechanicalCount = 0;
+  let globalMechanicalM2 = 0;
 
   const handlePrint = () => {
     window.print();
@@ -141,18 +143,26 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                 customer.rooms.map((room, roomIdx) => {
                   const windows = room.windows || [];
                   
-                  // Split products inside room into plicell and standard
+                  // Split products inside room into plicell, mechanical curtain, and standard
                   const plicellProducts: { p: ProductMeasurement; index: number; winName: string }[] = [];
+                  const mechanicalCurtainProducts: { p: ProductMeasurement; index: number; winName: string }[] = [];
                   const standardOpenings: { winName: string; winItem: WindowItem; products: ProductMeasurement[] }[] = [];
 
                   let plicellCounter = 0;
+                  let mechanicalCurtainCounter = 0;
                   windows.forEach(win => {
                     const plicellItems = win.products?.filter(p => p.templateType === 'PLICELL') || [];
-                    const standardItems = win.products?.filter(p => p.templateType !== 'PLICELL') || [];
+                    const mechanicalCurtainItems = win.products?.filter(p => p.templateType === 'mechanical_curtain') || [];
+                    const standardItems = win.products?.filter(p => p.templateType !== 'PLICELL' && p.templateType !== 'mechanical_curtain') || [];
 
                     if (plicellItems.length > 0) {
                       plicellItems.forEach(p => {
                         plicellProducts.push({ p, index: ++plicellCounter, winName: win.name });
+                      });
+                    }
+                    if (mechanicalCurtainItems.length > 0) {
+                      mechanicalCurtainItems.forEach(p => {
+                        mechanicalCurtainProducts.push({ p, index: ++mechanicalCurtainCounter, winName: win.name });
                       });
                     }
                     if (standardItems.length > 0) {
@@ -383,6 +393,92 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                             </div>
                           )}
 
+                          {/* C. Render Mechanical Curtain Group (Tablo) */}
+                          {mechanicalCurtainProducts.length > 0 && (
+                            <div className="space-y-3 mt-4">
+                              <h4 className="text-xs font-bold text-slate-400 print:text-slate-600 border-b border-slate-800 print:border-slate-200 pb-1">
+                                [Ölçü Grubu: Mekanik Perde Ölçüsü]
+                              </h4>
+                              
+                              <div className="overflow-x-auto rounded-lg border border-slate-850 print:border-slate-200">
+                                <table className="w-full text-xs text-left border-collapse">
+                                  <thead>
+                                    <tr className="bg-slate-950/60 print:bg-slate-100 text-slate-400 print:text-slate-700 font-bold border-b border-slate-850 print:border-slate-200">
+                                      <th className="p-2.5 text-center w-12">No</th>
+                                      <th className="p-2.5">Açıklık Adı</th>
+                                      <th className="p-2.5">Ürün Tipi</th>
+                                      <th className="p-2.5 text-right">Gerçek En</th>
+                                      <th className="p-2.5 text-right">Gerçek Boy</th>
+                                      <th className="p-2.5 text-right">Hesap En</th>
+                                      <th className="p-2.5 text-right">Hesap Boy</th>
+                                      <th className="p-2.5 text-center w-16">Adet</th>
+                                      <th className="p-2.5 text-right w-24">Hesap m²</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {(() => {
+                                      let roomMechanicalM2 = 0;
+                                      const notesList: { idx: number; note: string }[] = [];
+
+                                      const rows = mechanicalCurtainProducts.map(({ p, index, winName }) => {
+                                        const w = Number(p.rawValues?.width || 0);
+                                        const h = Number(p.rawValues?.height || 0);
+                                        const q = Number(p.rawValues?.quantity || 1);
+                                        const productType = p.rawValues?.productType || 'Stor Perde';
+                                        const calc = calculateMechanicalCurtainM2(w, h, q);
+
+                                        roomMechanicalM2 += calc.totalM2;
+                                        globalMechanicalCount += q;
+                                        globalMechanicalM2 += calc.totalM2;
+
+                                        if (p.notes && p.notes.trim()) {
+                                          notesList.push({ idx: index, note: p.notes.trim() });
+                                        }
+
+                                        return (
+                                          <tr key={p.id} className="border-b border-slate-900 last:border-0 print:border-slate-200 hover:bg-slate-900/30 print:hover:bg-transparent">
+                                            <td className="p-2.5 text-center font-semibold text-slate-400 print:text-slate-500">{index}</td>
+                                            <td className="p-2.5 font-medium text-slate-200 print:text-black">{winName}</td>
+                                            <td className="p-2.5 font-medium text-blue-400 print:text-blue-700">{productType}</td>
+                                            <td className="p-2.5 text-right font-semibold">{w.toFixed(1)} cm</td>
+                                            <td className="p-2.5 text-right font-semibold">{h.toFixed(1)} cm</td>
+                                            <td className="p-2.5 text-right font-bold text-blue-400 print:text-blue-700">{calc.billingWidth} cm</td>
+                                            <td className="p-2.5 text-right font-bold text-blue-400 print:text-blue-700">{calc.billingHeight} cm</td>
+                                            <td className="p-2.5 text-center font-semibold">{q} Adet</td>
+                                            <td className="p-2.5 text-right font-bold text-green-400 print:text-green-700">{calc.totalM2.toFixed(2)} m²</td>
+                                          </tr>
+                                        );
+                                      });
+
+                                      return (
+                                        <>
+                                          {rows}
+                                          <tr className="bg-slate-950/40 print:bg-slate-50 font-bold border-t-2 border-slate-850 print:border-slate-300">
+                                            <td colSpan={3} className="p-3 text-slate-300 print:text-slate-700">Toplam Mekanik Adedi: {mechanicalCurtainProducts.reduce((acc, curr) => acc + Number(curr.p.rawValues?.quantity || 1), 0)}</td>
+                                            <td colSpan={5} className="p-3 text-right text-slate-400 print:text-slate-600">Toplam Oda m²:</td>
+                                            <td className="p-3 text-right text-green-400 print:text-green-700 text-sm">{roomMechanicalM2.toFixed(2)} m²</td>
+                                          </tr>
+                                          {notesList.length > 0 && (
+                                            <tr>
+                                              <td colSpan={9} className="p-3 bg-slate-950/20 border-t border-slate-900 print:border-slate-200">
+                                                <div className="space-y-1 text-slate-300 print:text-slate-700">
+                                                  <span className="font-bold uppercase text-[9.5px] text-amber-500 print:text-amber-700 block">Notlar:</span>
+                                                  {notesList.map(n => (
+                                                    <div key={n.idx} className="text-[11px]">- {n.idx}. Mekanik: <span className="font-medium text-slate-200 print:text-black">{n.note}</span></div>
+                                                  ))}
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          )}
+                                        </>
+                                      );
+                                    })()}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
+
                         </div>
                       )}
                     </div>
@@ -396,6 +492,13 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
               <div className="my-6 p-4 rounded-xl bg-slate-950/60 print:bg-slate-50 border border-slate-850 print:border-slate-300 flex justify-between items-center text-sm font-bold print:text-xs">
                 <span className="text-slate-300 print:text-slate-700">Genel Plicell Rapor Toplamı:</span>
                 <span className="text-green-400 print:text-green-700 text-lg print:text-sm">{globalPlicellCount} Adet Cam / {globalPlicellM2.toFixed(2)} m²</span>
+              </div>
+            )}
+
+            {globalMechanicalCount > 0 && (
+              <div className="my-4 p-4 rounded-xl bg-slate-950/60 print:bg-slate-50 border border-slate-850 print:border-slate-300 flex justify-between items-center text-sm font-bold print:text-xs">
+                <span className="text-slate-300 print:text-slate-700">Genel Mekanik Perde Rapor Toplamı:</span>
+                <span className="text-green-400 print:text-green-700 text-lg print:text-sm">{globalMechanicalCount} Adet Mekanik Perde / {globalMechanicalM2.toFixed(2)} m²</span>
               </div>
             )}
 

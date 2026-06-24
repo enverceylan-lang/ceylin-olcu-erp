@@ -2,6 +2,7 @@ export const TEMPLATE_LABELS: Record<string, string> = {
   CURTAIN_DETAIL: "Detay Perde Ölçüsü",
   SIMPLE_WIDTH_HEIGHT: "Basit En-Boy Ölçüsü",
   PLICELL: "Plicell Cam İçi Ölçüsü",
+  mechanical_curtain: "Mekanik Perde Ölçüsü",
   CURTAIN: "Detay Perde Ölçüsü" // legacy fallback mapping
 };
 
@@ -70,6 +71,17 @@ export function getMeasurementDimensions(measurement: any): MeasurementDimension
     structuralWidth = glassWidth;
     structuralHeight = glassHeight;
     summaryLabel = `Cam: ${glassWidth}x${glassHeight} cm`;
+  } else if (templateType === 'mechanical_curtain') {
+    const productType = rawValues.productType || 'Mekanik Perde';
+    const width = Number(rawValues.width || 0);
+    const height = Number(rawValues.height || 0);
+    const quantity = Number(rawValues.quantity || 1);
+
+    rawWidth = width;
+    rawHeight = height;
+    structuralWidth = width;
+    structuralHeight = height;
+    summaryLabel = `${productType} — ${width} en x ${height} boy${quantity > 1 ? ` x ${quantity} Adet` : ''}`;
   } else {
     // Legacy measurements fallback
     structuralWidth = Number(measurement.calculatedWidth || measurement.width || 0);

@@ -32,6 +32,43 @@ export function calculatePlicellM2(widthCm: number, heightCm: number) {
   };
 }
 
+/**
+ * Calculates billing dimensions and square meters for Mechanical Curtain.
+ * - If actual width < 100 cm, billing width = 100 cm.
+ * - If actual width >= 100 cm, billing width is rounded up to next 10 cm.
+ * - If actual height < 200 cm, billing height = 200 cm.
+ * - If actual height >= 200 cm, billing height is rounded up to next 10 cm.
+ * - Unit m2 = billingWidth * billingHeight / 10000
+ * - Total m2 = Unit m2 * quantity
+ */
+export function calculateMechanicalCurtainM2(widthCm: number, heightCm: number, quantity: number = 1) {
+  let billingWidth = 100;
+  if (widthCm < 100) {
+    billingWidth = 100;
+  } else {
+    billingWidth = roundUpToNext10(widthCm);
+  }
+
+  let billingHeight = 200;
+  if (heightCm < 200) {
+    billingHeight = 200;
+  } else {
+    billingHeight = roundUpToNext10(heightCm);
+  }
+
+  const unitM2 = Number(((billingWidth * billingHeight) / 10000).toFixed(4));
+  const totalM2 = Number((unitM2 * quantity).toFixed(4));
+
+  return {
+    actualWidth: widthCm,
+    actualHeight: heightCm,
+    billingWidth,
+    billingHeight,
+    unitM2: Number(unitM2.toFixed(2)),
+    totalM2: Number(totalM2.toFixed(2))
+  };
+}
+
 // ─── WhatsApp Short Report Builder ───
 
 export function buildWhatsAppShortReport(customer: Customer, users: { id: string; name: string }[]): string {
@@ -83,6 +120,8 @@ export function buildWhatsAppShortReport(customer: Customer, users: { id: string
 
   let globalPlicellCount = 0;
   let globalPlicellM2 = 0;
+  let globalMechanicalCount = 0;
+  let globalMechanicalM2 = 0;
 
   // 3. Process Rooms
   customer.rooms.forEach((room, roomIndex) => {
@@ -95,19 +134,28 @@ export function buildWhatsAppShortReport(customer: Customer, users: { id: string
       return;
     }
 
-    // Split windows into Plicell and non-Plicell for specialized layout
-    // We group Plicell items per room
+    // Split windows into Plicell, Mechanical Curtain and standard for specialized layout
+    // We group Plicell items and Mechanical Curtain items per room
     const plicellProducts: { p: ProductMeasurement; indexInRoom: number; openingName: string }[] = [];
+    const mechanicalCurtainProducts: { p: ProductMeasurement; indexInRoom: number; openingName: string }[] = [];
     const standardOpenings: { window: WindowItem; products: ProductMeasurement[] }[] = [];
 
     let plicellCounter = 0;
+    let mechanicalCounter = 0;
     windows.forEach((win) => {
       const plicellItems = win.products?.filter(p => p.templateType === 'PLICELL') || [];
-      const standardItems = win.products?.filter(p => p.templateType !== 'PLICELL') || [];
+      const mechanicalItems = win.products?.filter(p => p.templateType === 'mechanical_curtain') || [];
+      const standardItems = win.products?.filter(p => p.templateType !== 'PLICELL' && p.templateType !== 'mechanical_curtain') || [];
 
       if (plicellItems.length > 0) {
         plicellItems.forEach(item => {
           plicellProducts.push({ p: item, indexInRoom: ++plicellCounter, openingName: win.name });
+        });
+      }
+
+      if (mechanicalItems.length > 0) {
+        mechanicalItems.forEach(item => {
+          mechanicalCurtainProducts.push({ p: item, indexInRoom: ++mechanicalCounter, openingName: win.name });
         });
       }
 
@@ -183,7 +231,7 @@ export function buildWhatsAppShortReport(customer: Customer, users: { id: string
       const notesList: string[] = [];
       let roomPlicellM2 = 0;
 
-      plicellProducts.forEach(({ p, indexInRoom, openingName }) => {
+      plicellProducts.forEach(({ p, indexInRoom }) => {
         const w = Number(p.rawValues?.glassWidth || 0);
         const h = Number(p.rawValues?.glassHeight || 0);
         const calc = calculatePlicellM2(w, h);
@@ -208,12 +256,58 @@ export function buildWhatsAppShortReport(customer: Customer, users: { id: string
       }
     }
 
+    // C. Render Mechanical Curtain Group (Kompakt Liste)
+    if (mechanicalCurtainProducts.length > 0) {
+      lines.push(`  Ölçü: Mekanik Perde Ölçüsü`);
+      
+      const notesList: string[] = [];
+      let roomMechanicalM2 = 0;
+
+      mechanicalCurtainProducts.forEach(({ p, indexInRoom }) => {
+        const w = Number(p.rawValues?.width || 0);
+        const h = Number(p.rawValues?.height || 0);
+        const q = Number(p.rawValues?.quantity || 1);
+        const productType = p.rawValues?.productType || 'Stor Perde';
+        const calc = calculateMechanicalCurtainM2(w, h, q);
+
+        roomMechanicalM2 += calc.totalM2;
+        globalMechanicalCount += q;
+        globalMechanicalM2 += calc.totalM2;
+
+        const qtySuffix = q > 1 ? ` x ${q} adet` : '';
+        const m2Formula = q > 1 
+          ? ` = ${calc.unitM2.toFixed(2)} m² x ${q} = ${calc.totalM2.toFixed(2)} m²` 
+          : ` = ${calc.totalM2.toFixed(2)} m²`;
+
+        lines.push(`  ${indexInRoom}) ${productType} — ${w} en x ${h} boy${qtySuffix} → Hesap: ${calc.billingWidth} x ${calc.billingHeight}${m2Formula}`);
+        
+        // Collect notes if any
+        if (p.notes && p.notes.trim()) {
+          notesList.push(`  - ${indexInRoom}. Mekanik: ${p.notes.trim()}`);
+        }
+      });
+
+      const totalQuantity = mechanicalCurtainProducts.reduce((acc, curr) => acc + Number(curr.p.rawValues?.quantity || 1), 0);
+      lines.push(`  Toplam: ${totalQuantity} Adet Mekanik Perde - ${roomMechanicalM2.toFixed(2)} m²`);
+
+      if (notesList.length > 0) {
+        lines.push(`  Notlar:`);
+        notesList.forEach(nl => lines.push(nl));
+      }
+    }
+
     lines.push(''); // spacing between rooms
   });
 
   // 4. Overall Plicell Grand Total
   if (globalPlicellCount > 0) {
     lines.push(`*GENEL PLİCELL TOPLAMI: ${globalPlicellCount} Adet Cam - ${globalPlicellM2.toFixed(2)} m²*`);
+    lines.push('');
+  }
+
+  // 4.1. Overall Mechanical Curtain Grand Total
+  if (globalMechanicalCount > 0) {
+    lines.push(`*GENEL MEKANİK PERDE TOPLAMI: ${globalMechanicalCount} Adet Mekanik Perde - ${globalMechanicalM2.toFixed(2)} m²*`);
     lines.push('');
   }
 

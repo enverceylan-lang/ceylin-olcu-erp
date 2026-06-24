@@ -9,7 +9,7 @@ import { getMeasurementDimensions, getTemplateLabel, getGoogleMapsUrl, getWorkfl
 import { fileToDataUrl } from "@/lib/fileStorage";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
 import { syncNow } from "@/lib/syncService";
-import { buildWhatsAppShortReport } from "@/lib/reportFormatters";
+import { buildWhatsAppShortReport, calculateMechanicalCurtainM2 } from "@/lib/reportFormatters";
 import { MeasurementVisualReport } from "@/components/reports/MeasurementVisualReport";
 
 export default function CariDetayPage({ params }: { params: Promise<{ id: string }> }) {
@@ -443,11 +443,19 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       const measuredByUser = users.find(u => u.id === overrideMeasuredById) || user;
       const now = new Date().toISOString();
 
-      const parsedRawValues: Record<string, number> = {};
+      const parsedRawValues: Record<string, any> = {};
       const templateFields = MEASUREMENT_TEMPLATES[selectedTemplate]?.fields || [];
       templateFields.forEach(f => {
         const val = rawValues[f.key];
-        parsedRawValues[f.key] = val !== undefined && val !== '' ? Number(val) : 0;
+        if (f.type === 'number') {
+          const defVal = f.defaultValue !== undefined ? f.defaultValue : 0;
+          parsedRawValues[f.key] = val !== undefined && val !== '' ? Number(val) : defVal;
+        } else if (f.type === 'select') {
+          const firstOpt = f.options && f.options.length > 0 ? f.options[0] : '';
+          parsedRawValues[f.key] = val !== undefined && val !== '' ? String(val) : firstOpt;
+        } else {
+          parsedRawValues[f.key] = val !== undefined && val !== null ? String(val) : '';
+        }
       });
 
       if (editingMeasurementId) {
@@ -1186,24 +1194,77 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                               </div>
 
                               {/* Raw Values Grid */}
-                              <div className="bg-gray-50 dark:bg-gray-900 p-3 rounded grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3 border border-gray-200 dark:border-gray-700">
-                                {Object.entries(p.rawValues || {}).map(([key, val]) => {
-                                  const template = MEASUREMENT_TEMPLATES[p.templateType] || (p.templateType === 'CURTAIN' ? MEASUREMENT_TEMPLATES['CURTAIN_DETAIL'] : undefined);
-                                  const label = template?.fields.find(f => f.key === key)?.label || key;
-                                  return (
-                                    <div key={key} className="flex flex-col">
-                                      <span className="text-[10px] text-gray-500 uppercase">{label}</span>
-                                      <span className="font-semibold text-gray-900 dark:text-white text-sm">{String(val)}</span>
-                                    </div>
-                                  );
-                                })}
-                                {p.notes && (
-                                  <div className="col-span-full mt-1 pt-1 border-t border-gray-200 dark:border-gray-700">
-                                    <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase">Saha Notu:</span>
-                                    <span className="text-sm text-gray-800 dark:text-gray-200 block">{p.notes}</span>
+                              {/* Raw Values Grid */}
+                              {p.templateType === 'mechanical_curtain' ? (
+                                <div className="bg-blue-50/50 dark:bg-blue-950/10 p-3.5 rounded-lg mb-3 border border-blue-100 dark:border-blue-900/30">
+                                  <div className="text-sm font-bold text-blue-700 dark:text-blue-400 mb-2.5 flex items-center justify-between">
+                                    <span>{p.rawValues?.productType || 'Diğer Mekanik Perde'}</span>
+                                    {Number(p.rawValues?.quantity || 1) > 1 && (
+                                      <span className="bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 text-xs px-2 py-0.5 rounded-full">
+                                        {p.rawValues?.quantity} Adet
+                                      </span>
+                                    )}
                                   </div>
-                                )}
-                              </div>
+                                  <div className="grid grid-cols-3 gap-3 text-xs">
+                                    <div className="bg-white dark:bg-gray-900/60 p-2 rounded border border-gray-100 dark:border-gray-800">
+                                      <span className="text-[9px] text-gray-500 uppercase block font-medium">Gerçek Ölçü</span>
+                                      <span className="font-semibold text-gray-900 dark:text-white text-[13px]">
+                                        {p.rawValues?.width} × {p.rawValues?.height} cm
+                                      </span>
+                                    </div>
+                                    <div className="bg-white dark:bg-gray-900/60 p-2 rounded border border-gray-100 dark:border-gray-800">
+                                      <span className="text-[9px] text-gray-500 uppercase block font-medium">Hesap Ölçüsü</span>
+                                      <span className="font-semibold text-gray-900 dark:text-white text-[13px]">
+                                        {(() => {
+                                          const w = Number(p.rawValues?.width || 0);
+                                          const h = Number(p.rawValues?.height || 0);
+                                          const calc = calculateMechanicalCurtainM2(w, h, 1);
+                                          return `${calc.billingWidth} × ${calc.billingHeight} cm`;
+                                        })()}
+                                      </span>
+                                    </div>
+                                    <div className="bg-green-50/40 dark:bg-green-950/10 p-2 rounded border border-green-100/50 dark:border-green-900/20">
+                                      <span className="text-[9px] text-green-600 dark:text-green-400 uppercase block font-medium">
+                                        {Number(p.rawValues?.quantity || 1) > 1 ? 'Toplam m²' : 'm²'}
+                                      </span>
+                                      <span className="font-bold text-green-700 dark:text-green-400 text-[13px]">
+                                        {(() => {
+                                          const w = Number(p.rawValues?.width || 0);
+                                          const h = Number(p.rawValues?.height || 0);
+                                          const q = Number(p.rawValues?.quantity || 1);
+                                          const calc = calculateMechanicalCurtainM2(w, h, q);
+                                          return `${calc.totalM2.toFixed(2)} m²`;
+                                        })()}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  {p.rawValues?.notes && p.rawValues?.notes.trim() && (
+                                    <div className="mt-2.5 pt-2 border-t border-dashed border-blue-100 dark:border-blue-900/30 text-xs">
+                                      <span className="text-[9px] text-gray-500 uppercase block font-medium">Not:</span>
+                                      <span className="text-gray-700 dark:text-gray-300">{p.rawValues?.notes}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="bg-gray-50 dark:bg-gray-900 p-3 rounded grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3 border border-gray-200 dark:border-gray-700">
+                                  {Object.entries(p.rawValues || {}).map(([key, val]) => {
+                                    const template = MEASUREMENT_TEMPLATES[p.templateType] || (p.templateType === 'CURTAIN' ? MEASUREMENT_TEMPLATES['CURTAIN_DETAIL'] : undefined);
+                                    const label = template?.fields.find(f => f.key === key)?.label || key;
+                                    return (
+                                      <div key={key} className="flex flex-col">
+                                        <span className="text-[10px] text-gray-500 uppercase">{label}</span>
+                                        <span className="font-semibold text-gray-900 dark:text-white text-sm">{String(val)}</span>
+                                      </div>
+                                    );
+                                  })}
+                                  {p.notes && (
+                                    <div className="col-span-full mt-1 pt-1 border-t border-gray-200 dark:border-gray-700">
+                                      <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase">Saha Notu:</span>
+                                      <span className="text-sm text-gray-800 dark:text-gray-200 block">{p.notes}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
 
                               {/* Display Measurement Attachments */}
                               {((p.photos && p.photos.length > 0) || (p.videos && p.videos.length > 0)) && (
@@ -1448,16 +1509,28 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
                                 <div className={`grid gap-3 bg-gray-50 dark:bg-gray-800/50 p-3 rounded border dark:border-gray-700 ${selectedTemplate === 'CURTAIN_DETAIL' ? 'grid-cols-3' : 'grid-cols-2'}`}>
                                   {MEASUREMENT_TEMPLATES[selectedTemplate]?.fields.map(f => (
-                                    <div key={f.key}>
+                                    <div key={f.key} className={selectedTemplate === 'mechanical_curtain' && f.key === 'notes' ? 'col-span-2' : ''}>
                                       <label className="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1">{f.label}</label>
-                                      <input 
-                                        type={f.type} 
-                                        step={f.type === 'number' ? 'any' : undefined}
-                                        placeholder={f.label}
-                                        value={rawValues[f.key] || ''}
-                                        onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
-                                        className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
-                                      />
+                                      {f.type === 'select' ? (
+                                        <select
+                                          value={rawValues[f.key] !== undefined ? rawValues[f.key] : (f.options && f.options.length > 0 ? f.options[0] : '')}
+                                          onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
+                                          className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
+                                        >
+                                          {f.options?.map(opt => (
+                                            <option key={opt} value={opt}>{opt}</option>
+                                          ))}
+                                        </select>
+                                      ) : (
+                                        <input 
+                                          type={f.type} 
+                                          step={f.type === 'number' ? 'any' : undefined}
+                                          placeholder={f.label}
+                                          value={rawValues[f.key] !== undefined ? rawValues[f.key] : (f.defaultValue !== undefined ? f.defaultValue : '')}
+                                          onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
+                                          className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
+                                        />
+                                      )}
                                     </div>
                                   ))}
                                 </div>
