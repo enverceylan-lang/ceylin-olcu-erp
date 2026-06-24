@@ -1166,20 +1166,27 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                 </div>
                                 <div className="flex items-center gap-2">
                                    {mode === 'MEASUREMENT' && (
-                                     <button 
-                                       onClick={() => {
-                                         setEditingMeasurementId(p.id);
-                                         setActiveWindowIdForProduct(window.id);
-                                         setSelectedTemplate(p.templateType);
-                                         setRawValues(p.rawValues || {});
-                                         setMeasurementNotes(p.notes || "");
-                                         setOverrideMeasuredById(p.measuredById || currentUser?.id || "");
-                                       }}
-                                       className="text-blue-500 hover:text-blue-700 p-1 cursor-pointer font-bold text-xs flex items-center gap-1 transition-colors bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
-                                       title="Ölçüyü Düzenle"
-                                     >
-                                       Düzenle
-                                     </button>
+                                      (normRole === 'ADMIN' || normRole === 'OFFICE') ? (
+                                        <button 
+                                          onClick={() => {
+                                            const resolvedTemplate = p.templateType === 'CURTAIN' ? 'CURTAIN_DETAIL' : p.templateType;
+                                            setEditingMeasurementId(p.id);
+                                            setActiveWindowIdForProduct(window.id);
+                                            setSelectedTemplate(resolvedTemplate);
+                                            setRawValues(p.rawValues || {});
+                                            setMeasurementNotes(p.notes || "");
+                                            setOverrideMeasuredById(p.measuredById || currentUser?.id || "");
+                                          }}
+                                          className="text-blue-500 hover:text-blue-700 p-1 cursor-pointer font-bold text-xs flex items-center gap-1 transition-colors bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
+                                          title="Ölçüyü Düzenle"
+                                        >
+                                          Düzenle
+                                        </button>
+                                      ) : (
+                                        <span className="text-[10px] text-gray-400 dark:text-gray-500 italic block mt-1">
+                                          Kaydedilen ölçüler sadece yönetici tarafından düzenlenebilir.
+                                        </span>
+                                      )
                                    )}
                                    <button 
                                       onClick={() => setDeleteConfirm({
@@ -1193,7 +1200,6 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                  </div>
                               </div>
 
-                              {/* Raw Values Grid */}
                               {/* Raw Values Grid */}
                               {p.templateType === 'mechanical_curtain' ? (
                                 <div className="bg-blue-50/50 dark:bg-blue-950/10 p-3.5 rounded-lg mb-3 border border-blue-100 dark:border-blue-900/30">
@@ -1547,7 +1553,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                 </div>
 
                                 <button onClick={() => handleSaveMeasurement(room.id, window.id)} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow-md transition-colors text-sm">
-                                  {editingMeasurementId ? "Değişiklikleri Kaydet" : "Saha Ölçüsünü Kaydet"}
+                                  {editingMeasurementId ? "Değişiklikleri Kaydet" : "Ölçüyü Kaydet"}
                                 </button>
                               </div>
                             </div>
