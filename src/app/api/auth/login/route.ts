@@ -74,9 +74,18 @@ export async function POST(req: NextRequest) {
     // Sanitize user (exclude password hash) before returning to client
     const { password: _, ...sanitizedUser } = user;
 
+    const finalSanitizedUser = {
+      ...sanitizedUser,
+      email: user.email || null,
+      phone: user.phone || null,
+      tcNo: user.tcNo || null,
+      address: user.address || null,
+      profileCompletedAt: user.profileCompletedAt || null,
+    };
+
     return NextResponse.json({
       success: true,
-      user: sanitizedUser,
+      user: finalSanitizedUser,
     });
   } catch (error: any) {
     console.error("Login API failed:", error);

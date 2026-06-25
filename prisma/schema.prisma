@@ -9,15 +9,20 @@ datasource db {
 }
 
 model User {
-  id          String   @id @default(cuid())
-  name        String
-  username    String   @unique
-  password    String   // Hashed password/PIN
-  role        String   // ADMIN, OFFICE, SALES, FIELD, MEASUREMENT, TAILOR, PRODUCTION, INSTALLER, INSTALLATION
-  isActive    Boolean  @default(true)
-  permissions String[] // Permitted modules
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                 String    @id @default(cuid())
+  name               String
+  username           String    @unique
+  password           String    // Hashed password/PIN
+  role               String    // ADMIN, OFFICE, SALES, FIELD, MEASUREMENT, TAILOR, PRODUCTION, INSTALLER, INSTALLATION
+  isActive           Boolean   @default(true)
+  permissions        String[]  // Permitted modules
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  email              String?
+  phone              String?
+  tcNo               String?
+  address            String?
+  profileCompletedAt DateTime?
 }
 
 model Customer {

@@ -243,16 +243,18 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         phone: trimmedPhone,
         tcNo: trimmedTcNo,
         address: trimmedAddress,
+        profileCompletedAt: new Date().toISOString()
       });
 
-      // Secure Logging (Only permitted fields)
+      // Secure Logging (Only boolean flags and non-sensitive status)
       console.log("User profile status:", {
-        usernameExists: true,
-        passwordChanged: false,
-        loginAllowed: true,
-        usedFallback: false,
-        active: currentUser.isActive,
-        role: currentUser.role
+        hasFullName: !!trimmedName,
+        hasEmail: !!trimmedEmail,
+        hasPhone: !!trimmedPhone,
+        hasTcNo: !!trimmedTcNo,
+        hasAddress: !!trimmedAddress,
+        role: currentUser.role,
+        active: currentUser.isActive
       });
     };
 

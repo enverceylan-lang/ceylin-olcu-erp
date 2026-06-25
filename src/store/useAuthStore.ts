@@ -36,6 +36,7 @@ export interface MockUser {
   phone?: string;
   tcNo?: string;
   address?: string;
+  profileCompletedAt?: string;
 }
 
 export function normalizeRole(role: UserRole | undefined): 'ADMIN' | 'OFFICE' | 'FIELD' | 'TAILOR' | 'INSTALLER' | 'ACCOUNTING' {
@@ -542,8 +543,57 @@ export const useAuthStore = create<AuthState>()(
                 }
               }
 
-              // Server has newer record, so update local store
-              const loggedInUser = { ...remoteUser, password: cleanInputPin };
+              // Server has newer record, so update local store, but merge profile fields from local store if remote is empty
+              const localUpdate = localUser?.updatedAt ? new Date(localUser.updatedAt).getTime() : 0;
+              const remoteUpdate = remoteUser.updatedAt ? new Date(remoteUser.updatedAt).getTime() : 0;
+
+              let email = remoteUser.email;
+              let phone = remoteUser.phone;
+              let tcNo = remoteUser.tcNo;
+              let address = remoteUser.address;
+              let profileCompletedAt = remoteUser.profileCompletedAt;
+
+              if (localUser) {
+                if (localUser.email && !remoteUser.email) {
+                  email = localUser.email;
+                } else if (remoteUser.email && localUser.email && localUpdate > remoteUpdate) {
+                  email = localUser.email;
+                }
+
+                if (localUser.phone && !remoteUser.phone) {
+                  phone = localUser.phone;
+                } else if (remoteUser.phone && localUser.phone && localUpdate > remoteUpdate) {
+                  phone = localUser.phone;
+                }
+
+                if (localUser.tcNo && !remoteUser.tcNo) {
+                  tcNo = localUser.tcNo;
+                } else if (remoteUser.tcNo && localUser.tcNo && localUpdate > remoteUpdate) {
+                  tcNo = localUser.tcNo;
+                }
+
+                if (localUser.address && !remoteUser.address) {
+                  address = localUser.address;
+                } else if (remoteUser.address && localUser.address && localUpdate > remoteUpdate) {
+                  address = localUser.address;
+                }
+
+                if (localUser.profileCompletedAt && !remoteUser.profileCompletedAt) {
+                  profileCompletedAt = localUser.profileCompletedAt;
+                } else if (remoteUser.profileCompletedAt && localUser.profileCompletedAt && localUpdate > remoteUpdate) {
+                  profileCompletedAt = localUser.profileCompletedAt;
+                }
+              }
+
+              const loggedInUser = { 
+                ...remoteUser, 
+                password: cleanInputPin,
+                email,
+                phone,
+                tcNo,
+                address,
+                profileCompletedAt
+              };
               
               // Update in local users list
               const updatedUsers = get().users.map((u: MockUser) => {

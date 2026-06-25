@@ -143,14 +143,15 @@ export default function AyarlarPage() {
     setShowAddForm(false);
     setMessage("Kullanıcı eklendi.");
 
-    // Secure Logging (Only permitted fields)
+    // Secure Logging (Only boolean flags and non-sensitive status)
     console.log("User profile status (admin created user):", {
-      usernameExists: true,
-      passwordChanged: true,
-      loginAllowed: true,
-      usedFallback: false,
-      active: true,
-      role: newRole
+      hasFullName: !!newName.trim(),
+      hasEmail: !!newEmail.trim(),
+      hasPhone: !!newPhone.trim(),
+      hasTcNo: !!newTcNo.trim(),
+      hasAddress: !!newAddress.trim(),
+      role: newRole,
+      active: true
     });
   };
 
@@ -188,15 +189,16 @@ export default function AyarlarPage() {
 
     updateUser(id, updateData);
 
-    // Secure Logging (Only permitted fields)
+    // Secure Logging (Only boolean flags and non-sensitive status)
     const userRecord = users.find(x => x.id === id);
     console.log("User profile status (admin update):", {
-      usernameExists: true,
-      passwordChanged: !!editPassword.trim(),
-      loginAllowed: true,
-      usedFallback: false,
-      active: userRecord ? userRecord.isActive : true,
-      role: updateData.role
+      hasFullName: !!editName.trim(),
+      hasEmail: !!editEmail.trim(),
+      hasPhone: !!editPhone.trim(),
+      hasTcNo: !!editTcNo.trim(),
+      hasAddress: !!editAddress.trim(),
+      role: editRole,
+      active: userRecord ? userRecord.isActive : true
     });
 
     setEditingUserId(null);
@@ -233,14 +235,15 @@ export default function AyarlarPage() {
     setSelfMessage("Profil bilgileriniz başarıyla güncellendi.");
     setSelfPassword(""); // reset password input
 
-    // Secure Logging (Only permitted fields)
+    // Secure Logging (Only boolean flags and non-sensitive status)
     console.log("User profile status (self update):", {
-      usernameExists: true,
-      passwordChanged: !!selfPassword.trim(),
-      loginAllowed: true,
-      usedFallback: false,
-      active: currentUser.isActive,
-      role: currentUser.role
+      hasFullName: !!selfName.trim(),
+      hasEmail: !!selfEmail.trim(),
+      hasPhone: !!selfPhone.trim(),
+      hasTcNo: !!selfTcNo.trim(),
+      hasAddress: !!selfAddress.trim(),
+      role: currentUser.role,
+      active: currentUser.isActive
     });
   };
 

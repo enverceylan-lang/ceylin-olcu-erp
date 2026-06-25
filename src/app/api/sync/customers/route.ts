@@ -300,6 +300,26 @@ export async function POST(req: NextRequest) {
       (remoteUsers || []).forEach(ru => mergedUsersMap.set(ru.id, ru));
       localUsers.forEach(lu => {
         const ru = mergedUsersMap.get(lu.id);
+
+        let email = lu.email || (ru ? ru.email : null);
+        let phone = lu.phone || (ru ? ru.phone : null);
+        let tcNo = lu.tcNo || (ru ? ru.tcNo : null);
+        let address = lu.address || (ru ? ru.address : null);
+        let profileCompletedAt = lu.profileCompletedAt || (ru ? ru.profileCompletedAt : null);
+
+        // Merge logic: local is populated, remote is empty -> local is preserved.
+        // If both are populated, prefer the one with the newer updatedAt timestamp.
+        if (ru) {
+          const localUpdate = lu.updatedAt ? new Date(lu.updatedAt).getTime() : 0;
+          const remoteUpdate = ru.updatedAt ? new Date(ru.updatedAt).getTime() : 0;
+          
+          if (ru.email && lu.email && remoteUpdate > localUpdate) email = ru.email;
+          if (ru.phone && lu.phone && remoteUpdate > localUpdate) phone = ru.phone;
+          if (ru.tcNo && lu.tcNo && remoteUpdate > localUpdate) tcNo = ru.tcNo;
+          if (ru.address && lu.address && remoteUpdate > localUpdate) address = ru.address;
+          if (ru.profileCompletedAt && lu.profileCompletedAt && remoteUpdate > localUpdate) profileCompletedAt = ru.profileCompletedAt;
+        }
+
         if (!ru || new Date(lu.updatedAt) > new Date(ru.updatedAt)) {
           let pwd = lu.password;
           if (pwd && pwd.length !== 128) {
@@ -320,7 +340,22 @@ export async function POST(req: NextRequest) {
             isActive: lu.isActive,
             permissions: lu.permissions || [],
             createdAt: lu.createdAt || new Date().toISOString(),
-            updatedAt: lu.updatedAt || new Date().toISOString()
+            updatedAt: lu.updatedAt || new Date().toISOString(),
+            email,
+            phone,
+            tcNo,
+            address,
+            profileCompletedAt
+          });
+        } else {
+          // If remote is newer, keep remote record but make sure to merge in any local values if remote has nulls
+          mergedUsersMap.set(ru.id, {
+            ...ru,
+            email,
+            phone,
+            tcNo,
+            address,
+            profileCompletedAt
           });
         }
       });

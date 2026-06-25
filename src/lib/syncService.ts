@@ -645,26 +645,72 @@ export async function syncNow(isManual: boolean = false) {
           console.warn(`[Client Sync] User "${remoteUser.username}" has no recoverable local credential.`);
         }
 
+        // Merge logic: local profile field populated, remote empty -> local is preserved.
+        // If both are populated, prefer the one with the newer updatedAt timestamp.
+        const localUpdate = localUser?.updatedAt ? new Date(localUser.updatedAt).getTime() : 0;
+        const remoteUpdate = remoteUser.updatedAt ? new Date(remoteUser.updatedAt).getTime() : 0;
+
+        let email = remoteUser.email;
+        let phone = remoteUser.phone;
+        let tcNo = remoteUser.tcNo;
+        let address = remoteUser.address;
+        let profileCompletedAt = remoteUser.profileCompletedAt;
+
+        if (localUser) {
+          if (localUser.email && !remoteUser.email) {
+            email = localUser.email;
+          } else if (remoteUser.email && localUser.email && localUpdate > remoteUpdate) {
+            email = localUser.email;
+          }
+
+          if (localUser.phone && !remoteUser.phone) {
+            phone = localUser.phone;
+          } else if (remoteUser.phone && localUser.phone && localUpdate > remoteUpdate) {
+            phone = localUser.phone;
+          }
+
+          if (localUser.tcNo && !remoteUser.tcNo) {
+            tcNo = localUser.tcNo;
+          } else if (remoteUser.tcNo && localUser.tcNo && localUpdate > remoteUpdate) {
+            tcNo = localUser.tcNo;
+          }
+
+          if (localUser.address && !remoteUser.address) {
+            address = localUser.address;
+          } else if (remoteUser.address && localUser.address && localUpdate > remoteUpdate) {
+            address = localUser.address;
+          }
+
+          if (localUser.profileCompletedAt && !remoteUser.profileCompletedAt) {
+            profileCompletedAt = localUser.profileCompletedAt;
+          } else if (remoteUser.profileCompletedAt && localUser.profileCompletedAt && localUpdate > remoteUpdate) {
+            profileCompletedAt = localUser.profileCompletedAt;
+          }
+        }
+
         return {
           ...remoteUser,
-          password: preservedPassword  // may be undefined for users never locally logged in
+          password: preservedPassword,  // may be undefined for users never locally logged in
+          email,
+          phone,
+          tcNo,
+          address,
+          profileCompletedAt
         };
       });
 
       useAuthStore.setState({ users: mergedUsers });
 
-      // Ensure currentUser in the session still has its password intact
-      // (it may have been partially overwritten by the setState above)
+      // Ensure currentUser in the session still has its password and profile fields intact and synchronized
       const updatedCurrentUser = mergedUsers.find((u: any) => u.id === activeUserId);
-      if (updatedCurrentUser && !updatedCurrentUser.password && activeSessionPassword) {
-        // Patch currentUser directly to restore the session password
+      if (updatedCurrentUser) {
         useAuthStore.setState({
           currentUser: {
-            ...useAuthStore.getState().currentUser!,
-            password: activeSessionPassword
+            ...updatedCurrentUser,
+            password: activeSessionPassword || updatedCurrentUser.password
           }
         });
-        console.log('[Client Sync] Restored session password for currentUser after merge.');
+        console.log('[Client Sync] Synchronized currentUser profile and session password after merge.');
       }
     }
 
