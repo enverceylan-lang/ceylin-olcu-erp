@@ -3,6 +3,7 @@
 import { Download, Settings, Upload, ShieldCheck, AlertTriangle, UserPlus, Trash2, Check, X, Shield } from "lucide-react";
 import { useRef, useState, useEffect, Fragment } from "react";
 import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, MockUser } from "@/store/useAuthStore";
+import { syncNow } from "@/lib/syncService";
 
 const DATA_KEYS = ["curtain-erp-storage-v3", "curtain-erp-auth-v1"];
 
@@ -111,7 +112,7 @@ export default function AyarlarPage() {
   };
 
   // User Management Handlers
-  const handleAddUserSubmit = (e: React.FormEvent) => {
+  const handleAddUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim() || !newUsername.trim() || !newPassword.trim() || !newEmail.trim() || !newPhone.trim()) {
       setMessage("Hata: Ad soyad, kullanıcı adı, şifre, mail adresi ve telefon numarası zorunludur.");
@@ -131,6 +132,12 @@ export default function AyarlarPage() {
       address: newAddress.trim()
     });
 
+    const addedName = newName.trim();
+    const addedEmail = newEmail.trim();
+    const addedPhone = newPhone.trim();
+    const addedTcNo = newTcNo.trim();
+    const addedAddress = newAddress.trim();
+
     // Reset Form
     setNewName("");
     setNewUsername("");
@@ -141,15 +148,22 @@ export default function AyarlarPage() {
     setNewTcNo("");
     setNewAddress("");
     setShowAddForm(false);
-    setMessage("Kullanıcı eklendi.");
+    setMessage("Kullanıcı ekleniyor... Lütfen bekleyin.");
+
+    try {
+      await syncNow(true);
+      setMessage("Kullanıcı eklendi ve başarıyla senkronize edildi.");
+    } catch (err: any) {
+      setMessage("Hata: Kullanıcı eklendi ancak sunucuya senkronize edilemedi.");
+    }
 
     // Secure Logging (Only boolean flags and non-sensitive status)
     console.log("User profile status (admin created user):", {
-      hasFullName: !!newName.trim(),
-      hasEmail: !!newEmail.trim(),
-      hasPhone: !!newPhone.trim(),
-      hasTcNo: !!newTcNo.trim(),
-      hasAddress: !!newAddress.trim(),
+      hasFullName: !!addedName,
+      hasEmail: !!addedEmail,
+      hasPhone: !!addedPhone,
+      hasTcNo: !!addedTcNo,
+      hasAddress: !!addedAddress,
       role: newRole,
       active: true
     });
@@ -167,7 +181,7 @@ export default function AyarlarPage() {
     setEditAddress(u.address || "");
   };
 
-  const handleSaveEdit = (id: string) => {
+  const handleSaveEdit = async (id: string) => {
     if (!editName.trim() || !editUsername.trim() || !editEmail.trim() || !editPhone.trim()) {
       setMessage("Hata: Ad soyad, kullanıcı adı, mail adresi ve telefon numarası zorunludur.");
       return;
@@ -188,6 +202,15 @@ export default function AyarlarPage() {
     }
 
     updateUser(id, updateData);
+    setMessage("Güncelleniyor... Lütfen bekleyin.");
+
+    try {
+      await syncNow(true);
+      setEditingUserId(null);
+      setMessage("Kullanıcı güncellendi ve başarıyla senkronize edildi.");
+    } catch (err: any) {
+      setMessage("Hata: Kullanıcı güncellendi ancak sunucuya senkronize edilemedi.");
+    }
 
     // Secure Logging (Only boolean flags and non-sensitive status)
     const userRecord = users.find(x => x.id === id);
@@ -200,12 +223,9 @@ export default function AyarlarPage() {
       role: editRole,
       active: userRecord ? userRecord.isActive : true
     });
-
-    setEditingUserId(null);
-    setMessage("Kullanıcı güncellendi.");
   };
 
-  const handleSelfUpdate = (e: React.FormEvent) => {
+  const handleSelfUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     setSelfMessage("");
 
@@ -232,8 +252,15 @@ export default function AyarlarPage() {
     }
 
     updateUser(currentUser.id, updateData);
-    setSelfMessage("Profil bilgileriniz başarıyla güncellendi.");
-    setSelfPassword(""); // reset password input
+    setSelfMessage("Güncelleniyor... Lütfen bekleyin.");
+
+    try {
+      await syncNow(true);
+      setSelfMessage("Profil bilgileriniz başarıyla güncellendi ve senkronize edildi.");
+      setSelfPassword(""); // reset password input
+    } catch (err: any) {
+      setSelfMessage("Hata: Profil güncellendi ancak sunucuya senkronize edilemedi.");
+    }
 
     // Secure Logging (Only boolean flags and non-sensitive status)
     console.log("User profile status (self update):", {

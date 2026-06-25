@@ -687,7 +687,8 @@ export const useAuthStore = create<AuthState>()(
         
         let updatedCurrentUser = state.currentUser;
         if (state.currentUser && state.currentUser.id === id) {
-          updatedCurrentUser = normalizeUser({ ...state.currentUser, ...dataCopy, updatedAt: now });
+          const { password, ...rest } = dataCopy;
+          updatedCurrentUser = normalizeUser({ ...state.currentUser, ...rest, updatedAt: now });
         }
           
         return {

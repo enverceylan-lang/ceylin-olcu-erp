@@ -634,8 +634,9 @@ export async function syncNow(isManual: boolean = false) {
         // Never assign undefined, null, or empty string as the password.
         let preservedPassword: string | undefined;
         if (remoteUser.id === activeUserId) {
-          // This is the currently logged-in user — always use the session password
-          preservedPassword = activeSessionPassword;
+          // If the local user record has a newer/different password than the active session password,
+          // it means there was a local password change. Promote it once sync succeeds.
+          preservedPassword = localUser?.password || activeSessionPassword;
         } else {
           // For other users, use what's already locally stored
           preservedPassword = localUser?.password || remoteUser.password;
@@ -707,7 +708,7 @@ export async function syncNow(isManual: boolean = false) {
         useAuthStore.setState({
           currentUser: {
             ...updatedCurrentUser,
-            password: activeSessionPassword || updatedCurrentUser.password
+            password: updatedCurrentUser.password || activeSessionPassword
           }
         });
         console.log('[Client Sync] Synchronized currentUser profile and session password after merge.');
