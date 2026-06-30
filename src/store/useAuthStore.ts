@@ -13,6 +13,15 @@ function generateUUID(): string {
   });
 }
 
+function utf8ToBase64(str: string): string {
+  if (typeof window !== 'undefined') {
+    return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (_, p1) => {
+      return String.fromCharCode(parseInt(p1, 16));
+    }));
+  }
+  return Buffer.from(str, "utf-8").toString("base64");
+}
+
 // ─── Role Definitions ───
 export type UserRole = 
   | 'ADMIN' 
@@ -37,6 +46,7 @@ export interface MockUser {
   tcNo?: string;
   address?: string;
   profileCompletedAt?: string;
+  hasPassword?: boolean;
 }
 
 export function normalizeRole(role: UserRole | undefined): 'ADMIN' | 'OFFICE' | 'FIELD' | 'TAILOR' | 'INSTALLER' | 'ACCOUNTING' {
@@ -458,9 +468,9 @@ interface AuthState {
   addAuditEntry: (entry: Omit<AuditEntry, 'id'>) => void;
   
   // User Management
-  addUser: (user: Omit<MockUser, 'id'>) => void;
-  updateUser: (id: string, data: Partial<MockUser>) => void;
-  deleteUser: (id: string) => void;
+  addUser: (user: Omit<MockUser, 'id'>) => Promise<boolean>;
+  updateUser: (id: string, data: Partial<MockUser>) => Promise<boolean>;
+  deleteUser: (id: string) => Promise<boolean>;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -486,31 +496,7 @@ export const useAuthStore = create<AuthState>()(
           return false;
         }
 
-        // 1. Try local authentication first
-        const usersList = get().users.map((u: MockUser) => normalizeUser(u));
-        const localUser = usersList.find((u: MockUser) => {
-          const userUsername = (u.username || '').trim().toLowerCase();
-          return userUsername === cleanInputUsername;
-        });
-
-        if (localUser && localUser.isActive) {
-          const userPassword = (localUser.password || '').trim();
-          if (userPassword && userPassword === cleanInputPin) {
-            const loggedInUser = { ...localUser, password: cleanInputPin };
-            set({ currentUser: loggedInUser });
-            console.log("Login attempt status:", {
-              usernameExists: true,
-              passwordChanged: false,
-              loginAllowed: true,
-              usedFallback: false,
-              active: localUser.isActive,
-              role: localUser.role
-            });
-            return true;
-          }
-        }
-
-        // 2. If local auth fails, try server authentication
+        // Always authenticate via server API
         try {
           const response = await fetch('/api/auth/login', {
             method: 'POST',
@@ -523,76 +509,9 @@ export const useAuthStore = create<AuthState>()(
             if (result.success && result.user) {
               const remoteUser = normalizeUser(result.user);
               
-              // If the user exists locally, we check if the local record is actually newer.
-              // If so, it means the password has been changed locally and not synced,
-              // rendering the server credentials obsolete. We reject.
-              if (localUser) {
-                const localUpdate = localUser.updatedAt ? new Date(localUser.updatedAt).getTime() : 0;
-                const remoteUpdate = remoteUser.updatedAt ? new Date(remoteUser.updatedAt).getTime() : 0;
-                
-                if (localUpdate > remoteUpdate) {
-                  console.log("Login attempt status:", {
-                    usernameExists: true,
-                    passwordChanged: false,
-                    loginAllowed: false,
-                    usedFallback: true,
-                    active: localUser.isActive,
-                    role: localUser.role
-                  });
-                  return false;
-                }
-              }
-
-              // Server has newer record, so update local store, but merge profile fields from local store if remote is empty
-              const localUpdate = localUser?.updatedAt ? new Date(localUser.updatedAt).getTime() : 0;
-              const remoteUpdate = remoteUser.updatedAt ? new Date(remoteUser.updatedAt).getTime() : 0;
-
-              let email = remoteUser.email;
-              let phone = remoteUser.phone;
-              let tcNo = remoteUser.tcNo;
-              let address = remoteUser.address;
-              let profileCompletedAt = remoteUser.profileCompletedAt;
-
-              if (localUser) {
-                if (localUser.email && !remoteUser.email) {
-                  email = localUser.email;
-                } else if (remoteUser.email && localUser.email && localUpdate > remoteUpdate) {
-                  email = localUser.email;
-                }
-
-                if (localUser.phone && !remoteUser.phone) {
-                  phone = localUser.phone;
-                } else if (remoteUser.phone && localUser.phone && localUpdate > remoteUpdate) {
-                  phone = localUser.phone;
-                }
-
-                if (localUser.tcNo && !remoteUser.tcNo) {
-                  tcNo = localUser.tcNo;
-                } else if (remoteUser.tcNo && localUser.tcNo && localUpdate > remoteUpdate) {
-                  tcNo = localUser.tcNo;
-                }
-
-                if (localUser.address && !remoteUser.address) {
-                  address = localUser.address;
-                } else if (remoteUser.address && localUser.address && localUpdate > remoteUpdate) {
-                  address = localUser.address;
-                }
-
-                if (localUser.profileCompletedAt && !remoteUser.profileCompletedAt) {
-                  profileCompletedAt = localUser.profileCompletedAt;
-                } else if (remoteUser.profileCompletedAt && localUser.profileCompletedAt && localUpdate > remoteUpdate) {
-                  profileCompletedAt = localUser.profileCompletedAt;
-                }
-              }
-
               const loggedInUser = { 
                 ...remoteUser, 
-                password: cleanInputPin,
-                email,
-                phone,
-                tcNo,
-                address,
-                profileCompletedAt
+                password: cleanInputPin, // Keep the plain PIN for auth header during sync/REST
               };
               
               // Update in local users list
@@ -612,13 +531,11 @@ export const useAuthStore = create<AuthState>()(
                 users: finalUsers
               });
 
-              console.log("Login attempt status:", {
-                usernameExists: true,
+              console.log("Login successful status:", {
+                hasPassword: true,
                 passwordChanged: false,
-                loginAllowed: true,
-                usedFallback: true,
-                active: remoteUser.isActive,
-                role: remoteUser.role
+                role: remoteUser.role,
+                active: remoteUser.isActive
               });
               return true;
             }
@@ -628,12 +545,12 @@ export const useAuthStore = create<AuthState>()(
         }
 
         console.log("Login attempt status:", {
-          usernameExists: !!localUser,
+          usernameExists: false,
           passwordChanged: false,
           loginAllowed: false,
-          usedFallback: true,
-          active: localUser ? localUser.isActive : false,
-          role: localUser ? localUser.role : undefined
+          usedFallback: false,
+          active: false,
+          role: undefined
         });
         return false;
       },
@@ -653,54 +570,166 @@ export const useAuthStore = create<AuthState>()(
         ]
       })),
       
-      addUser: (user: Omit<MockUser, 'id'>) => set((state: AuthState) => {
+      addUser: async (user: Omit<MockUser, 'id'>) => {
+        const currentUser = get().currentUser;
+        if (!currentUser || !currentUser.password) {
+          console.error("Yetkilendirme bilgisi eksik.");
+          return false;
+        }
+
         const now = new Date().toISOString();
-        const newUser = normalizeUser({
+        const generatedId = 'user-' + Math.random().toString(36).substring(2, 9);
+        const newUser = {
           ...user,
+          id: generatedId,
           isActive: true,
           createdAt: now,
           updatedAt: now
-        });
-        return {
-          users: [...state.users, newUser]
         };
-      }),
+
+        try {
+          const token = utf8ToBase64(`${currentUser.username}:${currentUser.password}`);
+          const response = await fetch('/api/admin/users/update', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(newUser)
+          });
+
+          if (response.ok) {
+            const result = await response.json();
+            if (result.success && result.user) {
+              const addedUser = normalizeUser({
+                ...result.user,
+                password: user.password // Keep the plain text password in local list
+              });
+              set((state: AuthState) => ({
+                users: [...state.users, addedUser]
+              }));
+              return true;
+            }
+          }
+        } catch (err) {
+          console.error("Add user API failed:", err);
+        }
+        return false;
+      },
       
-      updateUser: (id: string, data: Partial<MockUser>) => set((state: AuthState) => {
-        const now = new Date().toISOString();
+      updateUser: async (id: string, data: Partial<MockUser>) => {
+        const currentUser = get().currentUser;
+        if (!currentUser || !currentUser.password) {
+          console.error("Yetkilendirme bilgisi eksik.");
+          return false;
+        }
+
         const dataCopy = { ...data };
-        
         if (dataCopy.hasOwnProperty('password')) {
-          if (dataCopy.password === undefined || dataCopy.password === null || dataCopy.password.trim() === '') {
+          if (dataCopy.password === undefined || dataCopy.password === null || dataCopy.password.trim() === '' || dataCopy.password.trim() === '••••') {
             delete dataCopy.password;
           } else {
             dataCopy.password = dataCopy.password.trim();
           }
         }
 
-        const updatedUsers = state.users.map((u: MockUser) => {
-          if (u.id === id) {
-            return normalizeUser({ ...u, ...dataCopy, updatedAt: now });
+        try {
+          const token = utf8ToBase64(`${currentUser.username}:${currentUser.password}`);
+          const response = await fetch('/api/admin/users/update', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ id, ...dataCopy })
+          });
+
+          if (response.ok) {
+            const result = await response.json();
+            if (result.success && result.user) {
+              const updatedUserFromServer = normalizeUser(result.user);
+              
+              set((state: AuthState) => {
+                const updatedUsers = state.users.map((u: MockUser) => {
+                  if (u.id === id) {
+                    return {
+                      ...updatedUserFromServer,
+                      password: dataCopy.password !== undefined ? dataCopy.password : u.password
+                    };
+                  }
+                  return u;
+                });
+
+                let updatedCurrentUser = state.currentUser;
+                if (state.currentUser && state.currentUser.id === id) {
+                  updatedCurrentUser = {
+                    ...updatedUserFromServer,
+                    password: dataCopy.password !== undefined ? dataCopy.password : state.currentUser.password
+                  };
+                }
+
+                return {
+                  users: updatedUsers,
+                  currentUser: updatedCurrentUser
+                };
+              });
+              return true;
+            }
           }
-          return u;
-        });
-        
-        let updatedCurrentUser = state.currentUser;
-        if (state.currentUser && state.currentUser.id === id) {
-          const { password, ...rest } = dataCopy;
-          updatedCurrentUser = normalizeUser({ ...state.currentUser, ...rest, updatedAt: now });
+        } catch (err) {
+          console.error("Update user API failed:", err);
         }
-          
-        return {
-          users: updatedUsers,
-          currentUser: updatedCurrentUser
-        };
-      }),
+        return false;
+      },
       
-      deleteUser: (id: string) => set((state: AuthState) => ({
-        users: state.users.filter((u: MockUser) => u.id !== id),
-        currentUser: state.currentUser && state.currentUser.id === id ? null : state.currentUser
-      })),
+      deleteUser: async (id: string) => {
+        const currentUser = get().currentUser;
+        if (!currentUser || !currentUser.password) {
+          console.error("Yetkilendirme bilgisi eksik.");
+          return false;
+        }
+
+        try {
+          const token = utf8ToBase64(`${currentUser.username}:${currentUser.password}`);
+          const response = await fetch('/api/admin/users/delete', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ id })
+          });
+
+          if (response.ok) {
+            const result = await response.json();
+            if (result.success) {
+              // Update state locally: Soft delete means set isActive to false
+              set((state: AuthState) => {
+                const updatedUsers = state.users.map((u: MockUser) => {
+                  if (u.id === id) {
+                    return { ...u, isActive: false };
+                  }
+                  return u;
+                });
+                
+                let updatedCurrentUser = state.currentUser;
+                if (state.currentUser && state.currentUser.id === id) {
+                  updatedCurrentUser = { ...state.currentUser, isActive: false };
+                }
+
+                return {
+                  users: updatedUsers,
+                  currentUser: updatedCurrentUser
+                };
+              });
+              return true;
+            }
+          }
+        } catch (err) {
+          console.error("Delete user API failed:", err);
+        }
+        return false;
+      },
     }),
     {
       name: 'curtain-erp-auth-v1',

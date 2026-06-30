@@ -119,7 +119,9 @@ export default function AyarlarPage() {
       return;
     }
 
-    addUser({
+    setMessage("Kullanıcı ekleniyor... Lütfen bekleyin.");
+
+    const success = await addUser({
       name: newName.trim(),
       username: newUsername.trim().toLowerCase(),
       password: newPassword.trim(),
@@ -132,41 +134,42 @@ export default function AyarlarPage() {
       address: newAddress.trim()
     });
 
-    const addedName = newName.trim();
-    const addedEmail = newEmail.trim();
-    const addedPhone = newPhone.trim();
-    const addedTcNo = newTcNo.trim();
-    const addedAddress = newAddress.trim();
+    if (success) {
+      const addedName = newName.trim();
+      const addedEmail = newEmail.trim();
+      const addedPhone = newPhone.trim();
+      const addedTcNo = newTcNo.trim();
+      const addedAddress = newAddress.trim();
 
-    // Reset Form
-    setNewName("");
-    setNewUsername("");
-    setNewPassword("");
-    setNewRole("FIELD");
-    setNewEmail("");
-    setNewPhone("");
-    setNewTcNo("");
-    setNewAddress("");
-    setShowAddForm(false);
-    setMessage("Kullanıcı ekleniyor... Lütfen bekleyin.");
+      // Reset Form
+      setNewName("");
+      setNewUsername("");
+      setNewPassword("");
+      setNewRole("FIELD");
+      setNewEmail("");
+      setNewPhone("");
+      setNewTcNo("");
+      setNewAddress("");
+      setShowAddForm(false);
+      setMessage("Kullanıcı başarıyla eklendi.");
 
-    try {
-      await syncNow(true);
-      setMessage("Kullanıcı eklendi ve başarıyla senkronize edildi.");
-    } catch (err: any) {
-      setMessage("Hata: Kullanıcı eklendi ancak sunucuya senkronize edilemedi.");
+      try {
+        await syncNow(true);
+      } catch (err: any) {}
+
+      // Secure Logging (Only boolean flags and non-sensitive status)
+      console.log("User profile status (admin created user):", {
+        hasFullName: !!addedName,
+        hasEmail: !!addedEmail,
+        hasPhone: !!addedPhone,
+        hasTcNo: !!addedTcNo,
+        hasAddress: !!addedAddress,
+        role: newRole,
+        active: true
+      });
+    } else {
+      setMessage("Hata: Kullanıcı eklenemedi.");
     }
-
-    // Secure Logging (Only boolean flags and non-sensitive status)
-    console.log("User profile status (admin created user):", {
-      hasFullName: !!addedName,
-      hasEmail: !!addedEmail,
-      hasPhone: !!addedPhone,
-      hasTcNo: !!addedTcNo,
-      hasAddress: !!addedAddress,
-      role: newRole,
-      active: true
-    });
   };
 
   const startEditingUser = (u: any) => {
@@ -197,19 +200,21 @@ export default function AyarlarPage() {
       address: editAddress.trim()
     };
 
-    if (editPassword.trim()) {
+    if (editPassword.trim() && editPassword.trim() !== "••••") {
       updateData.password = editPassword.trim();
     }
 
-    updateUser(id, updateData);
     setMessage("Güncelleniyor... Lütfen bekleyin.");
 
-    try {
-      await syncNow(true);
+    const success = await updateUser(id, updateData);
+    if (success) {
       setEditingUserId(null);
-      setMessage("Kullanıcı güncellendi ve başarıyla senkronize edildi.");
-    } catch (err: any) {
-      setMessage("Hata: Kullanıcı güncellendi ancak sunucuya senkronize edilemedi.");
+      setMessage("Kullanıcı başarıyla güncellendi.");
+      try {
+        await syncNow(true);
+      } catch (err: any) {}
+    } else {
+      setMessage("Hata: Kullanıcı güncellenemedi.");
     }
 
     // Secure Logging (Only boolean flags and non-sensitive status)
@@ -247,19 +252,21 @@ export default function AyarlarPage() {
       address: selfAddress.trim()
     };
 
-    if (selfPassword.trim()) {
+    if (selfPassword.trim() && selfPassword.trim() !== "••••") {
       updateData.password = selfPassword.trim();
     }
 
-    updateUser(currentUser.id, updateData);
     setSelfMessage("Güncelleniyor... Lütfen bekleyin.");
 
-    try {
-      await syncNow(true);
-      setSelfMessage("Profil bilgileriniz başarıyla güncellendi ve senkronize edildi.");
+    const success = await updateUser(currentUser.id, updateData);
+    if (success) {
+      setSelfMessage("Profil bilgileriniz başarıyla güncellendi.");
       setSelfPassword(""); // reset password input
-    } catch (err: any) {
-      setSelfMessage("Hata: Profil güncellendi ancak sunucuya senkronize edilemedi.");
+      try {
+        await syncNow(true);
+      } catch (err: any) {}
+    } else {
+      setSelfMessage("Hata: Profil güncellenemedi.");
     }
 
     // Secure Logging (Only boolean flags and non-sensitive status)
@@ -570,7 +577,7 @@ export default function AyarlarPage() {
                               className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 text-gray-900 dark:text-white text-xs w-24 outline-none placeholder-slate-650" 
                             />
                           ) : (
-                            u.password ? "••••" : "-"
+                            u.password || u.hasPassword ? "••••" : "-"
                           )}
                         </td>
                         <td className="p-4 font-medium">
@@ -594,7 +601,15 @@ export default function AyarlarPage() {
                         </td>
                         <td className="p-4 text-center">
                           <button
-                            onClick={() => updateUser(u.id, { isActive: !u.isActive })}
+                            onClick={async () => {
+                              setMessage("Durum güncelleniyor...");
+                              const success = await updateUser(u.id, { isActive: !u.isActive });
+                              if (success) {
+                                setMessage("Kullanıcı durumu güncellendi.");
+                              } else {
+                                setMessage("Hata: Kullanıcı durumu güncellenemedi.");
+                              }
+                            }}
                             className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase border cursor-pointer transition-colors ${
                               u.isActive 
                                 ? 'bg-green-500/10 text-green-600 border-green-500/20 dark:text-green-400' 
@@ -615,7 +630,17 @@ export default function AyarlarPage() {
                               <>
                                 <button onClick={() => startEditingUser(u)} className="text-blue-500 hover:underline cursor-pointer">Düzenle</button>
                                 {u.id !== 'user-admin' && (
-                                  <button onClick={() => deleteUser(u.id)} className="text-red-500 hover:text-red-700 p-1 cursor-pointer" title="Kullanıcı Sil"><Trash2 className="w-4 h-4" /></button>
+                                  <button onClick={async () => {
+                                    if (confirm("Bu kullanıcıyı silmek istediğinize emin misiniz? (Devre dışı bırakılacaktır)")) {
+                                      setMessage("Kullanıcı siliniyor...");
+                                      const success = await deleteUser(u.id);
+                                      if (success) {
+                                        setMessage("Kullanıcı başarıyla silindi (pasif yapıldı).");
+                                      } else {
+                                        setMessage("Hata: Kullanıcı silinemedi.");
+                                      }
+                                    }
+                                  }} className="text-red-500 hover:text-red-700 p-1 cursor-pointer" title="Kullanıcı Sil"><Trash2 className="w-4 h-4" /></button>
                                 )}
                               </>
                             )}

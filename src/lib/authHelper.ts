@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import crypto from "crypto";
-import { prisma } from "./prisma";
+import { createClient } from "@supabase/supabase-js";
 
 // Safe, native SHA-512 pbkdf2 password hashing (no external binary dependencies)
 export function hashPassword(password: string): string {
@@ -19,21 +19,54 @@ export async function verifyAuth(req: NextRequest) {
 
     const token = authHeader.substring(7); // Strip 'Bearer '
     const decoded = Buffer.from(token, "base64").toString("utf-8");
-    const [username, hashedPassword] = decoded.split(":");
+    const [username, credential] = decoded.split(":");
 
-    if (!username || !hashedPassword) {
+    if (!username || !credential) {
       return null;
     }
 
-    // Since we shouldn't touch database during local compile checks,
-    // if prisma is not yet fully configured or is null, return null safely.
-    if (!prisma) return null;
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!supabaseUrl || !supabaseServiceKey) {
+      return null;
+    }
 
-    const user = await prisma.user.findUnique({
-      where: { username: username.toLowerCase().trim() },
+    const supabaseServer = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
     });
 
-    if (!user || !user.isActive || user.password !== hashedPassword) {
+    const { data: user, error } = await supabaseServer
+      .from("users")
+      .select("*")
+      .eq("username", username.toLowerCase().trim())
+      .single();
+
+    if (error || !user || !user.isActive) {
+      return null;
+    }
+
+    // Prevent default password "123" or default password hash verification under any circumstances
+    const defaultHashes = [
+      "737cca8746ba4b84c7898f055c9f5c251016bd006f32ddf4be6fc2adde15fe72fa6167ed96001110725115f7308da9763712a5fa0924faf3329f301fc6e20382",
+      hashPassword("123")
+    ];
+
+    if (
+      credential === "123" ||
+      !user.password ||
+      user.password.trim() === "" ||
+      defaultHashes.includes(user.password)
+    ) {
+      return null;
+    }
+
+    const isHashed = credential.length === 128;
+    const hashedPassword = isHashed ? credential : hashPassword(credential);
+
+    if (user.password !== hashedPassword) {
       return null;
     }
 
@@ -43,3 +76,4 @@ export async function verifyAuth(req: NextRequest) {
     return null;
   }
 }
+

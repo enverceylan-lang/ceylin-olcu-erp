@@ -294,7 +294,7 @@ export async function POST(req: NextRequest) {
 
     // 3. Sync Users list if user is ADMIN or OFFICE and localUsers is provided
     let finalUsers = remoteUsers || [];
-    const isAdminOrOffice = ["ADMIN", "OFFICE", "SALES"].includes(user.role);
+    const isAdminOrOffice = ["admin", "office", "sales"].includes(user.role?.toLowerCase());
     if (isAdminOrOffice && Array.isArray(localUsers)) {
       const mergedUsersMap = new Map<string, any>();
       (remoteUsers || []).forEach(ru => mergedUsersMap.set(ru.id, ru));
@@ -321,16 +321,8 @@ export async function POST(req: NextRequest) {
         }
 
         if (!ru || new Date(lu.updatedAt) > new Date(ru.updatedAt)) {
-          let pwd = lu.password;
-          if (pwd && pwd.length !== 128) {
-            pwd = hashPassword(pwd);
-          }
-          let finalPassword = pwd || (ru ? ru.password : null);
-          if (!finalPassword) {
-            console.error(`[Sync User Error] User "${lu.username}" has no password locally or in remote database. Password field cannot be null.`);
-            // Lock the account by setting a random high-entropy hash so no one can guess it
-            finalPassword = hashPassword(crypto.randomUUID());
-          }
+          // Keep the database's existing password if user exists, preventing sync from ever overwriting it.
+          const finalPassword = ru ? ru.password : (lu.password ? (lu.password.length === 128 ? lu.password : hashPassword(lu.password)) : hashPassword(crypto.randomUUID()));
           mergedUsersMap.set(lu.id, {
             id: lu.id,
             name: lu.name,
@@ -370,8 +362,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Sanitize users list (exclude password field) before sending to client
-    const sanitizedUsers = finalUsers.map(({ password, ...u }) => u);
+    // Sanitize users list (exclude password field, include hasPassword) before sending to client
+    const sanitizedUsers = finalUsers.map(({ password, ...u }) => ({ ...u, hasPassword: !!password }));
 
     // 4. Merge Customers, Rooms, Openings, Measurements
     // Map remote data for easy lookup

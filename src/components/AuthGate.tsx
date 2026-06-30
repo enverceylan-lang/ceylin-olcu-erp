@@ -235,7 +235,6 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         setProfileError("Lütfen ad soyad, mail adresi ve telefon numarası alanlarını doldurunuz.");
         return;
       }
-
       // Update user in the store
       useAuthStore.getState().updateUser(currentUser.id, {
         name: trimmedName,
@@ -244,6 +243,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         tcNo: trimmedTcNo,
         address: trimmedAddress,
         profileCompletedAt: new Date().toISOString()
+      }).then((success) => {
+        if (!success) {
+          setProfileError("Profil bilgileri sunucuda güncellenemedi.");
+        }
+      }).catch((err) => {
+        setProfileError("Profil güncellenirken hata oluştu.");
       });
 
       // Secure Logging (Only boolean flags and non-sensitive status)
@@ -255,8 +260,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         hasAddress: !!trimmedAddress,
         role: currentUser.role,
         active: currentUser.isActive
-      });
-    };
+      });    };
 
     return (
       <div className="min-h-screen w-full bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden">
