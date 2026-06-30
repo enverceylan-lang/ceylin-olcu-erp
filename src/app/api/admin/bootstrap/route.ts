@@ -12,24 +12,8 @@ const supabaseServer = createClient(supabaseUrl, supabaseServiceKey, {
   },
 });
 
-// GET: Check if users table is empty and system needs bootstrapping
+// GET: Check if users table is empty
 export async function GET() {
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    console.error("[Bootstrap Config Error] Missing SUPABASE_SERVICE_ROLE_KEY");
-    return NextResponse.json(
-      {
-        success: false,
-        error: "Server configuration error",
-        reason: "Missing SUPABASE_SERVICE_ROLE_KEY"
-      },
-      { status: 500 }
-    );
-  }
-
-  // Diagnostic log for key validation (safe, no secret exposure)
-  const keyType = process.env.SUPABASE_SERVICE_ROLE_KEY.startsWith("eyJhbGci") ? "service_role (valid JWT)" : "invalid format (not JWT)";
-  console.log(`[Bootstrap GET Client Init] URL present: ${!!process.env.SUPABASE_URL || !!process.env.NEXT_PUBLIC_SUPABASE_URL}, Service Role Key present: true, Key format: ${keyType}`);
-
   try {
     const { data: users, error } = await supabaseServer
       .from("users")
@@ -38,7 +22,7 @@ export async function GET() {
 
     if (error) {
       console.error("Bootstrap check database error:", error);
-      // If table doesn't exist yet, we also treat it as needing bootstrap/migration
+      // If error occurs (like table doesn't exist yet), return needsBootstrap: true
       return NextResponse.json({ success: true, needsBootstrap: true });
     }
 
@@ -50,25 +34,27 @@ export async function GET() {
   }
 }
 
-// POST: Seed the initial admin user on first install
-export async function POST() {
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    console.error("[Bootstrap Config Error] Missing SUPABASE_SERVICE_ROLE_KEY");
-    return NextResponse.json(
-      {
-        success: false,
-        error: "Server configuration error",
-        reason: "Missing SUPABASE_SERVICE_ROLE_KEY"
-      },
-      { status: 500 }
-    );
-  }
-
-  // Diagnostic log for key validation (safe, no secret exposure)
-  const keyType = process.env.SUPABASE_SERVICE_ROLE_KEY.startsWith("eyJhbGci") ? "service_role (valid JWT)" : "invalid format (not JWT)";
-  console.log(`[Bootstrap POST Client Init] URL present: ${!!process.env.SUPABASE_URL || !!process.env.NEXT_PUBLIC_SUPABASE_URL}, Service Role Key present: true, Key format: ${keyType}`);
-
+// POST: Seed the initial admin user with recovery token protection
+export async function POST(req: NextRequest) {
   try {
+    const recoveryTokenEnv = process.env.AUTH_RECOVERY_TOKEN;
+    if (!recoveryTokenEnv || recoveryTokenEnv.trim() === "") {
+      return NextResponse.json(
+        { success: false, error: "Bootstrap feature is disabled." },
+        { status: 404 }
+      );
+    }
+
+    const body = await req.json();
+    const { recoveryToken, password } = body;
+
+    if (!recoveryToken || recoveryToken.trim() !== recoveryTokenEnv.trim()) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized recovery token." },
+        { status: 401 }
+      );
+    }
+
     // 1. Check if users table is empty
     const { data: users, error: countError } = await supabaseServer
       .from("users")
@@ -76,24 +62,42 @@ export async function POST() {
       .limit(1);
 
     if (countError) {
-      // If table doesn't exist, we cannot bootstrap yet (db schema needs migration first)
-      return NextResponse.json({ success: false, error: "Database table not ready: " + countError.message }, { status: 500 });
+      return NextResponse.json(
+        { success: false, error: "Database table not ready: " + countError.message },
+        { status: 500 }
+      );
     }
 
     if (users && users.length > 0) {
       return NextResponse.json(
-        { success: false, error: "System already bootstrapped. Access denied." },
-        { status: 403 }
+        { success: false, error: "Bootstrap already completed." },
+        { status: 409 }
       );
     }
 
-    // 2. Create the default admin user
+    // 2. Validate password
+    const cleanPassword = (password || "").trim();
+    if (!cleanPassword) {
+      return NextResponse.json(
+        { success: false, error: "Şifre boş olamaz." },
+        { status: 400 }
+      );
+    }
+
+    if (cleanPassword === "123") {
+      return NextResponse.json(
+        { success: false, error: "Güvenlik nedeniyle varsayılan şifre kullanılamaz." },
+        { status: 400 }
+      );
+    }
+
+    // 3. Create the default admin user
     const now = new Date().toISOString();
     const adminUser = {
       id: "user-admin",
       name: "Yönetici (Admin)",
       username: "admin",
-      password: hashPassword("123"),
+      password: hashPassword(cleanPassword),
       role: "ADMIN",
       isActive: true,
       permissions: ["dashboard", "cariler", "olculer", "stok", "satis", "uretim", "montaj", "raporlar", "ayarlar"],
@@ -106,12 +110,20 @@ export async function POST() {
       .insert(adminUser);
 
     if (insertError) {
-      return NextResponse.json({ success: false, error: insertError.message }, { status: 500 });
+      console.error("Bootstrap insert error:", insertError);
+      return NextResponse.json(
+        { success: false, error: "Kullanıcı oluşturulamadı: " + insertError.message },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({
       success: true,
-      message: "Admin user bootstrapped successfully."
+      bootstrapped: true,
+      username: "admin",
+      role: "ADMIN",
+      isActive: true,
+      createdAt: now
     });
   } catch (error: any) {
     console.error("Bootstrap action error:", error);
