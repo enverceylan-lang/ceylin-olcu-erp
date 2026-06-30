@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 
 // Fallback UUID v4 generator for insecure/HTTP mobile environments
 function generateUUID(): string {
@@ -473,6 +473,21 @@ interface AuthState {
   deleteUser: (id: string) => Promise<boolean>;
 }
 
+const safeAuthStorage = {
+  getItem: (name: string) => {
+    if (typeof window === "undefined") return null;
+    return window.localStorage.getItem(name);
+  },
+  setItem: (name: string, value: string) => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(name, value);
+  },
+  removeItem: (name: string) => {
+    if (typeof window === "undefined") return;
+    window.localStorage.removeItem(name);
+  },
+};
+
 export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
@@ -771,7 +786,8 @@ export const useAuthStore = create<AuthState>()(
           users,
           currentUser
         };
-      }
+      },
+      storage: createJSONStorage(() => safeAuthStorage),
     }
   )
 );

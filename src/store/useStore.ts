@@ -69,16 +69,18 @@ export function sanitizeCustomersForPersist(customers: Customer[]): Customer[] {
 
 const customStoreStorage = {
   getItem: (name: string) => {
+    if (typeof window === 'undefined') return null;
     try {
-      return localStorage.getItem(name);
+      return window.localStorage.getItem(name);
     } catch (e) {
       console.error('[Zustand Storage] Error reading from localStorage:', e);
       return null;
     }
   },
   setItem: (name: string, value: string) => {
+    if (typeof window === 'undefined') return;
     try {
-      localStorage.setItem(name, value);
+      window.localStorage.setItem(name, value);
     } catch (error: any) {
       if (error.name === 'QuotaExceededError' || error.code === 22 || error.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
         console.warn('[Zustand Storage] QuotaExceededError detected. Cleaning up base64 media and retrying...');
@@ -89,7 +91,7 @@ const customStoreStorage = {
               parsed.state.customers = sanitizeCustomersForPersist(parsed.state.customers);
             }
             const sanitizedValue = JSON.stringify(parsed);
-            localStorage.setItem(name, sanitizedValue);
+            window.localStorage.setItem(name, sanitizedValue);
             console.log('[Zustand Storage] Successfully saved to localStorage after removing media.');
             return;
           }
@@ -101,8 +103,9 @@ const customStoreStorage = {
     }
   },
   removeItem: (name: string) => {
+    if (typeof window === 'undefined') return;
     try {
-      localStorage.removeItem(name);
+      window.localStorage.removeItem(name);
     } catch (e) {
       console.error('[Zustand Storage] Error removing from localStorage:', e);
     }
