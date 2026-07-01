@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { useAuthStore, normalizeRole } from './useAuthStore';
+import { saveLocalCustomer, saveLocalCustomers, softDeleteLocalCustomer, loadLocalCustomers } from '@/lib/localCustomerDb';
 
 // ─── Store Change Notification for Sync ───
 type StoreChangeListener = () => void;
@@ -394,22 +395,24 @@ interface AppState {
   pendingDeletes: { id: string; table: 'customers' | 'rooms' | 'openings' | 'measurements' }[];
   syncStatus: 'synced' | 'pending' | 'offline' | 'error';
 
-  addCustomer: (customer: Omit<Customer, 'rooms'> & { id?: string }) => void;
-  updateCustomer: (id: string, data: Partial<Customer>) => void;
-  deleteCustomer: (id: string) => void;
+  addCustomer: (customer: Omit<Customer, 'rooms'> & { id?: string }) => Promise<void>;
+  updateCustomer: (id: string, data: Partial<Customer>) => Promise<void>;
+  deleteCustomer: (id: string) => Promise<void>;
   
-  addRoom: (customerId: string, roomName: string) => void;
-  deleteRoom: (customerId: string, roomId: string) => void;
+  addRoom: (customerId: string, roomName: string) => Promise<void>;
+  deleteRoom: (customerId: string, roomId: string) => Promise<void>;
   
-  addWindow: (customerId: string, roomId: string, windowName: string) => void;
-  deleteWindow: (customerId: string, roomId: string, windowId: string) => void;
+  addWindow: (customerId: string, roomId: string, windowName: string) => Promise<void>;
+  deleteWindow: (customerId: string, roomId: string, windowId: string) => Promise<void>;
 
-  updateRoomAttachments: (customerId: string, roomId: string, photos: string[], videos: string[]) => void;
-  updateWindowItem: (customerId: string, roomId: string, windowId: string, data: Partial<WindowItem>) => void;
+  updateRoomAttachments: (customerId: string, roomId: string, photos: string[], videos: string[]) => Promise<void>;
+  updateWindowItem: (customerId: string, roomId: string, windowId: string, data: Partial<WindowItem>) => Promise<void>;
 
-  addProductMeasurement: (customerId: string, roomId: string, windowId: string, measurement: Omit<ProductMeasurement, 'id'>) => void;
-  updateProductMeasurement: (customerId: string, roomId: string, windowId: string, measurementId: string, data: Partial<ProductMeasurement>) => void;
-  deleteProductMeasurement: (customerId: string, roomId: string, windowId: string, measurementId: string) => void;
+  addProductMeasurement: (customerId: string, roomId: string, windowId: string, measurement: Omit<ProductMeasurement, 'id'>) => Promise<void>;
+  updateProductMeasurement: (customerId: string, roomId: string, windowId: string, measurementId: string, data: Partial<ProductMeasurement>) => Promise<void>;
+  deleteProductMeasurement: (customerId: string, roomId: string, windowId: string, measurementId: string) => Promise<void>;
+
+  initializeCustomersFromDb: () => Promise<void>;
 
   addSale: (saleData: { customerId: string; amount: number; items: SaleItem[]; address: string }) => void;
   updateProductionStatus: (id: string, status: string) => void;
@@ -438,7 +441,7 @@ const mockProducts: Product[] = [
 
 export const useStore = create<AppState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       customers: [],
       products: mockProducts,
       sales: [],
@@ -448,14 +451,15 @@ export const useStore = create<AppState>()(
       pendingDeletes: [],
       syncStatus: 'synced',
 
-      addCustomer: (data) => set((state) => {
+      addCustomer: async (data) => {
+        const state = get();
         const newCustomerId = data.id || generateUUID();
         
         // Submission/Id-based duplicate prevention:
         const exists = state.customers.some(c => c.id === newCustomerId);
         if (exists) {
           console.warn('[Store] Duplicate customer add prevented (same ID exists):', newCustomerId);
-          return {};
+          return;
         }
 
         // Secondary defense: Name-based duplicate protection (within 15 seconds)
@@ -468,7 +472,7 @@ export const useStore = create<AppState>()(
 
         if (isDuplicateName) {
           console.warn('[Store] Duplicate customer add prevented (same name recently created):', data.name);
-          return {};
+          return;
         }
 
         const now = new Date().toISOString();
@@ -508,68 +512,85 @@ export const useStore = create<AppState>()(
           approvalStatus: data.approvalStatus || initialApprovalStatus,
           addressPhotos: data.addressPhotos || []
         };
-        notifyStoreChanges();
-        
-        const afterCount = state.customers.length + 1;
-        console.log('[Store Save Customer] Local customers count after add:', afterCount);
 
-        return {
-          customers: [newCustomer, ...state.customers],
-          syncStatus: 'pending'
-        };
-      }),
+        // 1. Write to IndexedDB first
+        await saveLocalCustomer(newCustomer);
+
+        // 2. Then update Zustand state
+        set((state) => {
+          notifyStoreChanges();
+          return {
+            customers: [newCustomer, ...state.customers],
+            syncStatus: 'pending'
+          };
+        });
+      },
       
-      updateCustomer: (id, data) => set((state) => {
+      updateCustomer: async (id, data) => {
+        const state = get();
         const now = new Date().toISOString();
-        const updatedCustomers = state.customers.map(c => 
-          c.id === id ? { ...c, ...data, updatedAt: now } : c
-        );
-        notifyStoreChanges();
-        return {
-          customers: updatedCustomers,
-          syncStatus: 'pending'
-        };
-      }),
-
-      deleteCustomer: (id) => set((state) => {
-        const now = new Date().toISOString();
-        const updatedCustomers = state.customers.map(c => {
-          if (c.id === id) {
+        const target = state.customers.find(c => c.id === id);
+        if (target) {
+          const updatedCustomer = {
+            ...target,
+            ...data,
+            updatedAt: now
+          };
+          await saveLocalCustomer(updatedCustomer);
+          set((state) => {
+            notifyStoreChanges();
             return {
-              ...c,
+              customers: state.customers.map(c => c.id === id ? updatedCustomer : c),
+              syncStatus: 'pending'
+            };
+          });
+        }
+      },
+
+      deleteCustomer: async (id) => {
+        const state = get();
+        const now = new Date().toISOString();
+        const target = state.customers.find(c => c.id === id);
+        if (target) {
+          const updatedCustomer = {
+            ...target,
+            isDeleted: true,
+            deletedAt: now,
+            updatedAt: now,
+            rooms: target.rooms.map(r => ({
+              ...r,
               isDeleted: true,
               deletedAt: now,
               updatedAt: now,
-              rooms: c.rooms.map(r => ({
-                ...r,
+              windows: r.windows.map(w => ({
+                ...w,
                 isDeleted: true,
                 deletedAt: now,
                 updatedAt: now,
-                windows: r.windows.map(w => ({
-                  ...w,
+                products: w.products.map(p => ({
+                  ...p,
                   isDeleted: true,
                   deletedAt: now,
-                  updatedAt: now,
-                  products: w.products.map(p => ({
-                    ...p,
-                    isDeleted: true,
-                    deletedAt: now,
-                    updatedAt: now
-                  }))
+                  updatedAt: now
                 }))
               }))
+            }))
+          };
+          
+          await saveLocalCustomer(updatedCustomer);
+          
+          set((state) => {
+            notifyStoreChanges();
+            return {
+              customers: state.customers.map(c => c.id === id ? updatedCustomer : c),
+              syncStatus: 'pending'
             };
-          }
-          return c;
-        });
-        notifyStoreChanges();
-        return {
-          customers: updatedCustomers,
-          syncStatus: 'pending'
-        };
-      }),
+          });
+        }
+      },
 
-      addRoom: (customerId, roomName) => set((state) => {
+      addRoom: async (customerId, roomName) => {
+        const state = get();
         const now = new Date().toISOString();
         const defaultWindow: WindowItem = {
           id: generateUUID(),
@@ -589,42 +610,49 @@ export const useStore = create<AppState>()(
           createdAt: now,
           updatedAt: now
         };
-        notifyStoreChanges();
-        return {
-          customers: state.customers.map(c => {
-            if (c.id === customerId) {
-              return {
-                ...c,
-                updatedAt: now,
-                rooms: [...c.rooms, newRoom]
-              };
-            }
-            return c;
-          }),
-          syncStatus: 'pending'
-        };
-      }),
 
-      deleteRoom: (customerId, roomId) => set((state) => {
+        const target = state.customers.find(c => c.id === customerId);
+        if (target) {
+          const updatedCustomer = {
+            ...target,
+            updatedAt: now,
+            rooms: [...target.rooms, newRoom]
+          };
+          await saveLocalCustomer(updatedCustomer);
+          set((state) => {
+            notifyStoreChanges();
+            return {
+              customers: state.customers.map(c => c.id === customerId ? updatedCustomer : c),
+              syncStatus: 'pending'
+            };
+          });
+        }
+      },
+
+      deleteRoom: async (customerId, roomId) => {
+        const state = get();
         const now = new Date().toISOString();
-        notifyStoreChanges();
-        return {
-          customers: state.customers.map(c => {
-            if (c.id === customerId) {
-              return {
-                ...c,
-                updatedAt: now,
-                rooms: c.rooms.filter(r => r.id !== roomId)
-              };
-            }
-            return c;
-          }),
-          pendingDeletes: [...state.pendingDeletes, { id: roomId, table: 'rooms' }],
-          syncStatus: 'pending'
-        };
-      }),
+        const target = state.customers.find(c => c.id === customerId);
+        if (target) {
+          const updatedCustomer = {
+            ...target,
+            updatedAt: now,
+            rooms: target.rooms.filter(r => r.id !== roomId)
+          };
+          await saveLocalCustomer(updatedCustomer);
+          set((state) => {
+            notifyStoreChanges();
+            return {
+              customers: state.customers.map(c => c.id === customerId ? updatedCustomer : c),
+              pendingDeletes: [...state.pendingDeletes, { id: roomId, table: 'rooms' }],
+              syncStatus: 'pending'
+            };
+          });
+        }
+      },
 
-      addWindow: (customerId, roomId, windowName) => set((state) => {
+      addWindow: async (customerId, roomId, windowName) => {
+        const state = get();
         const now = new Date().toISOString();
         const newWindow: WindowItem = {
           id: generateUUID(),
@@ -635,115 +663,128 @@ export const useStore = create<AppState>()(
           createdAt: now,
           updatedAt: now
         };
-        notifyStoreChanges();
-        return {
-          customers: state.customers.map(c => {
-            if (c.id === customerId) {
-              return {
-                ...c,
-                updatedAt: now,
-                rooms: c.rooms.map(r => {
-                  if (r.id === roomId) {
-                    return {
-                      ...r,
-                      updatedAt: now,
-                      windows: [...r.windows, newWindow]
-                    };
-                  }
-                  return r;
-                })
-              };
-            }
-            return c;
-          }),
-          syncStatus: 'pending'
-        };
-      }),
 
-      deleteWindow: (customerId, roomId, windowId) => set((state) => {
+        const target = state.customers.find(c => c.id === customerId);
+        if (target) {
+          const updatedCustomer = {
+            ...target,
+            updatedAt: now,
+            rooms: target.rooms.map(r => {
+              if (r.id === roomId) {
+                return {
+                  ...r,
+                  updatedAt: now,
+                  windows: [...r.windows, newWindow]
+                };
+              }
+              return r;
+            })
+          };
+          await saveLocalCustomer(updatedCustomer);
+          set((state) => {
+            notifyStoreChanges();
+            return {
+              customers: state.customers.map(c => c.id === customerId ? updatedCustomer : c),
+              syncStatus: 'pending'
+            };
+          });
+        }
+      },
+
+      deleteWindow: async (customerId, roomId, windowId) => {
+        const state = get();
         const now = new Date().toISOString();
-        notifyStoreChanges();
-        return {
-          customers: state.customers.map(c => {
-            if (c.id === customerId) {
-              return {
-                ...c,
-                updatedAt: now,
-                rooms: c.rooms.map(r => {
-                  if (r.id === roomId) {
-                    return {
-                      ...r,
-                      updatedAt: now,
-                      windows: r.windows.filter(w => w.id !== windowId)
-                    };
-                  }
-                  return r;
-                })
-              };
-            }
-            return c;
-          }),
-          pendingDeletes: [...state.pendingDeletes, { id: windowId, table: 'openings' }],
-          syncStatus: 'pending'
-        };
-      }),
+        const target = state.customers.find(c => c.id === customerId);
+        if (target) {
+          const updatedCustomer = {
+            ...target,
+            updatedAt: now,
+            rooms: target.rooms.map(r => {
+              if (r.id === roomId) {
+                return {
+                  ...r,
+                  updatedAt: now,
+                  windows: r.windows.filter(w => w.id !== windowId)
+                };
+              }
+              return r;
+            })
+          };
+          await saveLocalCustomer(updatedCustomer);
+          set((state) => {
+            notifyStoreChanges();
+            return {
+              customers: state.customers.map(c => c.id === customerId ? updatedCustomer : c),
+              pendingDeletes: [...state.pendingDeletes, { id: windowId, table: 'openings' }],
+              syncStatus: 'pending'
+            };
+          });
+        }
+      },
 
-      updateRoomAttachments: (customerId, roomId, photos, videos) => set((state) => {
+      updateRoomAttachments: async (customerId, roomId, photos, videos) => {
+        const state = get();
         const now = new Date().toISOString();
-        notifyStoreChanges();
-        return {
-          customers: state.customers.map(c => {
-            if (c.id === customerId) {
-              return {
-                ...c,
-                updatedAt: now,
-                rooms: c.rooms.map(r => {
-                  if (r.id === roomId) {
-                    return { ...r, photos, videos, updatedAt: now };
-                  }
-                  return r;
-                })
-              };
-            }
-            return c;
-          }),
-          syncStatus: 'pending'
-        };
-      }),
+        const target = state.customers.find(c => c.id === customerId);
+        if (target) {
+          const updatedCustomer = {
+            ...target,
+            updatedAt: now,
+            rooms: target.rooms.map(r => {
+              if (r.id === roomId) {
+                return { ...r, photos, videos, updatedAt: now };
+              }
+              return r;
+            })
+          };
+          await saveLocalCustomer(updatedCustomer);
+          set((state) => {
+            notifyStoreChanges();
+            return {
+              customers: state.customers.map(c => c.id === customerId ? updatedCustomer : c),
+              syncStatus: 'pending'
+            };
+          });
+        }
+      },
 
-      updateWindowItem: (customerId, roomId, windowId, data) => set((state) => {
+      updateWindowItem: async (customerId, roomId, windowId, data) => {
+        const state = get();
         const now = new Date().toISOString();
-        notifyStoreChanges();
-        return {
-          customers: state.customers.map(c => {
-            if (c.id === customerId) {
-              return {
-                ...c,
-                updatedAt: now,
-                rooms: c.rooms.map(r => {
-                  if (r.id === roomId) {
-                    return {
-                      ...r,
-                      updatedAt: now,
-                      windows: r.windows.map(w => {
-                        if (w.id === windowId) {
-                          return { ...w, ...data, updatedAt: now };
-                        }
-                        return w;
-                      })
-                    };
-                  }
-                  return r;
-                })
-              };
-            }
-            return c;
-          }),
-          syncStatus: 'pending'
-        };
-      }),
+        const target = state.customers.find(c => c.id === customerId);
+        if (target) {
+          const updatedCustomer = {
+            ...target,
+            updatedAt: now,
+            rooms: target.rooms.map(r => {
+              if (r.id === roomId) {
+                return {
+                  ...r,
+                  updatedAt: now,
+                  windows: r.windows.map(w => {
+                    if (w.id === windowId) {
+                      return { ...w, ...data, updatedAt: now };
+                    }
+                    return w;
+                  })
+                };
+              }
+              return r;
+            })
+          };
+          await saveLocalCustomer(updatedCustomer);
+          set((state) => {
+            notifyStoreChanges();
+            return {
+              customers: state.customers.map(c => c.id === customerId ? updatedCustomer : c),
+              syncStatus: 'pending'
+            };
+          });
+        }
+      },
 
-      addProductMeasurement: (customerId, roomId, windowId, measurement) => set((state) => {
+      addProductMeasurement: async (customerId, roomId, windowId, measurement) => {
+        const state = get();
         const now = new Date().toISOString();
         const newMeas: ProductMeasurement = {
           ...measurement,
@@ -751,117 +792,138 @@ export const useStore = create<AppState>()(
           createdAt: now,
           updatedAt: now
         };
-        notifyStoreChanges();
-        return {
-          customers: state.customers.map(c => {
-            if (c.id === customerId) {
-              return {
-                ...c,
-                updatedAt: now,
-                rooms: c.rooms.map(r => {
-                  if (r.id === roomId) {
-                    return {
-                      ...r,
-                      updatedAt: now,
-                      windows: r.windows.map(w => {
-                        if (w.id === windowId) {
-                          return {
-                            ...w,
-                            updatedAt: now,
-                            products: [...w.products, newMeas]
-                          };
-                        }
-                        return w;
-                      })
-                    };
-                  }
-                  return r;
-                })
-              };
-            }
-            return c;
-          }),
-          syncStatus: 'pending'
-        };
-      }),
 
-      updateProductMeasurement: (customerId, roomId, windowId, measurementId, data) => set((state) => {
-        const now = new Date().toISOString();
-        notifyStoreChanges();
-        return {
-          customers: state.customers.map(c => {
-            if (c.id === customerId) {
-              return {
-                ...c,
-                updatedAt: now,
-                rooms: c.rooms.map(r => {
-                  if (r.id === roomId) {
-                    return {
-                      ...r,
-                      updatedAt: now,
-                      windows: r.windows.map(w => {
-                        if (w.id === windowId) {
-                          return {
-                            ...w,
-                            updatedAt: now,
-                            products: w.products.map(p => {
-                              if (p.id === measurementId) {
-                                return { ...p, ...data, updatedAt: now };
-                              }
-                              return p;
-                            })
-                          };
-                        }
-                        return w;
-                      })
-                    };
-                  }
-                  return r;
-                })
-              };
-            }
-            return c;
-          }),
-          syncStatus: 'pending'
-        };
-      }),
+        const target = state.customers.find(c => c.id === customerId);
+        if (target) {
+          const updatedCustomer = {
+            ...target,
+            updatedAt: now,
+            rooms: target.rooms.map(r => {
+              if (r.id === roomId) {
+                return {
+                  ...r,
+                  updatedAt: now,
+                  windows: r.windows.map(w => {
+                    if (w.id === windowId) {
+                      return {
+                        ...w,
+                        updatedAt: now,
+                        products: [...w.products, newMeas]
+                      };
+                    }
+                    return w;
+                  })
+                };
+              }
+              return r;
+            })
+          };
+          await saveLocalCustomer(updatedCustomer);
+          set((state) => {
+            notifyStoreChanges();
+            return {
+              customers: state.customers.map(c => c.id === customerId ? updatedCustomer : c),
+              syncStatus: 'pending'
+            };
+          });
+        }
+      },
 
-      deleteProductMeasurement: (customerId, roomId, windowId, measurementId) => set((state) => {
+      updateProductMeasurement: async (customerId, roomId, windowId, measurementId, data) => {
+        const state = get();
         const now = new Date().toISOString();
-        notifyStoreChanges();
-        return {
-          customers: state.customers.map(c => {
-            if (c.id === customerId) {
-              return {
-                ...c,
-                updatedAt: now,
-                rooms: c.rooms.map(r => {
-                  if (r.id === roomId) {
-                    return {
-                      ...r,
-                      updatedAt: now,
-                      windows: r.windows.map(w => {
-                        if (w.id === windowId) {
-                          return {
-                            ...w,
-                            updatedAt: now,
-                            products: w.products.filter(p => p.id !== measurementId)
-                          };
-                        }
-                        return w;
-                      })
-                    };
-                  }
-                  return r;
-                })
-              };
-            }
-            return c;
-          }),
-          pendingDeletes: [...state.pendingDeletes, { id: measurementId, table: 'measurements' }],
-          syncStatus: 'pending'
-        };
-      }),
+        const target = state.customers.find(c => c.id === customerId);
+        if (target) {
+          const updatedCustomer = {
+            ...target,
+            updatedAt: now,
+            rooms: target.rooms.map(r => {
+              if (r.id === roomId) {
+                return {
+                  ...r,
+                  updatedAt: now,
+                  windows: r.windows.map(w => {
+                    if (w.id === windowId) {
+                      return {
+                        ...w,
+                        updatedAt: now,
+                        products: w.products.map(p => {
+                          if (p.id === measurementId) {
+                            return { ...p, ...data, updatedAt: now };
+                          }
+                          return p;
+                        })
+                      };
+                    }
+                    return w;
+                  })
+                };
+              }
+              return r;
+            })
+          };
+          await saveLocalCustomer(updatedCustomer);
+          set((state) => {
+            notifyStoreChanges();
+            return {
+              customers: state.customers.map(c => c.id === customerId ? updatedCustomer : c),
+              syncStatus: 'pending'
+            };
+          });
+        }
+      },
+
+      deleteProductMeasurement: async (customerId, roomId, windowId, measurementId) => {
+        const state = get();
+        const now = new Date().toISOString();
+        const target = state.customers.find(c => c.id === customerId);
+        if (target) {
+          const updatedCustomer = {
+            ...target,
+            updatedAt: now,
+            rooms: target.rooms.map(r => {
+              if (r.id === roomId) {
+                return {
+                  ...r,
+                  updatedAt: now,
+                  windows: r.windows.map(w => {
+                    if (w.id === windowId) {
+                      return {
+                        ...w,
+                        updatedAt: now,
+                        products: w.products.filter(p => p.id !== measurementId)
+                      };
+                    }
+                    return w;
+                  })
+                };
+              }
+              return r;
+            })
+          };
+          await saveLocalCustomer(updatedCustomer);
+          set((state) => {
+            notifyStoreChanges();
+            return {
+              customers: state.customers.map(c => c.id === customerId ? updatedCustomer : c),
+              pendingDeletes: [...state.pendingDeletes, { id: measurementId, table: 'measurements' }],
+              syncStatus: 'pending'
+            };
+          });
+        }
+      },
+
+      initializeCustomersFromDb: async () => {
+        try {
+          const dbCustomers = await loadLocalCustomers();
+          if (Array.isArray(dbCustomers)) {
+            set({ customers: dbCustomers });
+            console.log(`[Store] Loaded ${dbCustomers.length} customers from IndexedDB.`);
+          }
+        } catch (err) {
+          console.error('[Store] Failed to load customers from IndexedDB:', err);
+        }
+      },
 
       addSale: (saleData) => set((state) => {
         const saleId = Math.floor(1000 + Math.random() * 9000).toString();
@@ -979,15 +1041,18 @@ export const useStore = create<AppState>()(
       setCustomers: (customers) => {
         const sanitized = sanitizeCustomersForPersist(customers);
         set({ customers: sanitized });
+        saveLocalCustomers(sanitized).catch((err: any) => {
+          console.error('[Store] Failed to save customers to IndexedDB in setCustomers:', err);
+        });
       },
       clearPendingDeletes: () => set({ pendingDeletes: [] }),
     }),
     {
       name: 'curtain-erp-storage-v3', // V3 format
-      partialize: (state) => ({
-        ...state,
-        customers: sanitizeCustomersForPersist(state.customers),
-      }),
+      partialize: (state) => {
+        const { customers, ...rest } = state;
+        return rest;
+      },
       storage: createJSONStorage(() => customStoreStorage),
     }
   )

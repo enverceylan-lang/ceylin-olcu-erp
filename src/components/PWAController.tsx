@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { WifiOff, Download, RefreshCw, X, HelpCircle, AlertCircle } from "lucide-react";
 import { initSync } from "@/lib/syncService";
+import { useStore } from "@/store/useStore";
 
 export function PWAController() {
   const [isOffline, setIsOffline] = useState(false);
@@ -16,6 +17,9 @@ export function PWAController() {
     let cleanupSync: (() => void) | undefined;
     // 1. Check offline status
     if (typeof window !== "undefined") {
+      // Restore customers from IndexedDB to Zustand store on startup
+      useStore.getState().initializeCustomersFromDb();
+
       cleanupSync = initSync();
       setIsOffline(!navigator.onLine);
 
