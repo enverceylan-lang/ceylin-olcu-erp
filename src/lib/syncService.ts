@@ -446,10 +446,12 @@ export async function syncNow(isManual: boolean = false) {
 
     // ── Task B: Sanitizing outgoing sync payload by stripping media ──
     const sanitizedCustomers = stripMediaAndDataUrls(localCustomers);
+    // Exclude password field from outgoing users payload for security
+    const outgoingUsers = (localUsers || []).map(({ password, ...u }: any) => u);
     const sanitizedPayload = {
       customers: sanitizedCustomers,
       pendingDeletes: pendingDeletes,
-      users: localUsers
+      users: outgoingUsers
     };
     const sanitizedJsonSize = getObjSize(sanitizedPayload);
     console.log('[Client Sync Size Info] Sanitized Payload Size:', (sanitizedJsonSize / 1024).toFixed(2) + ' KB');
@@ -759,7 +761,11 @@ export function initSync() {
     store.setSyncStatus('offline');
   };
 
-  // Re-sync when the app tab is focused / resumed from background (throttled to 15s)
+  window.addEventListener('online', handleOnline);
+  window.addEventListener('offline', handleOffline);
+
+  // Disabled: Sayfa focus / Tab visibility değişince otomatik sync (Phase 1)
+  /*
   let lastResumeSyncTime = 0;
   const handleAppResume = () => {
     if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
@@ -773,18 +779,19 @@ export function initSync() {
       syncNow();
     }
   };
-
-  window.addEventListener('online', handleOnline);
-  window.addEventListener('offline', handleOffline);
   window.addEventListener('focus', handleAppResume);
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', handleAppResume);
   }
+  */
 
-  // Sync whenever the main data store changes (customer add/edit/delete)
+  // Disabled: Zustand/local store her değiştiğinde otomatik sync (Phase 1)
+  const unsubscribeStore = () => {};
+  /*
   const unsubscribeStore = subscribeToStoreChanges(() => {
     syncNow();
   });
+  */
 
   // Sync when a user logs in or switches accounts
   let lastUserId: string | null = useAuthStore.getState().currentUser?.id ?? null;
@@ -797,21 +804,25 @@ export function initSync() {
     lastUserId = currentId;
   });
 
-  // Periodic background sync every 60 seconds
+  // Disabled: 60 saniyelik otomatik background sync (Phase 1)
+  /*
   const interval = setInterval(() => {
     syncNow();
   }, 60000);
+  */
 
   // Return cleanup function for use in React effects
   return () => {
     window.removeEventListener('online', handleOnline);
     window.removeEventListener('offline', handleOffline);
+    /*
     window.removeEventListener('focus', handleAppResume);
     if (typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', handleAppResume);
     }
+    */
     unsubscribeStore();
     unsubscribeAuth();
-    clearInterval(interval);
+    // clearInterval(interval);
   };
 }
