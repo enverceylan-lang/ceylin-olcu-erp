@@ -80,11 +80,11 @@ export function Topbar() {
               )}
 
               <button
-                onClick={() => syncNow(true)}
-                className="flex items-center gap-1 text-xs font-semibold px-2 py-0.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/30 text-indigo-650 dark:text-indigo-400 rounded-md transition-colors cursor-pointer border border-indigo-200/50 dark:border-indigo-800/30 ml-2"
-                title="El ile senkronizasyonu başlat"
+                onClick={() => alert("Cloud sync geçici olarak kapalı. Ana PC yerel veri korunuyor.")}
+                className="flex items-center gap-1 text-xs font-semibold px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 rounded-md border border-gray-200 dark:border-gray-700 ml-2 cursor-not-allowed opacity-60"
+                title="Cloud sync geçici olarak kapalı. Ana PC yerel veri korunuyor."
               >
-                <RefreshCw className="w-3 h-3" />
+                <RefreshCw className="w-3 h-3 text-gray-400 dark:text-gray-500" />
                 <span>Senkronize Et</span>
               </button>
             </div>

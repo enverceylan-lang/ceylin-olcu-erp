@@ -5,6 +5,9 @@ import { useAuthStore } from '@/store/useAuthStore';
 let isSyncing = false;
 let hasPendingSync = false;
 
+// Flag to temporarily disable all cloud sync processes to protect local data
+const CLOUD_SYNC_DISABLED = true;
+
 // Track last 413 Payload Too Large error timestamp
 let last413Time = 0;
 
@@ -308,6 +311,11 @@ function mergeProducts(local: ProductMeasurement[], remote: ProductMeasurement[]
 // ─── Main Sync Function ───
 
 export async function syncNow(isManual: boolean = false) {
+  if (CLOUD_SYNC_DISABLED) {
+    console.log('[Client Sync] Cloud sync is temporarily disabled. Local PC data is protected.');
+    return;
+  }
+
   // Guard: Ensure store is fully hydrated before syncing to prevent wiping local data
   if (typeof useStore.persist !== 'undefined' && !useStore.persist.hasHydrated()) {
     console.warn('[Client Sync] useStore is not hydrated yet. Sync aborted to prevent data loss.');
