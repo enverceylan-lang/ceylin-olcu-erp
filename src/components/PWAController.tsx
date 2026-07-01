@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { WifiOff, Download, RefreshCw, X, HelpCircle, AlertCircle } from "lucide-react";
 import { initSync } from "@/lib/syncService";
 import { useStore } from "@/store/useStore";
+import { migrateLocalStorageCustomersToIndexedDb } from "@/lib/migrateCustomersToIndexedDb";
 
 export function PWAController() {
   const [isOffline, setIsOffline] = useState(false);
@@ -17,8 +18,23 @@ export function PWAController() {
     let cleanupSync: (() => void) | undefined;
     // 1. Check offline status
     if (typeof window !== "undefined") {
-      // Restore customers from IndexedDB to Zustand store on startup
-      useStore.getState().initializeCustomersFromDb();
+      // Step 1: Migrate any old localStorage customers into IndexedDB (one-time, safe)
+      migrateLocalStorageCustomersToIndexedDb().then((report) => {
+        console.log('[Migration] LocalStorage -> IndexedDB:', {
+          legacyCount: report.legacyCount,
+          backupCount: report.backupCount,
+          idbBefore: report.idbBefore,
+          migratedCount: report.migratedCount,
+          idbAfter: report.idbAfter,
+          error: report.error,
+        });
+        // Step 2: Load all customers from IndexedDB into Zustand store
+        useStore.getState().initializeCustomersFromDb();
+      }).catch((err) => {
+        console.error('[Migration] Error during migration, falling back to direct load:', err);
+        // Fallback: load directly even if migration failed
+        useStore.getState().initializeCustomersFromDb();
+      });
 
       cleanupSync = initSync();
       setIsOffline(!navigator.onLine);
