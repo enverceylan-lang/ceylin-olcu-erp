@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie';
+import { enqueueSyncEvent } from './localSyncQueueDb';
 
 export interface FieldMeasurementDraft {
   id: string;
@@ -92,6 +93,7 @@ export async function createMeasurementDraft(draft: Omit<FieldMeasurementDraft, 
     updatedAt: now
   };
   await localDraftDb.measurementDrafts.add(newDraft);
+  await enqueueSyncEvent('DRAFT', newDraft.id, 'INSERT', newDraft);
   return newDraft.id;
 }
 
@@ -101,6 +103,11 @@ export async function updateMeasurementDraft(id: string, updates: Partial<Omit<F
     ...updates,
     updatedAt: now
   });
+  
+  const updated = await localDraftDb.measurementDrafts.get(id);
+  if (updated) {
+    await enqueueSyncEvent('DRAFT', id, 'UPDATE', updated);
+  }
 }
 
 export async function listMeasurementDrafts(createdBy?: string, syncStatus?: FieldMeasurementDraft['syncStatus']): Promise<FieldMeasurementDraft[]> {
@@ -196,6 +203,8 @@ export async function markDraftReadyToTransfer(id: string, type: 'MEASUREMENT' |
   const now = new Date().toISOString();
   if (type === 'MEASUREMENT') {
     await localDraftDb.measurementDrafts.update(id, { syncStatus: 'READY_TO_TRANSFER', updatedAt: now });
+    const updated = await localDraftDb.measurementDrafts.get(id);
+    if (updated) await enqueueSyncEvent('DRAFT', id, 'UPDATE', { syncStatus: 'READY_TO_TRANSFER', updatedAt: now });
   } else {
     await localDraftDb.installationDrafts.update(id, { syncStatus: 'READY_TO_TRANSFER', updatedAt: now });
   }
@@ -205,6 +214,8 @@ export async function markDraftTransferred(id: string, type: 'MEASUREMENT' | 'IN
   const now = new Date().toISOString();
   if (type === 'MEASUREMENT') {
     await localDraftDb.measurementDrafts.update(id, { syncStatus: 'TRANSFERRED', updatedAt: now });
+    const updated = await localDraftDb.measurementDrafts.get(id);
+    if (updated) await enqueueSyncEvent('DRAFT', id, 'UPDATE', { syncStatus: 'TRANSFERRED', updatedAt: now });
   } else {
     await localDraftDb.installationDrafts.update(id, { syncStatus: 'TRANSFERRED', updatedAt: now });
   }
@@ -217,6 +228,7 @@ export async function deleteTransferredDraft(id: string, type: 'MEASUREMENT' | '
   // 2. Delete draft itself
   if (type === 'MEASUREMENT') {
     await localDraftDb.measurementDrafts.delete(id);
+    await enqueueSyncEvent('DRAFT', id, 'SOFT_DELETE', { isDeleted: true });
   } else {
     await localDraftDb.installationDrafts.delete(id);
   }
@@ -230,4 +242,5 @@ export async function deleteMeasurementDraft(id: string): Promise<void> {
   // Delete associated media files first, then the draft
   await localDraftDb.draftMediaFiles.where('draftId').equals(id).delete();
   await localDraftDb.measurementDrafts.delete(id);
+  await enqueueSyncEvent('DRAFT', id, 'SOFT_DELETE', { isDeleted: true });
 }

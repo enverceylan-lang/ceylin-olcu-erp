@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import { Customer } from '@/store/useStore';
+import { enqueueSyncEvent } from './localSyncQueueDb';
 
 class LocalCustomerDatabase extends Dexie {
   customers!: Table<Customer, string>;
@@ -25,7 +26,13 @@ export async function loadLocalCustomers(): Promise<Customer[]> {
 
 export async function saveLocalCustomer(customer: Customer): Promise<void> {
   try {
+    const existing = await localCustomerDb.customers.get(customer.id);
+    const operation = existing ? 'UPDATE' : 'INSERT';
+
     await localCustomerDb.customers.put(customer);
+    
+    // Fire and forget event queueing at the aggregate root level
+    await enqueueSyncEvent('CUSTOMER', customer.id, operation, customer);
   } catch (err) {
     console.error('[localCustomerDb] Failed to save customer:', err);
     throw err;
@@ -50,6 +57,8 @@ export async function softDeleteLocalCustomer(id: string): Promise<void> {
       customer.deletedAt = now;
       customer.updatedAt = now;
       await localCustomerDb.customers.put(customer);
+
+      await enqueueSyncEvent('CUSTOMER', customer.id, 'SOFT_DELETE', { isDeleted: true, deletedAt: now, updatedAt: now });
     }
   } catch (err) {
     console.error('[localCustomerDb] Failed to soft delete customer:', err);
