@@ -992,3 +992,37 @@ export const useStore = create<AppState>()(
     }
   )
 );
+
+// ─── Local Database Backup & Wiping Protection Watchdog ───
+let lastKnownCustomers: Customer[] = [];
+
+if (typeof window !== 'undefined') {
+  // 1. Initialize lastKnownCustomers from local backup on startup
+  try {
+    const rawBackup = window.localStorage.getItem('ceylin_customers_backup');
+    if (rawBackup) {
+      lastKnownCustomers = JSON.parse(rawBackup);
+    }
+  } catch (e) {
+    console.error('[Store Backup] Failed to parse initial backup:', e);
+  }
+
+  // 2. Subscribe to store changes to protect against wipes
+  useStore.subscribe((state) => {
+    const current = state.customers;
+    if (Array.isArray(current) && current.length > 0) {
+      lastKnownCustomers = current;
+      try {
+        const sanitized = sanitizeCustomersForPersist(current);
+        window.localStorage.setItem('ceylin_customers_backup', JSON.stringify(sanitized));
+      } catch (err) {
+        console.error('[Store Backup] Failed to save backup:', err);
+      }
+    } else if (Array.isArray(current) && current.length === 0 && lastKnownCustomers.length > 0) {
+      console.warn('[Store Watchdog] Customers state was wiped! Restoring from last known local backup...');
+      setTimeout(() => {
+        useStore.setState({ customers: lastKnownCustomers });
+      }, 0);
+    }
+  });
+}
