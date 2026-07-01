@@ -221,3 +221,13 @@ export async function deleteTransferredDraft(id: string, type: 'MEASUREMENT' | '
     await localDraftDb.installationDrafts.delete(id);
   }
 }
+
+export async function getDraftById(id: string): Promise<FieldMeasurementDraft | undefined> {
+  return await localDraftDb.measurementDrafts.get(id);
+}
+
+export async function deleteMeasurementDraft(id: string): Promise<void> {
+  // Delete associated media files first, then the draft
+  await localDraftDb.draftMediaFiles.where('draftId').equals(id).delete();
+  await localDraftDb.measurementDrafts.delete(id);
+}
