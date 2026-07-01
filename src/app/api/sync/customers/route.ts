@@ -330,8 +330,12 @@ export async function POST(req: NextRequest) {
         }
 
         if (!ru || new Date(lu.updatedAt) > new Date(ru.updatedAt)) {
-          // Keep the database's existing password if user exists, preventing sync from ever overwriting it.
-          const finalPassword = ru ? ru.password : (lu.password ? (lu.password.length === 128 ? lu.password : hashPassword(lu.password)) : hashPassword(crypto.randomUUID()));
+          // Determine final password: if a new local password is provided, use it (hash it if it's plaintext).
+          // Otherwise, if the remote user already exists, preserve their password.
+          let finalPassword = ru ? ru.password : hashPassword(crypto.randomUUID());
+          if (lu.password && lu.password.trim() !== "" && lu.password.trim() !== "••••") {
+            finalPassword = lu.password.length === 128 ? lu.password : hashPassword(lu.password);
+          }
           mergedUsersMap.set(lu.id, {
             id: lu.id,
             name: lu.name,

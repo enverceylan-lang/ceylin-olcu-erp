@@ -114,8 +114,8 @@ export default function AyarlarPage() {
   // User Management Handlers
   const handleAddUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName.trim() || !newUsername.trim() || !newPassword.trim() || !newEmail.trim() || !newPhone.trim()) {
-      setMessage("Hata: Ad soyad, kullanıcı adı, şifre, mail adresi ve telefon numarası zorunludur.");
+    if (!newName.trim() || !newUsername.trim() || !newPassword.trim()) {
+      setMessage("Hata: Ad soyad, kullanıcı adı ve şifre zorunludur.");
       return;
     }
 
@@ -185,8 +185,8 @@ export default function AyarlarPage() {
   };
 
   const handleSaveEdit = async (id: string) => {
-    if (!editName.trim() || !editUsername.trim() || !editEmail.trim() || !editPhone.trim()) {
-      setMessage("Hata: Ad soyad, kullanıcı adı, mail adresi ve telefon numarası zorunludur.");
+    if (!editName.trim() || !editUsername.trim()) {
+      setMessage("Hata: Ad soyad ve kullanıcı adı zorunludur.");
       return;
     }
 
