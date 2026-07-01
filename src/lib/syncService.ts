@@ -308,6 +308,16 @@ function mergeProducts(local: ProductMeasurement[], remote: ProductMeasurement[]
 // ─── Main Sync Function ───
 
 export async function syncNow(isManual: boolean = false) {
+  // Guard: Ensure store is fully hydrated before syncing to prevent wiping local data
+  if (typeof useStore.persist !== 'undefined' && !useStore.persist.hasHydrated()) {
+    console.warn('[Client Sync] useStore is not hydrated yet. Sync aborted to prevent data loss.');
+    return;
+  }
+  if (typeof useAuthStore.persist !== 'undefined' && !useAuthStore.persist.hasHydrated()) {
+    console.warn('[Client Sync] useAuthStore is not hydrated yet. Sync aborted to prevent data loss.');
+    return;
+  }
+
   if (isSyncing) {
     hasPendingSync = true;
     return;
@@ -743,10 +753,18 @@ export async function syncNow(isManual: boolean = false) {
 export function initSync() {
   if (typeof window === 'undefined') return;
 
-  // Initial sync with a short delay to let the app render first
-  setTimeout(() => {
-    syncNow();
-  }, 1000);
+  // Wait for hydration before running the initial sync
+  const tryInitialSync = () => {
+    if (useStore.persist.hasHydrated() && useAuthStore.persist.hasHydrated()) {
+      console.log('[Client Sync] Stores hydrated. Running initial sync.');
+      syncNow();
+    } else {
+      console.log('[Client Sync] Stores not hydrated yet. Retrying initial sync in 500ms...');
+      setTimeout(tryInitialSync, 500);
+    }
+  };
+
+  setTimeout(tryInitialSync, 500);
 
   // Re-sync when coming back online after being offline
   const handleOnline = () => {
