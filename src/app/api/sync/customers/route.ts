@@ -275,12 +275,21 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Pull all entities from Supabase
-    const { data: remoteCustomers } = await supabaseServer.from("customers").select("*");
-    const { data: remoteRooms } = await supabaseServer.from("rooms").select("*");
-    const { data: remoteOpenings } = await supabaseServer.from("openings").select("*");
-    const { data: remoteMeasurements } = await supabaseServer.from("measurements").select("*");
-    const { data: remoteUsers } = await supabaseServer.from("users").select("*");
+    // 2. Pull all entities from Supabase with error checks
+    const { data: remoteCustomers, error: errCustomers } = await supabaseServer.from("customers").select("*");
+    const { data: remoteRooms, error: errRooms } = await supabaseServer.from("rooms").select("*");
+    const { data: remoteOpenings, error: errOpenings } = await supabaseServer.from("openings").select("*");
+    const { data: remoteMeasurements, error: errMeasurements } = await supabaseServer.from("measurements").select("*");
+    const { data: remoteUsers, error: errUsers } = await supabaseServer.from("users").select("*");
+
+    const fetchError = errCustomers || errRooms || errOpenings || errMeasurements || errUsers;
+    if (fetchError) {
+      console.error("[Sync Server Fetch Error] Database fetch failed:", fetchError.message);
+      return NextResponse.json(
+        { success: false, error: "Veritabanı bağlantı hatası: " + fetchError.message },
+        { status: 500 }
+      );
+    }
 
     console.log("[Sync API POST] fetched counts:", {
       customers: remoteCustomers?.length || 0,
@@ -357,7 +366,11 @@ export async function POST(req: NextRequest) {
       for (const u of finalUsers) {
         const ru = remoteUsers?.find(r => r.id === u.id);
         if (!ru || new Date(u.updatedAt) > new Date(ru.updatedAt)) {
-          await supabaseServer.from("users").upsert(u);
+          const { error: upsertError } = await supabaseServer.from("users").upsert(u);
+          if (upsertError) {
+            console.error(`[Sync DB Error] User upsert failed for ${u.username} (${u.id}):`, upsertError.message);
+            throw new Error(`User upsert failed: ${upsertError.message}`);
+          }
         }
       }
     }
