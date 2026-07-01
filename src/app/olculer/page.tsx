@@ -6,6 +6,7 @@ import { useStore, MEASUREMENT_TEMPLATES } from "@/store/useStore";
 import { useEffect, useState } from "react";
 import { getMeasurementDimensions, getTemplateLabel } from "@/lib/measurementAdapter";
 import { useAuthStore, canViewCustomer } from "@/store/useAuthStore";
+import { localDraftDb, FieldMeasurementDraft } from "@/lib/localDraftDb";
 
 export default function OlculerPage() {
   const { customers } = useStore();
@@ -13,8 +14,20 @@ export default function OlculerPage() {
   const [mounted, setMounted] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [expandedCustomers, setExpandedCustomers] = useState<Record<string, boolean>>({});
+  const [localDrafts, setLocalDrafts] = useState<FieldMeasurementDraft[]>([]);
 
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    setMounted(true);
+    const loadDrafts = async () => {
+      try {
+        const drafts = await localDraftDb.measurementDrafts.toArray();
+        setLocalDrafts(drafts);
+      } catch (err) {
+        console.error("Local drafts could not be loaded:", err);
+      }
+    };
+    loadDrafts();
+  }, []);
 
   if (!mounted) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
 
@@ -78,6 +91,11 @@ export default function OlculerPage() {
       (item.customer.phone && item.customer.phone.includes(searchTerm))
     );
 
+  const filteredDrafts = localDrafts.filter(d => 
+    d.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (d.customerPhone && d.customerPhone.includes(searchTerm))
+  );
+
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-12">
       <div>
@@ -100,6 +118,53 @@ export default function OlculerPage() {
           className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-shadow text-sm"
         />
       </div>
+
+      {/* LOCAL DRAFTS SECTION */}
+      {localDrafts.length > 0 && (
+        <div className="space-y-4">
+          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+            <Ruler className="w-5 h-5 text-amber-500" />
+            Yerel Saha Taslakları (İnternetsiz Kaydedilenler)
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {filteredDrafts.map((draft) => (
+              <div 
+                key={draft.id} 
+                className="bg-white dark:bg-gray-900 border border-amber-200 dark:border-amber-900/30 rounded-xl p-5 shadow-sm space-y-3 relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 bg-amber-500/10 text-amber-600 dark:text-amber-400 px-3 py-1 rounded-bl-xl text-[10px] font-bold uppercase tracking-wider">
+                  Saha Taslağı
+                </div>
+                <div>
+                  <h3 className="font-bold text-gray-900 dark:text-white text-base">
+                    {draft.customerName}
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Telefon: {draft.customerPhone || "-"}
+                  </p>
+                </div>
+                
+                <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                  <span>Oda Sayısı: <strong className="text-slate-800 dark:text-slate-200 font-semibold">{draft.rooms?.length || 0}</strong></span>
+                  <span>Kayıt Tarihi: <strong className="text-slate-800 dark:text-slate-200 font-semibold">{new Date(draft.createdAt).toLocaleDateString('tr-TR')}</strong></span>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-800">
+                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border dark:border-gray-700">
+                    Durum: {draft.syncStatus}
+                  </span>
+                  <Link 
+                    href={`/cariler/${draft.id}`}
+                    className="text-xs bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg font-bold flex items-center gap-1 transition-colors"
+                  >
+                    Düzenle / Detay <ArrowRight className="w-3.5 h-3.5" />
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="space-y-4">
         {customerStats.length === 0 ? (

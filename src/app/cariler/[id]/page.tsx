@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, ChevronRight, Layers, Camera, Video, FileText, CheckCircle, Shield, AlertTriangle, MapPin, MessageCircle, Loader2 } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, ChevronRight, Layers, Camera, Video, FileText, CheckCircle, Shield, AlertTriangle, MapPin, MessageCircle, Loader2, Ruler } from "lucide-react";
 import Link from "next/link";
 import { useStore, WindowItem, MEASUREMENT_TEMPLATES, ProductMeasurement } from "@/store/useStore";
 import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer, canViewCustomerWorkflowReport, canViewCustomerFinancialReport, canViewCustomerContactFields, canViewFinancialAreas, canEditCustomerLocation, canViewCariCard } from "@/store/useAuthStore";
@@ -11,6 +11,7 @@ import { MediaPreviewModal } from "@/components/MediaPreviewModal";
 import { syncNow } from "@/lib/syncService";
 import { buildWhatsAppShortReport, calculateMechanicalCurtainM2 } from "@/lib/reportFormatters";
 import { MeasurementVisualReport } from "@/components/reports/MeasurementVisualReport";
+import { localDraftDb, FieldMeasurementDraft } from "@/lib/localDraftDb";
 
 export default function CariDetayPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
@@ -580,6 +581,35 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     );
   };
 
+  const handleSaveAsLocalDraft = async () => {
+    if (!customer) return;
+    try {
+      const draftId = customer.id;
+      const existing = await localDraftDb.measurementDrafts.get(draftId);
+      const now = new Date().toISOString();
+      const draftData: FieldMeasurementDraft = {
+        id: draftId,
+        draftType: 'MEASUREMENT',
+        customerName: customer.name,
+        customerPhone: customer.phone || "",
+        customerAddress: customer.address || "",
+        notes: customer.notes || "",
+        rooms: customer.rooms || [],
+        mediaFiles: [],
+        createdBy: currentUser?.name || "Bilinmiyor",
+        createdAt: existing ? existing.createdAt : now,
+        updatedAt: now,
+        syncStatus: 'DRAFT'
+      };
+
+      await localDraftDb.measurementDrafts.put(draftData);
+      showToast("Saha taslağı telefona kaydedildi.");
+    } catch (err) {
+      console.error(err);
+      showToast("Taslak kaydedilemedi.");
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-24">
       {/* Header & Mode Toggle */}
@@ -611,6 +641,15 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
           >
             <FileText className="w-4 h-4" />
             Görsel Ölçü Raporu
+          </button>
+
+          <button
+            onClick={handleSaveAsLocalDraft}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-800 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer"
+            title="Saha ölçü taslağını telefona kaydet"
+          >
+            <Ruler className="w-4 h-4 text-blue-400" />
+            Telefona Taslak Kaydet
           </button>
 
           {/* MODE TOGGLE */}
