@@ -312,6 +312,8 @@ function mergeProducts(local: ProductMeasurement[], remote: ProductMeasurement[]
 
 export async function syncNow(isManual: boolean = false) {
   if (CLOUD_SYNC_DISABLED) {
+    // Cloud sync is disabled — clear any lingering pending/spinner state immediately
+    useStore.getState().setSyncStatus('synced');
     console.log('[Client Sync] Cloud sync is temporarily disabled. Local PC data is protected.');
     return;
   }
@@ -777,6 +779,11 @@ export function initSync() {
   // Re-sync when coming back online after being offline
   const handleOnline = () => {
     const store = useStore.getState();
+    if (CLOUD_SYNC_DISABLED) {
+      // Sync is disabled — just ensure status shows synced, no spinner
+      store.setSyncStatus('synced');
+      return;
+    }
     store.setSyncStatus('pending');
     syncNow();
   };
