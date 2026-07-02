@@ -5,13 +5,16 @@ import Link from "next/link";
 import { useStore } from "@/store/useStore";
 import { useEffect, useState } from "react";
 import { getGoogleMapsUrl } from "@/lib/measurementAdapter";
-import { useAuthStore, canViewCustomer, normalizeRole, canViewCariType } from "@/store/useAuthStore";
+import { useAuthStore, canViewCustomer, normalizeRole, canViewCariType, canViewCariList, canAddCustomer, canImportExportExcel } from "@/store/useAuthStore";
 
 import { syncNow } from "@/lib/syncService";
-import { RefreshCw, CheckCircle, AlertCircle, WifiOff } from "lucide-react";
+import { RefreshCw, CheckCircle, AlertCircle, WifiOff, Upload, Download } from "lucide-react";
+import { ExcelImportModal } from "@/components/modals/ExcelImportModal";
+import { ExcelExportModal } from "@/components/modals/ExcelExportModal";
+import { customerExcelProfile } from "@/lib/excelBridge";
 
 export default function CarilerPage() {
-  const { customers, deleteCustomer, syncStatus } = useStore();
+  const { customers, deleteCustomer, syncStatus, addCustomer, updateCustomer } = useStore();
   const { currentUser } = useAuthStore();
   const [mounted, setMounted] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -19,6 +22,63 @@ export default function CarilerPage() {
   const [selectedTypeFilter, setSelectedTypeFilter] = useState("ALL");
   const [customerToDelete, setCustomerToDelete] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+
+  const handleImport = async (previewResult: any) => {
+    for (const row of previewResult.rows) {
+      if (row.status === 'NEW' || row.status === 'MANUAL_REVIEW') {
+        await addCustomer(row.data);
+      } else if (row.status === 'UPDATE' && row.matchedEntityId) {
+        await updateCustomer(row.matchedEntityId, row.data);
+      }
+    }
+  };
+
+  const exportTemplates = [
+    {
+      name: "Opak Uyumlu Cari Export",
+      columns: [
+        { header: "Cari Kodu", dbField: "customerCode" },
+        { header: "Cari Adı", dbField: "name" },
+        { header: "Bakiye", dbField: "balance", formatter: (val: any) => val || 0 },
+        { header: "Grup Kodu", dbField: "groupCode" },
+        { header: "Grup Adı", dbField: "groupName" },
+        { header: "Rapor Kodu 1", dbField: "reportCode1" },
+        { header: "Adres", dbField: "address" },
+        { header: "KONUM", dbField: "locationText" },
+        { header: "Vergi No", dbField: "taxNumber" },
+        { header: "Vergi Dairesi", dbField: "taxOffice" },
+        { header: "Kimlik No", dbField: "identityNumber" },
+        { header: "Tipi", dbField: "cariType" },
+        { header: "Vade Günü", dbField: "dueDay" },
+        { header: "Telefon", dbField: "phone" },
+        { header: "Cep Tel 1", dbField: "mobile1" },
+        { header: "Cep Tel 2", dbField: "mobile2" },
+        { header: "EMail", dbField: "email" },
+        { header: "Plasiyer Adı", dbField: "salespersonName" },
+        { header: "Aktif", dbField: "isActive", formatter: (val: any) => val !== false ? "Evet" : "Hayır" },
+        { header: "E-Fatura", dbField: "eInvoice", formatter: (val: any) => val ? "Evet" : "Hayır" },
+        { header: "Cari Yetkili Adı", dbField: "authorizedPerson" },
+        { header: "Risk Var Mı", dbField: "hasRisk", formatter: (val: any) => val ? "Evet" : "Hayır" },
+        { header: "Risk", dbField: "riskLimit" },
+        { header: "Tüm İşlemlerde Kilit", dbField: "isLockedForAllTransactions", formatter: (val: any) => val ? "Evet" : "Hayır" }
+      ]
+    },
+    {
+      name: "CEYLİN ERP Detaylı Cari Export",
+      columns: [
+        { header: "İç ID", dbField: "id" },
+        { header: "Cari Kodu", dbField: "customerCode" },
+        { header: "Cari Adı", dbField: "name" },
+        { header: "Telefon", dbField: "phone" },
+        { header: "Tipi", dbField: "cariType" },
+        { header: "Bakiye", dbField: "balance" },
+        { header: "Oluşturulma", dbField: "createdAt" },
+        { header: "Güncellenme", dbField: "updatedAt" }
+      ]
+    }
+  ];
 
   const handleDelete = async () => {
     if (!customerToDelete || isDeleting) return;
@@ -152,31 +212,37 @@ export default function CarilerPage() {
           <p className="text-sm heading-subtitle">Müşterilerinizi yönetin ve yeni müşteri ekleyin.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
-          <button
-            onClick={handleManualSync}
-            disabled={syncing}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
-              syncStatus === 'synced' ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 hover:bg-emerald-500/20' :
-              syncStatus === 'pending' || syncing ? 'bg-blue-500/10 text-blue-600 border-blue-500/20 animate-pulse' :
-              syncStatus === 'error' ? 'bg-red-500/10 text-red-600 border-red-500/20 hover:bg-red-500/20' :
-              'bg-amber-500/10 text-amber-600 border-amber-500/20 hover:bg-amber-500/20'
-            }`}
-            title="Senkronizasyonu Tetikle"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${syncing || syncStatus === 'pending' ? 'animate-spin' : ''}`} />
-            {syncStatus === 'synced' ? 'Eşitlendi' :
-             syncStatus === 'pending' || syncing ? 'Eşitleniyor...' :
-             syncStatus === 'error' ? 'Senkronizasyon Hatası' : 'Çevrimdışı'}
-          </button>
+          {canImportExportExcel(currentUser) && (
+            <>
+              <button
+                onClick={() => setIsImportModalOpen(true)}
+                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors font-medium text-sm shadow-sm"
+              >
+                <Upload className="w-4 h-4" />
+                Excel'den İçe Aktar
+              </button>
+              <button
+                onClick={() => setIsExportModalOpen(true)}
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors font-medium text-sm shadow-sm"
+              >
+                <Download className="w-4 h-4" />
+                Excel'e Aktar
+              </button>
+            </>
+          )}
 
-          <Link href="/cariler/yeni" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors font-medium text-sm shadow-sm">
-            <Plus className="w-4 h-4" />
-            Yeni Cari Ekle
-          </Link>
+          {canAddCustomer(currentUser) && (
+            <Link href="/cariler/yeni" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors font-medium text-sm shadow-sm">
+              <Plus className="w-4 h-4" />
+              Yeni Cari Ekle
+            </Link>
+          )}
         </div>
       </div>
 
-      {allowedCariTypes.length > 1 && (
+      {canViewCariList(currentUser) ? (
+        <>
+          {allowedCariTypes.length > 1 && (
         <div className="flex flex-wrap gap-2 border-b border-gray-200 dark:border-gray-800 pb-2">
           {filterTabs.map(t => (
             <button
@@ -335,6 +401,27 @@ export default function CarilerPage() {
           </div>
         </div>
       )}
+      </>
+      ) : (
+        <div className="p-8 text-center text-gray-500 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl">
+          <p>Müşteri listesini görüntüleme yetkiniz bulunmamaktadır.</p>
+        </div>
+      )}
+
+      <ExcelImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        profile={customerExcelProfile}
+        existingData={customers}
+        onImport={handleImport}
+      />
+      <ExcelExportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        profile={customerExcelProfile}
+        data={customers}
+        templates={exportTemplates}
+      />
     </div>
   );
 }

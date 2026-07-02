@@ -269,11 +269,37 @@ export interface Customer {
   generalNote?: string;
 
   // ERP V2 fields
-  cariType?: 'CUSTOMER' | 'SUPPLIER' | 'TAILOR' | 'INSTALLER' | 'STAFF' | 'OTHER';
+  cariType?: 'CUSTOMER' | 'SUPPLIER' | 'TAILOR' | 'INSTALLER' | 'STAFF' | 'OTHER' | string;
   approvalStatus?: 'PENDING_APPROVAL' | 'APPROVED';
   addressPhotos?: string[];
   isDeleted?: boolean;
   deletedAt?: string;
+
+  // Excel Bridge Fields (Opak & V1-EXCEL)
+  balance?: number;
+  groupCode?: string;
+  groupName?: string;
+  reportCode1?: string;
+  locationText?: string;
+  latitude?: number;
+  longitude?: number;
+  taxOffice?: string;
+  identityNumber?: string;
+  dueDay?: number;
+  mobile1?: string;
+  mobile2?: string;
+  email?: string;
+  salespersonName?: string;
+  isActive?: boolean;
+  eInvoice?: boolean;
+  authorizedPerson?: string;
+  hasRisk?: boolean;
+  riskLimit?: number;
+  isLockedForAllTransactions?: boolean;
+  
+  externalSource?: 'OPAK' | 'MANUAL' | 'IMPORT';
+  rawImportData?: Record<string, any>;
+  customFields?: Record<string, any>;
 }
 
 export interface Product {
@@ -398,9 +424,12 @@ interface AppState {
   addCustomer: (customer: Omit<Customer, 'rooms'> & { id?: string }) => Promise<void>;
   updateCustomer: (id: string, data: Partial<Customer>) => Promise<void>;
   deleteCustomer: (id: string) => Promise<void>;
+  archiveCustomer: (id: string) => Promise<void>;
+  mergeCustomers: (sourceId: string, targetId: string) => Promise<void>;
   
   addRoom: (customerId: string, roomName: string) => Promise<void>;
   deleteRoom: (customerId: string, roomId: string) => Promise<void>;
+  moveRoom: (sourceCustomerId: string, targetCustomerId: string, roomId: string) => Promise<void>;
   
   addWindow: (customerId: string, roomId: string, windowName: string) => Promise<void>;
   deleteWindow: (customerId: string, roomId: string, windowId: string) => Promise<void>;
@@ -587,6 +616,105 @@ export const useStore = create<AppState>()(
             };
           });
         }
+      },
+      
+      archiveCustomer: async (id) => {
+        // Alias for soft-delete
+        await get().deleteCustomer(id);
+      },
+      
+      mergeCustomers: async (sourceId, targetId) => {
+        const state = get();
+        const sourceCustomer = state.customers.find(c => c.id === sourceId);
+        const targetCustomer = state.customers.find(c => c.id === targetId);
+        
+        if (!sourceCustomer || !targetCustomer) return;
+        
+        const now = new Date().toISOString();
+        
+        // 1. Move rooms to target and append source details to notes
+        const mergeNotes = `\n\n--- Birleştirilen Cariden Gelen Bilgiler ---\nAd: ${sourceCustomer.name}\nKod: ${sourceCustomer.customerCode || '-'}\nTel: ${sourceCustomer.phone || '-'}\nAdres: ${sourceCustomer.address || '-'}\nEski Not: ${sourceCustomer.notes || '-'}\n-----------------------------------------`;
+
+        const updatedTargetCustomer = {
+          ...targetCustomer,
+          updatedAt: now,
+          notes: (targetCustomer.notes || '') + mergeNotes,
+          rooms: [...(targetCustomer.rooms || []), ...(sourceCustomer.rooms || [])]
+        };
+        
+        // 2. Mark source as merged
+        const updatedSourceCustomer = {
+          ...sourceCustomer,
+          isDeleted: true,
+          deletedAt: now,
+          updatedAt: now,
+          status: 'MERGED',
+          customFields: {
+            ...(sourceCustomer.customFields || {}),
+            mergeHistory: {
+              sourceCustomerId: sourceId,
+              targetCustomerId: targetId,
+              mergedAt: now,
+              movedRoomsCount: sourceCustomer.rooms?.length || 0
+            }
+          },
+          rooms: [] // Clear rooms from source to prevent duplicate rendering if un-deleted
+        };
+        
+        await saveLocalCustomer(updatedTargetCustomer);
+        await saveLocalCustomer(updatedSourceCustomer);
+        
+        set((state) => {
+          notifyStoreChanges();
+          return {
+            customers: state.customers.map(c => {
+              if (c.id === targetId) return updatedTargetCustomer;
+              if (c.id === sourceId) return updatedSourceCustomer as any;
+              return c;
+            }),
+            syncStatus: 'pending'
+          };
+        });
+      },
+      
+      moveRoom: async (sourceCustomerId, targetCustomerId, roomId) => {
+        const state = get();
+        const sourceCustomer = state.customers.find(c => c.id === sourceCustomerId);
+        const targetCustomer = state.customers.find(c => c.id === targetCustomerId);
+        
+        if (!sourceCustomer || !targetCustomer) return;
+        
+        const roomToMove = sourceCustomer.rooms?.find(r => r.id === roomId);
+        if (!roomToMove) return;
+        
+        const now = new Date().toISOString();
+        
+        const updatedSourceCustomer = {
+          ...sourceCustomer,
+          updatedAt: now,
+          rooms: sourceCustomer.rooms.filter(r => r.id !== roomId)
+        };
+        
+        const updatedTargetCustomer = {
+          ...targetCustomer,
+          updatedAt: now,
+          rooms: [...(targetCustomer.rooms || []), roomToMove]
+        };
+        
+        await saveLocalCustomer(updatedSourceCustomer);
+        await saveLocalCustomer(updatedTargetCustomer);
+        
+        set((state) => {
+          notifyStoreChanges();
+          return {
+            customers: state.customers.map(c => {
+              if (c.id === sourceCustomerId) return updatedSourceCustomer;
+              if (c.id === targetCustomerId) return updatedTargetCustomer;
+              return c;
+            }),
+            syncStatus: 'pending'
+          };
+        });
       },
 
       addRoom: async (customerId, roomName) => {

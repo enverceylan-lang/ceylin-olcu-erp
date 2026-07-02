@@ -58,6 +58,7 @@ interface SalesState {
   addSale: (sale: Sale) => Promise<void>;
   updateSale: (sale: Sale) => Promise<void>;
   removeSale: (id: string) => Promise<void>;
+  transferSales: (sourceCustomerId: string, targetCustomerId: string) => Promise<void>;
 }
 
 export const useSalesStore = create<SalesState>((set, get) => ({
@@ -92,5 +93,31 @@ export const useSalesStore = create<SalesState>((set, get) => ({
     set(state => ({
       sales: state.sales.filter(s => s.id !== id)
     }));
+  },
+
+  transferSales: async (sourceCustomerId: string, targetCustomerId: string) => {
+    try {
+      const sales = get().sales;
+      const updatedSales = [...sales];
+      let hasChanges = false;
+      
+      for (let i = 0; i < updatedSales.length; i++) {
+        if (updatedSales[i].customerId === sourceCustomerId) {
+          updatedSales[i] = {
+            ...updatedSales[i],
+            customerId: targetCustomerId,
+            updatedAt: new Date().toISOString()
+          };
+          await saveLocalSale(updatedSales[i]);
+          hasChanges = true;
+        }
+      }
+      
+      if (hasChanges) {
+        set({ sales: updatedSales });
+      }
+    } catch (err) {
+      console.error('Error transferring sales:', err);
+    }
   }
 }));

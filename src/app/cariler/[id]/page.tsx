@@ -5,7 +5,7 @@ import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, 
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useStore, WindowItem, MEASUREMENT_TEMPLATES, ProductMeasurement } from "@/store/useStore";
-import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer, canViewCustomerWorkflowReport, canViewCustomerFinancialReport, canViewCustomerContactFields, canViewFinancialAreas, canEditCustomerLocation, canViewCariCard } from "@/store/useAuthStore";
+import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer, canViewCustomerWorkflowReport, canViewCustomerFinancialReport, canViewCustomerContactFields, canViewFinancialAreas, canEditCustomerLocation, canViewCariCard, canEditCari, canMergeCari, canArchiveCari, canMoveMeasurementBetweenCustomers } from "@/store/useAuthStore";
 import { getMeasurementDimensions, getTemplateLabel, getGoogleMapsUrl, getWorkflowStatusLabel, getWorkflowStatusColorClass, WORKFLOW_STATUS_LABELS } from "@/lib/measurementAdapter";
 import { fileToDataUrl } from "@/lib/fileStorage";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
@@ -15,7 +15,10 @@ import { MeasurementVisualReport } from "@/components/reports/MeasurementVisualR
 import { localDraftDb, FieldMeasurementDraft } from "@/lib/localDraftDb";
 import { useSalesStore } from "@/store/salesStore";
 import { createDraftSaleFromCustomer } from "@/lib/salesAdapter";
-import { ShoppingCart } from "lucide-react";
+import { ShoppingCart, Edit, Merge, Archive } from "lucide-react";
+import { CariEditModal } from "@/components/modals/CariEditModal";
+import { MergeCustomerModal } from "@/components/modals/MergeCustomerModal";
+import { MoveRoomModal } from "@/components/modals/MoveRoomModal";
 
 export default function CariDetayPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
@@ -30,6 +33,17 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const router = useRouter();
 
   const normRole = user ? normalizeRole(user.role) : 'FIELD';
+  const cariType = customer?.cariType || 'CUSTOMER';
+  
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
+  const [isMoveRoomModalOpen, setIsMoveRoomModalOpen] = useState(false);
+  const [roomToMove, setRoomToMove] = useState<any>(null);
+  
+  const canEdit = canEditCari(user, cariType);
+  const canMerge = canMergeCari(user);
+  const canArchive = canArchiveCari(user, cariType);
+  const canMoveRoom = canMoveMeasurementBetweenCustomers(user);
   const canViewAddressPhoto = !!user && !!customer && (
     normRole === 'ADMIN' ||
     normRole === 'OFFICE' ||
@@ -635,6 +649,75 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       setIsSaving(false);
     }
   };
+  
+  const handleSaveCustomer = async (id: string, data: Partial<any>) => {
+    await updateCustomer(id, data);
+    if (user) {
+      addAuditEntry({
+        entityType: 'Customer',
+        entityId: id,
+        field: 'all',
+        previousValue: 'N/A',
+        newValue: 'Updated via Admin Modal',
+        changedBy: user.name,
+        changedAt: new Date().toISOString(),
+        reason: 'Cari kart bilgileri yetkili tarafından güncellendi.'
+      });
+    }
+  };
+
+  const handleArchiveCustomer = async () => {
+    if (confirm("DİKKAT: Bu cariyi arşivlemek istediğinize emin misiniz? (Kalıcı olarak silinmez, ancak listeden kaldırılır.)")) {
+      await store.archiveCustomer(id);
+      if (user) {
+        addAuditEntry({
+          entityType: 'Customer',
+          entityId: id,
+          field: 'isDeleted',
+          previousValue: 'false',
+          newValue: 'true',
+          changedBy: user.name,
+          changedAt: new Date().toISOString(),
+          reason: 'Cari arşivlendi / soft delete yapıldı.'
+        });
+      }
+      router.push('/cariler');
+    }
+  };
+
+  const handleConfirmMerge = async (targetId: string) => {
+    await store.mergeCustomers(id, targetId);
+    await useSalesStore.getState().transferSales(id, targetId);
+    if (user) {
+      addAuditEntry({
+        entityType: 'Customer',
+        entityId: id,
+        field: 'status',
+        previousValue: 'ACTIVE',
+        newValue: `MERGED into ${targetId}`,
+        changedBy: user.name,
+        changedAt: new Date().toISOString(),
+        reason: 'Cari Birleştirme'
+      });
+    }
+    router.push('/cariler');
+  };
+
+  const handleConfirmMoveRoom = async (targetId: string, roomId: string) => {
+    await store.moveRoom(id, targetId, roomId);
+    if (user) {
+      addAuditEntry({
+        entityType: 'Room',
+        entityId: roomId,
+        field: 'customerId',
+        previousValue: id,
+        newValue: targetId,
+        changedBy: user.name,
+        changedAt: new Date().toISOString(),
+        reason: 'Oda başka cariye taşındı.'
+      });
+    }
+  };
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-24">
@@ -651,6 +734,38 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
         </div>
         
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+          {canEdit && (
+            <button
+              onClick={() => setIsEditModalOpen(true)}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer"
+              title="Cari bilgilerini düzenle"
+            >
+              <Edit className="w-4 h-4" />
+              Düzenle
+            </button>
+          )}
+          
+          {canMerge && (
+            <button
+              onClick={() => setIsMergeModalOpen(true)}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer"
+              title="Başka bir cari ile birleştir"
+            >
+              <Merge className="w-4 h-4" />
+              Birleştir
+            </button>
+          )}
+
+          {canArchive && (
+            <button
+              onClick={handleArchiveCustomer}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer"
+              title="Cariyi Arşivle/Sil"
+            >
+              <Archive className="w-4 h-4" />
+              Arşivle
+            </button>
+          )}
           <button
             onClick={handleShareWhatsAppReport}
             className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-green-650 hover:bg-green-700 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer"
@@ -1070,18 +1185,33 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                         {room.name}
                       </h3>
                     </div>
-                    <button 
-                      onClick={(e) => { 
-                        e.stopPropagation(); 
-                        setDeleteConfirm({ 
-                          type: 'room', 
-                          data: { customerId: customer.id, roomId: room.id, roomName: room.name } 
-                        }); 
-                      }} 
-                      className="text-red-400 hover:text-red-600 cursor-pointer"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex gap-4 items-center">
+                      {canMoveRoom && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRoomToMove(room);
+                            setIsMoveRoomModalOpen(true);
+                          }}
+                          className="text-indigo-500 hover:text-indigo-700 cursor-pointer font-semibold text-xs border border-indigo-200 bg-indigo-50 dark:bg-indigo-900/30 dark:border-indigo-800 px-2 py-1 rounded"
+                          title="Odayı başka cariye taşı"
+                        >
+                          Taşı
+                        </button>
+                      )}
+                      <button 
+                        onClick={(e) => { 
+                          e.stopPropagation(); 
+                          setDeleteConfirm({ 
+                            type: 'room', 
+                            data: { customerId: customer.id, roomId: room.id, roomName: room.name } 
+                          }); 
+                        }} 
+                        className="text-red-400 hover:text-red-600 cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                   
                   {/* Room Attachments */}
@@ -1872,6 +2002,37 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
           customer={customer}
           users={users}
         />
+        
+        {isEditModalOpen && (
+          <CariEditModal
+            isOpen={isEditModalOpen}
+            onClose={() => setIsEditModalOpen(false)}
+            customer={customer}
+            onSave={handleSaveCustomer}
+          />
+        )}
+        
+        {isMergeModalOpen && (
+          <MergeCustomerModal
+            isOpen={isMergeModalOpen}
+            onClose={() => setIsMergeModalOpen(false)}
+            sourceCustomer={customer}
+            onConfirm={handleConfirmMerge}
+          />
+        )}
+        
+        {isMoveRoomModalOpen && (
+          <MoveRoomModal
+            isOpen={isMoveRoomModalOpen}
+            onClose={() => {
+              setIsMoveRoomModalOpen(false);
+              setRoomToMove(null);
+            }}
+            sourceCustomer={customer}
+            roomToMove={roomToMove}
+            onConfirm={handleConfirmMoveRoom}
+          />
+        )}
       </div>
     </div>
   );

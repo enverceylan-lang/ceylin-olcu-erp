@@ -217,23 +217,68 @@ export function canCreateCariType(user: any, cariType: string): boolean {
 export function canViewCariType(user: any, cariType: string): boolean {
   if (!user) return false;
   const safeUser = normalizeUser(user);
-  const role = safeUser.role;
+  const normRole = normalizeRole(safeUser.role);
   
-  if (role === 'SALES') {
+  if (normRole === 'ADMIN') return true;
+  
+  if (normRole === 'MODERATOR' || normRole === 'OFFICE' || normRole === 'ACCOUNTING') {
     return cariType === 'CUSTOMER';
   }
   
-  const normRole = normalizeRole(role);
-  if (normRole === 'ADMIN' || normRole === 'OFFICE' || role === 'ACCOUNTING') {
-    return true;
-  }
-  if (normRole === 'FIELD') {
-    return cariType === 'CUSTOMER';
-  }
-  if (normRole === 'TAILOR' || normRole === 'INSTALLER') {
-    return cariType === 'CUSTOMER';
-  }
   return false;
+}
+
+export function canViewCariList(user: any): boolean {
+  if (!user) return false;
+  const safeUser = normalizeUser(user);
+  const normRole = normalizeRole(safeUser.role);
+  // ADMIN and MODERATOR can see the list. SAHA, TERZİ, MONTAJCI cannot.
+  return normRole === 'ADMIN' || normRole === 'MODERATOR' || normRole === 'OFFICE' || normRole === 'ACCOUNTING';
+}
+
+export function canAddCustomer(user: any): boolean {
+  if (!user) return false;
+  const safeUser = normalizeUser(user);
+  const normRole = normalizeRole(safeUser.role);
+  // ADMIN, MODERATOR, SAHA can add customers
+  return normRole === 'ADMIN' || normRole === 'MODERATOR' || normRole === 'OFFICE' || normRole === 'ACCOUNTING' || normRole === 'FIELD';
+}
+
+export function canImportExportExcel(user: any): boolean {
+  if (!user) return false;
+  const safeUser = normalizeUser(user);
+  const normRole = normalizeRole(safeUser.role);
+  return normRole === 'ADMIN';
+}
+
+export function canEditCari(user: any, cariType: string): boolean {
+  if (!user) return false;
+  const normRole = normalizeRole(user.role || normalizeUser(user).role);
+  if (normRole === 'ADMIN') return true;
+  if ((normRole === 'MODERATOR' || normRole === 'OFFICE' || normRole === 'ACCOUNTING') && (cariType === 'CUSTOMER' || !cariType)) return true;
+  return false;
+}
+
+export function canMergeCari(user: any): boolean {
+  if (!user) return false;
+  return normalizeRole(user.role || normalizeUser(user).role) === 'ADMIN';
+}
+
+export function canArchiveCari(user: any, cariType: string): boolean {
+  if (!user) return false;
+  const normRole = normalizeRole(user.role || normalizeUser(user).role);
+  if (normRole === 'ADMIN') return true;
+  return false;
+}
+
+export function canChangeCariCode(user: any): boolean {
+  if (!user) return false;
+  return normalizeRole(user.role || normalizeUser(user).role) === 'ADMIN';
+}
+
+export function canMoveMeasurementBetweenCustomers(user: any): boolean {
+  if (!user) return false;
+  return normalizeRole(user.role || normalizeUser(user).role) === 'ADMIN';
 }
 
 export function canViewCariCard(user: any, customer: any): boolean {
@@ -248,13 +293,10 @@ export function canViewCariCard(user: any, customer: any): boolean {
     return cType === 'CUSTOMER';
   }
   
-  if (!canViewCariType(safeUser, cType)) {
-    return false;
-  }
-
   const normRole = normalizeRole(role);
 
   if (normRole === 'ADMIN' || normRole === 'OFFICE' || role === 'ACCOUNTING') {
+    if (!canViewCariType(safeUser, cType)) return false;
     return true;
   }
 
@@ -283,7 +325,7 @@ export function canViewCariCard(user: any, customer: any): boolean {
     if (cType !== 'CUSTOMER') return false;
     return customer.assignedInstallerId === userId;
   }
-
+  
   return false;
 }
 
