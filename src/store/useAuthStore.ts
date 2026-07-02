@@ -25,6 +25,7 @@ function utf8ToBase64(str: string): string {
 // ─── Role Definitions ───
 export type UserRole = 
   | 'ADMIN' 
+  | 'MODERATOR'
   | 'OFFICE' | 'SALES'
   | 'FIELD' | 'MEASUREMENT' 
   | 'TAILOR' | 'PRODUCTION' 
@@ -49,7 +50,7 @@ export interface MockUser {
   hasPassword?: boolean;
 }
 
-export function normalizeRole(role: UserRole | undefined): 'ADMIN' | 'OFFICE' | 'FIELD' | 'TAILOR' | 'INSTALLER' | 'ACCOUNTING' {
+export function normalizeRole(role: UserRole | undefined): 'ADMIN' | 'MODERATOR' | 'OFFICE' | 'FIELD' | 'TAILOR' | 'INSTALLER' | 'ACCOUNTING' {
   if (!role) return 'ADMIN';
   if (role === 'SALES') return 'OFFICE';
   if (role === 'MEASUREMENT') return 'FIELD';
@@ -111,8 +112,9 @@ export function getUserPermissions(user: any): string[] {
 // ─── Role-based access labels ───
 export const ROLE_PERMISSIONS: Record<string, { label: string; canOverrideMeasuredBy: boolean; canAccessOfficeMode: boolean }> = {
   ADMIN: { label: 'Yönetici (Admin)', canOverrideMeasuredBy: true, canAccessOfficeMode: true },
-  OFFICE: { label: 'Ofis / Moderatör', canOverrideMeasuredBy: true, canAccessOfficeMode: true },
-  SALES: { label: 'Ofis / Moderatör', canOverrideMeasuredBy: true, canAccessOfficeMode: true },
+  MODERATOR: { label: 'Moderatör', canOverrideMeasuredBy: true, canAccessOfficeMode: true },
+  OFFICE: { label: 'Ofis', canOverrideMeasuredBy: true, canAccessOfficeMode: true },
+  SALES: { label: 'Satış', canOverrideMeasuredBy: true, canAccessOfficeMode: true },
   FIELD: { label: 'Saha / Plasiyer', canOverrideMeasuredBy: false, canAccessOfficeMode: false },
   MEASUREMENT: { label: 'Saha / Plasiyer', canOverrideMeasuredBy: false, canAccessOfficeMode: false },
   TAILOR: { label: 'Terzi / Üretici', canOverrideMeasuredBy: false, canAccessOfficeMode: false },
@@ -142,6 +144,10 @@ export function canViewModule(role: UserRole | undefined, modulePath: string): b
   // Normalize layout paths or names
   const clean = modulePath.toLowerCase().replace('/', '').split('?')[0].split('#')[0];
   
+  if (normRole === 'MODERATOR') {
+    // Allowed: dashboard, cariler, olculer, satis, stok, uretim, montaj, raporlar (Everything EXCEPT ayarlar)
+    return clean !== 'ayarlar';
+  }
   if (normRole === 'OFFICE') {
     // Allowed: dashboard, cariler, olculer, satis, raporlar
     return clean === '' || clean.startsWith('cariler') || clean.startsWith('olculer') || clean.startsWith('satis') || clean.startsWith('raporlar');
@@ -167,6 +173,11 @@ export function canEditModule(role: UserRole | undefined, modulePath: string): b
   
   const clean = modulePath.toLowerCase().replace('/', '').split('?')[0].split('#')[0];
 
+  if (normRole === 'MODERATOR') {
+    // Cannot edit settings, cannot change roles (handled in settings usually)
+    if (clean.startsWith('ayarlar')) return false;
+    return true;
+  }
   if (normRole === 'OFFICE') {
     // Cannot edit settings
     if (clean.startsWith('ayarlar')) return false;

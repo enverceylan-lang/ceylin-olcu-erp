@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useStore } from "@/store/useStore";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { getMeasurementDimensions, getTemplateLabel } from "@/lib/measurementAdapter";
 import { useAuthStore, canViewCustomer } from "@/store/useAuthStore";
 import {
@@ -21,6 +21,7 @@ import {
   updateInboundStatus
 } from "@/lib/localDraftDb";
 import { pullInboundMeasurements } from "@/lib/deltaSyncClient";
+import { processAsNewCustomer, processAsMerge } from "@/lib/inboundProcessor";
 
 // ─── Status helpers ────────────────────────────────────────────────────────────
 
@@ -79,6 +80,12 @@ export default function OlculerPage() {
 
   const [inboundMeasurements, setInboundMeasurements] = useState<InboundMeasurement[]>([]);
   const [isPulling, setIsPulling] = useState(false);
+  const [inboundSelections, setInboundSelections] = useState<Record<string, string>>({});
+  const [processingInboundId, setProcessingInboundId] = useState<string | null>(null);
+
+  // Cari Rehberi modal state
+  const [customerSearchInboundId, setCustomerSearchInboundId] = useState<string | null>(null);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState("");
 
   // Detail panel
   const [detailDraftId, setDetailDraftId] = useState<string | null>(null);
@@ -127,6 +134,64 @@ export default function OlculerPage() {
       setIsPulling(false);
     }
   };
+
+  const handleInboundCreateNew = async (inbound: InboundMeasurement) => {
+    if (inbound.suggestedCustomerIds && inbound.suggestedCustomerIds.length > 0) {
+      const confirm = window.confirm("Benzer cari bulundu, yine de yeni cari açılsın mı?");
+      if (!confirm) return;
+    }
+    
+    setProcessingInboundId(inbound.changeId);
+    try {
+      await processAsNewCustomer(inbound, currentUser?.id || 'admin', currentUser?.username || 'Admin');
+      alert("Gelen ölçü yeni cari olarak açıldı.");
+      await loadInbound();
+      // Notify zustand components to refresh
+      window.dispatchEvent(new Event('local-customers-updated'));
+    } catch (e: any) {
+      alert("İşlem tamamlanamadı. Veriler korunuyor. Hata: " + e.message);
+    } finally {
+      setProcessingInboundId(null);
+    }
+  };
+
+  const handleInboundMerge = async (inbound: InboundMeasurement) => {
+    // Determine the final selected customer
+    // 1. the explicit selection from state
+    // 2. OR the first suggestion if available
+    const selectedCustomerId = inboundSelections[inbound.changeId] || (inbound.suggestedCustomerIds && inbound.suggestedCustomerIds.length > 0 ? inbound.suggestedCustomerIds[0] : null);
+    
+    if (!selectedCustomerId) {
+      alert("Lütfen bağlamak için listeden bir cari seçin.");
+      return;
+    }
+
+    setProcessingInboundId(inbound.changeId);
+    try {
+      await processAsMerge(inbound, selectedCustomerId);
+      alert("Gelen ölçü mevcut cariye bağlandı.");
+      await loadInbound();
+      // Notify zustand components to refresh
+      window.dispatchEvent(new Event('local-customers-updated'));
+    } catch (e: any) {
+      alert("İşlem tamamlanamadı. Veriler korunuyor. Hata: " + e.message);
+    } finally {
+      setProcessingInboundId(null);
+    }
+  };
+
+  const searchedCustomers = useMemo(() => {
+    if (customerSearchQuery.length < 2) return [];
+    const q = customerSearchQuery.toLowerCase();
+    return customers.filter(c => !c.isDeleted && (
+      (c.customerCode && c.customerCode.toLowerCase().includes(q)) ||
+      (c.name && c.name.toLowerCase().includes(q)) ||
+      (c.phone && c.phone.includes(q)) ||
+      (c.address && c.address.toLowerCase().includes(q)) ||
+      (c.mapLocation && c.mapLocation.toLowerCase().includes(q)) ||
+      (c.notes && c.notes.toLowerCase().includes(q))
+    )).slice(0, 20);
+  }, [customerSearchQuery, customers]);
 
   useEffect(() => {
     setMounted(true);
@@ -193,6 +258,13 @@ export default function OlculerPage() {
         item.customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (item.customer.phone && item.customer.phone.includes(searchTerm))
     );
+
+  const handleSelectCustomerFromModal = (customerId: string) => {
+    if (!customerSearchInboundId) return;
+    setInboundSelections(prev => ({ ...prev, [customerSearchInboundId]: customerId }));
+    setCustomerSearchInboundId(null);
+    setCustomerSearchQuery("");
+  };
 
   const filteredDrafts = localDrafts
     .filter((d) =>
@@ -282,7 +354,7 @@ export default function OlculerPage() {
       </div>
 
       {/* V1D Inbound Pool Section */}
-      {currentUser?.role === 'ADMIN' && (
+      {(currentUser?.role === 'ADMIN' || currentUser?.role === 'MODERATOR') && (
         <section className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
@@ -314,6 +386,8 @@ export default function OlculerPage() {
                      <div>
                         <h3 className="font-bold text-gray-900 dark:text-white">{inbound.customerName || 'İsimsiz Müşteri'}</h3>
                         <p className="text-sm text-gray-500 flex items-center gap-1"><User className="w-3 h-3"/> {inbound.customerPhone || 'Telefon Yok'}</p>
+                        {inbound.customerAddress && <p className="text-xs text-gray-400 truncate max-w-[200px] mt-1">{inbound.customerAddress}</p>}
+                        <p className="text-xs text-gray-400 mt-1">{new Date(inbound.createdAt).toLocaleString('tr-TR')}</p>
                      </div>
                      <div className="flex flex-col gap-1 items-end">
                        <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">{inbound.entityType}</span>
@@ -324,18 +398,71 @@ export default function OlculerPage() {
                   {inbound.suggestedCustomerIds && inbound.suggestedCustomerIds.length > 0 && (
                     <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-md p-2">
                        <p className="text-xs font-bold text-amber-700 dark:text-amber-400 mb-1">Önerilen Eşleşmeler:</p>
-                       <ul className="text-xs text-amber-800 dark:text-amber-300 space-y-1">
+                       <div className="space-y-1">
                           {inbound.suggestedCustomerIds.map(id => {
                             const c = customers.find(x => x.id === id);
-                            return c ? <li key={id}>- {c.name} ({c.phone})</li> : null;
+                            if (!c) return null;
+                            const isSelected = (inboundSelections[inbound.changeId] || inbound.suggestedCustomerIds![0]) === id;
+                            return (
+                              <label key={id} className="flex items-center gap-2 text-xs text-amber-800 dark:text-amber-300 cursor-pointer p-1 rounded hover:bg-amber-100 dark:hover:bg-amber-900/40">
+                                <input 
+                                  type="radio" 
+                                  name={`match-${inbound.changeId}`} 
+                                  value={id}
+                                  checked={isSelected}
+                                  onChange={() => setInboundSelections(prev => ({ ...prev, [inbound.changeId]: id }))}
+                                  className="w-3 h-3 text-indigo-600 focus:ring-indigo-500"
+                                />
+                                <div className="flex flex-col">
+                                  <span className="font-bold">{c.name} {c.customerCode ? `(${c.customerCode})` : ''}</span>
+                                  <span className="text-[10px] truncate max-w-[200px]">{c.phone || 'Telefon yok'} - {c.address || 'Adres yok'}</span>
+                                </div>
+                              </label>
+                            );
                           })}
-                       </ul>
+                       </div>
                     </div>
                   )}
 
+                  <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-md p-2">
+                    <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Manuel Cari Seçimi:</p>
+                    {inboundSelections[inbound.changeId] && (!inbound.suggestedCustomerIds || !inbound.suggestedCustomerIds.includes(inboundSelections[inbound.changeId])) ? (
+                        (() => {
+                          const c = customers.find(x => x.id === inboundSelections[inbound.changeId]);
+                          return c ? (
+                            <div className="text-xs text-gray-800 dark:text-gray-200 bg-white dark:bg-gray-700 p-1.5 rounded border border-gray-200 dark:border-gray-600">
+                              <span className="font-bold">Seçili Cari:</span> {c.name} - {c.phone || 'Telefon yok'}
+                              <div className="truncate text-gray-500 dark:text-gray-400 mt-0.5">{c.address || 'Adres yok'}</div>
+                              <button onClick={() => setCustomerSearchInboundId(inbound.changeId)} className="mt-1 text-indigo-600 hover:underline text-[10px] font-semibold w-full text-center py-1 bg-indigo-50 dark:bg-indigo-900/20 rounded">Cari Rehberinden Değiştir</button>
+                            </div>
+                          ) : <span className="text-xs text-gray-500">Bilinmeyen Cari</span>;
+                        })()
+                    ) : (
+                        <button 
+                          onClick={() => setCustomerSearchInboundId(inbound.changeId)}
+                          className="w-full text-xs py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded font-medium hover:bg-gray-50 dark:hover:bg-gray-600 flex justify-center items-center gap-1"
+                        >
+                          <Search className="w-3 h-3" />
+                          Cari Seç / Rehberi Aç
+                        </button>
+                    )}
+                  </div>
+
                   <div className="mt-auto pt-3 border-t border-gray-100 dark:border-gray-700 flex flex-wrap gap-2">
-                     <button disabled className="flex-1 px-2 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded text-xs font-semibold disabled:opacity-50" title="V1E aşamasında aktif edilecek">Mevcut Cariye Bağla</button>
-                     <button disabled className="flex-1 px-2 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded text-xs font-semibold disabled:opacity-50" title="V1E aşamasında aktif edilecek">Yeni Cari Aç</button>
+                     <button 
+                       onClick={() => handleInboundMerge(inbound)}
+                       disabled={processingInboundId === inbound.changeId || (!inboundSelections[inbound.changeId] && (!inbound.suggestedCustomerIds || inbound.suggestedCustomerIds.length === 0))}
+                       className="flex-1 px-2 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded text-xs font-semibold hover:bg-green-100 disabled:opacity-50" 
+                     >
+                       {processingInboundId === inbound.changeId ? 'İşleniyor...' : 'Mevcut Cariye Bağla'}
+                     </button>
+                     <button 
+                       onClick={() => handleInboundCreateNew(inbound)}
+                       disabled={processingInboundId === inbound.changeId}
+                       className="flex-1 px-2 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded text-xs font-semibold hover:bg-blue-100 disabled:opacity-50" 
+                     >
+                       Yeni Cari Aç
+                     </button>
                      <button 
                        onClick={async () => {
                          const confirmed = window.confirm('Bu kaydı atlamak istediğinize emin misiniz? (Havuza bir daha düşmez)');
@@ -344,7 +471,8 @@ export default function OlculerPage() {
                            await loadInbound();
                          }
                        }}
-                       className="px-2 py-1.5 bg-gray-50 text-gray-700 border border-gray-200 rounded text-xs font-semibold hover:bg-gray-100"
+                       disabled={processingInboundId === inbound.changeId}
+                       className="px-2 py-1.5 bg-gray-50 text-gray-700 border border-gray-200 rounded text-xs font-semibold hover:bg-gray-100 disabled:opacity-50"
                      >Atla</button>
                   </div>
                 </div>
@@ -573,7 +701,7 @@ export default function OlculerPage() {
                       {/* Rooms summary */}
                       {(draft.rooms || []).length > 0 && (
                         <div className="space-y-1.5 pt-1 border-t border-amber-200/60 dark:border-amber-800/20">
-                          <p className="font-semibold text-slate-700 dark:text-slate-300">Odalar</p>
+                          <p className="font-semibold text-slate-700 dark:slate-300">Odalar</p>
                           {(draft.rooms || []).map((room: any, idx: number) => {
                             const wCount = (room.windows || []).filter((w: any) => !w.isDeleted).length;
                             const mCount = (room.windows || []).reduce(
@@ -690,6 +818,80 @@ export default function OlculerPage() {
                 {editSaving ? "Kaydediliyor..." : "Kaydet"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cari Rehberi Modal */}
+      {customerSearchInboundId && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-slate-800/50">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <Search className="w-5 h-5 text-indigo-500" />
+                Cari Rehberi
+              </h3>
+              <button
+                onClick={() => {
+                  setCustomerSearchInboundId(null);
+                  setCustomerSearchQuery("");
+                }}
+                className="text-gray-500 hover:bg-gray-200 dark:hover:bg-slate-700 p-1.5 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+              <input 
+                type="text" 
+                value={customerSearchQuery}
+                onChange={e => setCustomerSearchQuery(e.target.value)}
+                placeholder="Cari kodu, adı, telefon, adres ara... (En az 2 karakter)"
+                className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                autoFocus
+              />
+            </div>
+
+            <div className="p-0 overflow-y-auto flex-1 bg-gray-50 dark:bg-slate-900">
+              {customerSearchQuery.length < 2 ? (
+                <div className="p-8 text-center text-gray-500">Aramak için en az 2 karakter yazın.</div>
+              ) : searchedCustomers.length === 0 ? (
+                <div className="p-8 text-center text-gray-500">Sonuç bulunamadı.</div>
+              ) : (
+                <table className="w-full text-sm text-left text-gray-500 dark:text-gray-400">
+                  <thead className="text-xs text-gray-700 uppercase bg-gray-100 dark:bg-gray-800 dark:text-gray-400 sticky top-0">
+                    <tr>
+                      <th className="px-4 py-3">Cari Kodu</th>
+                      <th className="px-4 py-3">Cari Adı</th>
+                      <th className="px-4 py-3">Telefon</th>
+                      <th className="px-4 py-3">Adres</th>
+                      <th className="px-4 py-3">Not</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {searchedCustomers.map(c => (
+                      <tr 
+                        key={c.id} 
+                        onClick={() => handleSelectCustomerFromModal(c.id)}
+                        className="bg-white border-b dark:bg-gray-800 dark:border-gray-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 cursor-pointer transition-colors"
+                      >
+                        <td className="px-4 py-3 font-medium text-gray-900 dark:text-white whitespace-nowrap">{c.customerCode || '-'}</td>
+                        <td className="px-4 py-3 font-bold text-gray-900 dark:text-white">{c.name}</td>
+                        <td className="px-4 py-3">{c.phone}</td>
+                        <td className="px-4 py-3 max-w-xs truncate">{c.address || '-'}</td>
+                        <td className="px-4 py-3 max-w-xs truncate text-gray-400">{c.notes || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            {searchedCustomers.length === 20 && (
+              <div className="p-2 text-center text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400 border-t border-amber-200 dark:border-amber-800/50">
+                İlk 20 sonuç gösteriliyor. Daha spesifik arama yapın.
+              </div>
+            )}
           </div>
         </div>
       )}

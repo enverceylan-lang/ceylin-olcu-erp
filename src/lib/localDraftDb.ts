@@ -14,8 +14,10 @@ export interface InboundMeasurement {
   patch: any;
   senderId?: string;
   createdAt: string;
-  status: 'NEW' | 'MATCH_PENDING' | 'LINKED' | 'CREATED' | 'SKIPPED';
+  status: 'NEW' | 'MATCH_PENDING' | 'LINKED_TO_CUSTOMER' | 'CREATED_CUSTOMER' | 'SKIPPED';
   suggestedCustomerIds?: string[];
+  linkedCustomerId?: string;
+  createdCustomerId?: string;
 }
 
 export interface SyncCursor {
