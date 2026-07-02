@@ -124,9 +124,23 @@ export async function setSyncCursor(key: string, revision: number): Promise<void
 export async function saveInboundMeasurement(inbound: InboundMeasurement): Promise<void> {
   // Prevent duplicate insert if changeId already exists
   const existing = await localDraftDb.inboundMeasurements.get(inbound.changeId);
-  if (!existing) {
-    await localDraftDb.inboundMeasurements.add(inbound);
+  if (existing) return;
+  
+  // Smart deduplication: If we already have a PENDING record for this entity in the pool,
+  // we overwrite it so we don't have multiple pending cards. If it's already LINKED, 
+  // we ALLOW it so that tomorrow's updates aren't lost.
+  const all = await localDraftDb.inboundMeasurements.toArray();
+  const existingPending = all.find(x => 
+    x.entityId === inbound.entityId && 
+    x.entityType === inbound.entityType &&
+    (x.status === 'NEW' || x.status === 'MATCH_PENDING')
+  );
+  
+  if (existingPending) {
+    await localDraftDb.inboundMeasurements.delete(existingPending.changeId);
   }
+
+  await localDraftDb.inboundMeasurements.add(inbound);
 }
 
 export async function listInboundMeasurements(status?: InboundMeasurement['status']): Promise<InboundMeasurement[]> {

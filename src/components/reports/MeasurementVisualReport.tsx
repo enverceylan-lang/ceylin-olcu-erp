@@ -1,5 +1,7 @@
 import React from 'react';
-import { X, Printer } from 'lucide-react';
+import { X, Printer, Share2, Loader2 } from 'lucide-react';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
 import { Customer, MEASUREMENT_TEMPLATES, WindowItem, ProductMeasurement } from '@/store/useStore';
 import { getTemplateLabel, getMeasurementDimensions } from '@/lib/measurementAdapter';
 import { calculatePlicellM2, calculateMechanicalCurtainM2 } from '@/lib/reportFormatters';
@@ -13,6 +15,8 @@ interface MeasurementVisualReportProps {
 }
 
 export function MeasurementVisualReport({ isOpen, onClose, customer, users }: MeasurementVisualReportProps) {
+  const [isGeneratingPdf, setIsGeneratingPdf] = React.useState(false);
+
   if (!isOpen) return null;
 
   // Determine global "Ölçüyü Alan"
@@ -49,8 +53,150 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
     window.print();
   };
 
+  const generatePDF = async (): Promise<File | null> => {
+    const el = document.getElementById('visual-report-print-area');
+    if (!el) return null;
+    try {
+      setIsGeneratingPdf(true);
+      
+      // Clone the element to apply light theme for PDF
+      const clone = el.cloneNode(true) as HTMLElement;
+      
+      const makeLight = (cls: string) => {
+        if (!cls) return cls;
+        return cls
+          .replace(/bg-slate-900(\/60)?/g, 'bg-white')
+          .replace(/bg-slate-950(\/30)?/g, 'bg-slate-50')
+          .replace(/text-white/g, 'text-black')
+          .replace(/text-slate-[12]00/g, 'text-black')
+          .replace(/text-slate-400/g, 'text-slate-600')
+          .replace(/border-slate-800(\/[0-9]+)?/g, 'border-slate-300')
+          .replace(/text-blue-400/g, 'text-blue-700')
+          .replace(/text-blue-500/g, 'text-blue-700')
+          .replace(/border-blue-500/g, 'border-blue-700');
+      };
+
+      const elements = clone.getElementsByTagName('*');
+      for (let i = 0; i < elements.length; i++) {
+        const className = elements[i].className;
+        if (typeof className === 'string' && className.length > 0) {
+          elements[i].className = makeLight(className);
+        }
+      }
+      clone.className = makeLight(clone.className);
+      
+      clone.style.width = '800px';
+      clone.style.position = 'absolute';
+      clone.style.left = '-9999px';
+      clone.style.top = '0';
+      document.body.appendChild(clone);
+      
+      const canvas = await html2canvas(clone, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff'
+      });
+      
+      document.body.removeChild(clone);
+      
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      
+      const pdfWidth = 210;
+      const pdfHeight = 297;
+      const margin = 10;
+      
+      const innerWidth = pdfWidth - margin * 2;
+      const innerHeight = pdfHeight - margin * 2;
+      
+      const imgProps = pdf.getImageProperties(imgData);
+      const imgWidth = innerWidth;
+      const imgHeight = (imgProps.height * imgWidth) / imgProps.width;
+      
+      let heightLeft = imgHeight;
+      let position = margin;
+      
+      pdf.addImage(imgData, 'PNG', margin, position, imgWidth, imgHeight);
+      heightLeft -= innerHeight;
+      
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight + margin;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', margin, position, imgWidth, imgHeight);
+        heightLeft -= innerHeight;
+      }
+      
+      const fileName = `olcu-raporu-${customer.name.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}-${new Date().toISOString().split('T')[0]}.pdf`;
+      const blob = pdf.output('blob');
+      return new File([blob], fileName, { type: 'application/pdf' });
+    } catch (err) {
+      console.error('PDF generation error', err);
+      return null;
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
+  const handleWhatsAppShare = async () => {
+    let text = `*CEYLİN ÖLÇÜ ERP - Saha Ölçü Raporu*\n\n`;
+    text += `*Müşteri:* ${customer.name}\n`;
+    if (customer.phone) text += `*Telefon:* ${customer.phone}\n`;
+    if (customer.address || customer.mapLocation) text += `*Adres:* ${customer.address || customer.mapLocation}\n`;
+    text += `*Tarih:* ${new Date().toLocaleString('tr-TR')}\n\n`;
+
+    customer.rooms?.forEach((room, roomIdx) => {
+      text += `--- *${roomIdx + 1}. ODA: ${room.name}* ---\n`;
+      room.windows?.forEach((win) => {
+        text += `[Açıklık: ${win.name}]\n`;
+        win.products?.forEach((p, pIdx) => {
+          text += `  Ölçü ${pIdx + 1}: ${getTemplateLabel(p.templateType)}\n`;
+          const dims = getMeasurementDimensions(p);
+          if (dims.structuralWidth) text += `  En: ${dims.structuralWidth} cm, Boy: ${dims.structuralHeight} cm\n`;
+          if (p.notes) text += `  Not: ${p.notes}\n`;
+        });
+      });
+      text += `\n`;
+    });
+
+    const pdfFile = await generatePDF();
+    
+    // Web Share API with files support
+    if (pdfFile && navigator.share && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+      try {
+        await navigator.share({
+          title: 'Ölçü Raporu',
+          text: text,
+          files: [pdfFile]
+        });
+      } catch (err) {
+        console.error('Share error:', err);
+        fallbackWhatsApp(text, pdfFile);
+      }
+    } else {
+      fallbackWhatsApp(text, pdfFile);
+    }
+  };
+
+  const fallbackWhatsApp = (text: string, file: File | null) => {
+    if (file) {
+      const url = URL.createObjectURL(file);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = file.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      alert("PDF indirildi. WhatsApp'tan dosya olarak gönderebilirsiniz.");
+    } else {
+      const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+      window.open(url, '_blank');
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto no-print">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto print:bg-white print:p-0 print:block">
       {/* Injecting print-specific CSS directly via style tag to isolate print layout */}
       <style>{`
         @media print {
@@ -85,9 +231,9 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
         }
       `}</style>
 
-      <div className="bg-slate-900 border border-slate-800 w-full max-w-5xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-fade-in text-white">
+      <div className="bg-slate-900 border border-slate-800 w-full max-w-5xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-fade-in text-white print:shadow-none print:border-none print:max-h-none print:overflow-visible">
         {/* Modal Header */}
-        <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950/40">
+        <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950/40 no-print">
           <div>
             <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
               <span>Görsel Ölçü Raporu</span>
@@ -95,6 +241,13 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
             <p className="text-xs text-slate-400">Yazdırılabilir saha ve üretim teknik raporu.</p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={handleWhatsAppShare}
+              disabled={isGeneratingPdf}
+              className="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              {isGeneratingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Share2 className="w-4 h-4" />} Paylaş
+            </button>
             <button
               onClick={handlePrint}
               className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
@@ -111,7 +264,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
         </div>
 
         {/* Modal Body / Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-slate-950/20">
+        <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-slate-950/20 print:p-0 print:overflow-visible print:bg-white">
           <div id="visual-report-print-area" className="bg-slate-900 text-white font-sans max-w-4xl mx-auto rounded-xl p-6 border border-slate-800 shadow-sm print:border-none print:shadow-none print:p-0 print:bg-white print:text-black">
             
             {/* Report Header Title */}

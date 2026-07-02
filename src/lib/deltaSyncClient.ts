@@ -171,9 +171,29 @@ export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise
       return { success: false, fetchedCount: 0, errors: [data.error || 'Unknown API Error'] };
     }
 
-    const changes = data.changes || [];
+    const rawChanges = data.changes || [];
     let maxDraftRevision = draftCursor;
     let maxMeasurementRevision = measurementCursor;
+
+    // Deduplicate changes by entity_id, keeping the latest revision
+    const latestChanges = new Map<string, any>();
+    for (const change of rawChanges) {
+       const key = `${change.entity_type}_${change.entity_id}`;
+       const existing = latestChanges.get(key);
+       if (!existing || existing.revision < change.revision) {
+           latestChanges.set(key, change);
+       }
+       
+       // Advance cursors based on raw changes to not miss any revisions
+       if (change.sourceTable === 'draft_changes' && change.revision > maxDraftRevision) {
+         maxDraftRevision = change.revision;
+       }
+       if (change.sourceTable === 'measurement_changes' && change.revision > maxMeasurementRevision) {
+         maxMeasurementRevision = change.revision;
+       }
+    }
+    
+    const changes = Array.from(latestChanges.values());
 
     for (const change of changes) {
       const patch = change.patch || {};
@@ -212,13 +232,6 @@ export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise
         if (change.device_id !== 'local-device') { // In real app, compare with actual device ID
             await saveInboundMeasurement(inbound);
         }
-      }
-
-      if (change.sourceTable === 'draft_changes' && change.revision > maxDraftRevision) {
-        maxDraftRevision = change.revision;
-      }
-      if (change.sourceTable === 'measurement_changes' && change.revision > maxMeasurementRevision) {
-        maxMeasurementRevision = change.revision;
       }
     }
 

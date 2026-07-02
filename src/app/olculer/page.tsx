@@ -112,7 +112,26 @@ export default function OlculerPage() {
 
   const loadInbound = async () => {
     try {
-      const data = await listInboundMeasurements();
+      let data = await listInboundMeasurements();
+      // Auto-cleanup local duplicates ONLY FOR PENDING ITEMS
+      const pendingData = data.filter(d => d.status === 'NEW' || d.status === 'MATCH_PENDING');
+      const seen = new Set();
+      const duplicatesToRemove: string[] = [];
+      for (const d of pendingData) {
+         const key = `${d.entityType}_${d.entityId}`;
+         if (seen.has(key)) {
+             duplicatesToRemove.push(d.changeId);
+         } else {
+             seen.add(key);
+         }
+      }
+      
+      if (duplicatesToRemove.length > 0) {
+         const { localDraftDb } = await import('@/lib/localDraftDb');
+         await localDraftDb.inboundMeasurements.bulkDelete(duplicatesToRemove);
+         data = await listInboundMeasurements();
+      }
+
       setInboundMeasurements(data.filter(d => d.status === 'NEW' || d.status === 'MATCH_PENDING'));
     } catch (err) {}
   };
@@ -144,8 +163,14 @@ export default function OlculerPage() {
     setProcessingInboundId(inbound.changeId);
     try {
       await processAsNewCustomer(inbound, currentUser?.id || 'admin', currentUser?.username || 'Admin');
-      alert("Gelen ölçü yeni cari olarak açıldı.");
-      await loadInbound();
+      
+      // Update state immediately for instant feedback
+      setInboundMeasurements(prev => prev.filter(x => x.changeId !== inbound.changeId));
+      
+      setTimeout(() => alert("Yeni cari açıldı ve ölçü eklendi."), 50);
+      
+      // Sync with DB just in case
+      loadInbound();
       // Notify zustand components to refresh
       window.dispatchEvent(new Event('local-customers-updated'));
     } catch (e: any) {
@@ -169,8 +194,13 @@ export default function OlculerPage() {
     setProcessingInboundId(inbound.changeId);
     try {
       await processAsMerge(inbound, selectedCustomerId);
-      alert("Gelen ölçü mevcut cariye bağlandı.");
-      await loadInbound();
+      
+      // Update state immediately
+      setInboundMeasurements(prev => prev.filter(x => x.changeId !== inbound.changeId));
+      
+      setTimeout(() => alert("Ölçü mevcut cariye bağlandı."), 50);
+      
+      loadInbound();
       // Notify zustand components to refresh
       window.dispatchEvent(new Event('local-customers-updated'));
     } catch (e: any) {
@@ -467,8 +497,15 @@ export default function OlculerPage() {
                        onClick={async () => {
                          const confirmed = window.confirm('Bu kaydı atlamak istediğinize emin misiniz? (Havuza bir daha düşmez)');
                          if(confirmed) {
-                           await updateInboundStatus(inbound.changeId, 'SKIPPED');
-                           await loadInbound();
+                           setProcessingInboundId(inbound.changeId);
+                           try {
+                             await updateInboundStatus(inbound.changeId, 'SKIPPED');
+                             setInboundMeasurements(prev => prev.filter(x => x.changeId !== inbound.changeId));
+                             setTimeout(() => alert("Kayıt atlandı."), 50);
+                             loadInbound();
+                           } finally {
+                             setProcessingInboundId(null);
+                           }
                          }
                        }}
                        disabled={processingInboundId === inbound.changeId}
