@@ -603,6 +603,11 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       };
 
       await localDraftDb.measurementDrafts.put(draftData);
+      
+      // Fix: V1A Queue - Add to sync queue for push
+      const { enqueueSyncEvent } = await import('@/lib/localSyncQueueDb');
+      await enqueueSyncEvent('DRAFT', draftData.id, existing ? 'UPDATE' : 'INSERT', draftData);
+
       showToast("Saha taslağı telefona kaydedildi.");
     } catch (err) {
       console.error(err);

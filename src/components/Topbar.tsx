@@ -7,6 +7,7 @@ import { useAuthStore, ROLE_PERMISSIONS, normalizeUser } from "@/store/useAuthSt
 import { useUiStore } from "@/store/useUiStore";
 import { useStore } from "@/store/useStore";
 import { syncNow } from "@/lib/syncService";
+import { pushDeltaSyncEvents } from "@/lib/deltaSyncClient";
 
 const ROLE_BADGE_COLORS: Record<string, string> = {
   ADMIN: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
@@ -26,10 +27,45 @@ export function Topbar() {
   const { toggleMobileMenu } = useUiStore();
   const syncStatus = useStore((state) => state.syncStatus);
   const [mounted, setMounted] = useState(false);
+  const [isPushing, setIsPushing] = useState(false);
 
   useEffect(() => setMounted(true), []);
 
   if (!rawCurrentUser) return null;
+
+  const handleManualPush = async () => {
+    setIsPushing(true);
+    try {
+      const result = await pushDeltaSyncEvents();
+      
+      const debugText = `
+pendingCount: ${result.debug.pendingCount}
+apiStatus: ${result.debug.apiStatus}
+syncedCount: ${result.debug.syncedCount}
+errorCount: ${result.debug.errorCount}
+firstStatus: ${result.debug.firstStatus}
+      `.trim();
+
+      const isDev = process.env.NODE_ENV === 'development';
+
+      if (result.success) {
+        if (result.pushedCount > 0) {
+          alert(`Ölçüler gönderildi. ${result.pushedCount} kayıt aktarıldı.` + (isDev ? `\n\nDEBUG:\n${debugText}` : ''));
+        } else {
+          alert(`Gönderilecek yeni ölçü yok.` + (isDev ? `\n\nDEBUG:\n${debugText}` : ''));
+        }
+      } else {
+        alert(`Ölçüler gönderilemedi. İnternet bağlantısını kontrol edip tekrar deneyin.` + (isDev ? `\n\nDETAY: ${result.errors.join(', ')}\n\nDEBUG:\n${debugText}` : ''));
+      }
+    } catch (err: any) {
+      alert(`Beklenmeyen hata oluştu. Lütfen tekrar deneyin.`);
+      if (process.env.NODE_ENV === 'development') {
+        console.error("Manual push failed:", err);
+      }
+    } finally {
+      setIsPushing(false);
+    }
+  };
 
   const currentUser = normalizeUser(rawCurrentUser);
 
@@ -80,12 +116,17 @@ export function Topbar() {
               )}
 
               <button
-                onClick={() => alert("Cloud sync geçici olarak kapalı. Ana PC yerel veri korunuyor.")}
-                className="flex items-center gap-1 text-xs font-semibold px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 rounded-md border border-gray-200 dark:border-gray-700 ml-2 cursor-not-allowed opacity-60"
-                title="Cloud sync geçici olarak kapalı. Ana PC yerel veri korunuyor."
+                onClick={handleManualPush}
+                disabled={isPushing}
+                className={`flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md border ml-2 transition-colors ${
+                  isPushing 
+                    ? 'bg-gray-200 text-gray-500 border-gray-300 cursor-wait'
+                    : 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50'
+                }`}
+                title="Bekleyen yerel ölçüleri merkeze gönder"
               >
-                <RefreshCw className="w-3 h-3 text-gray-400 dark:text-gray-500" />
-                <span>Senkronize Et</span>
+                <RefreshCw className={`w-3 h-3 ${isPushing ? 'animate-spin text-gray-500' : 'text-indigo-600 dark:text-indigo-400'}`} />
+                <span>{isPushing ? 'Gönderiliyor...' : 'Ölçüleri Gönder'}</span>
               </button>
             </div>
           </div>

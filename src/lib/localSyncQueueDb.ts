@@ -72,7 +72,7 @@ export async function enqueueSyncEvent(
   entityId: string,
   operation: SyncEvent['operation'],
   patch: any
-): Promise<void> {
+): Promise<boolean> {
   try {
     const now = new Date().toISOString();
     const changeId = (typeof crypto !== 'undefined' && crypto.randomUUID)
@@ -100,19 +100,68 @@ export async function enqueueSyncEvent(
 
     await localSyncQueueDb.pendingSyncEvents.put(fullEvent);
     
-    // We do not log personal details. Only technical confirmation.
-    // console.log(`[SyncQueue] Enqueued ${operation} for ${entityType} ${entityId}`);
-  } catch (err) {
-    // We catch and log so that the main application logic (e.g. saving to localCustomerDb) NEVER fails
-    // just because queuing the event failed.
-    console.error('[SyncQueue] Failed to enqueue event (Local operation continues safely):', err);
+    // Debug for user
+    if (typeof window !== 'undefined') {
+      console.log(`[SyncQueue] Successfully enqueued ${operation} for ${entityType} ${entityId}`);
+      // alert(`[DEBUG] Queue Event Created: TRUE\nType: ${entityType}\nStatus: PENDING`);
+    }
+    return true;
+  } catch (err: any) {
+    if (typeof window !== 'undefined') {
+      alert(`[DEBUG] Queue Event Created: FALSE\nHATA: ${err.message}`);
+    }
+    console.error('[SyncQueue] Failed to enqueue event:', err);
+    return false;
   }
 }
 
-export async function getPendingEvents(): Promise<SyncEvent[]> {
+export async function getPendingSyncEvents(limit: number = 50): Promise<SyncEvent[]> {
   try {
-    return await localSyncQueueDb.pendingSyncEvents.where('syncStatus').equals('PENDING').toArray();
-  } catch (err) {
+    return await localSyncQueueDb.pendingSyncEvents
+      .where('syncStatus')
+      .equals('PENDING')
+      .limit(limit)
+      .toArray();
+  } catch (err: any) {
+    if (typeof window !== 'undefined') {
+      alert(`[DEBUG] getPendingSyncEvents failed: ${err.message}`);
+    }
+    console.error('[SyncQueue] getPendingSyncEvents failed:', err);
     return [];
+  }
+}
+
+export async function markSyncEventsSynced(changeIds: string[]): Promise<void> {
+  try {
+    const now = new Date().toISOString();
+    await localSyncQueueDb.pendingSyncEvents.bulkUpdate(
+      changeIds.map(id => ({
+        key: id,
+        changes: { syncStatus: 'SYNCED', updatedAt: now }
+      }))
+    );
+  } catch (err) {
+    console.error('[SyncQueue] Failed to mark events as SYNCED:', err);
+  }
+}
+
+export async function markSyncEventsError(changeIds: string[], errorMessage?: string): Promise<void> {
+  try {
+    const now = new Date().toISOString();
+    // Dexie bulkUpdate needs array of {key, changes}. Since we need to increment retryCount,
+    // we should ideally fetch them first or do a loop. Since changeIds is usually small for a batch:
+    for (const id of changeIds) {
+      const event = await localSyncQueueDb.pendingSyncEvents.get(id);
+      if (event) {
+        await localSyncQueueDb.pendingSyncEvents.update(id, {
+          syncStatus: 'ERROR',
+          updatedAt: now,
+          retryCount: (event.retryCount || 0) + 1
+          // We don't store errorMessage in DB for V1, just print it
+        });
+      }
+    }
+  } catch (err) {
+    console.error('[SyncQueue] Failed to mark events as ERROR:', err);
   }
 }
