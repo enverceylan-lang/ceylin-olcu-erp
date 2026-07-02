@@ -1,9 +1,9 @@
 import React from 'react';
 import { X, Printer, Share2, Loader2 } from 'lucide-react';
-import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { Customer, MEASUREMENT_TEMPLATES, WindowItem, ProductMeasurement } from '@/store/useStore';
 import { getTemplateLabel, getMeasurementDimensions } from '@/lib/measurementAdapter';
+import { generateMeasurementPdfBlob } from '@/lib/measurementPdfGenerator';
 import { calculatePlicellM2, calculateMechanicalCurtainM2 } from '@/lib/reportFormatters';
 import { renderSimpleWidthHeightDiagram, renderCurtainDetailDiagram } from '@/lib/measurementDiagram';
 
@@ -49,136 +49,49 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
   let globalMechanicalCount = 0;
   let globalMechanicalM2 = 0;
 
-  const handlePrint = () => {
-    window.print();
-  };
-
-  const generatePDF = async (): Promise<File | null> => {
-    const el = document.getElementById('visual-report-print-area');
-    if (!el) return null;
+  const handlePrint = async () => {
     try {
       setIsGeneratingPdf(true);
-      
-      // Clone the element to apply light theme for PDF
-      const clone = el.cloneNode(true) as HTMLElement;
-      
-      const makeLight = (cls: string) => {
-        if (!cls) return cls;
-        return cls
-          .replace(/bg-slate-900(\/60)?/g, 'bg-white')
-          .replace(/bg-slate-950(\/30)?/g, 'bg-slate-50')
-          .replace(/text-white/g, 'text-black')
-          .replace(/text-slate-[12]00/g, 'text-black')
-          .replace(/text-slate-400/g, 'text-slate-600')
-          .replace(/border-slate-800(\/[0-9]+)?/g, 'border-slate-300')
-          .replace(/text-blue-400/g, 'text-blue-700')
-          .replace(/text-blue-500/g, 'text-blue-700')
-          .replace(/border-blue-500/g, 'border-blue-700');
-      };
-
-      const elements = clone.getElementsByTagName('*');
-      for (let i = 0; i < elements.length; i++) {
-        const className = elements[i].className;
-        if (typeof className === 'string' && className.length > 0) {
-          elements[i].className = makeLight(className);
-        }
-      }
-      clone.className = makeLight(clone.className);
-      
-      clone.style.width = '800px';
-      clone.style.position = 'absolute';
-      clone.style.left = '-9999px';
-      clone.style.top = '0';
-      document.body.appendChild(clone);
-      
-      const canvas = await html2canvas(clone, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff'
-      });
-      
-      document.body.removeChild(clone);
-      
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      
-      const pdfWidth = 210;
-      const pdfHeight = 297;
-      const margin = 10;
-      
-      const innerWidth = pdfWidth - margin * 2;
-      const innerHeight = pdfHeight - margin * 2;
-      
-      const imgProps = pdf.getImageProperties(imgData);
-      const imgWidth = innerWidth;
-      const imgHeight = (imgProps.height * imgWidth) / imgProps.width;
-      
-      let heightLeft = imgHeight;
-      let position = margin;
-      
-      pdf.addImage(imgData, 'PNG', margin, position, imgWidth, imgHeight);
-      heightLeft -= innerHeight;
-      
-      while (heightLeft > 0) {
-        position = heightLeft - imgHeight + margin;
-        pdf.addPage();
-        pdf.addImage(imgData, 'PNG', margin, position, imgWidth, imgHeight);
-        heightLeft -= innerHeight;
-      }
-      
-      const fileName = `olcu-raporu-${customer.name.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}-${new Date().toISOString().split('T')[0]}.pdf`;
-      const blob = pdf.output('blob');
-      return new File([blob], fileName, { type: 'application/pdf' });
-    } catch (err) {
-      console.error('PDF generation error', err);
-      return null;
+      const pdfFile = await generateMeasurementPdfBlob(customer, sameMeasuredBy);
+      const url = URL.createObjectURL(pdfFile);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      console.error('PDF generation error', error);
+      alert('PDF oluşturulurken bir hata meydana geldi.');
     } finally {
       setIsGeneratingPdf(false);
     }
   };
 
   const handleWhatsAppShare = async () => {
-    let text = `*CEYLİN ÖLÇÜ ERP - Saha Ölçü Raporu*\n\n`;
-    text += `*Müşteri:* ${customer.name}\n`;
-    if (customer.phone) text += `*Telefon:* ${customer.phone}\n`;
-    if (customer.address || customer.mapLocation) text += `*Adres:* ${customer.address || customer.mapLocation}\n`;
-    text += `*Tarih:* ${new Date().toLocaleString('tr-TR')}\n\n`;
-
-    customer.rooms?.forEach((room, roomIdx) => {
-      text += `--- *${roomIdx + 1}. ODA: ${room.name}* ---\n`;
-      room.windows?.forEach((win) => {
-        text += `[Açıklık: ${win.name}]\n`;
-        win.products?.forEach((p, pIdx) => {
-          text += `  Ölçü ${pIdx + 1}: ${getTemplateLabel(p.templateType)}\n`;
-          const dims = getMeasurementDimensions(p);
-          if (dims.structuralWidth) text += `  En: ${dims.structuralWidth} cm, Boy: ${dims.structuralHeight} cm\n`;
-          if (p.notes) text += `  Not: ${p.notes}\n`;
-        });
-      });
-      text += `\n`;
-    });
-
-    const pdfFile = await generatePDF();
-    
-    // Web Share API with files support
-    if (pdfFile && navigator.share && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
-      try {
-        await navigator.share({
-          title: 'Ölçü Raporu',
-          text: text,
-          files: [pdfFile]
-        });
-      } catch (err) {
-        console.error('Share error:', err);
-        fallbackWhatsApp(text, pdfFile);
+    try {
+      setIsGeneratingPdf(true);
+      const pdfFile = await generateMeasurementPdfBlob(customer, sameMeasuredBy);
+      
+      // Web Share API with files support
+      if (pdfFile && navigator.share && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+        try {
+          await navigator.share({
+            title: 'CEYLİN ÖLÇÜ ERP',
+            files: [pdfFile]
+          });
+        } catch (err) {
+          console.error('Share error:', err);
+          fallbackWhatsApp(pdfFile);
+        }
+      } else {
+        fallbackWhatsApp(pdfFile);
       }
-    } else {
-      fallbackWhatsApp(text, pdfFile);
+    } catch (error) {
+      console.error('PDF generate/share error:', error);
+      alert('PDF oluşturulamadı veya paylaşılamadı.');
+    } finally {
+      setIsGeneratingPdf(false);
     }
   };
 
-  const fallbackWhatsApp = (text: string, file: File | null) => {
+  const fallbackWhatsApp = (file: File | null) => {
     if (file) {
       const url = URL.createObjectURL(file);
       const a = document.createElement('a');
@@ -188,10 +101,9 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      alert("PDF indirildi. WhatsApp'tan dosya olarak gönderebilirsiniz.");
+      alert("Bu cihaz PDF dosya paylaşımını doğrudan desteklemiyor. PDF indirildi, WhatsApp'tan dosya olarak gönderebilirsiniz.");
     } else {
-      const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
-      window.open(url, '_blank');
+      alert("PDF oluşturulamadı.");
     }
   };
 
@@ -323,21 +235,23 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                     }
                   });
 
-                  return (
-                    <div key={room.id} className="space-y-4 print-card print:border-slate-200 print:rounded-lg print:p-4">
-                      {/* Room Header */}
-                      <h3 className="text-md font-bold text-slate-100 print:text-black border-l-4 border-blue-500 print:border-blue-700 pl-3 flex items-center justify-between">
-                        <span>{roomIdx + 1}. ODA: {room.name}</span>
-                        {(room.photos?.length > 0 || room.videos?.length > 0) && (
-                          <span className="text-[10px] font-normal text-slate-400 print:text-slate-500">
-                            ({(room.photos||[]).length} Foto, {(room.videos||[]).length} Video eklenmiş)
-                          </span>
-                        )}
-                      </h3>
+                      const hasAnyProducts = plicellProducts.length > 0 || mechanicalCurtainProducts.length > 0 || standardOpenings.length > 0;
 
-                      {windows.length === 0 ? (
-                        <p className="text-xs text-slate-400 print:text-slate-600 pl-4 italic">Bu oda altında açıklık kaydı yok.</p>
-                      ) : (
+                      return (
+                        <div key={room.id} className="space-y-4 print-card print:border-slate-200 print:rounded-lg print:p-4">
+                          {/* Room Header */}
+                          <h3 className="text-md font-bold text-slate-100 print:text-black border-l-4 border-blue-500 print:border-blue-700 pl-3 flex items-center justify-between">
+                            <span>{roomIdx + 1}. ODA: {room.name}</span>
+                            {(room.photos?.length > 0 || room.videos?.length > 0) && (
+                              <span className="text-[10px] font-normal text-slate-400 print:text-slate-500">
+                                ({(room.photos||[]).length} Foto, {(room.videos||[]).length} Video eklenmiş)
+                              </span>
+                            )}
+                          </h3>
+
+                          {!hasAnyProducts ? (
+                            <p className="text-xs text-slate-400 print:text-slate-600 pl-4 italic">Bu oda için ölçü detayı yok.</p>
+                          ) : (
                         <div className="space-y-6 pl-2">
                           
                           {/* A. Render Standard Openings */}

@@ -5,7 +5,7 @@ import React from 'react';
  */
 export function renderSimpleWidthHeightDiagram(width: number, height: number): React.ReactNode {
   return (
-    <svg viewBox="0 0 200 200" className="w-full max-w-[200px] h-auto border border-gray-200 dark:border-gray-800 rounded bg-gray-50/50 dark:bg-gray-900/50 p-2 mx-auto">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" style={{ width: '100%', maxWidth: '200px', height: 'auto', border: '1px solid #e5e7eb', borderRadius: '4px', backgroundColor: '#f9fafb', padding: '8px', margin: '0 auto' }}>
       {/* Bounding box */}
       <rect x="25" y="25" width="150" height="150" fill="none" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3,3" />
       
@@ -80,8 +80,9 @@ export function renderCurtainDetailDiagram(rawValues: any): React.ReactNode {
   const winH = hPct * wallH;
 
   return (
-    <svg viewBox="0 0 280 220" className="w-full max-w-[280px] h-auto border border-gray-200 dark:border-gray-800 rounded bg-gray-50/50 dark:bg-gray-900/50 p-2 mx-auto">
-      {/* Wall Outline */}
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 220" width="280" height="220" style={{ width: '100%', maxWidth: '280px', height: 'auto', border: '1px solid #e5e7eb', borderRadius: '4px', backgroundColor: '#f9fafb', padding: '8px', margin: '0 auto' }}>
+      
+      {/* Bounding Box representing the total wall area */}
       <rect x={startX} y={startY} width={wallW} height={wallH} fill="none" stroke="#64748b" strokeWidth="1.5" />
       
       {/* The Window */}
