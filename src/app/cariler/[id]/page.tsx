@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, ChevronRight, Layers, Camera, Video, FileText, CheckCircle, Shield, AlertTriangle, MapPin, MessageCircle, Loader2, Ruler } from "lucide-react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useStore, WindowItem, MEASUREMENT_TEMPLATES, ProductMeasurement } from "@/store/useStore";
 import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer, canViewCustomerWorkflowReport, canViewCustomerFinancialReport, canViewCustomerContactFields, canViewFinancialAreas, canEditCustomerLocation, canViewCariCard } from "@/store/useAuthStore";
@@ -12,6 +13,9 @@ import { syncNow } from "@/lib/syncService";
 import { buildWhatsAppShortReport, calculateMechanicalCurtainM2 } from "@/lib/reportFormatters";
 import { MeasurementVisualReport } from "@/components/reports/MeasurementVisualReport";
 import { localDraftDb, FieldMeasurementDraft } from "@/lib/localDraftDb";
+import { useSalesStore } from "@/store/salesStore";
+import { createDraftSaleFromCustomer } from "@/lib/salesAdapter";
+import { ShoppingCart } from "lucide-react";
 
 export default function CariDetayPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
@@ -22,6 +26,8 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const { currentUser, addAuditEntry, users } = useAuthStore();
   const user = currentUser!;
   const customer = customers.find(c => c.id === id);
+  const { addSale } = useSalesStore();
+  const router = useRouter();
 
   const normRole = user ? normalizeRole(user.role) : 'FIELD';
   const canViewAddressPhoto = !!user && !!customer && (
@@ -615,6 +621,21 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     }
   };
 
+  const handleTransferToSales = async () => {
+    if (!customer) return;
+    try {
+      setIsSaving(true);
+      const newSale = createDraftSaleFromCustomer(customer);
+      await addSale(newSale);
+      router.push(`/satis/${newSale.id}`);
+    } catch (err) {
+      console.error(err);
+      showToast("Satışa aktarılırken bir hata oluştu.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-24">
       {/* Header & Mode Toggle */}
@@ -647,6 +668,18 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
             <FileText className="w-4 h-4" />
             Görsel Ölçü Raporu
           </button>
+
+          {permissions.canAccessOfficeMode && (
+            <button
+              onClick={handleTransferToSales}
+              disabled={isSaving}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+              title="Ölçüleri yeni satış/teklif taslağına kopyala"
+            >
+              <ShoppingCart className="w-4 h-4" />
+              Satışa Aktar
+            </button>
+          )}
 
           <button
             onClick={handleSaveAsLocalDraft}

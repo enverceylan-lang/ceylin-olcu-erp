@@ -126,18 +126,18 @@ export async function saveInboundMeasurement(inbound: InboundMeasurement): Promi
   const existing = await localDraftDb.inboundMeasurements.get(inbound.changeId);
   if (existing) return;
   
-  // Smart deduplication: If we already have a PENDING record for this entity in the pool,
-  // we overwrite it so we don't have multiple pending cards. If it's already LINKED, 
-  // we ALLOW it so that tomorrow's updates aren't lost.
+  // Strict deduplication requested by user:
+  // If ANY record exists for this entityType + entityId in the pool (even if SKIPPED, LINKED, etc.), 
+  // do NOT insert it again.
   const all = await localDraftDb.inboundMeasurements.toArray();
-  const existingPending = all.find(x => 
+  const existingEntity = all.find(x => 
     x.entityId === inbound.entityId && 
-    x.entityType === inbound.entityType &&
-    (x.status === 'NEW' || x.status === 'MATCH_PENDING')
+    x.entityType === inbound.entityType
   );
   
-  if (existingPending) {
-    await localDraftDb.inboundMeasurements.delete(existingPending.changeId);
+  if (existingEntity) {
+    // If it already exists in the pool (no matter the status), we do NOT re-add it as NEW.
+    return;
   }
 
   await localDraftDb.inboundMeasurements.add(inbound);

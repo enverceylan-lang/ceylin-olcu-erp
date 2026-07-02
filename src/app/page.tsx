@@ -1,11 +1,36 @@
+"use client";
+
 import { Users, Ruler, Package, ShoppingCart } from "lucide-react";
+import { useStore } from "@/store/useStore";
+import { useSalesStore } from "@/store/salesStore";
+import { useEffect, useState } from "react";
+import { localDraftDb } from "@/lib/localDraftDb";
 
 export default function Home() {
+  const { customers, products } = useStore();
+  const { sales, loadSales } = useSalesStore();
+  const [inboundCount, setInboundCount] = useState(0);
+
+  useEffect(() => {
+    loadSales();
+    localDraftDb.inboundMeasurements.toArray().then(items => {
+      const pending = items.filter(i => i.status === 'NEW' || i.status === 'MATCH_PENDING');
+      setInboundCount(pending.length);
+    }).catch(err => {
+      console.error("Failed to load inbound measurements for dashboard", err);
+    });
+  }, [loadSales]);
+
+  const activeCustomersCount = customers.filter(c => !c.isDeleted).length;
+  const activeSalesCount = sales.filter(s => s.status !== 'İPTAL' && s.status !== 'TAMAMLANDI').length;
+  // Use products if it exists, otherwise 0
+  const stockCount = products ? products.length : 0;
+
   const stats = [
-    { name: "Toplam Cari", value: "142", icon: Users, color: "text-blue-600 bg-blue-100 dark:bg-blue-900/50 dark:text-blue-400" },
-    { name: "Bekleyen Ölçüler", value: "18", icon: Ruler, color: "text-amber-600 bg-amber-100 dark:bg-amber-900/50 dark:text-amber-400" },
-    { name: "Aktif Siparişler", value: "32", icon: ShoppingCart, color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/50 dark:text-emerald-400" },
-    { name: "Stok Kalemleri", value: "845", icon: Package, color: "text-indigo-600 bg-indigo-100 dark:bg-indigo-900/50 dark:text-indigo-400" },
+    { name: "Toplam Cari", value: activeCustomersCount.toString(), icon: Users, color: "text-blue-600 bg-blue-100 dark:bg-blue-900/50 dark:text-blue-400" },
+    { name: "Bekleyen Ölçüler", value: inboundCount.toString(), icon: Ruler, color: "text-amber-600 bg-amber-100 dark:bg-amber-900/50 dark:text-amber-400" },
+    { name: "Aktif Siparişler", value: activeSalesCount.toString(), icon: ShoppingCart, color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/50 dark:text-emerald-400" },
+    { name: "Stok Kalemleri", value: stockCount.toString(), icon: Package, color: "text-indigo-600 bg-indigo-100 dark:bg-indigo-900/50 dark:text-indigo-400" },
   ];
 
   return (

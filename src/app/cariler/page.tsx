@@ -152,10 +152,6 @@ export default function CarilerPage() {
           <p className="text-sm heading-subtitle">Müşterilerinizi yönetin ve yeni müşteri ekleyin.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
-          <div className="text-xs text-gray-500 bg-gray-100 dark:bg-gray-800 dark:text-gray-400 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700/50">
-            Zustand Store: <span className="font-bold">{customers.length}</span> | Listelenen: <span className="font-bold">{sortedCustomers.length}</span>
-          </div>
-
           <button
             onClick={handleManualSync}
             disabled={syncing}
