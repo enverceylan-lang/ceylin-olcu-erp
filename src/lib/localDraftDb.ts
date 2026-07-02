@@ -1,6 +1,29 @@
 import Dexie, { type Table } from 'dexie';
 import { enqueueSyncEvent } from './localSyncQueueDb';
 
+export interface InboundMeasurement {
+  changeId: string;
+  revision: number;
+  entityType: string;
+  entityId: string;
+  operation: string;
+  sourceTable: 'draft_changes' | 'measurement_changes';
+  customerName?: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  patch: any;
+  senderId?: string;
+  createdAt: string;
+  status: 'NEW' | 'MATCH_PENDING' | 'LINKED' | 'CREATED' | 'SKIPPED';
+  suggestedCustomerIds?: string[];
+}
+
+export interface SyncCursor {
+  key: string;
+  revision: number;
+  updatedAt: string;
+}
+
 export interface FieldMeasurementDraft {
   id: string;
   draftType: 'MEASUREMENT';
@@ -68,18 +91,52 @@ class LocalDraftDatabase extends Dexie {
   measurementDrafts!: Table<FieldMeasurementDraft, string>;
   installationDrafts!: Table<FieldInstallationDraft, string>;
   draftMediaFiles!: Table<DraftMediaFile, string>;
+  inboundMeasurements!: Table<InboundMeasurement, string>;
+  syncCursors!: Table<SyncCursor, string>;
 
   constructor() {
     super('CeylinLocalDraftDb');
-    this.version(1).stores({
+    this.version(2).stores({
       measurementDrafts: 'id, draftType, createdBy, syncStatus, customerPhone',
       installationDrafts: 'id, draftType, ticketNo, createdBy, syncStatus',
-      draftMediaFiles: 'fileId, draftId, category'
+      draftMediaFiles: 'fileId, draftId, category',
+      inboundMeasurements: 'changeId, status, revision',
+      syncCursors: 'key'
     });
   }
 }
 
 export const localDraftDb = new LocalDraftDatabase();
+
+// ─── INBOUND MEASUREMENT HELPERS ───
+
+export async function getSyncCursor(key: string): Promise<number> {
+  const record = await localDraftDb.syncCursors.get(key);
+  return record?.revision || 0;
+}
+
+export async function setSyncCursor(key: string, revision: number): Promise<void> {
+  await localDraftDb.syncCursors.put({ key, revision, updatedAt: new Date().toISOString() });
+}
+
+export async function saveInboundMeasurement(inbound: InboundMeasurement): Promise<void> {
+  // Prevent duplicate insert if changeId already exists
+  const existing = await localDraftDb.inboundMeasurements.get(inbound.changeId);
+  if (!existing) {
+    await localDraftDb.inboundMeasurements.add(inbound);
+  }
+}
+
+export async function listInboundMeasurements(status?: InboundMeasurement['status']): Promise<InboundMeasurement[]> {
+  if (status) {
+    return await localDraftDb.inboundMeasurements.where('status').equals(status).reverse().sortBy('revision');
+  }
+  return await localDraftDb.inboundMeasurements.reverse().sortBy('revision');
+}
+
+export async function updateInboundStatus(changeId: string, status: InboundMeasurement['status']): Promise<void> {
+  await localDraftDb.inboundMeasurements.update(changeId, { status });
+}
 
 // ─── HELPER FUNCTIONS ───
 

@@ -3,7 +3,7 @@
 import {
   Search, Ruler, ArrowRight, ChevronDown, ChevronUp, User, Calendar, Layers,
   Image, Video as VideoIcon, CheckCircle2, AlertCircle, ClipboardList,
-  Trash2, Edit3, X, Save, BadgeCheck, Filter
+  Trash2, Edit3, X, Save, BadgeCheck, Filter, CloudDownload, RefreshCw
 } from "lucide-react";
 import Link from "next/link";
 import { useStore } from "@/store/useStore";
@@ -16,7 +16,11 @@ import {
   updateMeasurementDraft,
   markDraftReadyToTransfer,
   deleteMeasurementDraft,
+  listInboundMeasurements,
+  type InboundMeasurement,
+  updateInboundStatus
 } from "@/lib/localDraftDb";
+import { pullInboundMeasurements } from "@/lib/deltaSyncClient";
 
 // ─── Status helpers ────────────────────────────────────────────────────────────
 
@@ -73,6 +77,9 @@ export default function OlculerPage() {
   const [localDrafts, setLocalDrafts] = useState<FieldMeasurementDraft[]>([]);
   const [draftFilter, setDraftFilter] = useState<FilterKey>("ALL");
 
+  const [inboundMeasurements, setInboundMeasurements] = useState<InboundMeasurement[]>([]);
+  const [isPulling, setIsPulling] = useState(false);
+
   // Detail panel
   const [detailDraftId, setDetailDraftId] = useState<string | null>(null);
 
@@ -89,7 +96,6 @@ export default function OlculerPage() {
   const loadDrafts = async () => {
     try {
       const drafts = await localDraftDb.measurementDrafts.toArray();
-      // Sort newest first
       drafts.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
       setLocalDrafts(drafts);
     } catch (err) {
@@ -97,9 +103,35 @@ export default function OlculerPage() {
     }
   };
 
+  const loadInbound = async () => {
+    try {
+      const data = await listInboundMeasurements();
+      setInboundMeasurements(data.filter(d => d.status === 'NEW' || d.status === 'MATCH_PENDING'));
+    } catch (err) {}
+  };
+
+  const handlePullInbound = async () => {
+    setIsPulling(true);
+    try {
+      const res = await pullInboundMeasurements(customers);
+      if (res.success) {
+        if (res.fetchedCount > 0) alert(`Havuz güncellendi. ${res.fetchedCount} yeni ölçü alındı.`);
+        else alert('Havuza düşen yeni bir ölçü yok.');
+      } else {
+        alert('Çekerken hata: ' + res.errors.join(', '));
+      }
+      await loadInbound();
+    } catch(e) {
+       console.error(e);
+    } finally {
+      setIsPulling(false);
+    }
+  };
+
   useEffect(() => {
     setMounted(true);
     loadDrafts();
+    loadInbound();
   }, []);
 
   if (!mounted) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
@@ -248,6 +280,79 @@ export default function OlculerPage() {
           Müşteri bazında alınan saha ölçüleri ve durum takibi.
         </p>
       </div>
+
+      {/* V1D Inbound Pool Section */}
+      {currentUser?.role === 'ADMIN' && (
+        <section className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+              <CloudDownload className="w-5 h-5 text-indigo-500" />
+              Gelen Ölçüler Havuzu
+              <span className="text-sm font-semibold bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-2.5 py-0.5 rounded-full">
+                {inboundMeasurements.length} bekleyen
+              </span>
+            </h2>
+            <button
+              onClick={handlePullInbound}
+              disabled={isPulling}
+              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium flex items-center gap-2 shadow-sm transition-all"
+            >
+              <RefreshCw className={`w-4 h-4 ${isPulling ? 'animate-spin' : ''}`} />
+              {isPulling ? 'Alınıyor...' : 'Gelen Ölçüleri Al'}
+            </button>
+          </div>
+
+          {inboundMeasurements.length === 0 ? (
+            <div className="p-6 bg-white dark:bg-gray-800 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 text-center">
+              <p className="text-gray-500 dark:text-gray-400">Bekleyen gelen ölçü bulunmamaktadır.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {inboundMeasurements.map(inbound => (
+                <div key={inbound.changeId} className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col gap-3">
+                  <div className="flex justify-between items-start">
+                     <div>
+                        <h3 className="font-bold text-gray-900 dark:text-white">{inbound.customerName || 'İsimsiz Müşteri'}</h3>
+                        <p className="text-sm text-gray-500 flex items-center gap-1"><User className="w-3 h-3"/> {inbound.customerPhone || 'Telefon Yok'}</p>
+                     </div>
+                     <div className="flex flex-col gap-1 items-end">
+                       <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">{inbound.entityType}</span>
+                       <span className="text-xs font-semibold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">YENİ</span>
+                     </div>
+                  </div>
+                  
+                  {inbound.suggestedCustomerIds && inbound.suggestedCustomerIds.length > 0 && (
+                    <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-md p-2">
+                       <p className="text-xs font-bold text-amber-700 dark:text-amber-400 mb-1">Önerilen Eşleşmeler:</p>
+                       <ul className="text-xs text-amber-800 dark:text-amber-300 space-y-1">
+                          {inbound.suggestedCustomerIds.map(id => {
+                            const c = customers.find(x => x.id === id);
+                            return c ? <li key={id}>- {c.name} ({c.phone})</li> : null;
+                          })}
+                       </ul>
+                    </div>
+                  )}
+
+                  <div className="mt-auto pt-3 border-t border-gray-100 dark:border-gray-700 flex flex-wrap gap-2">
+                     <button disabled className="flex-1 px-2 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded text-xs font-semibold disabled:opacity-50" title="V1E aşamasında aktif edilecek">Mevcut Cariye Bağla</button>
+                     <button disabled className="flex-1 px-2 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded text-xs font-semibold disabled:opacity-50" title="V1E aşamasında aktif edilecek">Yeni Cari Aç</button>
+                     <button 
+                       onClick={async () => {
+                         const confirmed = window.confirm('Bu kaydı atlamak istediğinize emin misiniz? (Havuza bir daha düşmez)');
+                         if(confirmed) {
+                           await updateInboundStatus(inbound.changeId, 'SKIPPED');
+                           await loadInbound();
+                         }
+                       }}
+                       className="px-2 py-1.5 bg-gray-50 text-gray-700 border border-gray-200 rounded text-xs font-semibold hover:bg-gray-100"
+                     >Atla</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Search bar */}
       <div className="relative max-w-md">

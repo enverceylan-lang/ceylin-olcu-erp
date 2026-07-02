@@ -1,4 +1,5 @@
 import { getPendingSyncEvents, markSyncEventsSynced, markSyncEventsError } from './localSyncQueueDb';
+import { getSyncCursor, setSyncCursor, saveInboundMeasurement, type InboundMeasurement } from './localDraftDb';
 import { useAuthStore } from '@/store/useAuthStore';
 
 // btoa() fails on non-Latin1 characters (e.g. Ş, Ğ, İ, Ü, Ö, Ç).
@@ -134,4 +135,137 @@ export async function pushDeltaSyncEvents(): Promise<{
       }
     };
   }
+}
+
+export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise<{
+  success: boolean;
+  fetchedCount: number;
+  errors: string[];
+}> {
+  try {
+    const { currentUser } = useAuthStore.getState();
+    if (!currentUser || !currentUser.username || !currentUser.password) {
+      return { success: false, fetchedCount: 0, errors: ["Local Auth credentials missing."] };
+    }
+
+    const token = utf8ToBase64(`${currentUser.username}:${currentUser.password}`);
+    const draftCursor = await getSyncCursor('draft_changes_cursor');
+    const measurementCursor = await getSyncCursor('measurement_changes_cursor');
+
+    const response = await fetch('/api/delta-sync/pull', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ draftCursor, measurementCursor })
+    });
+
+    if (!response.ok) {
+      let errText = await response.text();
+      return { success: false, fetchedCount: 0, errors: [`API Error: ${response.status} - ${errText}`] };
+    }
+
+    const data = await response.json();
+    if (!data.success) {
+      return { success: false, fetchedCount: 0, errors: [data.error || 'Unknown API Error'] };
+    }
+
+    const changes = data.changes || [];
+    let maxDraftRevision = draftCursor;
+    let maxMeasurementRevision = measurementCursor;
+
+    for (const change of changes) {
+      const patch = change.patch || {};
+      
+      // Allow DRAFT, CUSTOMER, ROOM, OPENING, MEASUREMENT events
+      const isDraftEvent = change.entity_type === 'DRAFT' && (change.operation === 'INSERT' || change.operation === 'UPDATE');
+      const isMeasurementEvent = ['CUSTOMER', 'ROOM', 'OPENING', 'MEASUREMENT'].includes(change.entity_type) && 
+                                 (change.operation === 'INSERT' || change.operation === 'UPDATE');
+
+      if (isDraftEvent || isMeasurementEvent) {
+        
+        let customerName = patch.customerName || patch.name;
+        let customerPhone = patch.customerPhone || patch.phone;
+        let customerAddress = patch.customerAddress || patch.address;
+
+        const suggested = suggestCustomers({ customerName, customerPhone }, allLocalCustomers);
+        
+        const inbound: InboundMeasurement = {
+          changeId: change.change_id,
+          revision: change.revision,
+          entityType: change.entity_type,
+          entityId: change.entity_id,
+          operation: change.operation,
+          sourceTable: change.sourceTable,
+          customerName: customerName,
+          customerPhone: customerPhone,
+          customerAddress: customerAddress,
+          patch: patch,
+          senderId: change.user_id,
+          createdAt: new Date().toISOString(),
+          status: 'NEW',
+          suggestedCustomerIds: suggested.map(s => s.id)
+        };
+
+        // Don't import our own changes back into the pool to avoid echo
+        if (change.device_id !== 'local-device') { // In real app, compare with actual device ID
+            await saveInboundMeasurement(inbound);
+        }
+      }
+
+      if (change.sourceTable === 'draft_changes' && change.revision > maxDraftRevision) {
+        maxDraftRevision = change.revision;
+      }
+      if (change.sourceTable === 'measurement_changes' && change.revision > maxMeasurementRevision) {
+        maxMeasurementRevision = change.revision;
+      }
+    }
+
+    if (maxDraftRevision > draftCursor) {
+      await setSyncCursor('draft_changes_cursor', maxDraftRevision);
+    }
+    if (maxMeasurementRevision > measurementCursor) {
+      await setSyncCursor('measurement_changes_cursor', maxMeasurementRevision);
+    }
+
+    return { success: true, fetchedCount: changes.length, errors: [] };
+
+  } catch (err: any) {
+    console.error('[DeltaSyncClient] Pull failed:', err);
+    return { success: false, fetchedCount: 0, errors: [err.message] };
+  }
+}
+
+// Basic fuzzy matching
+export function suggestCustomers(patch: any, localCustomers: any[]): any[] {
+  const suggestions: any[] = [];
+  if (!patch.customerName && !patch.customerPhone) return suggestions;
+
+  const phone = (patch.customerPhone || '').replace(/\D/g, '');
+  const name = (patch.customerName || '').toLowerCase().trim();
+
+  for (const c of localCustomers) {
+    if (c.isDeleted) continue;
+    
+    const cPhone = (c.phone || '').replace(/\D/g, '');
+    const cName = (c.name || '').toLowerCase().trim();
+
+    let score = 0;
+    
+    if (phone && cPhone && cPhone === phone) {
+      score += 100; // Exact phone match is very strong
+    }
+    
+    if (name && cName) {
+      if (cName === name) score += 50;
+      else if (cName.includes(name) || name.includes(cName)) score += 20;
+    }
+
+    if (score > 0) {
+      suggestions.push({ id: c.id, score });
+    }
+  }
+
+  return suggestions.sort((a, b) => b.score - a.score).slice(0, 3);
 }
