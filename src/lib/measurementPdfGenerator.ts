@@ -2,6 +2,7 @@ import jsPDF from 'jspdf';
 import { Customer, ProductMeasurement, MEASUREMENT_TEMPLATES } from '@/store/useStore';
 import { getTemplateLabel, getMeasurementDimensions } from '@/lib/measurementAdapter';
 import { formatFacadeForReport } from '@/lib/facadeHelper';
+import { getValidNote } from '@/lib/reportFormatters';
 
 // A4 Dimensions in mm
 const PAGE_WIDTH = 210;
@@ -369,7 +370,8 @@ export async function generateMeasurementPdfBlob(customer: Customer, sameMeasure
           
           doc.setFillColor(248, 250, 252);
           doc.setDrawColor(226, 232, 240);
-          const boxHeight = p.notes ? 65 : 55; // Approximate box height
+          const validNote = getValidNote(p.notes);
+          const boxHeight = validNote ? 65 : 55; // Approximate box height
           doc.rect(MARGIN + 4, y, PAGE_WIDTH - MARGIN*2 - 4, boxHeight, 'FD');
           
           let innerY = y + 6;
@@ -442,11 +444,11 @@ export async function generateMeasurementPdfBlob(customer: Customer, sameMeasure
              });
           }
           
-          if (p.notes) {
+          if (validNote) {
             doc.setFontSize(8);
             doc.setTextColor(217, 119, 6);
             doc.setFont('helvetica', 'bold');
-            doc.text(`Saha Notu: ${sanitize(p.notes)}`, MARGIN + 8, y + boxHeight - 6);
+            doc.text(`Saha Notu: ${sanitize(validNote)}`, MARGIN + 8, y + boxHeight - 6);
           }
           
           y += boxHeight + 4;
@@ -463,15 +465,33 @@ export async function generateMeasurementPdfBlob(customer: Customer, sameMeasure
         doc.text(`[Olcu Grubu: Plicell Cam Ici Olcusu]`, MARGIN + 4, y);
         y += 4;
         
-        const tableData = plicellProducts.map(item => {
-           const dims = getMeasurementDimensions(item.p);
-           return [
-             sanitize(item.winName),
-             `${item.index}. Olcu`,
-             `${dims.structuralWidth} cm`,
-             `${dims.structuralHeight} cm`,
-             sanitize(item.p.notes || '-')
-           ];
+        const tableData: string[][] = [];
+        plicellProducts.forEach(item => {
+           const camListesi = item.p.rawValues?.plicellCamListesi;
+           if (camListesi && Array.isArray(camListesi) && camListesi.length > 0) {
+             const validCamListesi = camListesi.filter((cam: any) => Number(cam.widthCm) > 0 && Number(cam.heightCm) > 0);
+             const profilRengi = item.p.rawValues?.profilRengi;
+             const profilTxt = profilRengi ? `[Renk: ${profilRengi}] ` : '';
+             
+             validCamListesi.forEach((cam: any, idx: number) => {
+               tableData.push([
+                 sanitize(item.winName),
+                 `${idx + 1}. Cam`,
+                 `${cam.widthCm || 0} cm`,
+                 `${cam.heightCm || 0} cm`,
+                 sanitize(profilTxt + (cam.note || '-'))
+               ]);
+             });
+           } else {
+             const dims = getMeasurementDimensions(item.p);
+             tableData.push([
+               sanitize(item.winName),
+               `${item.index}. Olcu`,
+               `${dims.structuralWidth} cm`,
+               `${dims.structuralHeight} cm`,
+               sanitize(getValidNote(item.p.notes) || '-')
+             ]);
+           }
         });
         
         y = drawSimpleTable(doc, MARGIN + 4, y, ['Aciklik', 'No', 'En', 'Boy', 'Notlar'], tableData) + 10;
@@ -495,7 +515,7 @@ export async function generateMeasurementPdfBlob(customer: Customer, sameMeasure
              `${item.p.rawValues?.width || 0} cm`,
              `${item.p.rawValues?.height || 0} cm`,
              `${dims.structuralWidth} x ${dims.structuralHeight}`,
-             sanitize(item.p.notes || '-')
+             sanitize(getValidNote(item.p.notes) || '-')
            ];
         });
         

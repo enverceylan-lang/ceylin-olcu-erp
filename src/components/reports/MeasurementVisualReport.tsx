@@ -4,9 +4,10 @@ import { jsPDF } from 'jspdf';
 import { Customer, MEASUREMENT_TEMPLATES, WindowItem, ProductMeasurement } from '@/store/useStore';
 import { getTemplateLabel, getMeasurementDimensions } from '@/lib/measurementAdapter';
 import { generateMeasurementPdfBlob } from '@/lib/measurementPdfGenerator';
-import { calculatePlicellM2, calculateMechanicalCurtainM2 } from '@/lib/reportFormatters';
+import { calculatePlicellM2, calculateMechanicalCurtainM2, getValidNote } from '@/lib/reportFormatters';
 import { renderSimpleWidthHeightDiagram, renderCurtainDetailDiagram } from '@/lib/measurementDiagram';
 import { TechnicalMeasurementSketch } from './TechnicalMeasurementSketch';
+import { PlicellMeasurementSketch } from './PlicellMeasurementSketch';
 import { formatFacadeForReport } from '@/lib/facadeHelper';
 
 interface MeasurementVisualReportProps {
@@ -319,12 +320,16 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                                           </div>
                                         </div>
 
-                                        {p.notes && p.notes.trim() && (
-                                          <div className="mb-4 p-2.5 rounded bg-amber-50 border border-amber-200 text-xs text-amber-900 print:bg-white print:border-slate-300 print:text-black">
-                                            <span className="font-bold text-[9.5px] uppercase block mb-0.5">Saha Notu:</span>
-                                            {p.notes.trim()}
-                                          </div>
-                                        )}
+                                        {(() => {
+                                          const validNote = getValidNote(p.notes);
+                                          if (!validNote) return null;
+                                          return (
+                                            <div className="mb-4 p-2.5 rounded bg-amber-50 border border-amber-200 text-xs text-amber-900 print:bg-white print:border-slate-300 print:text-black">
+                                              <span className="font-bold text-[9.5px] uppercase block mb-0.5">Saha Notu:</span>
+                                              {validNote}
+                                            </div>
+                                          );
+                                        })()}
 
                                         <div className="w-full flex justify-center mt-2 print:mt-4">
                                           {isSimple || isCurtain ? (
@@ -365,83 +370,81 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                             );
                           })}
 
-                          {/* B. Render Plicell Group (Tablo) */}
+                          {/* B. Render Plicell Group */}
                           {plicellProducts.length > 0 && (
-                            <div className="space-y-3">
-                              <h4 className="text-xs font-bold text-slate-400 print:text-slate-600 border-b border-slate-800 print:border-slate-200 pb-1">
-                                [Ölçü Grubu: Plicell Cam İçi Ölçüsü]
-                              </h4>
-                              
-                              <div className="overflow-x-auto rounded-lg border border-slate-850 print:border-slate-200">
-                                <table className="w-full text-xs text-left border-collapse">
-                                  <thead>
-                                    <tr className="bg-slate-950/60 print:bg-slate-100 text-slate-400 print:text-slate-700 font-bold border-b border-slate-850 print:border-slate-200">
-                                      <th className="p-2.5 text-center w-12">No</th>
-                                      <th className="p-2.5">Açıklık Adı</th>
-                                      <th className="p-2.5 text-right">Gerçek En</th>
-                                      <th className="p-2.5 text-right">Gerçek Boy</th>
-                                      <th className="p-2.5 text-right">Hesap En</th>
-                                      <th className="p-2.5 text-right">Hesap Boy</th>
-                                      <th className="p-2.5 text-right w-24">Hesap m²</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {(() => {
-                                      let roomPlicellM2 = 0;
-                                      const notesList: { idx: number; note: string }[] = [];
+                            <div className="space-y-4">
+                              {plicellProducts.map(({ p, index, winName }) => {
+                                const camListesi = p.rawValues?.plicellCamListesi;
 
-                                      const rows = plicellProducts.map(({ p, index, winName }) => {
-                                        const w = Number(p.rawValues?.glassWidth || 0);
-                                        const h = Number(p.rawValues?.glassHeight || 0);
-                                        const calc = calculatePlicellM2(w, h);
+                                if (camListesi && Array.isArray(camListesi) && camListesi.length > 0) {
+                                  const validCamListesi = camListesi.filter((cam: any) => Number(cam.widthCm) > 0 && Number(cam.heightCm) > 0);
+                                  
+                                  if (validCamListesi.length === 0) {
+                                    return (
+                                      <div key={p.id}>
+                                        <h4 className="text-sm font-bold text-slate-800 print:text-black mb-2">
+                                          {winName} - Ölçü {index}: Plicell Cam İçi
+                                        </h4>
+                                        <div className="p-4 bg-slate-50 border border-slate-200 text-slate-500 italic text-sm rounded">
+                                          Geçerli Plicell cam ölçüsü girilmemiş.
+                                        </div>
+                                      </div>
+                                    );
+                                  }
 
-                                        roomPlicellM2 += calc.chargeableM2;
-                                        globalPlicellCount++;
-                                        globalPlicellM2 += calc.chargeableM2;
+                                  const ortakBoy = Number(p.rawValues?.ortakCamBoyuCm || 0);
+                                  const profilRengi = p.rawValues?.profilRengi || '';
+                                  const camAdedi = validCamListesi.length;
 
-                                        if (p.notes && p.notes.trim()) {
-                                          notesList.push({ idx: index, note: p.notes.trim() });
-                                        }
+                                  validCamListesi.forEach((cam: any) => {
+                                    const w = Number(cam.widthCm) || 0;
+                                    const h = Number(cam.heightCm) || 0;
+                                    globalPlicellCount++;
+                                    globalPlicellM2 += calculatePlicellM2(w, h).chargeableM2;
+                                  });
 
-                                        return (
-                                          <tr key={p.id} className="border-b border-slate-900 last:border-0 print:border-slate-200 hover:bg-slate-900/30 print:hover:bg-transparent">
-                                            <td className="p-2.5 text-center font-semibold text-slate-400 print:text-slate-500">{index}</td>
-                                            <td className="p-2.5 font-medium text-slate-200 print:text-black">{winName}</td>
-                                            <td className="p-2.5 text-right font-semibold">{w.toFixed(1)} cm</td>
-                                            <td className="p-2.5 text-right font-semibold">{h.toFixed(1)} cm</td>
-                                            <td className="p-2.5 text-right font-bold text-blue-400 print:text-blue-700">{calc.roundedWidth} cm</td>
-                                            <td className="p-2.5 text-right font-bold text-blue-400 print:text-blue-700">{calc.roundedHeight} cm</td>
-                                            <td className="p-2.5 text-right font-bold text-green-400 print:text-green-700">{calc.chargeableM2.toFixed(2)} m²</td>
-                                          </tr>
-                                        );
-                                      });
+                                  return (
+                                    <div key={p.id}>
+                                      <h4 className="text-sm font-bold text-slate-800 print:text-black mb-2">
+                                        {winName} - Ölçü {index}: Plicell Cam İçi
+                                      </h4>
+                                      <PlicellMeasurementSketch 
+                                        camAdedi={camAdedi}
+                                        ortakCamBoyuCm={ortakBoy}
+                                        profilRengi={profilRengi}
+                                        plicellCamListesi={validCamListesi}
+                                      />
+                                    </div>
+                                  );
+                                } else {
+                                  // Eski format: Tek cam
+                                  const w = Number(p.rawValues?.glassWidth || 0);
+                                  const h = Number(p.rawValues?.glassHeight || 0);
+                                  const calc = calculatePlicellM2(w, h);
+                                  
+                                  globalPlicellCount++;
+                                  globalPlicellM2 += calc.chargeableM2;
 
-                                      return (
-                                        <>
-                                          {rows}
-                                          <tr className="bg-slate-950/40 print:bg-slate-50 font-bold border-t-2 border-slate-850 print:border-slate-300">
-                                            <td colSpan={2} className="p-3 text-slate-300 print:text-slate-700">Toplam Cam Adedi: {plicellProducts.length}</td>
-                                            <td colSpan={4} className="p-3 text-right text-slate-400 print:text-slate-600">Toplam Oda m²:</td>
-                                            <td className="p-3 text-right text-green-400 print:text-green-700 text-sm">{roomPlicellM2.toFixed(2)} m²</td>
-                                          </tr>
-                                          {notesList.length > 0 && (
-                                            <tr>
-                                              <td colSpan={7} className="p-3 bg-slate-950/20 border-t border-slate-900 print:border-slate-200">
-                                                <div className="space-y-1 text-slate-300 print:text-slate-700">
-                                                  <span className="font-bold uppercase text-[9.5px] text-amber-500 print:text-amber-700 block">Notlar:</span>
-                                                  {notesList.map(n => (
-                                                    <div key={n.idx} className="text-[11px]">- {n.idx}. Cam: <span className="font-medium text-slate-200 print:text-black">{n.note}</span></div>
-                                                  ))}
-                                                </div>
-                                              </td>
-                                            </tr>
-                                          )}
-                                        </>
-                                      );
-                                    })()}
-                                  </tbody>
-                                </table>
-                              </div>
+                                  const singleCamItem = {
+                                    widthCm: w,
+                                    heightCm: h,
+                                    note: p.notes
+                                  };
+
+                                  return (
+                                    <div key={p.id}>
+                                      <h4 className="text-sm font-bold text-slate-800 print:text-black mb-2">
+                                        {winName} - Ölçü {index}: Plicell Cam İçi
+                                      </h4>
+                                      <PlicellMeasurementSketch 
+                                        camAdedi={1}
+                                        ortakCamBoyuCm={h}
+                                        plicellCamListesi={[singleCamItem]}
+                                      />
+                                    </div>
+                                  );
+                                }
+                              })}
                             </div>
                           )}
 
@@ -483,8 +486,9 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                                         globalMechanicalCount += q;
                                         globalMechanicalM2 += calc.totalM2;
 
-                                        if (p.notes && p.notes.trim()) {
-                                          notesList.push({ idx: index, note: p.notes.trim() });
+                                        const validMechNote = getValidNote(p.notes);
+                                        if (validMechNote) {
+                                          notesList.push({ idx: index, note: validMechNote });
                                         }
 
                                         return (

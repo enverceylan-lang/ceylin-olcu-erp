@@ -10,7 +10,7 @@ import { getMeasurementDimensions, getTemplateLabel, getGoogleMapsUrl, getWorkfl
 import { fileToDataUrl } from "@/lib/fileStorage";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
 import { syncNow } from "@/lib/syncService";
-import { buildWhatsAppShortReport, calculateMechanicalCurtainM2 } from "@/lib/reportFormatters";
+import { buildWhatsAppShortReport, calculateMechanicalCurtainM2, calculatePlicellM2, getValidNote } from "@/lib/reportFormatters";
 import { MeasurementVisualReport } from "@/components/reports/MeasurementVisualReport";
 import { localDraftDb, FieldMeasurementDraft } from "@/lib/localDraftDb";
 import { useSalesStore } from "@/store/salesStore";
@@ -20,6 +20,7 @@ import { CariEditModal } from "@/components/modals/CariEditModal";
 import { MergeCustomerModal } from "@/components/modals/MergeCustomerModal";
 import { MoveRoomModal } from "@/components/modals/MoveRoomModal";
 import { FacadeSegmentsEditor } from "@/components/measurements/FacadeSegmentsEditor";
+import { PlicellCamListEditor } from "@/components/measurements/PlicellCamListEditor";
 
 export default function CariDetayPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
@@ -483,6 +484,13 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       if (rawValues.facadeSegments && Array.isArray(rawValues.facadeSegments) && rawValues.facadeSegments.length > 0) {
         parsedRawValues.facadeSegments = rawValues.facadeSegments;
         parsedRawValues.totalFacadeWidthCm = rawValues.facadeSegments.reduce((sum: number, s: any) => sum + (Number(s.widthCm) > 0 ? Number(s.widthCm) : 0), 0);
+      }
+
+      if (selectedTemplate === 'PLICELL') {
+        if (rawValues.plicellCamListesi) parsedRawValues.plicellCamListesi = rawValues.plicellCamListesi;
+        if (rawValues.camAdedi !== undefined) parsedRawValues.camAdedi = rawValues.camAdedi;
+        if (rawValues.ortakCamBoyuCm !== undefined) parsedRawValues.ortakCamBoyuCm = rawValues.ortakCamBoyuCm;
+        if (rawValues.profilRengi !== undefined) parsedRawValues.profilRengi = rawValues.profilRengi;
       }
 
       if (editingMeasurementId) {
@@ -1464,11 +1472,63 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                     </div>
                                   )}
                                 </div>
+                              ) : p.templateType === 'PLICELL' && p.rawValues?.plicellCamListesi && Array.isArray(p.rawValues.plicellCamListesi) && p.rawValues.plicellCamListesi.length > 0 ? (
+                                <div className="bg-gray-50 dark:bg-gray-900 p-3 rounded mb-3 border border-gray-200 dark:border-gray-700">
+                                  {p.rawValues.profilRengi && (
+                                    <div className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-1">
+                                      <span className="text-gray-500 font-normal">Profil Rengi:</span> {p.rawValues.profilRengi}
+                                    </div>
+                                  )}
+                                  {Number(p.rawValues.ortakCamBoyuCm) > 0 && (
+                                    <div className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-1">
+                                      <span className="text-gray-500 font-normal">Ortak Cam Boyu:</span> {p.rawValues.ortakCamBoyuCm} cm
+                                    </div>
+                                  )}
+                                  <div className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">
+                                    <span className="text-gray-500 font-normal">Cam Adedi:</span> {p.rawValues.plicellCamListesi.filter((cam: any) => Number(cam.widthCm) > 0 && Number(cam.heightCm) > 0).length}
+                                  </div>
+                                  <div className="space-y-1.5 border-t border-gray-200 dark:border-gray-700 pt-2">
+                                    {(() => {
+                                      let totalM2 = 0;
+                                      const validCams = p.rawValues.plicellCamListesi.filter((cam: any) => Number(cam.widthCm) > 0 && Number(cam.heightCm) > 0);
+                                      return (
+                                        <>
+                                          {validCams.map((cam: any, i: number) => {
+                                            const w = Number(cam.widthCm) || 0;
+                                            const h = Number(cam.heightCm) || 0;
+                                            const { chargeableM2, roundedWidth, roundedHeight } = calculatePlicellM2(w, h);
+                                            totalM2 += chargeableM2;
+                                            return (
+                                              <div key={i} className="text-sm text-gray-700 dark:text-gray-300 flex items-center justify-between">
+                                                <span>{i + 1}. Cam: <span className="font-semibold">{w} × {h} cm</span></span>
+                                                <span className="text-xs text-gray-500">{roundedWidth} × {roundedHeight} = <span className="font-semibold text-green-600 dark:text-green-500">{chargeableM2.toFixed(2)} m²</span></span>
+                                              </div>
+                                            );
+                                          })}
+                                          <div className="pt-2 mt-2 border-t border-dashed border-gray-300 dark:border-gray-700 text-right text-sm font-bold text-gray-900 dark:text-white">
+                                            Toplam: <span className="text-green-600 dark:text-green-500">{totalM2.toFixed(2)} m²</span>
+                                          </div>
+                                        </>
+                                      );
+                                    })()}
+                                  </div>
+                                  {(() => {
+                                    const validNote = getValidNote(p.notes);
+                                    if (!validNote) return null;
+                                    return (
+                                      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                                        <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase block mb-1">Saha Notu:</span>
+                                        <span className="text-sm text-gray-800 dark:text-gray-200">{validNote}</span>
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
                               ) : (
                                 <div className="bg-gray-50 dark:bg-gray-900 p-3 rounded grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3 border border-gray-200 dark:border-gray-700">
                                   {Object.entries(p.rawValues || {})
                                     .filter(([key, val]) => {
                                       if (key === 'facadeSegments' || key === 'totalFacadeWidthCm') return false;
+                                      if (p.templateType === 'PLICELL' && (key === 'plicellCamListesi' || key === 'camAdedi' || key === 'ortakCamBoyuCm' || key === 'profilRengi')) return false;
                                       const template = MEASUREMENT_TEMPLATES[p.templateType] || (p.templateType === 'CURTAIN' ? MEASUREMENT_TEMPLATES['CURTAIN_DETAIL'] : undefined);
                                       const fieldDef = template?.fields.find(f => f.key === key);
                                       return !fieldDef?.hidden;
@@ -1476,6 +1536,10 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                     .map(([key, val]) => {
                                     const template = MEASUREMENT_TEMPLATES[p.templateType] || (p.templateType === 'CURTAIN' ? MEASUREMENT_TEMPLATES['CURTAIN_DETAIL'] : undefined);
                                     const label = template?.fields.find(f => f.key === key)?.label || key;
+                                    
+                                    // Hide old 0x0 values for PLICELL if needed
+                                    if (p.templateType === 'PLICELL' && (key === 'glassWidth' || key === 'glassHeight') && Number(val) === 0) return null;
+
                                     return (
                                       <div key={key} className="flex flex-col">
                                         <span className="text-[10px] text-gray-500 uppercase">{label}</span>
@@ -1483,12 +1547,16 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                       </div>
                                     );
                                   })}
-                                  {p.notes && (
-                                    <div className="col-span-full mt-1 pt-1 border-t border-gray-200 dark:border-gray-700">
-                                      <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase">Saha Notu:</span>
-                                      <span className="text-sm text-gray-800 dark:text-gray-200 block">{p.notes}</span>
-                                    </div>
-                                  )}
+                                  {(() => {
+                                    const validNote = getValidNote(p.notes);
+                                    if (!validNote) return null;
+                                    return (
+                                      <div className="col-span-full mt-1 pt-1 border-t border-gray-200 dark:border-gray-700">
+                                        <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase">Saha Notu:</span>
+                                        <span className="text-sm text-gray-800 dark:text-gray-200 block">{validNote}</span>
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               )}
 
@@ -1741,12 +1809,24 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                     />
                                   </div>
                                 )}
+
+                                {selectedTemplate === 'PLICELL' && (
+                                  <div className="mb-4">
+                                    <PlicellCamListEditor 
+                                      camAdedi={rawValues.camAdedi}
+                                      ortakCamBoyuCm={rawValues.ortakCamBoyuCm}
+                                      profilRengi={rawValues.profilRengi}
+                                      plicellCamListesi={rawValues.plicellCamListesi}
+                                      onChange={(data) => setRawValues({...rawValues, ...data})}
+                                    />
+                                  </div>
+                                )}
                                 
                                 <div className={`grid gap-3 bg-gray-50 dark:bg-gray-800/50 p-3 rounded border dark:border-gray-700 ${selectedTemplate === 'CURTAIN_DETAIL' ? 'grid-cols-3' : 'grid-cols-2'}`}>
                                   {selectedTemplate === 'CURTAIN_DETAIL' && (
                                     <div className="col-span-3 text-sm font-bold text-gray-700 dark:text-gray-300 mb-2 border-b pb-1 dark:border-gray-700">Yükseklik Bilgileri</div>
                                   )}
-                                  {MEASUREMENT_TEMPLATES[selectedTemplate]?.fields.filter(f => !f.hidden).map(f => (
+                                  {MEASUREMENT_TEMPLATES[selectedTemplate]?.fields.filter(f => !f.hidden && selectedTemplate !== 'PLICELL').map(f => (
                                     <div key={f.key} className={selectedTemplate === 'mechanical_curtain' && f.key === 'notes' ? 'col-span-2' : ''}>
                                       <label className="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1">{f.label}</label>
                                       {f.type === 'select' ? (

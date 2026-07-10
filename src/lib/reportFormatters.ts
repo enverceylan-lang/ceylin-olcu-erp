@@ -2,6 +2,16 @@ import { Customer, Room, WindowItem, ProductMeasurement, Note, MEASUREMENT_TEMPL
 import { getTemplateLabel, getMeasurementDimensions } from './measurementAdapter';
 import { formatFacadeForReport } from './facadeHelper';
 
+export function getValidNote(note?: string | null): string {
+  if (!note) return "";
+  const trimmed = note.trim();
+  const lower = trimmed.toLowerCase();
+  if (lower === "not" || lower === "" || lower === "null" || lower === "undefined") {
+    return "";
+  }
+  return trimmed;
+}
+
 // ─── Plicell Square Meter Calculation ───
 
 /**
@@ -259,37 +269,79 @@ export function buildWhatsAppShortReport(customer: Customer, users: { id: string
         if (showDateOnMeasurements && p.measuredDate) {
           lines.push(`  - Tarih: ${new Date(p.measuredDate).toLocaleDateString('tr-TR')}`);
         }
-        if (p.notes && p.notes.trim()) {
-          lines.push(`  - Not: ${p.notes.trim()}`);
+        const validNote = getValidNote(p.notes);
+        if (validNote) {
+          lines.push(`  - Not: ${validNote}`);
         }
       });
     });
 
     // B. Render Plicell Group (Kompakt Liste)
     if (plicellProducts.length > 0) {
-      lines.push(`  Ölçü: Plicell Cam İçi Ölçüsü`);
+      lines.push(`  Ölçü: PLICELL CAM İÇİ`);
       
       const notesList: string[] = [];
       let roomPlicellM2 = 0;
+      let roomPlicellAdet = 0;
 
       plicellProducts.forEach(({ p, indexInRoom }) => {
-        const w = Number(p.rawValues?.glassWidth || 0);
-        const h = Number(p.rawValues?.glassHeight || 0);
-        const calc = calculatePlicellM2(w, h);
-
-        roomPlicellM2 += calc.chargeableM2;
-        globalPlicellCount++;
-        globalPlicellM2 += calc.chargeableM2;
-
-        lines.push(`  ${indexInRoom}) ${w.toFixed(2)} en x ${h.toFixed(2)} boy → Hesap: ${calc.roundedWidth} x ${calc.roundedHeight} = ${calc.chargeableM2.toFixed(2)} m²`);
+        const camListesi = p.rawValues?.plicellCamListesi;
         
-        // Collect notes if any
-        if (p.notes && p.notes.trim()) {
-          notesList.push(`  - ${indexInRoom}. Cam: ${p.notes.trim()}`);
+        if (camListesi && Array.isArray(camListesi) && camListesi.length > 0) {
+          const validCamListesi = camListesi.filter((cam: any) => Number(cam.widthCm) > 0 && Number(cam.heightCm) > 0);
+          
+          if (validCamListesi.length > 0) {
+            const profilRengi = p.rawValues?.profilRengi;
+            if (profilRengi) {
+              lines.push(`  Profil Rengi: ${profilRengi}`);
+            }
+            const ortakBoy = p.rawValues?.ortakCamBoyuCm || 0;
+            if (ortakBoy > 0) {
+              lines.push(`  Ortak Cam Boyu: ${ortakBoy} cm`);
+            }
+            lines.push(`  Cam Adedi: ${validCamListesi.length}`);
+            lines.push('');
+            
+            validCamListesi.forEach((cam: any, idx: number) => {
+              const w = Number(cam.widthCm) || 0;
+              const h = Number(cam.heightCm) || 0;
+              const calc = calculatePlicellM2(w, h);
+              roomPlicellM2 += calc.chargeableM2;
+              roomPlicellAdet++;
+              globalPlicellCount++;
+              globalPlicellM2 += calc.chargeableM2;
+
+              lines.push(`  ${idx + 1}. Cam: ${w} × ${h} cm → Hesap: ${calc.roundedWidth} × ${calc.roundedHeight} = ${calc.chargeableM2.toFixed(2)} m²`);
+              
+              const validCamNote = getValidNote(cam.note);
+              if (validCamNote) {
+                notesList.push(`  - ${idx + 1}. Cam Notu: ${validCamNote}`);
+              }
+            });
+          }
+        } else {
+          // Fallback to old format
+          const w = Number(p.rawValues?.glassWidth || 0);
+          const h = Number(p.rawValues?.glassHeight || 0);
+          const calc = calculatePlicellM2(w, h);
+
+          roomPlicellM2 += calc.chargeableM2;
+          roomPlicellAdet++;
+          globalPlicellCount++;
+          globalPlicellM2 += calc.chargeableM2;
+
+          lines.push(`  ${indexInRoom}) ${w.toFixed(2)} en x ${h.toFixed(2)} boy → Hesap: ${calc.roundedWidth} x ${calc.roundedHeight} = ${calc.chargeableM2.toFixed(2)} m²`);
+          
+          const validNote = getValidNote(p.notes);
+          if (validNote) {
+            notesList.push(`  - ${indexInRoom}. Cam: ${validNote}`);
+          }
         }
       });
 
-      lines.push(`  Toplam: ${plicellProducts.length} Adet Cam - ${roomPlicellM2.toFixed(2)} m²`);
+      lines.push('');
+      lines.push(`  Toplam Adet: ${roomPlicellAdet}`);
+      lines.push(`  Toplam m²: ${roomPlicellM2.toFixed(2)}`);
 
       if (notesList.length > 0) {
         lines.push(`  Notlar:`);
@@ -323,8 +375,9 @@ export function buildWhatsAppShortReport(customer: Customer, users: { id: string
         lines.push(`  ${indexInRoom}) ${productType} — ${w} en x ${h} boy${qtySuffix} → Hesap: ${calc.billingWidth} x ${calc.billingHeight}${m2Formula}`);
         
         // Collect notes if any
-        if (p.notes && p.notes.trim()) {
-          notesList.push(`  - ${indexInRoom}. Mekanik: ${p.notes.trim()}`);
+        const validNote = getValidNote(p.notes);
+        if (validNote) {
+          notesList.push(`  - ${indexInRoom}. Mekanik: ${validNote}`);
         }
       });
 
