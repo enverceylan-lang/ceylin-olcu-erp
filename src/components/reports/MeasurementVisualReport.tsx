@@ -6,6 +6,8 @@ import { getTemplateLabel, getMeasurementDimensions } from '@/lib/measurementAda
 import { generateMeasurementPdfBlob } from '@/lib/measurementPdfGenerator';
 import { calculatePlicellM2, calculateMechanicalCurtainM2 } from '@/lib/reportFormatters';
 import { renderSimpleWidthHeightDiagram, renderCurtainDetailDiagram } from '@/lib/measurementDiagram';
+import { TechnicalMeasurementSketch } from './TechnicalMeasurementSketch';
+import { formatFacadeForReport } from '@/lib/facadeHelper';
 
 interface MeasurementVisualReportProps {
   isOpen: boolean;
@@ -271,106 +273,89 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                                   </h4>
                                 )}
 
-                                <div className="space-y-4">
+                                <div className="flex flex-wrap gap-6 print:block">
                                   {products.map((p, pIdx) => {
-                                    const dims = getMeasurementDimensions(p);
                                     const isSimple = p.templateType === 'SIMPLE_WIDTH_HEIGHT';
                                     const isCurtain = p.templateType === 'CURTAIN_DETAIL' || p.templateType === 'CURTAIN';
+                                    
+                                    let segmentsToDraw = [];
+                                    let widthToDraw = 0;
+                                    let heightToDraw = 0;
+                                    let totalWidth = 0;
+
+                                    if (isSimple) {
+                                      widthToDraw = Number(p.rawValues?.width || 0);
+                                      heightToDraw = Number(p.rawValues?.height || 0);
+                                      totalWidth = widthToDraw;
+                                    } else if (isCurtain) {
+                                      segmentsToDraw = p.rawValues?.facadeSegments || [];
+                                      totalWidth = Number(p.rawValues?.totalFacadeWidthCm || 0);
+
+                                      if (!segmentsToDraw.length && (Number(p.rawValues?.leftWall) > 0 || Number(p.rawValues?.windowWidth) > 0 || Number(p.rawValues?.rightWall) > 0)) {
+                                          if (Number(p.rawValues?.leftWall) > 0) segmentsToDraw.push({ widthCm: p.rawValues.leftWall, type: 'WALL', label: 'Duvar' });
+                                          if (Number(p.rawValues?.windowWidth) > 0) segmentsToDraw.push({ widthCm: p.rawValues.windowWidth, type: 'WINDOW', label: 'Pencere' });
+                                          if (Number(p.rawValues?.rightWall) > 0) segmentsToDraw.push({ widthCm: p.rawValues.rightWall, type: 'WALL', label: 'Duvar' });
+                                      }
+
+                                      if (segmentsToDraw.length > 0 && totalWidth === 0) {
+                                          totalWidth = segmentsToDraw.reduce((sum: number, s: any) => sum + (Number(s.widthCm) > 0 ? Number(s.widthCm) : 0), 0);
+                                      }
+                                    }
 
                                     return (
-                                      <div key={p.id} className="flex flex-col md:flex-row gap-6 p-4 rounded-xl bg-slate-900/60 border border-slate-800/80 print:bg-slate-50/20 print:border-slate-200">
-                                        
-                                        {/* Dimension Info */}
-                                        <div className="flex-1 space-y-3">
+                                      <div key={p.id} className="w-full xl:w-[calc(50%-12px)] print:w-full mb-6 print:mb-8 break-inside-avoid bg-white print:bg-white rounded-lg p-5 print:p-0 shadow-sm print:shadow-none border border-slate-200 print:border-none">
+                                        <div className="flex justify-between items-start mb-3">
                                           <div>
-                                            <div className="font-semibold text-sm text-slate-200 print:text-black">
-                                              Ölçü {pIdx + 1}: {getTemplateLabel(p.templateType)}
-                                            </div>
-                                            <div className="text-[10px] text-slate-400 print:text-slate-500 mt-0.5 flex flex-wrap gap-x-3">
+                                            <h4 className="text-sm font-bold text-slate-800 print:text-black">
+                                              {winName} - Ölçü {pIdx + 1}: {getTemplateLabel(p.templateType)}
+                                            </h4>
+                                            <div className="text-[10px] text-slate-500 mt-1 flex flex-wrap gap-x-3">
                                               {!sameMeasuredBy && p.measuredBy && <span>Ölçen: {p.measuredBy}</span>}
                                               {showDateOnMeasurements && p.measuredDate && <span>Tarih: {new Date(p.measuredDate).toLocaleDateString('tr-TR')}</span>}
                                               {(p.photos?.length > 0 || p.videos?.length > 0) && (
-                                                <span className="text-blue-400 print:text-blue-700">📷 {(p.photos||[]).length} Foto, {(p.videos||[]).length} Video var</span>
+                                                <span className="text-blue-600">📷 {(p.photos||[]).length} Foto, {(p.videos||[]).length} Video</span>
                                               )}
                                             </div>
                                           </div>
-
-                                          {/* Table of raw parameters */}
-                                          <div className="grid grid-cols-2 gap-2 text-xs">
-                                            {isCurtain ? (
-                                              <>
-                                                <div className="bg-slate-950/30 print:bg-white p-1.5 rounded border border-slate-800/40 print:border-slate-200">
-                                                  <span className="text-[9px] text-slate-400 print:text-slate-500 block uppercase font-medium">Sol Duvar</span>
-                                                  <span className="font-bold text-slate-200 print:text-black">{p.rawValues?.leftWall ?? '0'} cm</span>
-                                                </div>
-                                                <div className="bg-slate-950/30 print:bg-white p-1.5 rounded border border-slate-800/40 print:border-slate-200">
-                                                  <span className="text-[9px] text-slate-400 print:text-slate-500 block uppercase font-medium">Pencere Eni</span>
-                                                  <span className="font-bold text-slate-200 print:text-black">{p.rawValues?.windowWidth ?? '0'} cm</span>
-                                                </div>
-                                                <div className="bg-slate-950/30 print:bg-white p-1.5 rounded border border-slate-800/40 print:border-slate-200">
-                                                  <span className="text-[9px] text-slate-400 print:text-slate-500 block uppercase font-medium">Sağ Duvar</span>
-                                                  <span className="font-bold text-slate-200 print:text-black">{p.rawValues?.rightWall ?? '0'} cm</span>
-                                                </div>
-                                                <div className="bg-slate-950/30 print:bg-white p-1.5 rounded border border-slate-800/40 print:border-slate-200">
-                                                  <span className="text-[9px] text-slate-400 print:text-slate-500 block uppercase font-medium">Tavan Boşluğu</span>
-                                                  <span className="font-bold text-slate-200 print:text-black">{p.rawValues?.ceilingGap ?? '0'} cm</span>
-                                                </div>
-                                                <div className="bg-slate-950/30 print:bg-white p-1.5 rounded border border-slate-800/40 print:border-slate-200">
-                                                  <span className="text-[9px] text-slate-400 print:text-slate-500 block uppercase font-medium">Pencere Boyu</span>
-                                                  <span className="font-bold text-slate-200 print:text-black">{p.rawValues?.windowHeight ?? '0'} cm</span>
-                                                </div>
-                                                <div className="bg-slate-950/30 print:bg-white p-1.5 rounded border border-slate-800/40 print:border-slate-200">
-                                                  <span className="text-[9px] text-slate-400 print:text-slate-500 block uppercase font-medium">Zemin Boşluğu</span>
-                                                  <span className="font-bold text-slate-200 print:text-black">{p.rawValues?.floorGap ?? '0'} cm</span>
-                                                </div>
-                                                <div className="col-span-2 bg-blue-950/10 print:bg-blue-50/20 p-2 rounded border border-blue-900/30 print:border-blue-200 font-bold flex justify-between">
-                                                  <span className="text-slate-300 print:text-slate-700">Toplam Ölçü:</span>
-                                                  <span className="text-blue-400 print:text-blue-700">{dims.structuralWidth} × {dims.structuralHeight} cm</span>
-                                                </div>
-                                              </>
-                                            ) : isSimple ? (
-                                              <>
-                                                <div className="bg-slate-950/30 print:bg-white p-1.5 rounded border border-slate-800/40 print:border-slate-200">
-                                                  <span className="text-[9px] text-slate-400 print:text-slate-500 block uppercase font-medium">Genişlik (En)</span>
-                                                  <span className="font-bold text-slate-200 print:text-black">{p.rawValues?.width ?? '0'} cm</span>
-                                                </div>
-                                                <div className="bg-slate-950/30 print:bg-white p-1.5 rounded border border-slate-800/40 print:border-slate-200">
-                                                  <span className="text-[9px] text-slate-400 print:text-slate-500 block uppercase font-medium">Yükseklik (Boy)</span>
-                                                  <span className="font-bold text-slate-200 print:text-black">{p.rawValues?.height ?? '0'} cm</span>
-                                                </div>
-                                                <div className="col-span-2 bg-blue-950/10 print:bg-blue-50/20 p-2 rounded border border-blue-900/30 print:border-blue-200 font-bold flex justify-between">
-                                                  <span className="text-slate-300 print:text-slate-700">Toplam Ölçü:</span>
-                                                  <span className="text-blue-400 print:text-blue-700">{dims.structuralWidth} × {dims.structuralHeight} cm</span>
-                                                </div>
-                                              </>
-                                            ) : (
-                                              // Unknown template custom fields mapping
-                                              Object.entries(p.rawValues || {}).map(([k, v]) => {
-                                                const template = MEASUREMENT_TEMPLATES[p.templateType];
-                                                const label = template?.fields.find(f => f.key === k)?.label || k;
-                                                return (
-                                                  <div key={k} className="bg-slate-950/30 print:bg-white p-1.5 rounded border border-slate-800/40 print:border-slate-200">
-                                                    <span className="text-[9px] text-slate-400 print:text-slate-500 block uppercase font-medium">{label}</span>
-                                                    <span className="font-bold text-slate-200 print:text-black">{String(v)}</span>
-                                                  </div>
-                                                );
-                                              })
-                                            )}
-                                          </div>
-
-                                          {/* Saha Notu */}
-                                          {p.notes && p.notes.trim() && (
-                                            <div className="p-2.5 rounded bg-amber-500/5 border border-amber-500/20 text-xs text-amber-200 print:bg-amber-50/30 print:border-amber-200 print:text-black">
-                                              <span className="font-bold text-[9.5px] uppercase text-amber-400 print:text-amber-700 block mb-0.5">Saha Notu:</span>
-                                              {p.notes.trim()}
-                                            </div>
-                                          )}
                                         </div>
 
-                                        {/* Diagram Canvas */}
-                                        <div className="w-full md:w-auto flex items-center justify-center print-svg">
-                                          {isSimple && renderSimpleWidthHeightDiagram(Number(p.rawValues?.width || 0), Number(p.rawValues?.height || 0))}
-                                          {isCurtain && renderCurtainDetailDiagram(p.rawValues)}
+                                        {p.notes && p.notes.trim() && (
+                                          <div className="mb-4 p-2.5 rounded bg-amber-50 border border-amber-200 text-xs text-amber-900 print:bg-white print:border-slate-300 print:text-black">
+                                            <span className="font-bold text-[9.5px] uppercase block mb-0.5">Saha Notu:</span>
+                                            {p.notes.trim()}
+                                          </div>
+                                        )}
+
+                                        <div className="w-full flex justify-center mt-2 print:mt-4">
+                                          {isSimple || isCurtain ? (
+                                            <TechnicalMeasurementSketch 
+                                              facadeSegments={segmentsToDraw}
+                                              width={widthToDraw}
+                                              height={heightToDraw}
+                                              totalFacadeWidthCm={totalWidth}
+                                              kartonpiyerBoslukCm={Number(p.rawValues?.kartonpiyerBoslukCm || p.rawValues?.ceilingGap || 0)}
+                                              camUstuCm={Number(p.rawValues?.camUstuCm || 0)}
+                                              camIciCm={Number(p.rawValues?.camIciCm || p.rawValues?.windowHeight || 0)}
+                                              kaloriferMermerBoyuCm={Number(p.rawValues?.kaloriferMermerBoyuCm || 0)}
+                                              camAltiCm={Number(p.rawValues?.camAltiCm || p.rawValues?.floorGap || 0)}
+                                              solYukseklikCm={Number(p.rawValues?.solYukseklikCm || 0)}
+                                              ortaYukseklikCm={Number(p.rawValues?.ortaYukseklikCm || 0)}
+                                              sagYukseklikCm={Number(p.rawValues?.sagYukseklikCm || 0)}
+                                            />
+                                          ) : (
+                                            <div className="w-full grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+                                              {Object.entries(p.rawValues || {}).map(([k, v]) => {
+                                                const template = MEASUREMENT_TEMPLATES[p.templateType];
+                                                const label = template?.fields.find((f: any) => f.key === k)?.label || k;
+                                                return (
+                                                  <div key={k} className="bg-slate-50 print:bg-white p-2 rounded border border-slate-200 print:border-slate-300">
+                                                    <span className="text-[9px] text-slate-500 block uppercase font-medium">{label}</span>
+                                                    <span className="font-bold text-slate-800 print:text-black">{String(v)}</span>
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
+                                          )}
                                         </div>
                                       </div>
                                     );

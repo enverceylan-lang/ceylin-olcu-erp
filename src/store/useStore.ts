@@ -130,6 +130,7 @@ export interface MeasurementTemplate {
     options?: string[]; 
     defaultValue?: any; 
     optional?: boolean; 
+    hidden?: boolean;
   }[];
 }
 
@@ -137,12 +138,21 @@ export const MEASUREMENT_TEMPLATES: Record<string, MeasurementTemplate> = {
   CURTAIN_DETAIL: {
     type: 'CURTAIN_DETAIL',
     fields: [
-      { key: 'leftWall', label: 'Sol Duvar (cm)', type: 'number' },
-      { key: 'windowWidth', label: 'Pencere Eni (cm)', type: 'number' },
-      { key: 'rightWall', label: 'Sağ Duvar (cm)', type: 'number' },
-      { key: 'ceilingGap', label: 'Tavan Boşluğu (cm)', type: 'number' },
-      { key: 'windowHeight', label: 'Pencere Boyu (cm)', type: 'number' },
-      { key: 'floorGap', label: 'Zemin Boşluğu (cm)', type: 'number' },
+      { key: 'leftWall', label: 'Sol Duvar (cm)', type: 'number', hidden: true },
+      { key: 'windowWidth', label: 'Pencere Eni (cm)', type: 'number', hidden: true },
+      { key: 'rightWall', label: 'Sağ Duvar (cm)', type: 'number', hidden: true },
+      { key: 'ceilingGap', label: 'Tavan Boşluğu (cm)', type: 'number', hidden: true },
+      { key: 'windowHeight', label: 'Pencere Boyu (cm)', type: 'number', hidden: true },
+      { key: 'floorGap', label: 'Zemin Boşluğu (cm)', type: 'number', hidden: true },
+      { key: 'kartonpiyerBoslukCm', label: 'Kartonpiyer Boşluğu', type: 'number' },
+      { key: 'camUstuCm', label: 'Cam Üstü', type: 'number' },
+      { key: 'camIciCm', label: 'Cam İçi', type: 'number' },
+      { key: 'kaloriferMermerBoyuCm', label: 'Kalorifer / Mermer Boyu', type: 'number' },
+      { key: 'camAltiCm', label: 'Cam Altı', type: 'number' },
+      { key: 'solYukseklikCm', label: 'Sol Yükseklik', type: 'number' },
+      { key: 'ortaYukseklikCm', label: 'Orta Yükseklik', type: 'number' },
+      { key: 'sagYukseklikCm', label: 'Sağ Yükseklik', type: 'number' },
+      { key: 'yukseklikNotu', label: 'Yükseklik Notu', type: 'text' },
     ]
   },
   SIMPLE_WIDTH_HEIGHT: {

@@ -19,6 +19,7 @@ import { ShoppingCart, Edit, Merge, Archive } from "lucide-react";
 import { CariEditModal } from "@/components/modals/CariEditModal";
 import { MergeCustomerModal } from "@/components/modals/MergeCustomerModal";
 import { MoveRoomModal } from "@/components/modals/MoveRoomModal";
+import { FacadeSegmentsEditor } from "@/components/measurements/FacadeSegmentsEditor";
 
 export default function CariDetayPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
@@ -478,6 +479,11 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
           parsedRawValues[f.key] = val !== undefined && val !== null ? String(val) : '';
         }
       });
+
+      if (rawValues.facadeSegments && Array.isArray(rawValues.facadeSegments) && rawValues.facadeSegments.length > 0) {
+        parsedRawValues.facadeSegments = rawValues.facadeSegments;
+        parsedRawValues.totalFacadeWidthCm = rawValues.facadeSegments.reduce((sum: number, s: any) => sum + (Number(s.widthCm) > 0 ? Number(s.widthCm) : 0), 0);
+      }
 
       if (editingMeasurementId) {
         updateProductMeasurement(customer.id, roomId, windowId, editingMeasurementId, {
@@ -1460,7 +1466,14 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                 </div>
                               ) : (
                                 <div className="bg-gray-50 dark:bg-gray-900 p-3 rounded grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3 border border-gray-200 dark:border-gray-700">
-                                  {Object.entries(p.rawValues || {}).map(([key, val]) => {
+                                  {Object.entries(p.rawValues || {})
+                                    .filter(([key, val]) => {
+                                      if (key === 'facadeSegments' || key === 'totalFacadeWidthCm') return false;
+                                      const template = MEASUREMENT_TEMPLATES[p.templateType] || (p.templateType === 'CURTAIN' ? MEASUREMENT_TEMPLATES['CURTAIN_DETAIL'] : undefined);
+                                      const fieldDef = template?.fields.find(f => f.key === key);
+                                      return !fieldDef?.hidden;
+                                    })
+                                    .map(([key, val]) => {
                                     const template = MEASUREMENT_TEMPLATES[p.templateType] || (p.templateType === 'CURTAIN' ? MEASUREMENT_TEMPLATES['CURTAIN_DETAIL'] : undefined);
                                     const label = template?.fields.find(f => f.key === key)?.label || key;
                                     return (
@@ -1720,8 +1733,20 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                   </div>
                                 </div>
 
+                                {selectedTemplate === 'CURTAIN_DETAIL' && (
+                                  <div className="mb-4">
+                                    <FacadeSegmentsEditor 
+                                      segments={rawValues.facadeSegments || []}
+                                      onChange={(segments) => setRawValues({...rawValues, facadeSegments: segments})}
+                                    />
+                                  </div>
+                                )}
+                                
                                 <div className={`grid gap-3 bg-gray-50 dark:bg-gray-800/50 p-3 rounded border dark:border-gray-700 ${selectedTemplate === 'CURTAIN_DETAIL' ? 'grid-cols-3' : 'grid-cols-2'}`}>
-                                  {MEASUREMENT_TEMPLATES[selectedTemplate]?.fields.map(f => (
+                                  {selectedTemplate === 'CURTAIN_DETAIL' && (
+                                    <div className="col-span-3 text-sm font-bold text-gray-700 dark:text-gray-300 mb-2 border-b pb-1 dark:border-gray-700">Yükseklik Bilgileri</div>
+                                  )}
+                                  {MEASUREMENT_TEMPLATES[selectedTemplate]?.fields.filter(f => !f.hidden).map(f => (
                                     <div key={f.key} className={selectedTemplate === 'mechanical_curtain' && f.key === 'notes' ? 'col-span-2' : ''}>
                                       <label className="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1">{f.label}</label>
                                       {f.type === 'select' ? (

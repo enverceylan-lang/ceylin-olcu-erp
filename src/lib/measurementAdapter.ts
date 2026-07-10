@@ -41,6 +41,10 @@ export function getMeasurementDimensions(measurement: any): MeasurementDimension
   let summaryLabel = '';
 
   if (templateType === 'CURTAIN_DETAIL' || templateType === 'CURTAIN') {
+    // Check if facadeSegments exists
+    const facadeSegments = rawValues.facadeSegments || [];
+    
+    // Old fields
     const leftWall = Number(rawValues.leftWall || 0);
     const windowWidth = Number(rawValues.windowWidth || 0);
     const rightWall = Number(rawValues.rightWall || 0);
@@ -48,11 +52,35 @@ export function getMeasurementDimensions(measurement: any): MeasurementDimension
     const windowHeight = Number(rawValues.windowHeight || 0);
     const floorGap = Number(rawValues.floorGap || 0);
 
-    rawWidth = windowWidth;
-    rawHeight = windowHeight;
-    structuralWidth = Number((leftWall + windowWidth + rightWall).toFixed(2));
-    structuralHeight = Number((ceilingGap + windowHeight + floorGap).toFixed(2));
-    summaryLabel = `Pencere: ${windowWidth}x${windowHeight} cm (Sol: ${leftWall}, Sağ: ${rightWall}, Tavan: ${ceilingGap}, Zemin: ${floorGap})`;
+    // New Height fields
+    const kartonpiyer = Number(rawValues.kartonpiyerBoslukCm || 0);
+    const camUstu = Number(rawValues.camUstuCm || 0);
+    const solYukseklik = Number(rawValues.solYukseklikCm || 0);
+    
+    if (facadeSegments.length > 0) {
+      // New Facade Logic
+      const totalFacadeWidth = facadeSegments.reduce((sum: number, seg: any) => {
+        const w = Number(seg.widthCm);
+        return sum + (w > 0 ? w : 0);
+      }, 0);
+      
+      // We take solYukseklik or windowHeight as the rawHeight if available
+      const h = solYukseklik || windowHeight;
+      const sh = solYukseklik || (ceilingGap + windowHeight + floorGap);
+      
+      rawWidth = totalFacadeWidth;
+      rawHeight = h;
+      structuralWidth = totalFacadeWidth;
+      structuralHeight = Number(sh.toFixed(2));
+      summaryLabel = `Cephe (Toplam En: ${totalFacadeWidth} cm)`;
+    } else {
+      // Old Logic
+      rawWidth = windowWidth;
+      rawHeight = windowHeight;
+      structuralWidth = Number((leftWall + windowWidth + rightWall).toFixed(2));
+      structuralHeight = Number((ceilingGap + windowHeight + floorGap).toFixed(2));
+      summaryLabel = `Pencere: ${windowWidth}x${windowHeight} cm (Sol: ${leftWall}, Sağ: ${rightWall}, Tavan: ${ceilingGap}, Zemin: ${floorGap})`;
+    }
   } else if (templateType === 'SIMPLE_WIDTH_HEIGHT') {
     const width = Number(rawValues.width || 0);
     const height = Number(rawValues.height || 0);

@@ -151,3 +151,91 @@ export function renderCurtainDetailDiagram(rawValues: any): React.ReactNode {
     </svg>
   );
 }
+
+/**
+ * Renders an SVG diagram for Facade Segments (with optional height details)
+ */
+export function renderFacadeSegmentsDiagram(rawValues: any): React.ReactNode {
+  const segments = rawValues.facadeSegments || [];
+  if (segments.length === 0) return null;
+
+  const totalWidth = segments.reduce((sum: number, s: any) => sum + (Number(s.widthCm) > 0 ? Number(s.widthCm) : 0), 0);
+
+  const karton = Number(rawValues.kartonpiyerBoslukCm || 0);
+  const camUstu = Number(rawValues.camUstuCm || 0);
+  const camIci = Number(rawValues.camIciCm || 0);
+  const camAlti = Number(rawValues.camAltiCm || 0);
+
+  const sol = Number(rawValues.solYukseklikCm || 0);
+  const orta = Number(rawValues.ortaYukseklikCm || 0);
+  const sag = Number(rawValues.sagYukseklikCm || 0);
+
+  const svgW = 600;
+  const svgH = 260;
+  const startX = 40;
+  const drawW = 400; // Leave space for right side details
+  
+  const segY = 80;
+  const segH = 60;
+
+  let currentX = startX;
+
+  const rightDetails = [];
+  if (karton > 0) rightDetails.push(`KARTONPİYER BOŞLUĞU: ${karton}`);
+  if (camUstu > 0) rightDetails.push(`CAM ÜSTÜ: ${camUstu}`);
+  if (camIci > 0) rightDetails.push(`CAM İÇİ: ${camIci}`);
+  if (camAlti > 0) rightDetails.push(`CAM ALTI: ${camAlti}`);
+
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${svgW} ${svgH}`} width="100%" height="auto" style={{ border: '1px solid #e5e7eb', borderRadius: '4px', backgroundColor: '#fff', margin: '0 auto', display: 'block', fontFamily: 'monospace' }}>
+      
+      {/* Toplam En (Top) */}
+      <g stroke="#333" strokeWidth="1">
+        <line x1={startX} y1="30" x2={startX + drawW} y2="30" />
+        <line x1={startX} y1="25" x2={startX} y2="35" />
+        <line x1={startX + drawW} y1="25" x2={startX + drawW} y2="35" />
+        <text x={startX + drawW/2} y="22" fill="#000" fontSize="14" fontWeight="bold" textAnchor="middle" stroke="none">{totalWidth} EN</text>
+      </g>
+
+      {/* Segments Rectangle Outline */}
+      <rect x={startX} y={segY} width={drawW} height={segH} fill="none" stroke="#333" strokeWidth="1.5" />
+
+      {/* Segments Draw */}
+      {segments.map((seg: any, i: number) => {
+        const pct = totalWidth > 0 ? Number(seg.widthCm) / totalWidth : 1/segments.length;
+        const w = Math.max(pct * drawW, 40); // min 40px
+        
+        const rect = (
+          <g key={seg.id}>
+            {i > 0 && <line x1={currentX} y1={segY} x2={currentX} y2={segY + segH} stroke="#333" strokeWidth="1" />}
+            <text x={currentX + w/2} y={segY + segH/2 - 2} fill="#000" fontSize="14" fontWeight="bold" textAnchor="middle" stroke="none">{seg.widthCm}</text>
+            <text x={currentX + w/2} y={segY + segH/2 + 14} fill="#333" fontSize="12" textAnchor="middle" stroke="none">{seg.label.toUpperCase()}</text>
+          </g>
+        );
+        currentX += w;
+        return rect;
+      })}
+
+      {/* Heights (Bottom) */}
+      <g stroke="#333" strokeWidth="1">
+        <line x1={startX} y1={segY + segH + 30} x2={startX + drawW} y2={segY + segH + 30} />
+        <line x1={startX} y1={segY + segH + 25} x2={startX} y2={segY + segH + 35} />
+        <line x1={startX + drawW} y1={segY + segH + 25} x2={startX + drawW} y2={segY + segH + 35} />
+        
+        {sol > 0 && <text x={startX + 20} y={segY + segH + 50} fill="#000" fontSize="12" textAnchor="start" stroke="none">{sol} SOL YÜKSEKLİK</text>}
+        {orta > 0 && <text x={startX + drawW/2} y={segY + segH + 50} fill="#000" fontSize="12" textAnchor="middle" stroke="none">{orta} ORTA YÜKSEKLİK</text>}
+        {sag > 0 && <text x={startX + drawW - 20} y={segY + segH + 50} fill="#000" fontSize="12" textAnchor="end" stroke="none">{sag} SAĞ YÜKSEKLİK</text>}
+      </g>
+
+      {/* Vertical Details (Right side) */}
+      {rightDetails.length > 0 && (
+        <g stroke="#333" strokeWidth="1">
+          <line x1={startX + drawW + 30} y1={segY} x2={startX + drawW + 30} y2={segY + segH} strokeDasharray="4,4"/>
+          {rightDetails.map((det, idx) => (
+            <text key={idx} x={startX + drawW + 40} y={segY + 15 + (idx * 20)} fill="#000" fontSize="12" textAnchor="start" stroke="none">{det}</text>
+          ))}
+        </g>
+      )}
+    </svg>
+  );
+}

@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import { Customer, ProductMeasurement, MEASUREMENT_TEMPLATES } from '@/store/useStore';
 import { getTemplateLabel, getMeasurementDimensions } from '@/lib/measurementAdapter';
+import { formatFacadeForReport } from '@/lib/facadeHelper';
 
 // A4 Dimensions in mm
 const PAGE_WIDTH = 210;
@@ -133,6 +134,96 @@ function drawCurtainDetailDiagram(doc: jsPDF, x: number, y: number, rawValues: a
   doc.text(`${windowWidth}x${windowHeight}`, winX + winW/2, winY - 2, { align: 'center' });
 
   return wallH;
+}
+
+function drawFacadeSegmentsDiagram(doc: jsPDF, x: number, y: number, rawValues: any) {
+  const segments = rawValues.facadeSegments || [];
+  if (segments.length === 0) return 60;
+
+  const totalWidth = segments.reduce((sum: number, s: any) => sum + (Number(s.widthCm) > 0 ? Number(s.widthCm) : 0), 0);
+  const karton = Number(rawValues.kartonpiyerBoslukCm || 0);
+  const camUstu = Number(rawValues.camUstuCm || 0);
+  const camIci = Number(rawValues.camIciCm || 0);
+  const kaloriferMermer = Number(rawValues.kaloriferMermerBoyuCm || 0);
+  const camAlti = Number(rawValues.camAltiCm || 0);
+
+  const sol = Number(rawValues.solYukseklikCm || 0);
+  const orta = Number(rawValues.ortaYukseklikCm || 0);
+  const sag = Number(rawValues.sagYukseklikCm || 0);
+
+  const drawW = 100; // max width for the diagram
+  let currentY = y + 5;
+  
+  doc.setFontSize(8);
+  doc.setTextColor(15, 23, 42);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`${totalWidth} EN`, x + drawW/2, currentY, { align: 'center' });
+  currentY += 2;
+
+  const segH = 15;
+  doc.setDrawColor(15, 23, 42);
+  doc.setLineWidth(0.3);
+  doc.rect(x, currentY, drawW, segH);
+
+  let currentX = x;
+  
+  segments.forEach((seg: any, i: number) => {
+    const pct = totalWidth > 0 ? Number(seg.widthCm) / totalWidth : 1/segments.length;
+    const w = Math.max(pct * drawW, 8); // min 8mm
+    
+    if (i > 0) {
+      doc.setLineDashPattern([1, 1], 0);
+      doc.line(currentX, currentY, currentX, currentY + segH);
+      doc.setLineDashPattern([], 0);
+    }
+    
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`${seg.widthCm}`, currentX + w/2, currentY + 6, { align: 'center' });
+    
+    const lbl = seg.label.length > 5 ? seg.label.substring(0,3).toUpperCase() + '.' : seg.label.toUpperCase();
+    doc.setFontSize(6);
+    doc.setFont('helvetica', 'normal');
+    doc.text(lbl, currentX + w/2, currentY + 11, { align: 'center' });
+    
+    currentX += w;
+  });
+  
+  currentY += segH + 5;
+
+  const rightDetails = [];
+  if (karton > 0) rightDetails.push(`KARTONPIYER B.: ${karton}`);
+  if (camUstu > 0) rightDetails.push(`CAM USTU: ${camUstu}`);
+  if (camIci > 0) rightDetails.push(`CAM ICI: ${camIci}`);
+  if (kaloriferMermer > 0) rightDetails.push(`KALORIFER/MERMER: ${kaloriferMermer}`);
+  if (camAlti > 0) rightDetails.push(`CAM ALTI: ${camAlti}`);
+
+  if (sol > 0 || orta > 0 || sag > 0) {
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'normal');
+    let hTxt = [];
+    if (sol > 0) hTxt.push(`${sol} SOL YUKS.`);
+    if (orta > 0) hTxt.push(`${orta} ORTA YUKS.`);
+    if (sag > 0) hTxt.push(`${sag} SAG YUKS.`);
+    doc.text(hTxt.join('   '), x + drawW/2, currentY, { align: 'center' });
+    currentY += 5;
+  }
+
+  if (rightDetails.length > 0) {
+     let startY = y + 5;
+     doc.setFontSize(6);
+     doc.setLineDashPattern([1, 1], 0);
+     doc.line(x + drawW + 5, y + 5, x + drawW + 5, y + 25);
+     doc.setLineDashPattern([], 0);
+     
+     rightDetails.forEach((d) => {
+       doc.text(d, x + drawW + 8, startY);
+       startY += 4;
+     });
+     currentY = Math.max(currentY, startY);
+  }
+
+  return Math.max(40, currentY - y);
 }
 
 function drawSimpleDiagram(doc: jsPDF, x: number, y: number, width: number, height: number) {
@@ -298,20 +389,40 @@ export async function generateMeasurementPdfBlob(customer: Customer, sameMeasure
           const rightColX = MARGIN + 80;
           
           if (isCurtain) {
-            doc.text(`Sol Duvar: ${p.rawValues?.leftWall || 0} cm`, MARGIN + 8, innerY);
-            doc.text(`Pencere Eni: ${p.rawValues?.windowWidth || 0} cm`, MARGIN + 8, innerY + 6);
-            doc.text(`Sag Duvar: ${p.rawValues?.rightWall || 0} cm`, MARGIN + 8, innerY + 12);
-            doc.text(`Tavan Boslugu: ${p.rawValues?.ceilingGap || 0} cm`, MARGIN + 8, innerY + 18);
-            doc.text(`Pencere Boyu: ${p.rawValues?.windowHeight || 0} cm`, MARGIN + 8, innerY + 24);
-            doc.text(`Zemin Boslugu: ${p.rawValues?.floorGap || 0} cm`, MARGIN + 8, innerY + 30);
-            
-            doc.setFont('helvetica', 'bold');
-            doc.setTextColor(37, 99, 235);
-            doc.text(`Toplam: ${dims.structuralWidth} x ${dims.structuralHeight} cm`, MARGIN + 8, innerY + 38);
-            
-            // Draw Diagram
-            drawCurtainDetailDiagram(doc, rightColX, innerY - 4, p.rawValues);
-            
+            const facadeSegments = p.rawValues?.facadeSegments;
+            if (facadeSegments && Array.isArray(facadeSegments) && facadeSegments.length > 0) {
+              const facadeStr = formatFacadeForReport(facadeSegments).replace(/ç/g, 'c').replace(/ş/g, 's').replace(/ğ/g, 'g').replace(/ı/g, 'i').replace(/ö/g, 'o').replace(/ü/g, 'u').replace(/Ç/g, 'C').replace(/Ş/g, 'S').replace(/Ğ/g, 'G').replace(/İ/g, 'I').replace(/Ö/g, 'O').replace(/Ü/g, 'U');
+              const linesStr = doc.splitTextToSize(facadeStr, 65);
+              doc.text(linesStr, MARGIN + 8, innerY);
+              
+              let curY = innerY + (linesStr.length * 4) + 4;
+              if (p.rawValues?.kartonpiyerBoslukCm) { doc.text(`Kartonpiyer: ${p.rawValues.kartonpiyerBoslukCm}`, MARGIN + 8, curY); curY+=4; }
+              if (p.rawValues?.camUstuCm) { doc.text(`Cam Ustu: ${p.rawValues.camUstuCm}`, MARGIN + 8, curY); curY+=4; }
+              if (p.rawValues?.camIciCm) { doc.text(`Cam Ici: ${p.rawValues.camIciCm}`, MARGIN + 8, curY); curY+=4; }
+              if (p.rawValues?.kaloriferMermerBoyuCm) { doc.text(`Kalorifer / Mermer: ${p.rawValues.kaloriferMermerBoyuCm}`, MARGIN + 8, curY); curY+=4; }
+              if (p.rawValues?.camAltiCm) { doc.text(`Cam Alti: ${p.rawValues.camAltiCm}`, MARGIN + 8, curY); curY+=4; }
+              if (p.rawValues?.solYukseklikCm) { doc.text(`Sol Yukseklik: ${p.rawValues.solYukseklikCm}`, MARGIN + 8, curY); curY+=4; }
+              if (p.rawValues?.ortaYukseklikCm) { doc.text(`Orta Yukseklik: ${p.rawValues.ortaYukseklikCm}`, MARGIN + 8, curY); curY+=4; }
+              if (p.rawValues?.sagYukseklikCm) { doc.text(`Sag Yukseklik: ${p.rawValues.sagYukseklikCm}`, MARGIN + 8, curY); curY+=4; }
+              if (p.rawValues?.yukseklikNotu) { doc.text(`Yukseklik Notu: ${p.rawValues.yukseklikNotu}`, MARGIN + 8, curY); curY+=4; }
+              
+              // Draw Diagram
+              drawFacadeSegmentsDiagram(doc, rightColX, innerY - 4, p.rawValues);
+            } else {
+              doc.text(`Sol Duvar: ${p.rawValues?.leftWall || 0} cm`, MARGIN + 8, innerY);
+              doc.text(`Pencere Eni: ${p.rawValues?.windowWidth || 0} cm`, MARGIN + 8, innerY + 6);
+              doc.text(`Sag Duvar: ${p.rawValues?.rightWall || 0} cm`, MARGIN + 8, innerY + 12);
+              doc.text(`Tavan Boslugu: ${p.rawValues?.ceilingGap || 0} cm`, MARGIN + 8, innerY + 18);
+              doc.text(`Pencere Boyu: ${p.rawValues?.windowHeight || 0} cm`, MARGIN + 8, innerY + 24);
+              doc.text(`Zemin Boslugu: ${p.rawValues?.floorGap || 0} cm`, MARGIN + 8, innerY + 30);
+              
+              doc.setFont('helvetica', 'bold');
+              doc.setTextColor(37, 99, 235);
+              doc.text(`Toplam: ${dims.structuralWidth} x ${dims.structuralHeight} cm`, MARGIN + 8, innerY + 38);
+              
+              // Draw Diagram
+              drawCurtainDetailDiagram(doc, rightColX, innerY - 4, p.rawValues);
+            }
           } else if (isSimple) {
             doc.text(`Genislik (En): ${p.rawValues?.width || 0} cm`, MARGIN + 8, innerY);
             doc.text(`Yukseklik (Boy): ${p.rawValues?.height || 0} cm`, MARGIN + 8, innerY + 6);

@@ -1,5 +1,6 @@
 import { Customer, Room, WindowItem, ProductMeasurement, Note, MEASUREMENT_TEMPLATES } from '@/store/useStore';
 import { getTemplateLabel, getMeasurementDimensions } from './measurementAdapter';
+import { formatFacadeForReport } from './facadeHelper';
 
 // ─── Plicell Square Meter Calculation ───
 
@@ -177,17 +178,57 @@ export function buildWhatsAppShortReport(customer: Customer, users: { id: string
         
         // Render fields inline
         if (p.templateType === 'CURTAIN_DETAIL' || p.templateType === 'CURTAIN') {
-          const leftWall = p.rawValues?.leftWall ?? '0';
-          const windowWidth = p.rawValues?.windowWidth ?? '0';
-          const rightWall = p.rawValues?.rightWall ?? '0';
-          const ceilingGap = p.rawValues?.ceilingGap ?? '0';
-          const windowHeight = p.rawValues?.windowHeight ?? '0';
-          const floorGap = p.rawValues?.floorGap ?? '0';
           const dims = getMeasurementDimensions(p);
+          const facadeSegments = p.rawValues?.facadeSegments;
+          
+          if (facadeSegments && Array.isArray(facadeSegments) && facadeSegments.length > 0) {
+            lines.push(`  - ${formatFacadeForReport(facadeSegments).replace(/\n/g, '\n    ')}`);
+            
+            const totalWidth = facadeSegments.reduce((sum: number, s: any) => sum + (s.widthCm > 0 ? s.widthCm : 0), 0);
+            lines.push(`  - Toplam En: ${totalWidth} cm`);
+            
+            // Heights summary
+            const sol = p.rawValues?.solYukseklikCm;
+            const orta = p.rawValues?.ortaYukseklikCm;
+            const sag = p.rawValues?.sagYukseklikCm;
+            const hFields = [];
+            if (sol) hFields.push(`Sol ${sol}`);
+            if (orta) hFields.push(`Orta ${orta}`);
+            if (sag) hFields.push(`Sağ ${sag}`);
+            if (hFields.length > 0) {
+              lines.push(`  - Yükseklik Özeti: ${hFields.join(' / ')} cm`);
+            }
 
-          lines.push(`  - Sol Duvar (cm): ${leftWall}   - Pencere Eni (cm): ${windowWidth}   - Sağ Duvar (cm): ${rightWall}`);
-          lines.push(`  - Tavan Boşluğu (cm): ${ceilingGap}   - Pencere Boyu (cm): ${windowHeight}   - Zemin Boşluğu (cm): ${floorGap}`);
-          lines.push(`  - Toplam Ölçü: ${dims.structuralWidth} × ${dims.structuralHeight} cm`);
+            if (p.rawValues?.kartonpiyerBoslukCm && Number(p.rawValues.kartonpiyerBoslukCm) > 0) {
+              lines.push(`  - KARTONPİYER BOŞLUĞU: ${p.rawValues.kartonpiyerBoslukCm} cm`);
+            }
+            if (p.rawValues?.camUstuCm && Number(p.rawValues.camUstuCm) > 0) {
+              lines.push(`  - Cam Üstü: ${p.rawValues.camUstuCm} cm`);
+            }
+            if (p.rawValues?.camIciCm && Number(p.rawValues.camIciCm) > 0) {
+              lines.push(`  - Cam İçi: ${p.rawValues.camIciCm} cm`);
+            }
+            if (p.rawValues?.kaloriferMermerBoyuCm && Number(p.rawValues.kaloriferMermerBoyuCm) > 0) {
+              lines.push(`  - Kalorifer / Mermer: ${p.rawValues.kaloriferMermerBoyuCm} cm`);
+            }
+            if (p.rawValues?.camAltiCm && Number(p.rawValues.camAltiCm) > 0) {
+              lines.push(`  - Cam Altı: ${p.rawValues.camAltiCm} cm`);
+            }
+            if (p.rawValues?.yukseklikNotu) {
+              lines.push(`  - Yükseklik Notu: ${p.rawValues.yukseklikNotu}`);
+            }
+          } else {
+            const leftWall = p.rawValues?.leftWall ?? '0';
+            const windowWidth = p.rawValues?.windowWidth ?? '0';
+            const rightWall = p.rawValues?.rightWall ?? '0';
+            const ceilingGap = p.rawValues?.ceilingGap ?? '0';
+            const windowHeight = p.rawValues?.windowHeight ?? '0';
+            const floorGap = p.rawValues?.floorGap ?? '0';
+
+            lines.push(`  - Sol Duvar (cm): ${leftWall}   - Pencere Eni (cm): ${windowWidth}   - Sağ Duvar (cm): ${rightWall}`);
+            lines.push(`  - Tavan Boşluğu (cm): ${ceilingGap}   - Pencere Boyu (cm): ${windowHeight}   - Zemin Boşluğu (cm): ${floorGap}`);
+            lines.push(`  - Toplam Ölçü: ${dims.structuralWidth} × ${dims.structuralHeight} cm`);
+          }
         } else if (p.templateType === 'SIMPLE_WIDTH_HEIGHT') {
           const width = p.rawValues?.width ?? '0';
           const height = p.rawValues?.height ?? '0';
