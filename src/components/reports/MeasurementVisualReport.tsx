@@ -19,6 +19,15 @@ interface MeasurementVisualReportProps {
 
 export function MeasurementVisualReport({ isOpen, onClose, customer, users }: MeasurementVisualReportProps) {
   const [isGeneratingPdf, setIsGeneratingPdf] = React.useState(false);
+  const [previewNode, setPreviewNode] = React.useState<React.ReactNode | null>(null);
+
+  React.useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPreviewNode(null);
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, []);
 
   if (!isOpen) return null;
 
@@ -333,20 +342,42 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
 
                                         <div className="w-full flex justify-center mt-2 print:mt-4">
                                           {isSimple || isCurtain ? (
-                                            <TechnicalMeasurementSketch 
-                                              facadeSegments={segmentsToDraw}
-                                              width={widthToDraw}
-                                              height={heightToDraw}
-                                              totalFacadeWidthCm={totalWidth}
-                                              kartonpiyerBoslukCm={Number(p.rawValues?.kartonpiyerBoslukCm || p.rawValues?.ceilingGap || 0)}
-                                              camUstuCm={Number(p.rawValues?.camUstuCm || 0)}
-                                              camIciCm={Number(p.rawValues?.camIciCm || p.rawValues?.windowHeight || 0)}
-                                              kaloriferMermerBoyuCm={Number(p.rawValues?.kaloriferMermerBoyuCm || 0)}
-                                              camAltiCm={Number(p.rawValues?.camAltiCm || p.rawValues?.floorGap || 0)}
-                                              solYukseklikCm={Number(p.rawValues?.solYukseklikCm || 0)}
-                                              ortaYukseklikCm={Number(p.rawValues?.ortaYukseklikCm || 0)}
-                                              sagYukseklikCm={Number(p.rawValues?.sagYukseklikCm || 0)}
-                                            />
+                                            <div 
+                                              className="cursor-pointer hover:opacity-90 transition-opacity w-full"
+                                              onClick={() => setPreviewNode(
+                                                <div className="w-full h-full min-h-[50vh] flex items-center justify-center p-4 bg-white rounded-lg">
+                                                  <TechnicalMeasurementSketch 
+                                                    facadeSegments={segmentsToDraw}
+                                                    width={widthToDraw}
+                                                    height={heightToDraw}
+                                                    totalFacadeWidthCm={totalWidth}
+                                                    kartonpiyerBoslukCm={Number(p.rawValues?.kartonpiyerBoslukCm || p.rawValues?.ceilingGap || 0)}
+                                                    camUstuCm={Number(p.rawValues?.camUstuCm || 0)}
+                                                    camIciCm={Number(p.rawValues?.camIciCm || p.rawValues?.windowHeight || 0)}
+                                                    kaloriferMermerBoyuCm={Number(p.rawValues?.kaloriferMermerBoyuCm || 0)}
+                                                    camAltiCm={Number(p.rawValues?.camAltiCm || p.rawValues?.floorGap || 0)}
+                                                    solYukseklikCm={Number(p.rawValues?.solYukseklikCm || 0)}
+                                                    ortaYukseklikCm={Number(p.rawValues?.ortaYukseklikCm || 0)}
+                                                    sagYukseklikCm={Number(p.rawValues?.sagYukseklikCm || 0)}
+                                                  />
+                                                </div>
+                                              )}
+                                            >
+                                              <TechnicalMeasurementSketch 
+                                                facadeSegments={segmentsToDraw}
+                                                width={widthToDraw}
+                                                height={heightToDraw}
+                                                totalFacadeWidthCm={totalWidth}
+                                                kartonpiyerBoslukCm={Number(p.rawValues?.kartonpiyerBoslukCm || p.rawValues?.ceilingGap || 0)}
+                                                camUstuCm={Number(p.rawValues?.camUstuCm || 0)}
+                                                camIciCm={Number(p.rawValues?.camIciCm || p.rawValues?.windowHeight || 0)}
+                                                kaloriferMermerBoyuCm={Number(p.rawValues?.kaloriferMermerBoyuCm || 0)}
+                                                camAltiCm={Number(p.rawValues?.camAltiCm || p.rawValues?.floorGap || 0)}
+                                                solYukseklikCm={Number(p.rawValues?.solYukseklikCm || 0)}
+                                                ortaYukseklikCm={Number(p.rawValues?.ortaYukseklikCm || 0)}
+                                                sagYukseklikCm={Number(p.rawValues?.sagYukseklikCm || 0)}
+                                              />
+                                            </div>
                                           ) : (
                                             <div className="w-full grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
                                               {Object.entries(p.rawValues || {}).map(([k, v]) => {
@@ -408,12 +439,26 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                                       <h4 className="text-sm font-bold text-slate-800 print:text-black mb-2">
                                         {winName} - Ölçü {index}: Plicell Cam İçi
                                       </h4>
-                                      <PlicellMeasurementSketch 
-                                        camAdedi={camAdedi}
-                                        ortakCamBoyuCm={ortakBoy}
-                                        profilRengi={profilRengi}
-                                        plicellCamListesi={validCamListesi}
-                                      />
+                                      <div 
+                                        className="cursor-pointer hover:opacity-90 transition-opacity"
+                                        onClick={() => setPreviewNode(
+                                          <div className="w-full max-w-3xl mx-auto p-4 bg-white rounded-lg overflow-y-auto max-h-[80vh]">
+                                            <PlicellMeasurementSketch 
+                                              camAdedi={camAdedi}
+                                              ortakCamBoyuCm={ortakBoy}
+                                              profilRengi={profilRengi}
+                                              plicellCamListesi={validCamListesi}
+                                            />
+                                          </div>
+                                        )}
+                                      >
+                                        <PlicellMeasurementSketch 
+                                          camAdedi={camAdedi}
+                                          ortakCamBoyuCm={ortakBoy}
+                                          profilRengi={profilRengi}
+                                          plicellCamListesi={validCamListesi}
+                                        />
+                                      </div>
                                     </div>
                                   );
                                 } else {
@@ -436,11 +481,24 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                                       <h4 className="text-sm font-bold text-slate-800 print:text-black mb-2">
                                         {winName} - Ölçü {index}: Plicell Cam İçi
                                       </h4>
-                                      <PlicellMeasurementSketch 
-                                        camAdedi={1}
-                                        ortakCamBoyuCm={h}
-                                        plicellCamListesi={[singleCamItem]}
-                                      />
+                                      <div 
+                                        className="cursor-pointer hover:opacity-90 transition-opacity"
+                                        onClick={() => setPreviewNode(
+                                          <div className="w-full max-w-3xl mx-auto p-4 bg-white rounded-lg overflow-y-auto max-h-[80vh]">
+                                            <PlicellMeasurementSketch 
+                                              camAdedi={1}
+                                              ortakCamBoyuCm={h}
+                                              plicellCamListesi={[singleCamItem]}
+                                            />
+                                          </div>
+                                        )}
+                                      >
+                                        <PlicellMeasurementSketch 
+                                          camAdedi={1}
+                                          ortakCamBoyuCm={h}
+                                          plicellCamListesi={[singleCamItem]}
+                                        />
+                                      </div>
                                     </div>
                                   );
                                 }
@@ -588,6 +646,29 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
           </button>
         </div>
       </div>
+      
+      {/* Zoom/Preview Modal */}
+      {previewNode && (
+        <div 
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4 sm:p-8 no-print animate-fade-in"
+          onClick={() => setPreviewNode(null)}
+        >
+          <div className="absolute top-4 right-4 z-[70]">
+            <button 
+              onClick={(e) => { e.stopPropagation(); setPreviewNode(null); }}
+              className="p-2 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+          <div 
+            className="bg-white rounded-xl shadow-2xl overflow-y-auto max-h-full w-full max-w-5xl animate-scale-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {previewNode}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
