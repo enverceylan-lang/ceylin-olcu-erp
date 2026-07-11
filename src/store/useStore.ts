@@ -247,6 +247,23 @@ export interface Room {
   deletedAt?: string;
 }
 
+export interface ProductIntentItem {
+  id: string;
+  productType: string;
+  label: string;
+  selected: boolean;
+  note?: string;
+}
+
+export interface RoomProductIntent {
+  id: string;
+  roomId: string;
+  roomName: string;
+  products: ProductIntentItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Customer {
   id: string;
   name: string;
@@ -255,6 +272,7 @@ export interface Customer {
   mapLocation: string;
   notes: string;
   rooms: Room[];
+  roomProductIntents?: RoomProductIntent[];
   createdAt?: string;
   updatedAt?: string;
 

@@ -21,6 +21,7 @@ import { MergeCustomerModal } from "@/components/modals/MergeCustomerModal";
 import { MoveRoomModal } from "@/components/modals/MoveRoomModal";
 import { FacadeSegmentsEditor } from "@/components/measurements/FacadeSegmentsEditor";
 import { PlicellCamListEditor } from "@/components/measurements/PlicellCamListEditor";
+import { PreSalesIntentSection } from "@/components/measurements/PreSalesIntentSection";
 
 export default function CariDetayPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
@@ -1822,35 +1823,46 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                   </div>
                                 )}
                                 
-                                <div className={`grid gap-3 bg-gray-50 dark:bg-gray-800/50 p-3 rounded border dark:border-gray-700 ${selectedTemplate === 'CURTAIN_DETAIL' ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                                <div className={`grid gap-3 bg-gray-50 dark:bg-gray-800/50 p-3 rounded border dark:border-gray-700 ${selectedTemplate === 'CURTAIN_DETAIL' ? 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
                                   {selectedTemplate === 'CURTAIN_DETAIL' && (
-                                    <div className="col-span-3 text-sm font-bold text-gray-700 dark:text-gray-300 mb-2 border-b pb-1 dark:border-gray-700">Yükseklik Bilgileri</div>
+                                    <div className="col-span-1 sm:col-span-2 md:col-span-3 text-sm font-bold text-gray-700 dark:text-gray-300 mb-2 border-b pb-1 dark:border-gray-700">Yükseklik Bilgileri</div>
                                   )}
-                                  {MEASUREMENT_TEMPLATES[selectedTemplate]?.fields.filter(f => !f.hidden && selectedTemplate !== 'PLICELL').map(f => (
-                                    <div key={f.key} className={selectedTemplate === 'mechanical_curtain' && f.key === 'notes' ? 'col-span-2' : ''}>
-                                      <label className="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1">{f.label}</label>
-                                      {f.type === 'select' ? (
-                                        <select
-                                          value={rawValues[f.key] !== undefined ? rawValues[f.key] : (f.options && f.options.length > 0 ? f.options[0] : '')}
-                                          onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
-                                          className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
-                                        >
-                                          {f.options?.map(opt => (
-                                            <option key={opt} value={opt}>{opt}</option>
-                                          ))}
-                                        </select>
-                                      ) : (
-                                        <input 
-                                          type={f.type} 
-                                          step={f.type === 'number' ? 'any' : undefined}
-                                          placeholder={f.label}
-                                          value={rawValues[f.key] !== undefined ? rawValues[f.key] : (f.defaultValue !== undefined ? f.defaultValue : '')}
-                                          onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
-                                          className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
-                                        />
-                                      )}
-                                    </div>
-                                  ))}
+                                  {MEASUREMENT_TEMPLATES[selectedTemplate]?.fields.filter(f => !f.hidden && selectedTemplate !== 'PLICELL').map(f => {
+                                    const isNotesField = f.key === 'notes' || f.key === 'yukseklikNotu';
+                                    return (
+                                      <div key={f.key} className={isNotesField ? 'col-span-1 sm:col-span-full' : ''}>
+                                        <label className="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1">{f.label}</label>
+                                        {f.type === 'select' ? (
+                                          <select
+                                            value={rawValues[f.key] !== undefined ? rawValues[f.key] : (f.options && f.options.length > 0 ? f.options[0] : '')}
+                                            onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
+                                            className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
+                                          >
+                                            {f.options?.map(opt => (
+                                              <option key={opt} value={opt}>{opt}</option>
+                                            ))}
+                                          </select>
+                                        ) : isNotesField ? (
+                                          <textarea 
+                                            placeholder={f.label}
+                                            value={rawValues[f.key] !== undefined ? rawValues[f.key] : (f.defaultValue !== undefined ? f.defaultValue : '')}
+                                            onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
+                                            className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow resize-y"
+                                            rows={2}
+                                          />
+                                        ) : (
+                                          <input 
+                                            type={f.type} 
+                                            step={f.type === 'number' ? 'any' : undefined}
+                                            placeholder={f.label}
+                                            value={rawValues[f.key] !== undefined ? rawValues[f.key] : (f.defaultValue !== undefined ? f.defaultValue : '')}
+                                            onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
+                                            className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
+                                          />
+                                        )}
+                                      </div>
+                                    );
+                                  })}
                                 </div>
 
                                 <div>
@@ -1912,6 +1924,26 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
               </div>
             );
           })}
+          
+            {/* PRE-SALES INTENT SECTION */}
+            {['ADMIN', 'MODERATOR'].includes(normRole) && (
+              <PreSalesIntentSection 
+                customer={customer}
+                onSave={async (intents) => {
+                  await updateCustomer(customer.id, { roomProductIntents: intents });
+                  addAuditEntry({
+                    entityType: 'Customer',
+                    entityId: customer.id,
+                    field: 'roomProductIntents',
+                    previousValue: 'N/A',
+                    newValue: 'Güncellendi',
+                    changedBy: user.name,
+                    changedAt: new Date().toISOString(),
+                    reason: "Müşteri Satışa Hazırlık Ürün İsteği"
+                  });
+                }}
+              />
+            )}
             </>
           )}
 
