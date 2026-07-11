@@ -58,16 +58,16 @@ export const FacadeSegmentsEditor: React.FC<FacadeSegmentsEditorProps> = ({ segm
 
   return (
     <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4">
-      <div className="flex justify-between items-center mb-2">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-2 gap-1 sm:gap-0">
         <h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm">Cephe En Dizilimi</h3>
         <span className="font-bold text-blue-600 dark:text-blue-400">Toplam En: {totalWidth} cm</span>
       </div>
 
       <div className="bg-blue-50 dark:bg-blue-900/10 p-3 rounded-lg border border-blue-100 dark:border-blue-900/30">
         <label className="block text-xs font-semibold text-blue-800 dark:text-blue-300 mb-1">
-          Hızlı Tek Satır Giriş (örn: 60 D 70 C 80 P 70 C 20 D 80 K 15 D)
+          Hızlı Tek Satır Giriş (Örn: 60 D 70 C 80 P 70 C 20 D 80 K 15 D)
         </label>
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-2">
           <input
             type="text"
             value={fastInput}
@@ -79,12 +79,12 @@ export const FacadeSegmentsEditor: React.FC<FacadeSegmentsEditorProps> = ({ segm
               }
             }}
             placeholder="60 D 70 C 80 P..."
-            className="flex-1 p-2 text-sm border border-blue-200 dark:border-blue-800 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 outline-none focus:border-blue-400"
+            className="w-full sm:flex-1 p-2 text-sm border border-blue-200 dark:border-blue-800 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 outline-none focus:border-blue-400"
           />
           <button
             type="button"
             onClick={handleFastInputSubmit}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-bold transition-colors"
+            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-bold transition-colors"
           >
             Çözümle / Tabloya Aktar
           </button>

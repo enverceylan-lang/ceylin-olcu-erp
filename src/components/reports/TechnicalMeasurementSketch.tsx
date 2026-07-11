@@ -163,19 +163,7 @@ export function TechnicalMeasurementSketch(props: TechnicalMeasurementSketchProp
 
     elements.push(...segElements);
     
-    // YAN TARAFTA TEK SEFERDE GÖSTERİLEN ÖLÇÜLER
-    if (camUstuCm > 0) {
-      elements.push(<text key="sideCamUstu" x={endX + 12} y={segStartY + camUstuH/2 + 4} fill="#111" fontSize="12" fontWeight="bold" textAnchor="start">{camUstuCm} ÜST</text>);
-    }
-    if (camIciCm > 0) {
-      elements.push(<text key="sideCamIci" x={endX + 12} y={segStartY + camUstuH + camIciH/2 + 4} fill="#111" fontSize="12" fontWeight="bold" textAnchor="start">{camIciCm} İÇ</text>);
-    }
-    if (kaloriferMermerBoyuCm > 0) {
-      elements.push(<text key="sideKalorifer" x={endX + 12} y={segStartY + camUstuH + camIciH + kaloriferMermerH/2 + 4} fill="#111" fontSize="12" fontWeight="bold" textAnchor="start">{kaloriferMermerBoyuCm} KALORİFER / MERMER</text>);
-    }
-    if (camAltiCm > 0) {
-      elements.push(<text key="sideCamAlti" x={endX + 12} y={segStartY + camUstuH + camIciH + kaloriferMermerH + camAltiH/2 + 4} fill="#111" fontSize="12" fontWeight="bold" textAnchor="start">{camAltiCm} ALT</text>);
-    }
+    // YAN TARAFTA TEK SEFERDE GÖSTERİLEN ÖLÇÜLER (Kaldırıldı - Mobilde taşmayı önlemek için)
 
     yCursor += totalSegH;
   } else if (width > 0) {

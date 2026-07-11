@@ -380,10 +380,21 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     if (newRoomName.trim()) {
       setIsSaving(true);
       try {
-        addRoom(customer.id, newRoomName.trim());
+        const newRoomId = await addRoom(customer.id, newRoomName.trim());
         await syncNow();
         setIsAddingRoom(false);
         setNewRoomName("");
+        if (newRoomId) {
+          setExpandedRooms(prev => ({ ...prev, [newRoomId]: true }));
+          setTimeout(() => {
+            const el = document.getElementById(`room-card-${newRoomId}`);
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              el.classList.add('ring-4', 'ring-blue-500', 'transition-all', 'duration-1000');
+              setTimeout(() => el.classList.remove('ring-4', 'ring-blue-500'), 2000);
+            }
+          }, 100);
+        }
       } catch (err) {
         console.error(err);
         showToast("Oda kaydedilirken senkronizasyon hatası oluştu.");
@@ -1188,7 +1199,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
             const isExpanded = expandedRooms[room.id] !== false;
 
             return (
-              <div key={room.id} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden shadow-sm">
+              <div id={`room-card-${room.id}`} key={room.id} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden shadow-sm">
                 
                 {/* ROOM HEADER */}
                 <div className="bg-gray-50 dark:bg-gray-800/50 p-4 border-b border-gray-200 dark:border-gray-800">
@@ -1805,6 +1816,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                 {selectedTemplate === 'CURTAIN_DETAIL' && (
                                   <div className="mb-4">
                                     <FacadeSegmentsEditor 
+                                      key={activeWindowIdForProduct || 'new'}
                                       segments={rawValues.facadeSegments || []}
                                       onChange={(segments) => setRawValues({...rawValues, facadeSegments: segments})}
                                     />
@@ -1919,33 +1931,44 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                         </button>
                       </div>
                     )}
+
+                    {['ADMIN', 'MODERATOR'].includes(normRole) && (
+                      <div className="mt-4 border-t border-gray-200 dark:border-gray-700/50 pt-2">
+                        <PreSalesIntentSection 
+                          roomId={room.id}
+                          roomName={room.name}
+                          intent={customer.roomProductIntents?.find(i => i.roomId === room.id)}
+                          onSave={async (intent) => {
+                            const currentIntents = customer.roomProductIntents || [];
+                            const existingIndex = currentIntents.findIndex(i => i.roomId === room.id);
+                            let newIntents = [...currentIntents];
+                            if (existingIndex >= 0) {
+                              newIntents[existingIndex] = intent;
+                            } else {
+                              newIntents.push(intent);
+                            }
+                            await updateCustomer(customer.id, { roomProductIntents: newIntents });
+                            addAuditEntry({
+                              entityType: 'Customer',
+                              entityId: customer.id,
+                              field: 'roomProductIntents',
+                              previousValue: 'N/A',
+                              newValue: 'Güncellendi',
+                              changedBy: user.name,
+                              changedAt: new Date().toISOString(),
+                              reason: "Oda ürün isteği kaydedildi: " + room.name
+                            });
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
             );
           })}
-          
-            {/* PRE-SALES INTENT SECTION */}
-            {['ADMIN', 'MODERATOR'].includes(normRole) && (
-              <PreSalesIntentSection 
-                customer={customer}
-                onSave={async (intents) => {
-                  await updateCustomer(customer.id, { roomProductIntents: intents });
-                  addAuditEntry({
-                    entityType: 'Customer',
-                    entityId: customer.id,
-                    field: 'roomProductIntents',
-                    previousValue: 'N/A',
-                    newValue: 'Güncellendi',
-                    changedBy: user.name,
-                    changedAt: new Date().toISOString(),
-                    reason: "Müşteri Satışa Hazırlık Ürün İsteği"
-                  });
-                }}
-              />
-            )}
-            </>
-          )}
+          </>
+        )}
 
           {activeTab === "timeline" && canViewCustomerWorkflowReport(currentUser, customer) && (
             <div className="space-y-6">

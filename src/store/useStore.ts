@@ -455,7 +455,7 @@ interface AppState {
   archiveCustomer: (id: string) => Promise<void>;
   mergeCustomers: (sourceId: string, targetId: string) => Promise<void>;
   
-  addRoom: (customerId: string, roomName: string) => Promise<void>;
+  addRoom: (customerId: string, roomName: string) => Promise<string>;
   deleteRoom: (customerId: string, roomId: string) => Promise<void>;
   moveRoom: (sourceCustomerId: string, targetCustomerId: string, roomId: string) => Promise<void>;
   
@@ -782,7 +782,9 @@ export const useStore = create<AppState>()(
               syncStatus: 'pending'
             };
           });
+          return newRoom.id;
         }
+        return '';
       },
 
       deleteRoom: async (customerId, roomId) => {
