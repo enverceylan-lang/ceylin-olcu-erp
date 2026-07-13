@@ -6,8 +6,12 @@ import { saveLocalCustomer, loadLocalCustomers } from './localCustomerDb';
  * Strips out media arrays to ensure we don't save REDACTED strings to IndexedDB.
  */
 function cleanMediaFromRoom(room: any): Room {
-  const cleanWindows = (room.windows || []).map((w: any) => {
-    const cleanProducts = (w.products || []).map((p: any) => {
+  const rawWindows = room.windows || room.openings || [];
+  
+  const cleanWindows = rawWindows.map((w: any) => {
+    const rawProducts = w.products || w.measurements || [];
+    
+    const cleanProducts = rawProducts.map((p: any) => {
       return {
         ...p,
         id: generateUUID(), // New ID to prevent reference clashes
@@ -40,8 +44,18 @@ function cleanMediaFromRoom(room: any): Room {
  */
 function extractRoomsFromPatch(patch: any): Room[] {
   let rooms: any[] = [];
-  if (patch && Array.isArray(patch.rooms)) {
-    rooms = patch.rooms;
+  
+  let parsedPatch = patch;
+  if (typeof parsedPatch === 'string') {
+    try {
+      parsedPatch = JSON.parse(parsedPatch);
+    } catch (e) {
+      console.warn('[InboundProcessor] Could not parse patch as JSON', e);
+    }
+  }
+
+  if (parsedPatch && Array.isArray(parsedPatch.rooms)) {
+    rooms = parsedPatch.rooms;
   }
   return rooms.map(cleanMediaFromRoom);
 }

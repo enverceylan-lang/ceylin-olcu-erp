@@ -8,6 +8,7 @@ import { useUiStore } from "@/store/useUiStore";
 import { useStore } from "@/store/useStore";
 import { syncNow } from "@/lib/syncService";
 import { pushDeltaSyncEvents } from "@/lib/deltaSyncClient";
+import { forceRequeueAllMeasurementDrafts } from "@/lib/localDraftDb";
 
 const ROLE_BADGE_COLORS: Record<string, string> = {
   ADMIN: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
@@ -28,6 +29,7 @@ export function Topbar() {
   const syncStatus = useStore((state) => state.syncStatus);
   const [mounted, setMounted] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
+  const [isRecovering, setIsRecovering] = useState(false);
 
   useEffect(() => setMounted(true), []);
 
@@ -67,12 +69,39 @@ firstStatus: ${result.debug.firstStatus}
     }
   };
 
+  
+  const handleRecover = async () => {
+    if (!confirm("Eksik aktarılan yerel ölçüleri tam veriyle tekrar eşitleme kuyruğuna almak istiyor musunuz?")) return;
+    
+    setIsRecovering(true);
+    try {
+      const summary = await forceRequeueAllMeasurementDrafts();
+      alert(`Recovery Özeti:\nToplam Taslak: ${summary.found}\nÖlçü İçeren: ${summary.withMeasurements}\nKuyruğa Alınan: ${summary.requeued}\nAtlanan (Ölçüsüz veya Zaten Kurtarılmış): ${summary.skipped}\n\nBu cihazdaki ölçüler tekrar gönderim kuyruğuna alındı. Şimdi "Ölçüleri Gönder" butonuna basabilirsiniz.`);
+    } catch (err: any) {
+      alert("Kurtarma sırasında hata oluştu: " + err.message);
+    } finally {
+      setIsRecovering(false);
+    }
+  };
+
   const currentUser = normalizeUser(rawCurrentUser);
 
   return (
     <header className="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-4 lg:px-8">
       <div className="flex items-center gap-4">
-        <button 
+        
+              {currentUser?.role === 'ADMIN' && (
+                <button
+                  onClick={handleRecover}
+                  disabled={isRecovering}
+                  className="flex items-center space-x-1 bg-red-100 hover:bg-red-200 text-red-700 px-2 sm:px-4 py-1.5 sm:py-2 rounded-full transition-colors text-xs font-semibold disabled:opacity-50 mr-2"
+                  title="Force Requeue (Kurtar)"
+                >
+                  <RefreshCw className={`w-3 h-3 sm:w-4 sm:h-4 ${isRecovering ? 'animate-spin' : ''}`} />
+                  <span className="hidden sm:inline">{isRecovering ? 'Bekleyin...' : 'Kurtar'}</span>
+                </button>
+              )}
+<button 
           onClick={toggleMobileMenu}
           className="md:hidden p-2 rounded-md text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
           aria-label="Menüyü Aç"

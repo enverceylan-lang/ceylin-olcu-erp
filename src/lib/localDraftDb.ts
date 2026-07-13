@@ -50,6 +50,7 @@ export interface FieldMeasurementDraft {
   createdAt: string;
   updatedAt: string;
   syncStatus: 'DRAFT' | 'READY_TO_TRANSFER' | 'TRANSFERRING' | 'TRANSFERRED' | 'ERROR';
+  recoveryQueuedAt?: string;
 }
 
 export interface FieldInstallationDraft {
@@ -76,6 +77,7 @@ export interface FieldInstallationDraft {
   createdAt: string;
   updatedAt: string;
   syncStatus: 'DRAFT' | 'READY_TO_TRANSFER' | 'TRANSFERRING' | 'TRANSFERRED' | 'ERROR';
+  recoveryQueuedAt?: string;
 }
 
 export interface DraftMediaFile {
@@ -277,7 +279,26 @@ export async function markDraftReadyToTransfer(id: string, type: 'MEASUREMENT' |
   if (type === 'MEASUREMENT') {
     await localDraftDb.measurementDrafts.update(id, { syncStatus: 'READY_TO_TRANSFER', updatedAt: now });
     const updated = await localDraftDb.measurementDrafts.get(id);
-    if (updated) await enqueueSyncEvent('DRAFT', id, 'UPDATE', { syncStatus: 'READY_TO_TRANSFER', updatedAt: now });
+    
+      if (updated) {
+          let rCount = 0, wCount = 0, pCount = 0;
+          let hasRaw = false;
+          if (updated.rooms && Array.isArray(updated.rooms)) {
+              rCount = updated.rooms.length;
+              updated.rooms.forEach((r: any) => {
+                  const windows = r.windows || r.openings || [];
+                  wCount += windows.length;
+                  windows.forEach((w: any) => {
+                      const prods = w.products || w.measurements || [];
+                      pCount += prods.length;
+                      prods.forEach((p: any) => { if (p.rawValues) hasRaw = true; });
+                  });
+              });
+          }
+          console.log(`[SYNC-DIAGNOSTIC] Telefon push öncesi: entityType=DRAFT, patchKeys=${Object.keys(updated).length}, roomsCount=${rCount}, windowsCount/openingsCount=${wCount}, productsCount/measurementsCount=${pCount}, hasRawValues=${hasRaw}, syncStatus=${updated.syncStatus}`);
+          await enqueueSyncEvent('DRAFT', id, 'UPDATE', updated);
+      }
+
   } else {
     await localDraftDb.installationDrafts.update(id, { syncStatus: 'READY_TO_TRANSFER', updatedAt: now });
   }
@@ -288,7 +309,26 @@ export async function markDraftTransferred(id: string, type: 'MEASUREMENT' | 'IN
   if (type === 'MEASUREMENT') {
     await localDraftDb.measurementDrafts.update(id, { syncStatus: 'TRANSFERRED', updatedAt: now });
     const updated = await localDraftDb.measurementDrafts.get(id);
-    if (updated) await enqueueSyncEvent('DRAFT', id, 'UPDATE', { syncStatus: 'TRANSFERRED', updatedAt: now });
+    
+      if (updated) {
+          let rCount = 0, wCount = 0, pCount = 0;
+          let hasRaw = false;
+          if (updated.rooms && Array.isArray(updated.rooms)) {
+              rCount = updated.rooms.length;
+              updated.rooms.forEach((r: any) => {
+                  const windows = r.windows || r.openings || [];
+                  wCount += windows.length;
+                  windows.forEach((w: any) => {
+                      const prods = w.products || w.measurements || [];
+                      pCount += prods.length;
+                      prods.forEach((p: any) => { if (p.rawValues) hasRaw = true; });
+                  });
+              });
+          }
+          console.log(`[SYNC-DIAGNOSTIC] Telefon push öncesi: entityType=DRAFT, patchKeys=${Object.keys(updated).length}, roomsCount=${rCount}, windowsCount/openingsCount=${wCount}, productsCount/measurementsCount=${pCount}, hasRawValues=${hasRaw}, syncStatus=${updated.syncStatus}`);
+          await enqueueSyncEvent('DRAFT', id, 'UPDATE', updated);
+      }
+
   } else {
     await localDraftDb.installationDrafts.update(id, { syncStatus: 'TRANSFERRED', updatedAt: now });
   }
@@ -316,4 +356,55 @@ export async function deleteMeasurementDraft(id: string): Promise<void> {
   await localDraftDb.draftMediaFiles.where('draftId').equals(id).delete();
   await localDraftDb.measurementDrafts.delete(id);
   await enqueueSyncEvent('DRAFT', id, 'SOFT_DELETE', { isDeleted: true });
+}
+
+export async function forceRequeueAllMeasurementDrafts(): Promise<{ found: number, withMeasurements: number, requeued: number, skipped: number }> {
+  const drafts = await localDraftDb.measurementDrafts.toArray();
+  const now = new Date().toISOString();
+  
+  let found = drafts.length;
+  let withMeasurements = 0;
+  let requeued = 0;
+  let skipped = 0;
+
+  for (const draft of drafts) {
+    // Check if it has actual measurements
+    let hasMeasurements = false;
+    if (draft.rooms && Array.isArray(draft.rooms) && draft.rooms.length > 0) {
+      for (const r of draft.rooms) {
+        const wList = r.windows || r.openings || [];
+        for (const w of wList) {
+          const pList = w.products || w.measurements || [];
+          if (pList.length > 0) {
+            hasMeasurements = true;
+            break;
+          }
+        }
+        if (hasMeasurements) break;
+      }
+    }
+
+    if (!hasMeasurements) {
+      skipped++;
+      continue;
+    }
+    
+    withMeasurements++;
+
+    // Prevent duplicate requeue if already recovered successfully
+    if (draft.recoveryQueuedAt) {
+      skipped++;
+      continue;
+    }
+
+    // Full payload enqueue
+    draft.recoveryQueuedAt = now;
+    draft.updatedAt = now;
+    
+    await localDraftDb.measurementDrafts.put(draft);
+    await enqueueSyncEvent('DRAFT', draft.id, 'UPDATE', draft);
+    requeued++;
+  }
+
+  return { found, withMeasurements, requeued, skipped };
 }

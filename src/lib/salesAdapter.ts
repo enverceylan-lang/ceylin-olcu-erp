@@ -72,8 +72,9 @@ function createSaleItemFromMeasurement(p: ProductMeasurement, roomName: string, 
  * Cari'ye ait tüm ölçüleri bir Sale objesine dönüştürür (Snapshot)
  */
 export function createDraftSaleFromCustomer(customer: Customer): Sale {
-  const items: SaleItem[] = [];
+  const items: any[] = [];
   
+  // 1. Ölçüleri aktar
   customer.rooms?.forEach(room => {
     room.windows?.forEach(win => {
       win.products?.forEach(p => {
@@ -81,6 +82,44 @@ export function createDraftSaleFromCustomer(customer: Customer): Sale {
       });
     });
   });
+
+  // 2. Oda bazlı ürün isteklerini aktar
+  if (customer.roomProductIntents) {
+    customer.roomProductIntents.forEach(intent => {
+      intent.products?.forEach(pIntent => {
+        if (pIntent.selected) {
+          let unit = 'ADET';
+          const t = pIntent.productType;
+          if (['TUL', 'FON', 'GUNESLIK', 'RUSTIK', 'TAVAN_RUSTIK'].includes(t)) {
+            unit = 'METRE';
+          } else if (['STOR', 'ZEBRA', 'PLICELL', 'JALUZI', 'AHSAP_JALUZI', 'PICASSO', 'DIKEY_PERDE'].includes(t)) {
+            unit = 'M2';
+          }
+
+          items.push({
+            id: crypto.randomUUID(),
+            measurementId: undefined, // Ölçüye bağlı değil
+            roomName: intent.roomName || customer.rooms?.find(r => r.id === intent.roomId)?.name || 'Bilinmeyen Oda',
+            windowName: 'Ürün İsteği (Genel)',
+            productType: pIntent.productType,
+            productGroup: pIntent.label,
+            width: 0,
+            height: 0,
+            calcWidth: 0,
+            calcHeight: 0,
+            quantity: 1,
+            metricSize: 1,
+            metricUnit: unit,
+            pleatDetails: undefined,
+            unitPrice: 0,
+            discount: 0,
+            rowTotal: 0,
+            note: pIntent.note || undefined
+          });
+        }
+      });
+    });
+  }
   
   const saleNo = `TEK-${new Date().getFullYear()}${(new Date().getMonth()+1).toString().padStart(2,'0')}-${Math.floor(Math.random()*10000).toString().padStart(4,'0')}`;
   

@@ -60,7 +60,26 @@ export async function pushDeltaSyncEvents(): Promise<{
     const token = utf8ToBase64(`${currentUser.username}:${currentUser.password}`);
 
     // Call the server-side API route which uses the Service Role Key
-    const response = await fetch('/api/delta-sync/push', {
+    
+      let rCount = 0, pCount = 0;
+      let hasRaw = false;
+      pendingEvents.forEach(ev => {
+          const p = ev.patch;
+          if (p && p.rooms && Array.isArray(p.rooms)) {
+              rCount += p.rooms.length;
+              p.rooms.forEach((r: any) => {
+                  const w = r.windows || r.openings || [];
+                  w.forEach((wi: any) => {
+                      const prods = wi.products || wi.measurements || [];
+                      pCount += prods.length;
+                      prods.forEach((pr: any) => { if (pr.rawValues) hasRaw = true; });
+                  });
+              });
+          }
+      });
+      console.log(`[SYNC-DIAGNOSTIC] Push API: eventCount=${pendingEvents.length}, roomsCount=${rCount}, productsCount=${pCount}, hasRawValues=${hasRaw}`);
+      const response = await fetch('/api/delta-sync/push'
+, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -175,13 +194,29 @@ export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise
     let maxDraftRevision = draftCursor;
     let maxMeasurementRevision = measurementCursor;
 
-    // Deduplicate changes by entity_id, keeping the latest revision
+    // Deduplicate changes by entity_id, merging properties for the same entity in order of revision
+    rawChanges.sort((a: any, b: any) => a.revision - b.revision);
+    
     const latestChanges = new Map<string, any>();
     for (const change of rawChanges) {
        const key = `${change.entity_type}_${change.entity_id}`;
        const existing = latestChanges.get(key);
-       if (!existing || existing.revision < change.revision) {
+       
+       if (!existing) {
            latestChanges.set(key, change);
+       } else {
+           // Merge the patches
+           const mergedPatch = { ...existing.patch, ...change.patch };
+           
+           // Ensure critical arrays are not overwritten by undefined or missing fields in subsequent patches
+           if (existing.patch && existing.patch.rooms && (!change.patch || !change.patch.rooms)) {
+               mergedPatch.rooms = existing.patch.rooms;
+           }
+           
+           latestChanges.set(key, {
+               ...change,
+               patch: mergedPatch
+           });
        }
        
        // Advance cursors based on raw changes to not miss any revisions
@@ -195,7 +230,27 @@ export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise
     
     const changes = Array.from(latestChanges.values());
 
+    
+    let rCount = 0, pCount = 0;
+    let hasRaw = false;
+    changes.forEach(change => {
+        const p = change.patch || {};
+        if (p.rooms && Array.isArray(p.rooms)) {
+            rCount += p.rooms.length;
+            p.rooms.forEach((r: any) => {
+                const w = r.windows || r.openings || [];
+                w.forEach((wi: any) => {
+                    const prods = wi.products || wi.measurements || [];
+                    pCount += prods.length;
+                    prods.forEach((pr: any) => { if (pr.rawValues) hasRaw = true; });
+                });
+            });
+        }
+    });
+    console.log(`[SYNC-DIAGNOSTIC] PC pull sonrası: pulledRawEventCount=${rawChanges.length}, uniqueMergedCount=${changes.length}, mergedRoomsCount=${rCount}, mergedProductsCount=${pCount}, hasRawValues=${hasRaw}`);
+
     for (const change of changes) {
+
       const patch = change.patch || {};
       
       // Allow DRAFT, CUSTOMER, ROOM, OPENING, MEASUREMENT events
@@ -205,6 +260,18 @@ export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise
 
       if (isDraftEvent || isMeasurementEvent) {
         
+        // Safety check: if this is a DRAFT event and it lacks rooms/measurements and also lacks a customerName,
+        // and is essentially just a status-only patch, do not process it into the inbound pool.
+        if (isDraftEvent) {
+            const hasRooms = patch.rooms && Array.isArray(patch.rooms) && patch.rooms.length > 0;
+            const isStatusOnly = Object.keys(patch).length <= 3 && patch.syncStatus;
+            
+            if (!hasRooms && isStatusOnly) {
+                console.warn(`[DeltaSyncClient] Skipping status-only DRAFT patch lacking measurements: ${change.change_id}`);
+                continue;
+            }
+        }
+
         let customerName = patch.customerName || patch.name;
         let customerPhone = patch.customerPhone || patch.phone;
         let customerAddress = patch.customerAddress || patch.address;

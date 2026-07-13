@@ -16,6 +16,7 @@ const PRODUCT_TYPES = [
   { id: "GUNESLIK", label: "Güneşlik" },
   { id: "FON", label: "Fon" },
   { id: "RUSTIK", label: "Rustik" },
+  { id: "TAVAN_RUSTIK", label: "Tavan Rustik" },
   { id: "STOR", label: "Stor" },
   { id: "ZEBRA", label: "Zebra" },
   { id: "DIKEY_PERDE", label: "Dikey Perde" },

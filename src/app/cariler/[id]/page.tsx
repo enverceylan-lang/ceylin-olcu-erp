@@ -127,6 +127,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   // For ADMIN/SALES entering on behalf of someone else
   const [overrideMeasuredById, setOverrideMeasuredById] = useState(currentUser?.id || "");
   const [measurementNotes, setMeasurementNotes] = useState("");
+  const [measurementViewMode, setMeasurementViewMode] = useState<"CARD"|"GRID">("CARD");
   const [editingMeasurementId, setEditingMeasurementId] = useState<string | null>(null);
 
   // Office Config Form State
@@ -745,6 +746,136 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     }
   };
 
+  
+  const renderMeasurementForm = (room: any, window: any, isInlineEdit: boolean = false) => {
+    return (
+      <div key={isInlineEdit ? editingMeasurementId : "new"} className={`mt-4 border-2 border-blue-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-lg ${isInlineEdit ? "" : "ml-6"} relative`}>
+                              <div className="bg-blue-50 dark:bg-gray-900 p-3 border-b border-blue-100 dark:border-gray-700 flex justify-between items-center">
+                                <h5 className="font-bold text-blue-900 dark:text-gray-100">
+                                  {editingMeasurementId ? "Saha Ölçüsü Düzenleme Formu" : "Saha Ölçü Formu"}
+                                </h5>
+                                <button onClick={() => { setActiveWindowIdForProduct(null); setEditingMeasurementId(null); }}><X className="w-5 h-5 text-blue-400 hover:text-blue-600 dark:text-gray-400 dark:hover:text-gray-200" /></button>
+                              </div>
+                              
+                              <div className="p-4 space-y-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                  <div>
+                                    <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Ölçüm Şablonu</label>
+                                    <select 
+                                      value={selectedTemplate} 
+                                      onChange={(e) => { setSelectedTemplate(e.target.value); setRawValues({}); }}
+                                      className="w-full p-2 border rounded-lg bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                    >
+                                      {Object.values(MEASUREMENT_TEMPLATES).map(t => (
+                                        <option key={t.type} value={t.type}>{getTemplateLabel(t.type)}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Ölçüyü Alan</label>
+                                    {permissions.canOverrideMeasuredBy ? (
+                                      /* ADMIN/SALES can select who measured */
+                                      <select 
+                                        value={overrideMeasuredById} 
+                                        onChange={(e) => setOverrideMeasuredById(e.target.value)}
+                                        className="w-full p-2 border rounded-lg bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                      >
+                                        {measurementEmployees.map(u => <option key={u.id} value={u.id}>{u.name} ({(ROLE_PERMISSIONS[u.role] || { label: u.role }).label})</option>)}
+                                      </select>
+                                    ) : (
+                                      /* Normal users see their own name, read-only */
+                                      <div className="w-full p-2 border rounded-lg bg-gray-100 dark:bg-gray-900/50 dark:border-gray-700 text-gray-800 dark:text-gray-200 text-sm font-medium flex items-center gap-2">
+                                        <Shield className="w-3.5 h-3.5 text-blue-500" />
+                                        {currentUser?.name || "Bilinmiyor"}
+                                        <span className="text-[10px] text-gray-500 dark:text-gray-500 ml-auto">Otomatik</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {selectedTemplate === 'CURTAIN_DETAIL' && (
+                                  <div className="mb-4">
+                                    <FacadeSegmentsEditor 
+                                      key={activeWindowIdForProduct || 'new'}
+                                      segments={rawValues.facadeSegments || []}
+                                      onChange={(segments) => setRawValues({...rawValues, facadeSegments: segments})}
+                                    />
+                                  </div>
+                                )}
+
+                                {selectedTemplate === 'PLICELL' && (
+                                  <div className="mb-4">
+                                    <PlicellCamListEditor 
+                                      camAdedi={rawValues.camAdedi}
+                                      ortakCamBoyuCm={rawValues.ortakCamBoyuCm}
+                                      profilRengi={rawValues.profilRengi}
+                                      plicellCamListesi={rawValues.plicellCamListesi}
+                                      onChange={(data) => setRawValues({...rawValues, ...data})}
+                                    />
+                                  </div>
+                                )}
+                                
+                                <div className={`grid gap-3 bg-gray-50 dark:bg-gray-800/50 p-3 rounded border dark:border-gray-700 ${selectedTemplate === 'CURTAIN_DETAIL' ? 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
+                                  {selectedTemplate === 'CURTAIN_DETAIL' && (
+                                    <div className="col-span-1 sm:col-span-2 md:col-span-3 text-sm font-bold text-gray-700 dark:text-gray-300 mb-2 border-b pb-1 dark:border-gray-700">Yükseklik Bilgileri</div>
+                                  )}
+                                  {MEASUREMENT_TEMPLATES[selectedTemplate]?.fields.filter(f => !f.hidden && selectedTemplate !== 'PLICELL').map(f => {
+                                    const isNotesField = f.key === 'notes' || f.key === 'yukseklikNotu';
+                                    return (
+                                      <div key={f.key} className={isNotesField ? 'col-span-1 sm:col-span-full' : ''}>
+                                        <label className="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1">{f.label}</label>
+                                        {f.type === 'select' ? (
+                                          <select
+                                            value={rawValues[f.key] !== undefined ? rawValues[f.key] : (f.options && f.options.length > 0 ? f.options[0] : '')}
+                                            onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
+                                            className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
+                                          >
+                                            {f.options?.map(opt => (
+                                              <option key={opt} value={opt}>{opt}</option>
+                                            ))}
+                                          </select>
+                                        ) : isNotesField ? (
+                                          <textarea 
+                                            placeholder={f.label}
+                                            value={rawValues[f.key] !== undefined ? rawValues[f.key] : (f.defaultValue !== undefined ? f.defaultValue : '')}
+                                            onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
+                                            className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow resize-y"
+                                            rows={2}
+                                          />
+                                        ) : (
+                                          <input 
+                                            type={f.type} 
+                                            step={f.type === 'number' ? 'any' : undefined}
+                                            placeholder={f.label}
+                                            value={rawValues[f.key] !== undefined ? rawValues[f.key] : (f.defaultValue !== undefined ? f.defaultValue : '')}
+                                            onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
+                                            className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
+                                          />
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Saha Notları (İsteğe Bağlı, Engeller vb.)</label>
+                                  <textarea 
+                                    value={measurementNotes} 
+                                    placeholder="Herhangi bir engel veya not var mı?"
+                                    onChange={(e) => setMeasurementNotes(e.target.value)}
+                                    className="w-full p-2 border dark:border-gray-700 rounded bg-white dark:bg-gray-900 dark:text-white dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
+                                    rows={2}
+                                  />
+                                </div>
+
+                                <button onClick={() => handleSaveMeasurement(room.id, window.id)} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow-md transition-colors text-sm">
+                                  {editingMeasurementId ? "Değişiklikleri Kaydet" : "Ölçüyü Kaydet"}
+                                </button>
+                              </div>
+                            </div>
+    );
+  };
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-24">
       {/* Header & Mode Toggle */}
@@ -1148,7 +1279,30 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
         {/* Main Content Area */}
         <div className="lg:col-span-3 space-y-6">
-          {/* Tabs Navigation */}
+          
+            {/* View Mode Toggle for Measurements */}
+            {activeTab === "rooms" && customer.rooms.length > 0 && (
+              <div className="flex justify-end mb-4">
+                <button 
+                  onClick={() => setMeasurementViewMode(prev => prev === 'CARD' ? 'GRID' : 'CARD')}
+                  className="px-4 py-2 text-xs font-bold rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors border border-gray-200 dark:border-gray-700 flex items-center gap-2 shadow-sm"
+                >
+                  {measurementViewMode === 'CARD' ? (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
+                      Toplu A4 Görünümüne Geç
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
+                      Kart Görünümüne Geç
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+
+            {/* Tabs Navigation */}
           <div className="flex border-b border-gray-200 dark:border-gray-800 mb-4 gap-6">
             <button
               onClick={() => setActiveTab("rooms")}
@@ -1377,8 +1531,32 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                         )}
 
                         {/* MEASUREMENTS LIST */}
-                        <div className="space-y-3">
-                          {window.products.map(p => (
+                        <div className={measurementViewMode === "GRID" ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3" : "space-y-3"}>
+                            {window.products.map(p => {
+  if (editingMeasurementId === p.id) return renderMeasurementForm(room, window, true);
+  
+  
+  if (measurementViewMode === 'GRID') {
+    return (
+      <div key={p.id} className="relative bg-[#e6f2ff] dark:bg-blue-900/20 border-2 border-blue-400 dark:border-blue-700 rounded-sm p-2 flex flex-col items-center justify-center text-center shadow-inner min-h-[140px] m-2">
+        <div className="absolute inset-x-0 top-0 border-b-2 border-blue-300 dark:border-blue-800 bg-white/50 dark:bg-black/20 text-[10px] font-bold py-1 text-blue-800 dark:text-blue-300">
+          EN: {p.rawValues?.width || 0}
+        </div>
+        <div className="absolute inset-y-0 left-0 border-r-2 border-blue-300 dark:border-blue-800 bg-white/50 dark:bg-black/20 text-[10px] font-bold px-1 text-blue-800 dark:text-blue-300 flex items-center justify-center" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+          BOY: {p.rawValues?.height || 0}
+        </div>
+        <div className="mt-6 ml-6 flex flex-col items-center justify-center h-full">
+           <div className="text-[10px] text-blue-700 dark:text-blue-400 font-bold mb-1 line-clamp-1 bg-white/60 dark:bg-black/40 px-1 rounded">{getTemplateLabel(p.templateType)}</div>
+           {p.rawValues?.quantity && Number(p.rawValues.quantity) > 1 && <div className="text-xs bg-white/80 dark:bg-black/50 text-blue-800 dark:text-blue-300 font-bold px-1 rounded inline-block shadow-sm">{p.rawValues.quantity} Adet</div>}
+           {p.notes && <div className="text-[9px] text-gray-700 dark:text-gray-300 mt-1 line-clamp-2 leading-tight bg-white/50 dark:bg-black/30 p-1 rounded">{p.notes}</div>}
+           <button onClick={() => setEditingMeasurementId(p.id)} className="mt-2 text-[10px] bg-blue-500 text-white px-3 py-1 rounded shadow-sm hover:bg-blue-600 transition-colors">Düzenle</button>
+        </div>
+      </div>
+    );
+  }
+
+                              if (editingMeasurementId === p.id) return renderMeasurementForm(room, window, true);
+                            return (
                             <div key={p.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 shadow-sm ml-6 relative">
                               
                               <div className="flex justify-between items-start mb-3">
@@ -1763,137 +1941,15 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                 </div>
                               )}
                             </div>
-                          ))}
+                          );
+                          })}
                         </div>
 
                         {/* MEASUREMENT MODE: Add new Raw Measurement */}
                         {mode === 'MEASUREMENT' && (
                           activeWindowIdForProduct === window.id ? (
-                            <div className="mt-4 border-2 border-blue-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-lg ml-6">
-                              <div className="bg-blue-50 dark:bg-gray-900 p-3 border-b border-blue-100 dark:border-gray-700 flex justify-between items-center">
-                                <h5 className="font-bold text-blue-900 dark:text-gray-100">
-                                  {editingMeasurementId ? "Saha Ölçüsü Düzenleme Formu" : "Saha Ölçü Formu"}
-                                </h5>
-                                <button onClick={() => { setActiveWindowIdForProduct(null); setEditingMeasurementId(null); }}><X className="w-5 h-5 text-blue-400 hover:text-blue-600 dark:text-gray-400 dark:hover:text-gray-200" /></button>
-                              </div>
-                              
-                              <div className="p-4 space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div>
-                                    <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Ölçüm Şablonu</label>
-                                    <select 
-                                      value={selectedTemplate} 
-                                      onChange={(e) => { setSelectedTemplate(e.target.value); setRawValues({}); }}
-                                      className="w-full p-2 border rounded-lg bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                                    >
-                                      {Object.values(MEASUREMENT_TEMPLATES).map(t => (
-                                        <option key={t.type} value={t.type}>{getTemplateLabel(t.type)}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Ölçüyü Alan</label>
-                                    {permissions.canOverrideMeasuredBy ? (
-                                      /* ADMIN/SALES can select who measured */
-                                      <select 
-                                        value={overrideMeasuredById} 
-                                        onChange={(e) => setOverrideMeasuredById(e.target.value)}
-                                        className="w-full p-2 border rounded-lg bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                                      >
-                                        {measurementEmployees.map(u => <option key={u.id} value={u.id}>{u.name} ({(ROLE_PERMISSIONS[u.role] || { label: u.role }).label})</option>)}
-                                      </select>
-                                    ) : (
-                                      /* Normal users see their own name, read-only */
-                                      <div className="w-full p-2 border rounded-lg bg-gray-100 dark:bg-gray-900/50 dark:border-gray-700 text-gray-800 dark:text-gray-200 text-sm font-medium flex items-center gap-2">
-                                        <Shield className="w-3.5 h-3.5 text-blue-500" />
-                                        {currentUser?.name || "Bilinmiyor"}
-                                        <span className="text-[10px] text-gray-500 dark:text-gray-500 ml-auto">Otomatik</span>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {selectedTemplate === 'CURTAIN_DETAIL' && (
-                                  <div className="mb-4">
-                                    <FacadeSegmentsEditor 
-                                      key={activeWindowIdForProduct || 'new'}
-                                      segments={rawValues.facadeSegments || []}
-                                      onChange={(segments) => setRawValues({...rawValues, facadeSegments: segments})}
-                                    />
-                                  </div>
-                                )}
-
-                                {selectedTemplate === 'PLICELL' && (
-                                  <div className="mb-4">
-                                    <PlicellCamListEditor 
-                                      camAdedi={rawValues.camAdedi}
-                                      ortakCamBoyuCm={rawValues.ortakCamBoyuCm}
-                                      profilRengi={rawValues.profilRengi}
-                                      plicellCamListesi={rawValues.plicellCamListesi}
-                                      onChange={(data) => setRawValues({...rawValues, ...data})}
-                                    />
-                                  </div>
-                                )}
-                                
-                                <div className={`grid gap-3 bg-gray-50 dark:bg-gray-800/50 p-3 rounded border dark:border-gray-700 ${selectedTemplate === 'CURTAIN_DETAIL' ? 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
-                                  {selectedTemplate === 'CURTAIN_DETAIL' && (
-                                    <div className="col-span-1 sm:col-span-2 md:col-span-3 text-sm font-bold text-gray-700 dark:text-gray-300 mb-2 border-b pb-1 dark:border-gray-700">Yükseklik Bilgileri</div>
-                                  )}
-                                  {MEASUREMENT_TEMPLATES[selectedTemplate]?.fields.filter(f => !f.hidden && selectedTemplate !== 'PLICELL').map(f => {
-                                    const isNotesField = f.key === 'notes' || f.key === 'yukseklikNotu';
-                                    return (
-                                      <div key={f.key} className={isNotesField ? 'col-span-1 sm:col-span-full' : ''}>
-                                        <label className="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1">{f.label}</label>
-                                        {f.type === 'select' ? (
-                                          <select
-                                            value={rawValues[f.key] !== undefined ? rawValues[f.key] : (f.options && f.options.length > 0 ? f.options[0] : '')}
-                                            onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
-                                            className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
-                                          >
-                                            {f.options?.map(opt => (
-                                              <option key={opt} value={opt}>{opt}</option>
-                                            ))}
-                                          </select>
-                                        ) : isNotesField ? (
-                                          <textarea 
-                                            placeholder={f.label}
-                                            value={rawValues[f.key] !== undefined ? rawValues[f.key] : (f.defaultValue !== undefined ? f.defaultValue : '')}
-                                            onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
-                                            className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow resize-y"
-                                            rows={2}
-                                          />
-                                        ) : (
-                                          <input 
-                                            type={f.type} 
-                                            step={f.type === 'number' ? 'any' : undefined}
-                                            placeholder={f.label}
-                                            value={rawValues[f.key] !== undefined ? rawValues[f.key] : (f.defaultValue !== undefined ? f.defaultValue : '')}
-                                            onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
-                                            className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
-                                          />
-                                        )}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-
-                                <div>
-                                  <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Saha Notları (İsteğe Bağlı, Engeller vb.)</label>
-                                  <textarea 
-                                    value={measurementNotes} 
-                                    placeholder="Herhangi bir engel veya not var mı?"
-                                    onChange={(e) => setMeasurementNotes(e.target.value)}
-                                    className="w-full p-2 border dark:border-gray-700 rounded bg-white dark:bg-gray-900 dark:text-white dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
-                                    rows={2}
-                                  />
-                                </div>
-
-                                <button onClick={() => handleSaveMeasurement(room.id, window.id)} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow-md transition-colors text-sm">
-                                  {editingMeasurementId ? "Değişiklikleri Kaydet" : "Ölçüyü Kaydet"}
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
+                              renderMeasurementForm(room, window, false)
+                            ) : (
                             <div className="ml-6 mt-3">
                               <button onClick={() => openMeasurementForm(window)} className="text-sm font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 px-4 py-2 rounded-lg flex items-center gap-2 w-full justify-center border border-transparent dark:border-blue-800/50 transition-colors">
                                 <Plus className="w-4 h-4" /> Yeni Şablonla Ölçü Al
@@ -1934,6 +1990,41 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
                     {['ADMIN', 'MODERATOR'].includes(normRole) && (
                       <div className="mt-4 border-t border-gray-200 dark:border-gray-700/50 pt-2">
+                        
+                        {/* ALT SIRAYA YENİ ODA EKLE */}
+                        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700/50 flex justify-center">
+                          {isAddingRoom ? (
+                            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 shadow-sm space-y-3 w-full max-w-md">
+                              <div className="space-y-1">
+                                <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Oda Adı</label>
+                                <input
+                                  type="text"
+                                  value={newRoomName}
+                                  onChange={(e) => setNewRoomName(e.target.value)}
+                                  placeholder="Örn: Salon, Yatak Odası, Mutfak"
+                                  className="w-full px-3 py-2 rounded-lg border border-gray-250 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
+                                  autoFocus
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleSaveRoom();
+                                    else if (e.key === 'Escape') { setIsAddingRoom(false); setNewRoomName(""); }
+                                  }}
+                                />
+                              </div>
+                              <div className="flex gap-2">
+                                <button type="button" onClick={() => { setIsAddingRoom(false); setNewRoomName(""); }} className="flex-1 px-3 py-2 border border-gray-250 dark:border-gray-750 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg text-xs font-bold transition-colors cursor-pointer">İptal</button>
+                                <button type="button" onClick={handleSaveRoom} disabled={!newRoomName.trim()} className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:bg-blue-600/50 disabled:cursor-not-allowed">Kaydet</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button 
+                              onClick={() => setIsAddingRoom(true)} 
+                              className="text-sm font-bold text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 flex items-center gap-1.5 transition-colors"
+                            >
+                              <Plus className="w-4 h-4" /> Alt Sıraya Yeni Oda Ekle
+                            </button>
+                          )}
+                        </div>
+
                         <PreSalesIntentSection 
                           roomId={room.id}
                           roomName={room.name}
