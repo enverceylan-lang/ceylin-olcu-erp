@@ -277,9 +277,18 @@ export default function CarilerPage() {
               >
                 <Download className="w-4 h-4" />
                 Excel'e Aktar
+                </button>
+              </>
+            )}
+            {normalizeRole(currentUser?.role) === 'ADMIN' && (
+              <button
+                onClick={handlePreviewStandardization}
+                className="flex items-center gap-2 bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-lg transition-colors font-medium text-sm shadow-sm"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Cari Adlarını Standartlaştır
               </button>
-            </>
-          )}
+            )}
 
           {canAddCustomer(currentUser) && (
             <Link href="/cariler/yeni" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors font-medium text-sm shadow-sm">
