@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, ChevronRight, Layers, Camera, Video, FileText, CheckCircle, Shield, AlertTriangle, MapPin, MessageCircle, Loader2, Ruler } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, ChevronRight, Layers, Camera, Video, FileText, CheckCircle, Shield, AlertTriangle, MapPin, MessageCircle, Loader2, Ruler, RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useStore, WindowItem, MEASUREMENT_TEMPLATES, ProductMeasurement } from "@/store/useStore";
@@ -12,7 +12,7 @@ import { MediaPreviewModal } from "@/components/MediaPreviewModal";
 import { syncNow } from "@/lib/syncService";
 import { buildWhatsAppShortReport, calculateMechanicalCurtainM2, calculatePlicellM2, getValidNote } from "@/lib/reportFormatters";
 import { MeasurementVisualReport } from "@/components/reports/MeasurementVisualReport";
-import { localDraftDb, FieldMeasurementDraft } from "@/lib/localDraftDb";
+import { localDraftDb, FieldMeasurementDraft, forceRequeueCustomerMeasurementTree } from "@/lib/localDraftDb";
 import { useSalesStore } from "@/store/salesStore";
 import { createDraftSaleFromCustomer } from "@/lib/salesAdapter";
 import { ShoppingCart, Edit, Merge, Archive } from "lucide-react";
@@ -40,6 +40,24 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
+  const [isRecovering, setIsRecovering] = useState(false);
+
+  const handleTargetRecover = async () => {
+    if (!customer?.id) return;
+    setIsRecovering(true);
+    try {
+      const result = await forceRequeueCustomerMeasurementTree(customer.id);
+      if (result.counts) {
+        alert(`Sonuç: ${result.message}\n\nCari ID: ${customer.id.substring(0, 8)}...\nOdalar: ${result.counts.roomsCount}\nAçıklıklar: ${result.counts.openingsCount}\nÖlçüler: ${result.counts.measurementsCount}\nKuyrukta: ${result.queued ? 'EVET' : 'HAYIR'}\nZaten Kuyruktaydı: ${result.alreadyQueued ? 'EVET' : 'HAYIR'}`);
+      } else {
+        alert(result.message);
+      }
+    } catch (err: any) {
+      alert("Kurtarma sırasında hata oluştu: " + err.message);
+    } finally {
+      setIsRecovering(false);
+    }
+  };
   const [isMoveRoomModalOpen, setIsMoveRoomModalOpen] = useState(false);
   const [roomToMove, setRoomToMove] = useState<any>(null);
   
@@ -891,6 +909,21 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
         </div>
         
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+          {currentUser?.role === 'ADMIN' && (
+            <button
+              onClick={handleTargetRecover}
+              disabled={isRecovering}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer"
+              title="Bu Carinin Ölçülerini Yeniden Gönderime Hazırla"
+            >
+              {isRecovering ? (
+                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+              ) : (
+                <RefreshCw className="w-4 h-4" />
+              )}
+              <span className="hidden sm:inline">Ölçü Kurtar</span>
+            </button>
+          )}
           {canEdit && (
             <button
               onClick={() => setIsEditModalOpen(true)}

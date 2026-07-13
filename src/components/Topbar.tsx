@@ -90,17 +90,7 @@ firstStatus: ${result.debug.firstStatus}
     <header className="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-4 lg:px-8">
       <div className="flex items-center gap-4">
         
-              {currentUser?.role === 'ADMIN' && (
-                <button
-                  onClick={handleRecover}
-                  disabled={isRecovering}
-                  className="flex items-center space-x-1 bg-red-100 hover:bg-red-200 text-red-700 px-2 sm:px-4 py-1.5 sm:py-2 rounded-full transition-colors text-xs font-semibold disabled:opacity-50 mr-2"
-                  title="Force Requeue (Kurtar)"
-                >
-                  <RefreshCw className={`w-3 h-3 sm:w-4 sm:h-4 ${isRecovering ? 'animate-spin' : ''}`} />
-                  <span className="hidden sm:inline">{isRecovering ? 'Bekleyin...' : 'Kurtar'}</span>
-                </button>
-              )}
+              {/* Global Kurtar button disabled per user request */}
 <button 
           onClick={toggleMobileMenu}
           className="md:hidden p-2 rounded-md text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"

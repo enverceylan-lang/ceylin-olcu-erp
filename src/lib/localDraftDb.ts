@@ -1,6 +1,7 @@
 import Dexie, { type Table } from 'dexie';
-import { enqueueSyncEvent } from './localSyncQueueDb';
-import { loadLocalCustomers, saveLocalCustomer } from './localCustomerDb';
+import { type Customer } from '@/store/useStore';
+import { enqueueSyncEvent, localSyncQueueDb } from './localSyncQueueDb';
+import { loadLocalCustomers, saveLocalCustomer, localCustomerDb } from './localCustomerDb';
 
 export interface InboundMeasurement {
   changeId: string;
@@ -440,4 +441,79 @@ export async function forceRequeueAllMeasurementDrafts(): Promise<{
   }
 
   return result;
+}
+
+export function getMeasurementTreeCounts(customer: Customer) {
+  let roomsCount = 0;
+  let openingsCount = 0;
+  let measurementsCount = 0;
+  let hasRawValues = false;
+
+  if (customer.rooms && Array.isArray(customer.rooms)) {
+    roomsCount = customer.rooms.length;
+    for (const room of customer.rooms) {
+      if (room.windows && Array.isArray(room.windows)) {
+        openingsCount += room.windows.length;
+        for (const w of room.windows) {
+          if (w.products && Array.isArray(w.products)) {
+            measurementsCount += w.products.length;
+            for (const p of w.products) {
+              if (p.rawValues) hasRawValues = true;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return { roomsCount, openingsCount, measurementsCount, hasRawValues };
+}
+
+export async function forceRequeueCustomerMeasurementTree(customerId: string): Promise<{
+  success: boolean;
+  message: string;
+  counts?: ReturnType<typeof getMeasurementTreeCounts>;
+  queued?: boolean;
+  alreadyQueued?: boolean;
+}> {
+  const customer = await localCustomerDb.customers.get(customerId);
+  if (!customer) {
+    return { success: false, message: "Bu cari local veritabanında bulunamadı." };
+  }
+
+  const counts = getMeasurementTreeCounts(customer);
+  if (counts.roomsCount === 0) {
+    return { success: false, message: "Bu caride yerel ölçü ağacı bulunamadı.", counts };
+  }
+
+  // Check if already queued
+  const pending = await localSyncQueueDb.pendingSyncEvents
+      .where('syncStatus')
+      .equals('PENDING')
+      .toArray();
+      
+  const isAlreadyQueued = pending.some(ev => 
+    ev.entityType === 'CUSTOMER' && 
+    ev.entityId === customerId && 
+    ev.operation === 'UPDATE' && 
+    ev.patch && 
+    ev.patch.syncIntent === 'MEASUREMENT_TREE_RECOVERY' &&
+    ev.patch.rooms && 
+    ev.patch.rooms.length > 0
+  );
+
+  if (isAlreadyQueued) {
+    return { success: true, message: "Bu carinin ölçü kurtarma payload'ı zaten gönderim kuyruğunda.", counts, alreadyQueued: true, queued: false };
+  }
+
+  const now = new Date().toISOString();
+  const recoveryPayload = {
+    ...customer,
+    syncIntent: 'MEASUREMENT_TREE_RECOVERY',
+    recoveryQueuedAt: now
+  };
+
+  await enqueueSyncEvent('CUSTOMER', customer.id, 'UPDATE', recoveryPayload);
+
+  return { success: true, message: "Bu carinin ölçü ağacı gönderim kuyruğuna alındı. Şimdi Ölçüleri Gönder butonuna basabilirsiniz.", counts, alreadyQueued: false, queued: true };
 }
