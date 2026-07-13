@@ -76,6 +76,19 @@ export async function processAsNewCustomer(inbound: InboundMeasurement, adminId:
 
   const rooms = extractRoomsFromPatch(patch);
 
+  if (patch.syncIntent === 'MEASUREMENT_TREE_RECOVERY' && (!rooms || rooms.length === 0)) {
+    await localDraftDb.inboundMeasurements.update(inbound.changeId, {
+      status: 'FAILED_MISSING_MEASUREMENT_PAYLOAD' as any
+    });
+    console.warn(`[InboundProcessor] FAILED_MISSING_MEASUREMENT_PAYLOAD {
+  entityType: '${inbound.entityType}',
+  entityId: '${inbound.entityId}',
+  syncIntent: '${patch.syncIntent}',
+  roomsCount: 0
+}`);
+    throw new Error('Eksik ölçü ağacı: FAILED_MISSING_MEASUREMENT_PAYLOAD.');
+  }
+
   const newCustomer: Customer = {
     id: generateUUID(),
     name: customerName,
@@ -121,6 +134,19 @@ export async function processAsMerge(inbound: InboundMeasurement, customerId: st
 
   const patch = inbound.patch || {};
   const newRooms = extractRoomsFromPatch(patch);
+
+  if (patch.syncIntent === 'MEASUREMENT_TREE_RECOVERY' && (!newRooms || newRooms.length === 0)) {
+    await localDraftDb.inboundMeasurements.update(inbound.changeId, {
+      status: 'FAILED_MISSING_MEASUREMENT_PAYLOAD' as any
+    });
+    console.warn(`[InboundProcessor] FAILED_MISSING_MEASUREMENT_PAYLOAD {
+  entityType: '${inbound.entityType}',
+  entityId: '${inbound.entityId}',
+  syncIntent: '${patch.syncIntent}',
+  roomsCount: 0
+}`);
+    throw new Error('Eksik ölçü ağacı: FAILED_MISSING_MEASUREMENT_PAYLOAD.');
+  }
 
   // Append, do not merge.
   const updatedCustomer: Customer = {

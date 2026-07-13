@@ -76,7 +76,7 @@ firstStatus: ${result.debug.firstStatus}
     setIsRecovering(true);
     try {
       const summary = await forceRequeueAllMeasurementDrafts();
-      alert(`Recovery Özeti:\nToplam Taslak: ${summary.found}\nÖlçü İçeren: ${summary.withMeasurements}\nKuyruğa Alınan: ${summary.requeued}\nAtlanan (Ölçüsüz veya Zaten Kurtarılmış): ${summary.skipped}\n\nBu cihazdaki ölçüler tekrar gönderim kuyruğuna alındı. Şimdi "Ölçüleri Gönder" butonuna basabilirsiniz.`);
+      alert(`Recovery Özeti:\nDraft Toplam: ${summary.draftsFound}\nÖlçü İçeren: ${summary.draftsWithMeasurements}\nKuyruğa Alınan: ${summary.draftsRequeued}\nAtlanan (Ölçüsüz veya Zaten Kurtarılmış): ${summary.skipped}\n\nBu cihazdaki ölçüler tekrar gönderim kuyruğuna alındı. Şimdi "Ölçüleri Gönder" butonuna basabilirsiniz.`);
     } catch (err: any) {
       alert("Kurtarma sırasında hata oluştu: " + err.message);
     } finally {

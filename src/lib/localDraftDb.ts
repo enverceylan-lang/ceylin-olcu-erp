@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import { enqueueSyncEvent } from './localSyncQueueDb';
+import { loadLocalCustomers, saveLocalCustomer } from './localCustomerDb';
 
 export interface InboundMeasurement {
   changeId: string;
@@ -358,53 +359,85 @@ export async function deleteMeasurementDraft(id: string): Promise<void> {
   await enqueueSyncEvent('DRAFT', id, 'SOFT_DELETE', { isDeleted: true });
 }
 
-export async function forceRequeueAllMeasurementDrafts(): Promise<{ found: number, withMeasurements: number, requeued: number, skipped: number }> {
+export async function forceRequeueAllMeasurementDrafts(): Promise<{ 
+  draftsFound: number, 
+  draftsWithMeasurements: number, 
+  draftsRequeued: number, 
+  customersFound: number,
+  customersWithMeasurements: number,
+  customersRequeued: number,
+  skipped: number 
+}> {
   const drafts = await localDraftDb.measurementDrafts.toArray();
+  const customers = await loadLocalCustomers();
   const now = new Date().toISOString();
   
-  let found = drafts.length;
-  let withMeasurements = 0;
-  let requeued = 0;
-  let skipped = 0;
+  let result = {
+    draftsFound: drafts.length,
+    draftsWithMeasurements: 0,
+    draftsRequeued: 0,
+    customersFound: customers.length,
+    customersWithMeasurements: 0,
+    customersRequeued: 0,
+    skipped: 0
+  };
 
+  // 1. Process Drafts
   for (const draft of drafts) {
-    // Check if it has actual measurements
     let hasMeasurements = false;
     if (draft.rooms && Array.isArray(draft.rooms) && draft.rooms.length > 0) {
-      for (const r of draft.rooms) {
-        const wList = r.windows || r.openings || [];
-        for (const w of wList) {
-          const pList = w.products || w.measurements || [];
-          if (pList.length > 0) {
-            hasMeasurements = true;
-            break;
-          }
-        }
-        if (hasMeasurements) break;
-      }
+      hasMeasurements = true;
     }
 
     if (!hasMeasurements) {
-      skipped++;
+      result.skipped++;
       continue;
     }
     
-    withMeasurements++;
+    result.draftsWithMeasurements++;
 
-    // Prevent duplicate requeue if already recovered successfully
     if (draft.recoveryQueuedAt) {
-      skipped++;
+      result.skipped++;
       continue;
     }
 
-    // Full payload enqueue
     draft.recoveryQueuedAt = now;
-    draft.updatedAt = now;
+      (draft as any).syncIntent = 'MEASUREMENT_TREE_RECOVERY';
+      draft.updatedAt = now;
     
     await localDraftDb.measurementDrafts.put(draft);
     await enqueueSyncEvent('DRAFT', draft.id, 'UPDATE', draft);
-    requeued++;
+    result.draftsRequeued++;
   }
 
-  return { found, withMeasurements, requeued, skipped };
+  // 2. Process Customers
+  for (const customer of customers) {
+    let hasMeasurements = false;
+    if (customer.rooms && Array.isArray(customer.rooms) && customer.rooms.length > 0) {
+      hasMeasurements = true;
+    }
+
+    if (!hasMeasurements) {
+      result.skipped++;
+      continue;
+    }
+
+    result.customersWithMeasurements++;
+
+    // Safe cast to any to check if recoveryQueuedAt exists
+    if ((customer as any).recoveryQueuedAt) {
+      result.skipped++;
+      continue;
+    }
+
+    (customer as any).recoveryQueuedAt = now;
+      (customer as any).syncIntent = 'MEASUREMENT_TREE_RECOVERY';
+      customer.updatedAt = now;
+
+    await saveLocalCustomer(customer);
+    // enqueueSyncEvent is called inside saveLocalCustomer, so it will queue the full customer payload!
+    result.customersRequeued++;
+  }
+
+  return result;
 }

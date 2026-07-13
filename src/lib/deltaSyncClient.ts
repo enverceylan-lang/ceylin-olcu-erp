@@ -208,9 +208,12 @@ export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise
            // Merge the patches
            const mergedPatch = { ...existing.patch, ...change.patch };
            
-           // Ensure critical arrays are not overwritten by undefined or missing fields in subsequent patches
-           if (existing.patch && existing.patch.rooms && (!change.patch || !change.patch.rooms)) {
-               mergedPatch.rooms = existing.patch.rooms;
+           // Ensure critical arrays are not overwritten by undefined, missing fields, or empty arrays in subsequent patches
+           // An empty array in a later patch shouldn't wipe out existing rooms unless explicitly instructed via a deletion operation (which we don't have for rooms yet).
+           if (existing.patch && existing.patch.rooms && existing.patch.rooms.length > 0) {
+               if (!change.patch || !change.patch.rooms || change.patch.rooms.length === 0) {
+                   mergedPatch.rooms = existing.patch.rooms;
+               }
            }
            
            latestChanges.set(key, {
