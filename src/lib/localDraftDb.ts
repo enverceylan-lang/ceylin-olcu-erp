@@ -140,7 +140,47 @@ export async function saveInboundMeasurement(inbound: InboundMeasurement): Promi
   );
   
   if (existingEntity) {
-    // If it already exists in the pool (no matter the status), we do NOT re-add it as NEW.
+    const hasRooms = inbound.patch?.rooms && Array.isArray(inbound.patch.rooms) && inbound.patch.rooms.length > 0;
+    
+    if (inbound.patch?.syncIntent === 'MEASUREMENT_TREE_RECOVERY' && hasRooms) {
+      const now = new Date().toISOString();
+      const rCount = inbound.patch.rooms.length;
+      let oCount = 0, mCount = 0;
+      inbound.patch.rooms.forEach((r: any) => {
+          const w = r.windows || r.openings || [];
+          oCount += w.length;
+          w.forEach((wi: any) => {
+              const p = wi.products || wi.measurements || [];
+              mCount += p.length;
+          });
+      });
+
+      console.log(`[Inbound] recovery payload upserted {
+  entityType: '${inbound.entityType}',
+  entityIdShort: '${inbound.entityId.substring(0,8)}',
+  roomsCount: ${rCount},
+  openingsCount: ${oCount},
+  measurementsCount: ${mCount},
+  previousStatus: '${existingEntity.status}',
+  newStatus: 'NEW'
+}`);
+
+      const updatedPatch = {
+        ...inbound.patch,
+        _recoveryMetadata: {
+          updatedAt: now,
+          previousStatus: existingEntity.status
+        }
+      };
+
+      await localDraftDb.inboundMeasurements.update(existingEntity.changeId, {
+        patch: updatedPatch,
+        status: 'NEW'
+      });
+      return;
+    }
+
+    // If it already exists in the pool and is NOT a valid recovery payload, we do NOT re-add it as NEW.
     return;
   }
 
