@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import { Customer } from '@/store/useStore';
+import { normalizeCariName } from './stringUtils';
 import { enqueueSyncEvent } from './localSyncQueueDb';
 
 class LocalCustomerDatabase extends Dexie {
@@ -26,6 +27,9 @@ export async function loadLocalCustomers(): Promise<Customer[]> {
 
 export async function saveLocalCustomer(customer: Customer): Promise<void> {
   try {
+    if (customer && customer.name) {
+      customer.name = normalizeCariName(customer.name);
+    }
     const existing = await localCustomerDb.customers.get(customer.id);
     const operation = existing ? 'UPDATE' : 'INSERT';
 

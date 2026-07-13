@@ -3,7 +3,7 @@
 import {
   Search, Ruler, ArrowRight, ChevronDown, ChevronUp, User, Calendar, Layers,
   Image, Video as VideoIcon, CheckCircle2, AlertCircle, ClipboardList,
-  Trash2, Edit3, X, Save, BadgeCheck, Filter, CloudDownload, RefreshCw
+  Trash2, Edit3, X, Save, BadgeCheck, Filter, CloudDownload, RefreshCw, MapPin
 } from "lucide-react";
 import Link from "next/link";
 import { useStore } from "@/store/useStore";
@@ -247,6 +247,7 @@ export default function OlculerPage() {
       let videoCount = 0;
       let latestDate: Date | null = null;
       let latestMeasuredBy = "";
+      let sortDate = new Date((customer as any).lastMeasurementAt || customer.updatedAt || customer.createdAt || 0).getTime();
 
       for (const room of activeRooms) {
         photoCount += (room.photos || []).length;
@@ -263,11 +264,18 @@ export default function OlculerPage() {
             videoCount += (p.videos || []).length;
             if (p.measuredDate) {
               const d = new Date(p.measuredDate);
+              if (d.getTime() > sortDate) sortDate = d.getTime();
               if (!latestDate || d.getTime() > latestDate.getTime()) {
                 latestDate = d;
                 latestMeasuredBy = p.measuredBy || "";
+                }
+              } else if (p.createdAt) {
+                const d = new Date(p.createdAt);
+                if (d.getTime() > sortDate) sortDate = d.getTime();
+              } else if (p.updatedAt) {
+                const d = new Date(p.updatedAt);
+                if (d.getTime() > sortDate) sortDate = d.getTime();
               }
-            }
           }
         }
       }
@@ -279,7 +287,8 @@ export default function OlculerPage() {
         measurementCount,
         photoCount,
         videoCount,
-        latestDateStr: latestDate ? latestDate.toLocaleDateString("tr-TR") : "-",
+        latestDateStr: latestDate ? latestDate.toLocaleDateString("tr-TR", { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : "-",
+        sortDate,
         latestMeasuredBy: latestMeasuredBy || "-",
       };
     })
@@ -287,7 +296,8 @@ export default function OlculerPage() {
       (item) =>
         item.customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (item.customer.phone && item.customer.phone.includes(searchTerm))
-    );
+    )
+    .sort((a, b) => b.sortDate - a.sortDate);
 
   const handleSelectCustomerFromModal = (customerId: string) => {
     if (!customerSearchInboundId) return;
@@ -972,6 +982,9 @@ export default function OlculerPage() {
                       </Link>
                     </h3>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+                      <span className="flex items-center gap-1">
+                        <MapPin className="w-3.5 h-3.5" /> Lokasyon: {customer.address || "Belirtilmemiş"}
+                      </span>
                       <span className="flex items-center gap-1">
                         <Calendar className="w-3.5 h-3.5" /> Son Ölçüm: {latestDateStr}
                       </span>

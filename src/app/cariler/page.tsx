@@ -12,6 +12,8 @@ import { RefreshCw, CheckCircle, AlertCircle, WifiOff, Upload, Download } from "
 import { ExcelImportModal } from "@/components/modals/ExcelImportModal";
 import { ExcelExportModal } from "@/components/modals/ExcelExportModal";
 import { customerExcelProfile } from "@/lib/excelBridge";
+import { normalizeCariName } from "@/lib/stringUtils";
+import { saveLocalCustomer } from "@/lib/localCustomerDb";
 
 export default function CarilerPage() {
   const { customers, deleteCustomer, syncStatus, addCustomer, updateCustomer } = useStore();
@@ -24,6 +26,54 @@ export default function CarilerPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [isStandardizeModalOpen, setIsStandardizeModalOpen] = useState(false);
+  const [standardizePreview, setStandardizePreview] = useState<{ total: number; changed: number; examples: string[] } | null>(null);
+  const [isStandardizing, setIsStandardizing] = useState(false);
+
+  const handlePreviewStandardization = () => {
+    const changes: { oldName: string; newName: string }[] = [];
+    customers.forEach(c => {
+      if (c.name) {
+        const norm = normalizeCariName(c.name);
+        if (norm !== c.name) {
+          changes.push({ oldName: c.name, newName: norm });
+        }
+      }
+    });
+    setStandardizePreview({
+      total: customers.length,
+      changed: changes.length,
+      examples: changes.slice(0, 10).map(x => `${x.oldName} -> ${x.newName}`)
+    });
+    setIsStandardizeModalOpen(true);
+  };
+
+  const executeStandardization = async () => {
+    if (!standardizePreview || standardizePreview.changed === 0) {
+      setIsStandardizeModalOpen(false);
+      return;
+    }
+    setIsStandardizing(true);
+    let count = 0;
+    try {
+      for (const c of customers) {
+        if (c.name) {
+          const norm = normalizeCariName(c.name);
+          if (norm !== c.name) {
+            await saveLocalCustomer({ ...c, name: norm });
+            count++;
+          }
+        }
+      }
+      alert(`${count} cari adı standartlaştırıldı.`);
+      window.dispatchEvent(new Event('local-customers-updated'));
+    } catch (e: any) {
+      alert("Hata: " + e.message);
+    } finally {
+      setIsStandardizing(false);
+      setIsStandardizeModalOpen(false);
+    }
+  };
 
   const handleImport = async (previewResult: any) => {
     for (const row of previewResult.rows) {
@@ -422,6 +472,58 @@ export default function CarilerPage() {
         data={customers}
         templates={exportTemplates}
       />
+
+      {isStandardizeModalOpen && standardizePreview && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl max-w-lg w-full p-6 shadow-xl">
+            <h2 className="text-xl font-bold mb-4">Cari Adlarını Standartlaştır</h2>
+            <div className="space-y-4 mb-6">
+              <p className="text-gray-600 dark:text-gray-300">
+                Sistemdeki cari adları büyük harf ve tek boşluk kuralına göre düzenlenecektir.
+              </p>
+              <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
+                <p><strong>Toplam Cari:</strong> {standardizePreview.total}</p>
+                <p><strong>Düzeltilecek:</strong> {standardizePreview.changed}</p>
+              </div>
+              
+              {standardizePreview.changed > 0 && (
+                <div>
+                  <h3 className="font-semibold mb-2">Örnekler:</h3>
+                  <ul className="list-disc pl-5 text-sm text-gray-600 dark:text-gray-400 max-h-40 overflow-y-auto">
+                    {standardizePreview.examples.map((ex, i) => (
+                      <li key={i}>{ex}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              
+              <div className="bg-yellow-50 dark:bg-yellow-900/30 p-3 rounded-lg flex items-start gap-2 border border-yellow-200 dark:border-yellow-800/30">
+                <AlertTriangle className="w-5 h-5 text-yellow-600 dark:text-yellow-500 shrink-0 mt-0.5" />
+                <p className="text-sm text-yellow-800 dark:text-yellow-400">
+                  Cari adları büyük harf standardına çevrilecek. Ölçü/satış/veri silinmeyecek. Devam edilsin mi?
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setIsStandardizeModalOpen(false)}
+                disabled={isStandardizing}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800 font-medium"
+              >
+                İptal
+              </button>
+              <button
+                onClick={executeStandardization}
+                disabled={isStandardizing || standardizePreview.changed === 0}
+                className="bg-yellow-600 hover:bg-yellow-700 text-white px-6 py-2 rounded-lg font-medium disabled:opacity-50"
+              >
+                {isStandardizing ? 'İşleniyor...' : 'Onayla ve Uygula'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

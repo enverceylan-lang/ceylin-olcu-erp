@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { normalizeCariName } from '@/lib/stringUtils';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { useAuthStore, normalizeRole } from './useAuthStore';
 import { saveLocalCustomer, saveLocalCustomers, softDeleteLocalCustomer, loadLocalCustomers } from '@/lib/localCustomerDb';
@@ -543,6 +544,7 @@ export const useStore = create<AppState>()(
           }
         }
 
+        if (data.name) { data.name = normalizeCariName(data.name); }
         const newCustomer: Customer = {
           ...data,
           id: newCustomerId,
@@ -588,6 +590,7 @@ export const useStore = create<AppState>()(
         const now = new Date().toISOString();
         const target = state.customers.find(c => c.id === id);
         if (target) {
+          if (data.name) { data.name = normalizeCariName(data.name); }
           const updatedCustomer = {
             ...target,
             ...data,
