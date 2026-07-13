@@ -15,6 +15,19 @@ import { customerExcelProfile } from "@/lib/excelBridge";
 import { normalizeCariName } from "@/lib/stringUtils";
 import { saveLocalCustomer } from "@/lib/localCustomerDb";
 
+function isArchivedOrDeletedCustomer(customer: any) {
+  return Boolean(
+    customer.isArchived ||
+    customer.archivedAt ||
+    customer.deletedAt ||
+    customer.isDeleted ||
+    customer.status === 'ARCHIVED' ||
+    customer.status === 'DELETED' ||
+    customer.active === false ||
+    customer.isActive === false
+  );
+}
+
 export default function CarilerPage() {
   const { customers, deleteCustomer, syncStatus, addCustomer, updateCustomer } = useStore();
   const { currentUser } = useAuthStore();
@@ -27,12 +40,20 @@ export default function CarilerPage() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isStandardizeModalOpen, setIsStandardizeModalOpen] = useState(false);
-  const [standardizePreview, setStandardizePreview] = useState<{ total: number; changed: number; examples: string[] } | null>(null);
+  const [standardizePreview, setStandardizePreview] = useState<{ totalActive: number; changedActive: number; excludedCount: number; examples: string[] } | null>(null);
   const [isStandardizing, setIsStandardizing] = useState(false);
 
   const handlePreviewStandardization = () => {
     const changes: { oldName: string; newName: string }[] = [];
+    let totalActive = 0;
+    let excludedCount = 0;
+
     customers.forEach(c => {
+      if (isArchivedOrDeletedCustomer(c)) {
+        excludedCount++;
+        return;
+      }
+      totalActive++;
       if (c.name) {
         const norm = normalizeCariName(c.name);
         if (norm !== c.name) {
@@ -40,16 +61,18 @@ export default function CarilerPage() {
         }
       }
     });
+
     setStandardizePreview({
-      total: customers.length,
-      changed: changes.length,
+      totalActive,
+      changedActive: changes.length,
+      excludedCount,
       examples: changes.slice(0, 10).map(x => `${x.oldName} -> ${x.newName}`)
     });
     setIsStandardizeModalOpen(true);
   };
 
   const executeStandardization = async () => {
-    if (!standardizePreview || standardizePreview.changed === 0) {
+    if (!standardizePreview || standardizePreview.changedActive === 0) {
       setIsStandardizeModalOpen(false);
       return;
     }
@@ -57,6 +80,8 @@ export default function CarilerPage() {
     let count = 0;
     try {
       for (const c of customers) {
+        if (isArchivedOrDeletedCustomer(c)) continue;
+        
         if (c.name) {
           const norm = normalizeCariName(c.name);
           if (norm !== c.name) {
@@ -491,11 +516,12 @@ export default function CarilerPage() {
                 Sistemdeki cari adları büyük harf ve tek boşluk kuralına göre düzenlenecektir.
               </p>
               <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
-                <p><strong>Toplam Cari:</strong> {standardizePreview.total}</p>
-                <p><strong>Düzeltilecek:</strong> {standardizePreview.changed}</p>
+                <p><strong>Toplam Aktif Cari:</strong> {standardizePreview.totalActive}</p>
+                  <p><strong>Düzeltilecek Aktif Cari:</strong> {standardizePreview.changedActive}</p>
+                  <p><strong>Hariç Tutulan Arşiv/Silinmiş Cari:</strong> {standardizePreview.excludedCount}</p>
               </div>
               
-              {standardizePreview.changed > 0 && (
+              {standardizePreview.changedActive > 0 && (
                 <div>
                   <h3 className="font-semibold mb-2">Örnekler:</h3>
                   <ul className="list-disc pl-5 text-sm text-gray-600 dark:text-gray-400 max-h-40 overflow-y-auto">
@@ -524,7 +550,7 @@ export default function CarilerPage() {
               </button>
               <button
                 onClick={executeStandardization}
-                disabled={isStandardizing || standardizePreview.changed === 0}
+                disabled={isStandardizing || standardizePreview.changedActive === 0}
                 className="bg-yellow-600 hover:bg-yellow-700 text-white px-6 py-2 rounded-lg font-medium disabled:opacity-50"
               >
                 {isStandardizing ? 'İşleniyor...' : 'Onayla ve Uygula'}
