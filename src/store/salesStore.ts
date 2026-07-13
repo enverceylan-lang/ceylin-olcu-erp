@@ -49,6 +49,16 @@ export interface Sale {
   
   createdAt: string;
   updatedAt: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deleteBatchId?: string;
+  deleteSource?: string;
+  isArchived?: boolean;
+  archivedAt?: string;
+  archivedBy?: string;
+  archiveBatchId?: string;
+  archiveSource?: string;
 }
 
 interface SalesState {
@@ -59,6 +69,10 @@ interface SalesState {
   updateSale: (sale: Sale) => Promise<void>;
   removeSale: (id: string) => Promise<void>;
   transferSales: (sourceCustomerId: string, targetCustomerId: string) => Promise<void>;
+  cascadeArchiveCustomer: (customerId: string, batchId: string, username: string) => Promise<void>;
+  cascadeRestoreArchivedCustomer: (customerId: string, batchId: string) => Promise<void>;
+  cascadeMoveToTrash: (customerId: string, batchId: string, username: string) => Promise<void>;
+  cascadeRestoreFromTrash: (customerId: string, batchId: string) => Promise<void>;
 }
 
 export const useSalesStore = create<SalesState>((set, get) => ({
@@ -93,6 +107,105 @@ export const useSalesStore = create<SalesState>((set, get) => ({
     set(state => ({
       sales: state.sales.filter(s => s.id !== id)
     }));
+  },
+
+  
+  cascadeArchiveCustomer: async (customerId, batchId, username) => {
+    const state = get();
+    const now = new Date().toISOString();
+    let updated = false;
+
+    const newSales = state.sales.map(sale => {
+      if (sale.customerId === customerId && !sale.isDeleted && !sale.isArchived) {
+        updated = true;
+        const upSale = {
+          ...sale,
+          isArchived: true,
+          archivedAt: now,
+          archivedBy: username,
+          archiveBatchId: batchId,
+          archiveSource: 'CUSTOMER_CASCADE'
+        };
+        saveLocalSale(upSale).catch(console.error);
+        return upSale;
+      }
+      return sale;
+    });
+
+    if (updated) set({ sales: newSales });
+  },
+
+  cascadeRestoreArchivedCustomer: async (customerId, batchId) => {
+    const state = get();
+    let updated = false;
+
+    const newSales = state.sales.map(sale => {
+      if (sale.customerId === customerId && sale.isArchived && sale.archiveBatchId === batchId) {
+        updated = true;
+        const upSale = {
+          ...sale,
+          isArchived: false,
+          archivedAt: undefined,
+          archivedBy: undefined,
+          archiveBatchId: undefined,
+          archiveSource: undefined
+        };
+        saveLocalSale(upSale).catch(console.error);
+        return upSale;
+      }
+      return sale;
+    });
+
+    if (updated) set({ sales: newSales });
+  },
+
+  cascadeMoveToTrash: async (customerId, batchId, username) => {
+    const state = get();
+    const now = new Date().toISOString();
+    let updated = false;
+
+    const newSales = state.sales.map(sale => {
+      if (sale.customerId === customerId && !sale.isDeleted) {
+        updated = true;
+        const upSale = {
+          ...sale,
+          isDeleted: true,
+          deletedAt: now,
+          deletedBy: username,
+          deleteBatchId: batchId,
+          deleteSource: 'CUSTOMER_CASCADE'
+        };
+        saveLocalSale(upSale).catch(console.error);
+        return upSale;
+      }
+      return sale;
+    });
+
+    if (updated) set({ sales: newSales });
+  },
+
+  cascadeRestoreFromTrash: async (customerId, batchId) => {
+    const state = get();
+    let updated = false;
+
+    const newSales = state.sales.map(sale => {
+      if (sale.customerId === customerId && sale.isDeleted && sale.deleteBatchId === batchId) {
+        updated = true;
+        const upSale = {
+          ...sale,
+          isDeleted: false,
+          deletedAt: undefined,
+          deletedBy: undefined,
+          deleteBatchId: undefined,
+          deleteSource: undefined
+        };
+        saveLocalSale(upSale).catch(console.error);
+        return upSale;
+      }
+      return sale;
+    });
+
+    if (updated) set({ sales: newSales });
   },
 
   transferSales: async (sourceCustomerId: string, targetCustomerId: string) => {

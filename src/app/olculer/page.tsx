@@ -213,7 +213,7 @@ export default function OlculerPage() {
   const searchedCustomers = useMemo(() => {
     if (customerSearchQuery.length < 2) return [];
     const q = customerSearchQuery.toLowerCase();
-    return customers.filter(c => !c.isDeleted && (
+    return customers.filter(c => !c.isDeleted && !c.isArchived && (
       (c.customerCode && c.customerCode.toLowerCase().includes(q)) ||
       (c.name && c.name.toLowerCase().includes(q)) ||
       (c.phone && c.phone.includes(q)) ||
@@ -238,7 +238,7 @@ export default function OlculerPage() {
   };
 
   const customerStats = customers
-    .filter((c) => !c.isDeleted && (!currentUser || canViewCustomer(currentUser, c)))
+    .filter((c) => !c.isDeleted && !c.isArchived && (!currentUser || canViewCustomer(currentUser, c)))
     .map((customer) => {
       const activeRooms = (customer.rooms || []).filter((r) => !r.isDeleted);
       let openingCount = 0;

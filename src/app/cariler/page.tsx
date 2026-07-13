@@ -33,6 +33,7 @@ export default function CarilerPage() {
   const { currentUser } = useAuthStore();
   const [mounted, setMounted] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [viewMode, setViewMode] = useState<'ACTIVE'|'ARCHIVED'|'TRASH'>('ACTIVE');
   const [syncing, setSyncing] = useState(false);
   const [selectedTypeFilter, setSelectedTypeFilter] = useState("ALL");
   const [customerToDelete, setCustomerToDelete] = useState<any>(null);
@@ -237,7 +238,14 @@ export default function CarilerPage() {
   if (!mounted) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
 
   const filteredCustomers = customers.filter(c => {
-    if (c.isDeleted) return false;
+    if (viewMode === 'ACTIVE') {
+      if (c.isDeleted || c.isArchived) return false;
+    } else if (viewMode === 'ARCHIVED') {
+      if (!c.isArchived || c.isDeleted) return false;
+    } else if (viewMode === 'TRASH') {
+      if (!c.isDeleted) return false;
+    }
+
     if (currentUser && !canViewCustomer(currentUser, c)) return false;
     
     const cType = c.cariType || "CUSTOMER";

@@ -249,16 +249,6 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     );
   }
 
-  if (customer.isDeleted) {
-    return (
-      <div className="p-8 text-center space-y-4 bg-slate-900 border border-slate-800 rounded-2xl max-w-md mx-auto my-12 animate-fade-in">
-        <p className="text-red-500 font-bold text-lg">Cari Silinmiş</p>
-        <p className="text-slate-350 text-sm">Bu cari kartı silinmiştir ve işlem yapılamaz.</p>
-        <Link href="/cariler" className="inline-block bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-sm font-semibold transition-colors">Listeye Dön</Link>
-      </div>
-    );
-  }
-
   const getJobDurationDays = () => {
     if (!customer.createdAt) return 0;
     const start = new Date(customer.createdAt).getTime();
@@ -712,25 +702,34 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   };
 
   const handleArchiveCustomer = async () => {
-    if (confirm("DİKKAT: Bu cariyi arşivlemek istediğinize emin misiniz? (Kalıcı olarak silinmez, ancak listeden kaldırılır.)")) {
-      await store.archiveCustomer(id);
-      if (user) {
-        addAuditEntry({
-          entityType: 'Customer',
-          entityId: id,
-          field: 'isDeleted',
-          previousValue: 'false',
-          newValue: 'true',
-          changedBy: user.name,
-          changedAt: new Date().toISOString(),
-          reason: 'Cari arşivlendi / soft delete yapıldı.'
-        });
-      }
-      router.push('/cariler');
+    if (confirm("Bu cari ve cariye baYlI ölçü, satIY ve finans iYlemleri aktif ekranlardan kaldIrIlarak arYive taYInacaktIr. Veriler fiziksel olarak silinmeyecek ve geri getirilebilecektir.")) {
+      await store.archiveCustomer(id, currentUser);
+      await syncNow();
     }
   };
 
-  const handleConfirmMerge = async (targetId: string) => {
+  const handleRestoreArchivedCustomer = async () => {
+    if (confirm("Cari ve arYivlenen baYlI kayItlar geri getirilecek. Emin misiniz?")) {
+      await store.restoreArchivedCustomer(id, currentUser);
+      await syncNow();
+    }
+  };
+
+  const handleMoveToTrash = async () => {
+    if (confirm("Bu cari ve baYlI tüm kayItlar çöp kutusuna taYInacaktIr. Emin misiniz?")) {
+      await store.moveCustomerToTrash(id, currentUser);
+      await syncNow();
+    }
+  };
+
+  const handleRestoreFromTrash = async () => {
+    if (confirm("Çöp kutusundan çIkarIlacaktIr. Emin misiniz?")) {
+      await store.restoreCustomerFromTrash(id, currentUser);
+        await syncNow();
+      }
+    };
+
+    const handleConfirmMerge = async (targetId: string) => {
     await store.mergeCustomers(id, targetId);
     await useSalesStore.getState().transferSales(id, targetId);
     if (user) {
@@ -896,6 +895,36 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-24">
+{customer.isArchived && !customer.isDeleted && (
+  <div className="bg-yellow-100 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-400 px-4 py-3 rounded-xl mb-6">
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        <AlertTriangle className="w-5 h-5" />
+        <span className="font-bold">ARIVLENM CAR:</span> Bu kayIt sadece okuma amaçlIdIr. Yeni iYlem yapIlamaz.
+      </div>
+      {(currentUser?.role === 'ADMIN') && (
+        <button onClick={handleRestoreArchivedCustomer} className="px-3 py-1 bg-yellow-200 dark:bg-yellow-800 rounded font-medium hover:opacity-80 transition-opacity">
+          ArYivden Geri Al
+        </button>
+      )}
+    </div>
+  </div>
+)}
+{customer.isDeleted && (
+  <div className="bg-red-100 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-400 px-4 py-3 rounded-xl mb-6">
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        <Trash2 className="w-5 h-5" />
+        <span className="font-bold">ÇÖP KUTUSUNDA:</span> Bu kayIt tamamen silinmiY durumdadIr.
+      </div>
+      {(currentUser?.role === 'ADMIN') && (
+        <button onClick={handleRestoreFromTrash} className="px-3 py-1 bg-red-200 dark:bg-red-800 rounded font-medium hover:opacity-80 transition-opacity">
+          Çöp Kutusundan ÇIkar
+        </button>
+      )}
+    </div>
+  </div>
+)}
       {/* Header & Mode Toggle */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
@@ -946,16 +975,18 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
             </button>
           )}
 
-          {canArchive && (
-            <button
-              onClick={handleArchiveCustomer}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer"
-              title="Cariyi Arşivle/Sil"
-            >
-              <Archive className="w-4 h-4" />
-              Arşivle
-            </button>
-          )}
+          {canArchive && !customer.isArchived && !customer.isDeleted && (
+    <div className="flex gap-2 mt-4 sm:mt-0">
+      <button onClick={handleArchiveCustomer} className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-yellow-200 text-yellow-600 hover:bg-yellow-50 dark:border-yellow-900 dark:text-yellow-500 dark:hover:bg-yellow-900/20 text-sm font-medium transition-colors">
+        <Archive className="w-4 h-4" />
+        ArYivle
+      </button>
+      <button onClick={handleMoveToTrash} className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-500 dark:hover:bg-red-900/20 text-sm font-medium transition-colors">
+        <Trash2 className="w-4 h-4" />
+        Sil
+      </button>
+    </div>
+  )}
           <button
             onClick={handleShareWhatsAppReport}
             className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-green-650 hover:bg-green-700 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer"

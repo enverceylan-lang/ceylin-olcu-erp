@@ -219,6 +219,14 @@ export interface ProductMeasurement {
   videos: string[];
   isDeleted?: boolean;
   deletedAt?: string;
+  deletedBy?: string;
+  deleteBatchId?: string;
+  deleteSource?: string;
+  isArchived?: boolean;
+  archivedAt?: string;
+  archivedBy?: string;
+  archiveBatchId?: string;
+  archiveSource?: string;
 }
 
 export interface WindowItem {
@@ -234,6 +242,14 @@ export interface WindowItem {
   updatedAt?: string;
   isDeleted?: boolean;
   deletedAt?: string;
+  deletedBy?: string;
+  deleteBatchId?: string;
+  deleteSource?: string;
+  isArchived?: boolean;
+  archivedAt?: string;
+  archivedBy?: string;
+  archiveBatchId?: string;
+  archiveSource?: string;
 }
 
 export interface Room {
@@ -246,6 +262,14 @@ export interface Room {
   updatedAt?: string;
   isDeleted?: boolean;
   deletedAt?: string;
+  deletedBy?: string;
+  deleteBatchId?: string;
+  deleteSource?: string;
+  isArchived?: boolean;
+  archivedAt?: string;
+  archivedBy?: string;
+  archiveBatchId?: string;
+  archiveSource?: string;
 }
 
 export interface ProductIntentItem {
@@ -303,6 +327,14 @@ export interface Customer {
   addressPhotos?: string[];
   isDeleted?: boolean;
   deletedAt?: string;
+  deletedBy?: string;
+  deleteBatchId?: string;
+  deleteSource?: string;
+  isArchived?: boolean;
+  archivedAt?: string;
+  archivedBy?: string;
+  archiveBatchId?: string;
+  archiveSource?: string;
 
   // Excel Bridge Fields (Opak & V1-EXCEL)
   balance?: number;
@@ -453,7 +485,10 @@ interface AppState {
   addCustomer: (customer: Omit<Customer, 'rooms'> & { id?: string }) => Promise<void>;
   updateCustomer: (id: string, data: Partial<Customer>) => Promise<void>;
   deleteCustomer: (id: string) => Promise<void>;
-  archiveCustomer: (id: string) => Promise<void>;
+    archiveCustomer: (id: string, user: any) => Promise<void>;
+    restoreArchivedCustomer: (id: string, user: any) => Promise<void>;
+    moveCustomerToTrash: (id: string, user: any) => Promise<void>;
+    restoreCustomerFromTrash: (id: string, user: any) => Promise<void>;
   mergeCustomers: (sourceId: string, targetId: string) => Promise<void>;
   
   addRoom: (customerId: string, roomName: string) => Promise<string>;
@@ -649,9 +684,197 @@ export const useStore = create<AppState>()(
         }
       },
       
-      archiveCustomer: async (id) => {
-        // Alias for soft-delete
-        await get().deleteCustomer(id);
+      
+      archiveCustomer: async (id, user) => {
+        const state = get();
+        const customer = state.customers.find(c => c.id === id);
+        if (!customer) return;
+
+        const batchId = generateUUID();
+        const now = new Date().toISOString();
+        const username = user?.name || user?.email || 'SYSTEM';
+
+        // Helper to archive recursively
+        const cascadeArchive = (items: any[]): any[] => {
+          if (!items) return [];
+          return items.map(item => {
+            if (item.isDeleted || item.isArchived) return item; // Don't touch already deleted/archived items
+            return {
+              ...item,
+              isArchived: true,
+              archivedAt: now,
+              archivedBy: username,
+              archiveBatchId: batchId,
+              archiveSource: 'CUSTOMER_CASCADE',
+              // Recurse children
+              windows: item.windows ? cascadeArchive(item.windows) : undefined,
+              products: item.products ? cascadeArchive(item.products) : undefined
+            };
+          });
+        };
+
+        const updatedCustomer = {
+          ...customer,
+          isArchived: true,
+          archivedAt: now,
+          archivedBy: username,
+          archiveBatchId: batchId,
+          archiveSource: 'CUSTOMER_CASCADE',
+          rooms: customer.rooms ? cascadeArchive(customer.rooms) : []
+        };
+
+        set({ customers: state.customers.map(c => c.id === id ? updatedCustomer : c) });
+        await saveLocalCustomer(updatedCustomer);
+        
+        // Also call sales store cascade
+        try {
+          const { useSalesStore } = await import('@/store/salesStore');
+          await useSalesStore.getState().cascadeArchiveCustomer(id, batchId, username);
+        } catch(e) {
+          console.error("Sales cascade failed", e);
+        }
+      },
+
+      restoreArchivedCustomer: async (id, user) => {
+        const state = get();
+        const customer = state.customers.find(c => c.id === id);
+        if (!customer || !customer.isArchived) return;
+
+        const batchId = customer.archiveBatchId;
+
+        const cascadeRestore = (items: any[]): any[] => {
+          if (!items) return [];
+          return items.map(item => {
+            if (item.isArchived && item.archiveBatchId === batchId) {
+              return {
+                ...item,
+                isArchived: false,
+                archivedAt: undefined,
+                archivedBy: undefined,
+                archiveBatchId: undefined,
+                archiveSource: undefined,
+                windows: item.windows ? cascadeRestore(item.windows) : undefined,
+                products: item.products ? cascadeRestore(item.products) : undefined
+              };
+            }
+            // If it wasn't archived by THIS batch, we don't touch it
+            return item;
+          });
+        };
+
+        const updatedCustomer = {
+          ...customer,
+          isArchived: false,
+          archivedAt: undefined,
+          archivedBy: undefined,
+          archiveBatchId: undefined,
+          archiveSource: undefined,
+          rooms: customer.rooms ? cascadeRestore(customer.rooms) : []
+        };
+
+        set({ customers: state.customers.map(c => c.id === id ? updatedCustomer : c) });
+        await saveLocalCustomer(updatedCustomer);
+        
+        try {
+          const { useSalesStore } = await import('@/store/salesStore');
+          await useSalesStore.getState().cascadeRestoreArchivedCustomer(id, batchId || '');
+        } catch(e) {
+          console.error("Sales cascade restore failed", e);
+        }
+      },
+
+      moveCustomerToTrash: async (id, user) => {
+        const state = get();
+        const customer = state.customers.find(c => c.id === id);
+        if (!customer) return;
+
+        const batchId = generateUUID();
+        const now = new Date().toISOString();
+        const username = user?.name || user?.email || 'SYSTEM';
+
+        const cascadeTrash = (items: any[]): any[] => {
+          if (!items) return [];
+          return items.map(item => {
+            if (item.isDeleted) return item; // Don't touch already deleted items
+            return {
+              ...item,
+              isDeleted: true,
+              deletedAt: now,
+              deletedBy: username,
+              deleteBatchId: batchId,
+              deleteSource: 'CUSTOMER_CASCADE',
+              windows: item.windows ? cascadeTrash(item.windows) : undefined,
+              products: item.products ? cascadeTrash(item.products) : undefined
+            };
+          });
+        };
+
+        const updatedCustomer = {
+          ...customer,
+          isDeleted: true,
+          deletedAt: now,
+          deletedBy: username,
+          deleteBatchId: batchId,
+          deleteSource: 'CUSTOMER_CASCADE',
+          rooms: customer.rooms ? cascadeTrash(customer.rooms) : []
+        };
+
+        set({ customers: state.customers.map(c => c.id === id ? updatedCustomer : c) });
+        await saveLocalCustomer(updatedCustomer);
+        
+        try {
+          const { useSalesStore } = await import('@/store/salesStore');
+          await useSalesStore.getState().cascadeMoveToTrash(id, batchId, username);
+        } catch(e) {
+          console.error("Sales cascade trash failed", e);
+        }
+      },
+
+      restoreCustomerFromTrash: async (id, user) => {
+        const state = get();
+        const customer = state.customers.find(c => c.id === id);
+        if (!customer || !customer.isDeleted) return;
+
+        const batchId = customer.deleteBatchId;
+
+        const cascadeRestore = (items: any[]): any[] => {
+          if (!items) return [];
+          return items.map(item => {
+            if (item.isDeleted && item.deleteBatchId === batchId) {
+              return {
+                ...item,
+                isDeleted: false,
+                deletedAt: undefined,
+                deletedBy: undefined,
+                deleteBatchId: undefined,
+                deleteSource: undefined,
+                windows: item.windows ? cascadeRestore(item.windows) : undefined,
+                products: item.products ? cascadeRestore(item.products) : undefined
+              };
+            }
+            return item;
+          });
+        };
+
+        const updatedCustomer = {
+          ...customer,
+          isDeleted: false,
+          deletedAt: undefined,
+          deletedBy: undefined,
+          deleteBatchId: undefined,
+          deleteSource: undefined,
+          rooms: customer.rooms ? cascadeRestore(customer.rooms) : []
+        };
+
+        set({ customers: state.customers.map(c => c.id === id ? updatedCustomer : c) });
+        await saveLocalCustomer(updatedCustomer);
+        
+        try {
+          const { useSalesStore } = await import('@/store/salesStore');
+          await useSalesStore.getState().cascadeRestoreFromTrash(id, batchId || '');
+        } catch(e) {
+          console.error("Sales cascade trash restore failed", e);
+        }
       },
       
       mergeCustomers: async (sourceId, targetId) => {

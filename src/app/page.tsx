@@ -21,7 +21,7 @@ export default function Home() {
     });
   }, [loadSales]);
 
-  const activeCustomersCount = customers.filter(c => !c.isDeleted).length;
+  const activeCustomersCount = customers.filter(c => !c.isDeleted && !c.isArchived).length;
   const activeSalesCount = sales.filter(s => s.status !== 'İPTAL' && s.status !== 'TAMAMLANDI').length;
   // Use products if it exists, otherwise 0
   const stockCount = products ? products.length : 0;
