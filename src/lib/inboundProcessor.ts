@@ -1,48 +1,83 @@
+import { useMeasurementStore } from '@/store/measurementStore';
 import { InboundMeasurement, localDraftDb, updateInboundStatus } from './localDraftDb';
 import { Customer, Room, WindowItem, ProductMeasurement, generateUUID, useStore } from '@/store/useStore';
 import { saveLocalCustomer, loadLocalCustomers } from './localCustomerDb';
+import { ensureMeasurementId } from './measurementIdHelper';
 
 /**
- * Strips out media arrays to ensure we don't save REDACTED strings to IndexedDB.
+ * Strip only heavy binary/base64 data from media arrays, keeping all metadata
+ * (localKey, thumbnailRef, mimeType, size, etc.) so references are not lost.
  */
-function cleanMediaFromRoom(room: any): Room {
-  const rawWindows = room.windows || room.openings || [];
-  
-  const cleanWindows = rawWindows.map((w: any) => {
+function sanitizeMediaArray(arr: any[]): any[] {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(item => {
+    if (typeof item === 'string') {
+      // Raw base64 or data-url — drop entirely for local storage
+      if (item.startsWith('data:') || item.length > 2000) return null;
+      return item;
+    }
+    if (typeof item === 'object' && item !== null) {
+      // Keep all metadata keys; only remove the heavy binary 'data' field
+      const { data, base64, ...rest } = item as any;
+      return rest;
+    }
+    return item;
+  }).filter(Boolean);
+}
+
+/**
+ * Cleans a room for local storage:
+ *  - Preserves existing IDs (room, window, product) for idempotency
+ *  - Generates deterministic legacy IDs when absent
+ *  - Sanitizes media: keeps metadata, strips binary data
+ */
+export async function cleanMediaFromRoom(room: any): Promise<Room> {
+  const roomId = room.id || `legacy-r-${(room.name || '').replace(/\s/g, '')}` ;
+  const rawWindows = room.windows || [];
+
+  const cleanWindows = await Promise.all(rawWindows.map(async (w: any, wIndex: number) => {
+    const winId = w.id || `legacy-w-${roomId}-${(w.name || wIndex).toString().replace(/\s/g, '')}`;
     const rawProducts = w.products || w.measurements || [];
-    
-    const cleanProducts = rawProducts.map((p: any) => {
+
+    const cleanProducts = await Promise.all(rawProducts.map(async (p: any, pIndex: number) => {
+      const pId = await ensureMeasurementId(p.id, {
+        customerId: room.customerId || room.id || room.name || '',
+        roomKey: roomId,
+        windowKey: winId,
+        type: p.templateType || p.type || 'UNKNOWN',
+        sourceIndex: pIndex,
+      });
       return {
         ...p,
-        id: generateUUID(), // New ID to prevent reference clashes
-        photos: [],
-        videos: [],
+        id: pId,
+        photos: sanitizeMediaArray(p.photos || []),
+        videos: sanitizeMediaArray(p.videos || []),
       };
-    });
+    }));
 
     return {
       ...w,
-      id: generateUUID(),
-      photos: [],
-      videos: [],
-      products: cleanProducts
+      id: winId,
+      photos: sanitizeMediaArray(w.photos || []),
+      videos: sanitizeMediaArray(w.videos || []),
+      products: cleanProducts,
     };
-  });
+  }));
 
   return {
     ...room,
-    id: generateUUID(),
-    name: room.name ? `${room.name} - Gelen Ölçü` : 'Gelen Ölçü', // Suffix as requested
-    photos: [],
-    videos: [],
-    windows: cleanWindows
-  };
+    id: roomId,
+    name: room.name ? `${room.name} - Gelen Ölçü` : 'Gelen Ölçü',
+    photos: sanitizeMediaArray(room.photos || []),
+    videos: sanitizeMediaArray(room.videos || []),
+    windows: cleanWindows,
+  } as Room;
 }
 
 /**
  * Extract rooms from patch. The patch could be a FieldMeasurementDraft or a Customer object.
  */
-function extractRoomsFromPatch(patch: any): Room[] {
+async function extractRoomsFromPatch(patch: any): Promise<Room[]> {
   let rooms: any[] = [];
   
   let parsedPatch = patch;
@@ -57,7 +92,7 @@ function extractRoomsFromPatch(patch: any): Room[] {
   if (parsedPatch && Array.isArray(parsedPatch.rooms)) {
     rooms = parsedPatch.rooms;
   }
-  return rooms.map(cleanMediaFromRoom);
+  return Promise.all(rooms.map(cleanMediaFromRoom));
 }
 
 /**
@@ -74,7 +109,7 @@ export async function processAsNewCustomer(inbound: InboundMeasurement, adminId:
   const customerPhone = (inbound.customerPhone || patch.customerPhone || patch.phone || '').trim();
   const customerAddress = (inbound.customerAddress || patch.customerAddress || patch.address || '').trim();
 
-  const rooms = extractRoomsFromPatch(patch);
+  const rooms = await extractRoomsFromPatch(patch);
 
   if (patch.syncIntent === 'MEASUREMENT_TREE_RECOVERY' && (!rooms || rooms.length === 0)) {
     await localDraftDb.inboundMeasurements.update(inbound.changeId, {
@@ -106,6 +141,14 @@ export async function processAsNewCustomer(inbound: InboundMeasurement, adminId:
   };
 
   await saveLocalCustomer(newCustomer);
+
+  // Also extract products to measurementStore
+  const extractedMeas: any[] = [];
+  newCustomer.rooms?.forEach(r => r.windows?.forEach(w => w.products?.forEach(p => extractedMeas.push({ ...p, customerId: newCustomer.id, roomId: r.id, windowId: w.id }))));
+  if (extractedMeas.length > 0) await useMeasurementStore.getState().batchUpsertMeasurements(extractedMeas);
+
+  // Clear products from nested structure to enforce single-source-of-truth
+  newCustomer.rooms?.forEach(r => r.windows?.forEach(w => w.products = []));
   useStore.getState().addCustomer(newCustomer);
   
   await localDraftDb.inboundMeasurements.update(inbound.changeId, { 
@@ -133,7 +176,7 @@ export async function processAsMerge(inbound: InboundMeasurement, customerId: st
   }
 
   const patch = inbound.patch || {};
-  const newRooms = extractRoomsFromPatch(patch);
+  const newRooms = await extractRoomsFromPatch(patch);
 
   if (patch.syncIntent === 'MEASUREMENT_TREE_RECOVERY' && (!newRooms || newRooms.length === 0)) {
     await localDraftDb.inboundMeasurements.update(inbound.changeId, {
@@ -156,6 +199,14 @@ export async function processAsMerge(inbound: InboundMeasurement, customerId: st
   };
 
   await saveLocalCustomer(updatedCustomer);
+
+  // Also extract products to measurementStore
+  const extractedMeas2: any[] = [];
+  updatedCustomer.rooms?.forEach(r => r.windows?.forEach(w => w.products?.forEach(p => extractedMeas2.push({ ...p, customerId: updatedCustomer.id, roomId: r.id, windowId: w.id }))));
+  if (extractedMeas2.length > 0) await useMeasurementStore.getState().batchUpsertMeasurements(extractedMeas2);
+
+  // Clear products from nested structure to enforce single-source-of-truth
+  updatedCustomer.rooms?.forEach(r => r.windows?.forEach(w => w.products = []));
   useStore.getState().updateCustomer(updatedCustomer.id, { rooms: updatedCustomer.rooms, updatedAt: updatedCustomer.updatedAt });
 
   await localDraftDb.inboundMeasurements.update(inbound.changeId, {

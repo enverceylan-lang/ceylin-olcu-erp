@@ -42,7 +42,7 @@ export function generateUUID(): string {
 
 export function sanitizeCustomersForPersist(customers: Customer[]): Customer[] {
   if (!Array.isArray(customers)) return [];
-  
+
   const isMediaString = (val: any): boolean => {
     if (typeof val !== 'string') return false;
     return val.startsWith('data:') || val.includes(';base64,') || val.length > 5000;
@@ -124,13 +124,13 @@ export interface Note {
 
 export interface MeasurementTemplate {
   type: string;
-  fields: { 
-    key: string; 
-    label: string; 
-    type: 'number' | 'text' | 'select'; 
-    options?: string[]; 
-    defaultValue?: any; 
-    optional?: boolean; 
+  fields: {
+    key: string;
+    label: string;
+    type: 'number' | 'text' | 'select';
+    options?: string[];
+    defaultValue?: any;
+    optional?: boolean;
     hidden?: boolean;
   }[];
 }
@@ -200,13 +200,13 @@ export interface ProductMeasurement {
   templateType: string;
   rawValues: Record<string, any>;
   productId?: string;
-  productGroup?: string; 
-  productType?: string;  
+  productGroup?: string;
+  productType?: string;
   calculatedWidth?: number;
   calculatedHeight?: number;
-  details?: Record<string, any>; 
+  details?: Record<string, any>;
   notes: string;
-  status: string; 
+  status: string;
   // Responsibility tracking
   measuredBy: string;       // display name (legacy compat)
   measuredById?: string;    // user ID of the person who physically measured
@@ -357,7 +357,7 @@ export interface Customer {
   hasRisk?: boolean;
   riskLimit?: number;
   isLockedForAllTransactions?: boolean;
-  
+
   externalSource?: 'OPAK' | 'MANUAL' | 'IMPORT';
   rawImportData?: Record<string, any>;
   customFields?: Record<string, any>;
@@ -490,11 +490,11 @@ interface AppState {
     moveCustomerToTrash: (id: string, user: any) => Promise<void>;
     restoreCustomerFromTrash: (id: string, user: any) => Promise<void>;
   mergeCustomers: (sourceId: string, targetId: string) => Promise<void>;
-  
+
   addRoom: (customerId: string, roomName: string) => Promise<string>;
   deleteRoom: (customerId: string, roomId: string) => Promise<void>;
   moveRoom: (sourceCustomerId: string, targetCustomerId: string, roomId: string) => Promise<void>;
-  
+
   addWindow: (customerId: string, roomId: string, windowName: string) => Promise<void>;
   deleteWindow: (customerId: string, roomId: string, windowId: string) => Promise<void>;
 
@@ -511,7 +511,7 @@ interface AppState {
   updateProductionStatus: (id: string, status: string) => void;
   updateMontageStatus: (id: string, status: string) => void;
   updateMontageTask: (id: string, data: Partial<MontageTask>) => void;
-  
+
   addProductionItem: (item: ProductionItem) => void;
   updateProductionItem: (id: string, data: Partial<ProductionItem>) => void;
   setProductionItems: (items: ProductionItem[]) => void;
@@ -547,7 +547,7 @@ export const useStore = create<AppState>()(
       addCustomer: async (data) => {
         const state = get();
         const newCustomerId = data.id || generateUUID();
-        
+
         // Submission/Id-based duplicate prevention:
         const exists = state.customers.some(c => c.id === newCustomerId);
         if (exists) {
@@ -570,7 +570,7 @@ export const useStore = create<AppState>()(
 
         const now = new Date().toISOString();
         const currentUser = useAuthStore.getState().currentUser;
-        
+
         let initialApprovalStatus: 'PENDING_APPROVAL' | 'APPROVED' = 'APPROVED';
         if (currentUser) {
           const normRole = normalizeRole(currentUser.role);
@@ -619,7 +619,7 @@ export const useStore = create<AppState>()(
           };
         });
       },
-      
+
       updateCustomer: async (id, data) => {
         const state = get();
         const now = new Date().toISOString();
@@ -671,9 +671,9 @@ export const useStore = create<AppState>()(
               }))
             }))
           };
-          
+
           await saveLocalCustomer(updatedCustomer);
-          
+
           set((state) => {
             notifyStoreChanges();
             return {
@@ -683,8 +683,8 @@ export const useStore = create<AppState>()(
           });
         }
       },
-      
-      
+
+
       archiveCustomer: async (id, user) => {
         const state = get();
         const customer = state.customers.find(c => c.id === id);
@@ -725,13 +725,16 @@ export const useStore = create<AppState>()(
 
         set({ customers: state.customers.map(c => c.id === id ? updatedCustomer : c) });
         await saveLocalCustomer(updatedCustomer);
-        
-        // Also call sales store cascade
+
+        // Also call cascade on sales and measurement stores
         try {
           const { useSalesStore } = await import('@/store/salesStore');
           await useSalesStore.getState().cascadeArchiveCustomer(id, batchId, username);
+          const { useMeasurementStore } = await import('@/store/measurementStore');
+          await useMeasurementStore.getState().cascadeArchiveCustomer(id, batchId, username);
         } catch(e) {
-          console.error("Sales cascade failed", e);
+          console.error('[Store] archiveCustomer cascade failed — re-throwing to prevent partial state', e);
+          throw e; // Prevent partial success
         }
       },
 
@@ -774,12 +777,15 @@ export const useStore = create<AppState>()(
 
         set({ customers: state.customers.map(c => c.id === id ? updatedCustomer : c) });
         await saveLocalCustomer(updatedCustomer);
-        
+
         try {
           const { useSalesStore } = await import('@/store/salesStore');
           await useSalesStore.getState().cascadeRestoreArchivedCustomer(id, batchId || '');
+          const { useMeasurementStore } = await import('@/store/measurementStore');
+          await useMeasurementStore.getState().cascadeRestoreArchivedCustomer(id, batchId || '');
         } catch(e) {
-          console.error("Sales cascade restore failed", e);
+          console.error('[Store] restoreArchivedCustomer cascade failed — re-throwing to prevent partial state', e);
+          throw e;
         }
       },
 
@@ -821,12 +827,15 @@ export const useStore = create<AppState>()(
 
         set({ customers: state.customers.map(c => c.id === id ? updatedCustomer : c) });
         await saveLocalCustomer(updatedCustomer);
-        
+
         try {
           const { useSalesStore } = await import('@/store/salesStore');
           await useSalesStore.getState().cascadeMoveToTrash(id, batchId, username);
+          const { useMeasurementStore } = await import('@/store/measurementStore');
+          await useMeasurementStore.getState().cascadeMoveToTrash(id, batchId, username);
         } catch(e) {
-          console.error("Sales cascade trash failed", e);
+          console.error('[Store] moveCustomerToTrash cascade failed — re-throwing to prevent partial state', e);
+          throw e;
         }
       },
 
@@ -868,24 +877,27 @@ export const useStore = create<AppState>()(
 
         set({ customers: state.customers.map(c => c.id === id ? updatedCustomer : c) });
         await saveLocalCustomer(updatedCustomer);
-        
+
         try {
           const { useSalesStore } = await import('@/store/salesStore');
           await useSalesStore.getState().cascadeRestoreFromTrash(id, batchId || '');
+          const { useMeasurementStore } = await import('@/store/measurementStore');
+          await useMeasurementStore.getState().cascadeRestoreFromTrash(id, batchId || '');
         } catch(e) {
-          console.error("Sales cascade trash restore failed", e);
+          console.error('[Store] restoreCustomerFromTrash cascade failed — re-throwing to prevent partial state', e);
+          throw e;
         }
       },
-      
+
       mergeCustomers: async (sourceId, targetId) => {
         const state = get();
         const sourceCustomer = state.customers.find(c => c.id === sourceId);
         const targetCustomer = state.customers.find(c => c.id === targetId);
-        
+
         if (!sourceCustomer || !targetCustomer) return;
-        
+
         const now = new Date().toISOString();
-        
+
         // 1. Move rooms to target and append source details to notes
         const mergeNotes = `\n\n--- Birleştirilen Cariden Gelen Bilgiler ---\nAd: ${sourceCustomer.name}\nKod: ${sourceCustomer.customerCode || '-'}\nTel: ${sourceCustomer.phone || '-'}\nAdres: ${sourceCustomer.address || '-'}\nEski Not: ${sourceCustomer.notes || '-'}\n-----------------------------------------`;
 
@@ -895,7 +907,7 @@ export const useStore = create<AppState>()(
           notes: (targetCustomer.notes || '') + mergeNotes,
           rooms: [...(targetCustomer.rooms || []), ...(sourceCustomer.rooms || [])]
         };
-        
+
         // 2. Mark source as merged
         const updatedSourceCustomer = {
           ...sourceCustomer,
@@ -914,10 +926,10 @@ export const useStore = create<AppState>()(
           },
           rooms: [] // Clear rooms from source to prevent duplicate rendering if un-deleted
         };
-        
+
         await saveLocalCustomer(updatedTargetCustomer);
         await saveLocalCustomer(updatedSourceCustomer);
-        
+
         set((state) => {
           notifyStoreChanges();
           return {
@@ -930,34 +942,34 @@ export const useStore = create<AppState>()(
           };
         });
       },
-      
+
       moveRoom: async (sourceCustomerId, targetCustomerId, roomId) => {
         const state = get();
         const sourceCustomer = state.customers.find(c => c.id === sourceCustomerId);
         const targetCustomer = state.customers.find(c => c.id === targetCustomerId);
-        
+
         if (!sourceCustomer || !targetCustomer) return;
-        
+
         const roomToMove = sourceCustomer.rooms?.find(r => r.id === roomId);
         if (!roomToMove) return;
-        
+
         const now = new Date().toISOString();
-        
+
         const updatedSourceCustomer = {
           ...sourceCustomer,
           updatedAt: now,
           rooms: sourceCustomer.rooms.filter(r => r.id !== roomId)
         };
-        
+
         const updatedTargetCustomer = {
           ...targetCustomer,
           updatedAt: now,
           rooms: [...(targetCustomer.rooms || []), roomToMove]
         };
-        
+
         await saveLocalCustomer(updatedSourceCustomer);
         await saveLocalCustomer(updatedTargetCustomer);
-        
+
         set((state) => {
           notifyStoreChanges();
           return {
@@ -1168,7 +1180,6 @@ export const useStore = create<AppState>()(
       },
 
       addProductMeasurement: async (customerId, roomId, windowId, measurement) => {
-        const state = get();
         const now = new Date().toISOString();
         const newMeas: ProductMeasurement = {
           ...measurement,
@@ -1177,125 +1188,47 @@ export const useStore = create<AppState>()(
           updatedAt: now
         };
 
-        const target = state.customers.find(c => c.id === customerId);
-        if (target) {
-          const updatedCustomer = {
-            ...target,
-            updatedAt: now,
-            rooms: target.rooms.map(r => {
-              if (r.id === roomId) {
-                return {
-                  ...r,
-                  updatedAt: now,
-                  windows: r.windows.map(w => {
-                    if (w.id === windowId) {
-                      return {
-                        ...w,
-                        updatedAt: now,
-                        products: [...w.products, newMeas]
-                      };
-                    }
-                    return w;
-                  })
-                };
-              }
-              return r;
-            })
-          };
-          await saveLocalCustomer(updatedCustomer);
-          set((state) => {
-            notifyStoreChanges();
-            return {
-              customers: state.customers.map(c => c.id === customerId ? updatedCustomer : c),
-              syncStatus: 'pending'
-            };
-          });
-        }
+        // Single-write: write to new independent store only
+        const { useMeasurementStore } = await import('@/store/measurementStore');
+        await useMeasurementStore.getState().addMeasurement({
+          ...newMeas,
+          customerId,
+          roomId,
+          windowId
+        }, measurement.createdById || 'SYSTEM');
+        // No longer writing to Customer tree
       },
+
+
 
       updateProductMeasurement: async (customerId, roomId, windowId, measurementId, data) => {
-        const state = get();
         const now = new Date().toISOString();
-        const target = state.customers.find(c => c.id === customerId);
-        if (target) {
-          const updatedCustomer = {
-            ...target,
-            updatedAt: now,
-            rooms: target.rooms.map(r => {
-              if (r.id === roomId) {
-                return {
-                  ...r,
-                  updatedAt: now,
-                  windows: r.windows.map(w => {
-                    if (w.id === windowId) {
-                      return {
-                        ...w,
-                        updatedAt: now,
-                        products: w.products.map(p => {
-                          if (p.id === measurementId) {
-                            return { ...p, ...data, updatedAt: now };
-                          }
-                          return p;
-                        })
-                      };
-                    }
-                    return w;
-                  })
-                };
-              }
-              return r;
-            })
-          };
-          await saveLocalCustomer(updatedCustomer);
-          set((state) => {
-            notifyStoreChanges();
-            return {
-              customers: state.customers.map(c => c.id === customerId ? updatedCustomer : c),
-              syncStatus: 'pending'
-            };
-          });
+
+        // Single-write: update in independent store only
+        const { useMeasurementStore } = await import('@/store/measurementStore');
+
+        // We need the existing measurement to merge
+        const existing = useMeasurementStore.getState().measurements.find(m => m.id === measurementId);
+        if (existing) {
+          const updatedMeas = { ...existing, ...data, updatedAt: now };
+          await useMeasurementStore.getState().updateMeasurement(
+            updatedMeas,
+            data.createdById || existing.createdById || 'SYSTEM'
+          );
         }
+        // No longer writing to Customer tree
       },
 
+
+
       deleteProductMeasurement: async (customerId, roomId, windowId, measurementId) => {
-        const state = get();
-        const now = new Date().toISOString();
-        const target = state.customers.find(c => c.id === customerId);
-        if (target) {
-          const updatedCustomer = {
-            ...target,
-            updatedAt: now,
-            rooms: target.rooms.map(r => {
-              if (r.id === roomId) {
-                return {
-                  ...r,
-                  updatedAt: now,
-                  windows: r.windows.map(w => {
-                    if (w.id === windowId) {
-                      return {
-                        ...w,
-                        updatedAt: now,
-                        products: w.products.filter(p => p.id !== measurementId)
-                      };
-                    }
-                    return w;
-                  })
-                };
-              }
-              return r;
-            })
-          };
-          await saveLocalCustomer(updatedCustomer);
-          set((state) => {
-            notifyStoreChanges();
-            return {
-              customers: state.customers.map(c => c.id === customerId ? updatedCustomer : c),
-              pendingDeletes: [...state.pendingDeletes, { id: measurementId, table: 'measurements' }],
-              syncStatus: 'pending'
-            };
-          });
-        }
+        // Single-write: delete in independent store only
+        const { useMeasurementStore } = await import('@/store/measurementStore');
+        await useMeasurementStore.getState().deleteMeasurement(measurementId, 'SYSTEM');
+        // No longer writing to Customer tree
       },
+
+
 
       initializeCustomersFromDb: async () => {
         try {
@@ -1378,32 +1311,32 @@ export const useStore = create<AppState>()(
       })),
 
       updateProductionItem: (id, data) => set((state) => {
-        const updatedItems = state.productionItems.map(item => 
+        const updatedItems = state.productionItems.map(item =>
           item.id === id ? { ...item, ...data } : item
         );
-        
+
         const updatedItem = updatedItems.find(item => item.id === id);
         if (updatedItem) {
           const orderId = updatedItem.orderId;
           const orderItems = updatedItems.filter(item => item.orderId === orderId);
-          
-          const allComplete = orderItems.length > 0 && orderItems.every(item => 
+
+          const allComplete = orderItems.length > 0 && orderItems.every(item =>
             item.productionStatus === 'READY' || item.productionStatus === 'CANCELLED'
           );
-          
+
           const newStatus = allComplete ? 'Tamamlandı' : 'Üretimde';
-          
+
           return {
             productionItems: updatedItems,
-            productionTasks: state.productionTasks.map(t => 
+            productionTasks: state.productionTasks.map(t =>
               t.saleId === orderId ? { ...t, status: newStatus } : t
             ),
-            sales: state.sales.map(s => 
+            sales: state.sales.map(s =>
               s.id === orderId ? { ...s, status: newStatus } : s
             )
           };
         }
-        
+
         return { productionItems: updatedItems };
       }),
 

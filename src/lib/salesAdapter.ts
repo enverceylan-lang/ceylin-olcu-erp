@@ -1,11 +1,13 @@
 import { Customer, ProductMeasurement } from '@/store/useStore';
+import { useMeasurementStore } from '@/store/measurementStore';
 import { Sale, SaleItem } from '@/store/salesStore';
 import { getMeasurementDimensions } from '@/lib/measurementAdapter';
 
 /**
  * Ürün grubunu tahmin eder.
  */
-function guessProductGroup(templateType: string): string {
+function guessProductGroup(templateType?: string): string {
+  if (!templateType) return 'Diğer';
   const t = templateType.toUpperCase();
   if (t === 'PLICELL') return 'Plicell';
   if (t === 'MECHANICAL_CURTAIN') return 'Mekanik Perde';
@@ -75,12 +77,11 @@ export function createDraftSaleFromCustomer(customer: Customer): Sale {
   const items: any[] = [];
   
   // 1. Ölçüleri aktar
-  customer.rooms?.forEach(room => {
-    room.windows?.forEach(win => {
-      win.products?.forEach(p => {
-        items.push(createSaleItemFromMeasurement(p, room.name, win.name));
-      });
-    });
+  const measurements = useMeasurementStore.getState().measurements.filter(m => m.customerId === customer.id && !m.isDeleted);
+  measurements.forEach(p => {
+    const room = customer.rooms?.find(r => r.id === p.roomId);
+    const win = room?.windows?.find(w => w.id === p.windowId);
+    items.push(createSaleItemFromMeasurement(p, room?.name || 'Oda', win?.name || 'Pencere'));
   });
 
   // 2. Oda bazlı ürün isteklerini aktar

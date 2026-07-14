@@ -1,3 +1,4 @@
+import { MeasurementRecord } from '@/store/measurementStore';
 import { Customer, Room, WindowItem, ProductMeasurement, Note, MEASUREMENT_TEMPLATES } from '@/store/useStore';
 import { getTemplateLabel, getMeasurementDimensions } from './measurementAdapter';
 import { formatFacadeForReport } from './facadeHelper';
@@ -82,7 +83,7 @@ export function calculateMechanicalCurtainM2(widthCm: number, heightCm: number, 
 
 // ─── WhatsApp Short Report Builder ───
 
-export function buildWhatsAppShortReport(customer: Customer, users: { id: string; name: string }[]): string {
+export function buildWhatsAppShortReport(customer: Customer, users: { id: string; name: string }[], measurements: MeasurementRecord[] = []): string {
   const lines: string[] = [
     `*ÖLÇÜ ERP V1 - SAHA ÖLÇÜ RAPORU*`,
     `Müşteri: ${customer.name}`,
@@ -95,9 +96,10 @@ export function buildWhatsAppShortReport(customer: Customer, users: { id: string
   // Collect all unique names of personnel who took measurements
   const allMeasuredBy = new Set<string>();
   let hasMeasurements = false;
-  customer.rooms?.forEach(room => {
-    room.windows?.forEach(window => {
-      window.products?.forEach(p => {
+  const allMeasurements = measurements.filter(m => m.customerId === customer.id && !m.isDeleted);
+    customer.rooms?.forEach(room => {
+      room.windows?.forEach(window => {
+        allMeasurements.filter(m => m.windowId === window.id).forEach(p => {
         hasMeasurements = true;
         if (p.measuredBy) allMeasuredBy.add(p.measuredBy);
       });
@@ -118,8 +120,8 @@ export function buildWhatsAppShortReport(customer: Customer, users: { id: string
   // 2. Date checks: are measurements on different days?
   const uniqueDays = new Set<string>();
   customer.rooms.forEach(room => {
-    room.windows?.forEach(window => {
-      window.products?.forEach(p => {
+      room.windows?.forEach(window => {
+        allMeasurements.filter(m => m.windowId === window.id).forEach(p => {
         if (p.measuredDate) {
           const dayStr = new Date(p.measuredDate).toLocaleDateString('tr-TR');
           uniqueDays.add(dayStr);
@@ -154,9 +156,10 @@ export function buildWhatsAppShortReport(customer: Customer, users: { id: string
     let plicellCounter = 0;
     let mechanicalCounter = 0;
     windows.forEach((win) => {
-      const plicellItems = win.products?.filter(p => p.templateType === 'PLICELL') || [];
-      const mechanicalItems = win.products?.filter(p => p.templateType === 'mechanical_curtain') || [];
-      const standardItems = win.products?.filter(p => p.templateType !== 'PLICELL' && p.templateType !== 'mechanical_curtain') || [];
+      const winProds = allMeasurements.filter(m => m.windowId === win.id);
+      const plicellItems = winProds.filter(p => p.templateType === 'PLICELL');
+      const mechanicalItems = winProds.filter(p => p.templateType === 'mechanical_curtain');
+      const standardItems = winProds.filter(p => p.templateType !== 'PLICELL' && p.templateType !== 'mechanical_curtain');
 
       if (plicellItems.length > 0) {
         plicellItems.forEach(item => {

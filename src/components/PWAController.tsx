@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { WifiOff, Download, RefreshCw, X, HelpCircle, AlertCircle } from "lucide-react";
 import { initSync } from "@/lib/syncService";
 import { useStore } from "@/store/useStore";
+import { useMeasurementStore } from "@/store/measurementStore";
+import { runMeasurementMigration } from "@/lib/measurementMigration";
 import { migrateLocalStorageCustomersToIndexedDb } from "@/lib/migrateCustomersToIndexedDb";
 
 export function PWAController() {
@@ -29,11 +31,21 @@ export function PWAController() {
           error: report.error,
         });
         // Step 2: Load all customers from IndexedDB into Zustand store
-        useStore.getState().initializeCustomersFromDb();
+        useStore.getState().initializeCustomersFromDb().then(() => {
+            // Measurement migration injected here
+            return runMeasurementMigration();
+          }).then(() => {
+            return useMeasurementStore.getState().loadMeasurements();
+          });
       }).catch((err) => {
         console.error('[Migration] Error during migration, falling back to direct load:', err);
         // Fallback: load directly even if migration failed
-        useStore.getState().initializeCustomersFromDb();
+        useStore.getState().initializeCustomersFromDb().then(() => {
+            // Measurement migration injected here
+            return runMeasurementMigration();
+          }).then(() => {
+            return useMeasurementStore.getState().loadMeasurements();
+          });
       });
 
       cleanupSync = initSync();

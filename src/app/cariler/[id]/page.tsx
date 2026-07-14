@@ -5,6 +5,7 @@ import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, 
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useStore, WindowItem, MEASUREMENT_TEMPLATES, ProductMeasurement } from "@/store/useStore";
+import { useMeasurementStore } from "@/store/measurementStore";
 import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer, canViewCustomerWorkflowReport, canViewCustomerFinancialReport, canViewCustomerContactFields, canViewFinancialAreas, canEditCustomerLocation, canViewCariCard, canEditCari, canMergeCari, canArchiveCari, canMoveMeasurementBetweenCustomers } from "@/store/useAuthStore";
 import { getMeasurementDimensions, getTemplateLabel, getGoogleMapsUrl, getWorkflowStatusLabel, getWorkflowStatusColorClass, WORKFLOW_STATUS_LABELS } from "@/lib/measurementAdapter";
 import { fileToDataUrl } from "@/lib/fileStorage";
@@ -28,6 +29,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const id = unwrappedParams.id;
   
   const store = useStore();
+  const measurementStore = useMeasurementStore();
   const { customers, updateCustomer, addRoom, deleteRoom, addWindow, deleteWindow, updateRoomAttachments, updateWindowItem, addProductMeasurement, updateProductMeasurement, deleteProductMeasurement } = store;
   const { currentUser, addAuditEntry, users } = useAuthStore();
   const user = currentUser!;
@@ -191,7 +193,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       if (data.type === 'measurement') {
         const roomObj = customer?.rooms.find(r => r.id === data.roomId);
         const winObj = roomObj?.windows.find(w => w.id === data.windowId);
-        const measObj = winObj?.products.find(p => p.id === data.measurementId);
+        const measObj = measurementStore.measurements.find(p => p.id === data.measurementId);
         if (measObj) {
           const updatedPhotos = (measObj.photos || []).filter(u => u !== data.url);
           const updatedVideos = (measObj.videos || []).filter(u => u !== data.url);
@@ -274,7 +276,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     // 2. Measurements
     customer.rooms.forEach(room => {
       room.windows?.forEach(win => {
-        win.products?.forEach(p => {
+        measurementStore.measurements.filter(m => m.windowId === win.id && !m.isDeleted).forEach(p => {
           const date = p.measuredDate || p.createdAt || customer.createdAt || "";
           if (date) {
             events.push({
@@ -326,11 +328,12 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       room.windows.forEach((opening, openingIndex) => {
         lines.push(`${openingIndex + 1}.${roomIndex + 1} Açıklık: ${opening.name}`);
 
-        if (opening.products.length === 0) {
+        const mProds = measurementStore.measurements.filter(m => m.windowId === opening.id && !m.isDeleted);
+        if (mProds.length === 0) {
           lines.push('  - Ölçü alınmamış');
         }
 
-        opening.products.forEach((measurement, measurementIndex) => {
+        mProds.forEach((measurement, measurementIndex) => {
           const template = MEASUREMENT_TEMPLATES[measurement.templateType];
           const dims = getMeasurementDimensions(measurement);
           lines.push(`  Ölçü ${measurementIndex + 1}: ${getTemplateLabel(measurement.templateType)}`);
@@ -363,7 +366,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   };
 
   const handleShareWhatsAppReport = async () => {
-    const report = buildWhatsAppShortReport(customer, users);
+    const report = buildWhatsAppShortReport(customer, users, useMeasurementStore.getState().measurements);
 
     try {
       if (navigator.share) {
@@ -1596,7 +1599,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
                         {/* MEASUREMENTS LIST */}
                         <div className={measurementViewMode === "GRID" ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3" : "space-y-3"}>
-                            {window.products.map(p => {
+                            {measurementStore.measurements.filter(m => m.windowId === window.id && !m.isDeleted).map(p => {
   if (editingMeasurementId === p.id) return renderMeasurementForm(room, window, true);
   
   

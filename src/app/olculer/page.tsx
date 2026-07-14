@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useStore } from "@/store/useStore";
+import { useMeasurementStore } from "@/store/measurementStore";
 import { useEffect, useState, useMemo } from "react";
 import { getMeasurementDimensions, getTemplateLabel } from "@/lib/measurementAdapter";
 import { useAuthStore, canViewCustomer } from "@/store/useAuthStore";
@@ -71,6 +72,7 @@ interface EditForm {
 
 export default function OlculerPage() {
   const { customers } = useStore();
+  const measurementStore = useMeasurementStore();
   const { currentUser } = useAuthStore();
   const [mounted, setMounted] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -257,7 +259,7 @@ export default function OlculerPage() {
         for (const window of activeWindows) {
           photoCount += (window.photos || []).length;
           videoCount += (window.videos || []).length;
-          const activeProducts = (window.products || []).filter((p) => !p.isDeleted);
+          const activeProducts = measurementStore.measurements.filter(m => m.windowId === window.id && !m.isDeleted);
           measurementCount += activeProducts.length;
           for (const p of activeProducts) {
             photoCount += (p.photos || []).length;
@@ -606,7 +608,7 @@ export default function OlculerPage() {
                   acc +
                   (r.windows || []).reduce(
                     (wacc: number, w: any) =>
-                      wacc + ((w.products || []).filter((p: any) => !p.isDeleted).length),
+                      wacc + measurementStore.measurements.filter((m: any) => m.windowId === w.id && !m.isDeleted).length,
                     0
                   ),
                 0
@@ -753,7 +755,7 @@ export default function OlculerPage() {
                             const wCount = (room.windows || []).filter((w: any) => !w.isDeleted).length;
                             const mCount = (room.windows || []).reduce(
                               (a: number, w: any) =>
-                                a + ((w.products || []).filter((p: any) => !p.isDeleted).length),
+                                a + measurementStore.measurements.filter((m: any) => m.windowId === w.id && !m.isDeleted).length,
                               0
                             );
                             return (
@@ -1067,13 +1069,13 @@ export default function OlculerPage() {
                                   </h5>
 
                                   <div className="space-y-2 pl-5">
-                                    {window.products.filter((p) => !p.isDeleted).length === 0 ? (
+                                    {measurementStore.measurements.filter((p) => p.windowId === window.id && !p.isDeleted).length === 0 ? (
                                       <p className="text-[11px] text-gray-400 italic">Alınmış ölçü kaydı yok.</p>
                                     ) : null}
 
-                                    {window.products
-                                      .filter((p) => !p.isDeleted)
-                                      .map((p) => {
+                                    {measurementStore.measurements
+                                        .filter((p) => p.windowId === window.id && !p.isDeleted)
+                                        .map((p) => {
                                         const dims = getMeasurementDimensions(p);
                                         const isAssigned = !!(p.productId || p.productType);
 

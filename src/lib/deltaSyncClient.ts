@@ -1,3 +1,4 @@
+import { useMeasurementStore } from '@/store/measurementStore';
 import { getPendingSyncEvents, markSyncEventsSynced, markSyncEventsError } from './localSyncQueueDb';
 import { getSyncCursor, setSyncCursor, saveInboundMeasurement, type InboundMeasurement } from './localDraftDb';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -23,11 +24,11 @@ export async function pushDeltaSyncEvents(): Promise<{
 }> {
   try {
     const pendingEvents = await getPendingSyncEvents(50);
-    
+
     if (pendingEvents.length === 0) {
-      return { 
-        success: true, 
-        pushedCount: 0, 
+      return {
+        success: true,
+        pushedCount: 0,
         errors: [],
         debug: {
           pendingCount: 0,
@@ -60,7 +61,7 @@ export async function pushDeltaSyncEvents(): Promise<{
     const token = utf8ToBase64(`${currentUser.username}:${currentUser.password}`);
 
     // Call the server-side API route which uses the Service Role Key
-    
+
       let rCount = 0, pCount = 0;
       let hasRaw = false;
       pendingEvents.forEach(ev => {
@@ -97,7 +98,7 @@ export async function pushDeltaSyncEvents(): Promise<{
         const json = JSON.parse(errText);
         errText = json.error || json.details || errText;
       } catch (e) {}
-      
+
       return {
         success: false,
         pushedCount: 0,
@@ -120,7 +121,7 @@ export async function pushDeltaSyncEvents(): Promise<{
     if (syncedIds && syncedIds.length > 0) {
       await markSyncEventsSynced(syncedIds);
     }
-    
+
     if (errorIds && errorIds.length > 0) {
       const errMsgs = Array.isArray(errors) ? errors.join(', ') : (errors || 'Unknown error');
       await markSyncEventsError(errorIds, errMsgs);
@@ -141,9 +142,9 @@ export async function pushDeltaSyncEvents(): Promise<{
 
   } catch (err: any) {
     console.error('[DeltaSyncClient] Push failed:', err);
-    return { 
-      success: false, 
-      pushedCount: 0, 
+    return {
+      success: false,
+      pushedCount: 0,
       errors: [err.message],
       debug: {
         pendingCount: -1,
@@ -196,18 +197,18 @@ export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise
 
     // Deduplicate changes by entity_id, merging properties for the same entity in order of revision
     rawChanges.sort((a: any, b: any) => a.revision - b.revision);
-    
+
     const latestChanges = new Map<string, any>();
     for (const change of rawChanges) {
        const key = `${change.entity_type}_${change.entity_id}`;
        const existing = latestChanges.get(key);
-       
+
        if (!existing) {
            latestChanges.set(key, change);
        } else {
            // Merge the patches
            const mergedPatch = { ...existing.patch, ...change.patch };
-           
+
            // Ensure critical arrays are not overwritten by undefined, missing fields, or empty arrays in subsequent patches
            // An empty array in a later patch shouldn't wipe out existing rooms unless explicitly instructed via a deletion operation (which we don't have for rooms yet).
            if (existing.patch && existing.patch.rooms && existing.patch.rooms.length > 0) {
@@ -215,13 +216,13 @@ export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise
                    mergedPatch.rooms = existing.patch.rooms;
                }
            }
-           
+
            latestChanges.set(key, {
                ...change,
                patch: mergedPatch
            });
        }
-       
+
        // Advance cursors based on raw changes to not miss any revisions
        if (change.sourceTable === 'draft_changes' && change.revision > maxDraftRevision) {
          maxDraftRevision = change.revision;
@@ -230,10 +231,10 @@ export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise
          maxMeasurementRevision = change.revision;
        }
     }
-    
+
     const changes = Array.from(latestChanges.values());
 
-    
+
     let rCount = 0, pCount = 0;
     let hasRaw = false;
     changes.forEach(change => {
@@ -255,20 +256,33 @@ export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise
     for (const change of changes) {
 
       const patch = change.patch || {};
-      
+
       // Allow DRAFT, CUSTOMER, ROOM, OPENING, MEASUREMENT events
       const isDraftEvent = change.entity_type === 'DRAFT' && (change.operation === 'INSERT' || change.operation === 'UPDATE');
-      const isMeasurementEvent = ['CUSTOMER', 'ROOM', 'OPENING', 'MEASUREMENT'].includes(change.entity_type) && 
+      const isMeasurementEvent = ['CUSTOMER', 'ROOM', 'OPENING'].includes(change.entity_type) &&
                                  (change.operation === 'INSERT' || change.operation === 'UPDATE');
 
+      if (change.entity_type === 'MEASUREMENT' && (change.operation === 'INSERT' || change.operation === 'UPDATE')) {
+        try {
+          const measPatch = change.patch || {};
+          if (measPatch.id) {
+            useMeasurementStore.getState().batchUpsertMeasurements([measPatch as any]);
+            console.log(`[DeltaSyncClient] Directly upserted MEASUREMENT ${measPatch.id}`);
+          }
+        } catch(err) {
+          console.error('[DeltaSyncClient] Failed to apply MEASUREMENT event', err);
+        }
+        continue;
+      }
+
       if (isDraftEvent || isMeasurementEvent) {
-        
+
         // Safety check: if this is a DRAFT event and it lacks rooms/measurements and also lacks a customerName,
         // and is essentially just a status-only patch, do not process it into the inbound pool.
         if (isDraftEvent) {
             const hasRooms = patch.rooms && Array.isArray(patch.rooms) && patch.rooms.length > 0;
             const isStatusOnly = Object.keys(patch).length <= 3 && patch.syncStatus;
-            
+
             if (!hasRooms && isStatusOnly) {
                 console.warn(`[DeltaSyncClient] Skipping status-only DRAFT patch lacking measurements: ${change.change_id}`);
                 continue;
@@ -280,7 +294,7 @@ export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise
         let customerAddress = patch.customerAddress || patch.address;
 
         const suggested = suggestCustomers({ customerName, customerPhone }, allLocalCustomers);
-        
+
         const inbound: InboundMeasurement = {
           changeId: change.change_id,
           revision: change.revision,
@@ -330,16 +344,16 @@ export function suggestCustomers(patch: any, localCustomers: any[]): any[] {
 
   for (const c of localCustomers) {
     if (c.isDeleted) continue;
-    
+
     const cPhone = (c.phone || '').replace(/\D/g, '');
     const cName = (c.name || '').toLowerCase().trim();
 
     let score = 0;
-    
+
     if (phone && cPhone && cPhone === phone) {
       score += 100; // Exact phone match is very strong
     }
-    
+
     if (name && cName) {
       if (cName === name) score += 50;
       else if (cName.includes(name) || name.includes(cName)) score += 20;
