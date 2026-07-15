@@ -1,7 +1,15 @@
 import { useMeasurementStore } from '@/store/measurementStore';
 import { getPendingSyncEvents, markSyncEventsSynced, markSyncEventsError } from './localSyncQueueDb';
-import { getSyncCursor, setSyncCursor, saveInboundMeasurement, type InboundMeasurement } from './localDraftDb';
+import {
+  getSyncCursor,
+  setSyncCursor,
+  saveInboundMeasurement,
+  saveTransferReceipt,
+  type InboundMeasurement,
+  type TransferReceipt
+} from './localDraftDb';
 import { useAuthStore } from '@/store/useAuthStore';
+import { getDeviceId } from './deviceIdentity';
 
 // btoa() fails on non-Latin1 characters (e.g. Ş, Ğ, İ, Ü, Ö, Ç).
 function utf8ToBase64(str: string): string {
@@ -326,24 +334,76 @@ export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise
                                  (change.operation === 'INSERT' || change.operation === 'UPDATE');
 
       if (change.entity_type === 'MEASUREMENT' && (change.operation === 'INSERT' || change.operation === 'UPDATE')) {
+        const now = new Date().toISOString();
+        const receiverDeviceId = getDeviceId();
+        const receiverUserId = currentUser.id;
+        const senderUserId = change.user_id || 'unknown';
+        const senderDeviceId = change.device_id || 'unknown';
+
         try {
           const canonical = extractMeasurementFromChange(change);
           if (!canonical) {
             throw new Error(`Invalid or empty wrapper payload for measurement change ${change.change_id}`);
           }
 
-          const existing = useMeasurementStore.getState().measurements.find(m => m.id === canonical.id);
+          const existing = useMeasurementStore
+            .getState()
+            .measurements
+            .find((measurement) => measurement.id === canonical.id);
+
           const check = shouldOverwriteMeasurement(existing, canonical);
 
           if (!check.shouldOverwrite) {
-            console.warn(`[DeltaSyncClient] Skipping measurement change ${change.change_id}: ${check.error}`);
+            console.warn(
+              `[DeltaSyncClient] Skipping measurement change ${change.change_id}: ${check.error}`
+            );
           } else {
-            await useMeasurementStore.getState().batchUpsertMeasurements([canonical]);
-            console.log(`[DeltaSyncClient] Successfully applied/upserted MEASUREMENT ${canonical.id}`);
+            await useMeasurementStore
+              .getState()
+              .batchUpsertMeasurements([canonical]);
+
+            const receipt: TransferReceipt = {
+              transferId: change.change_id,
+              entityType: 'MEASUREMENT',
+              entityId: canonical.id,
+              senderUserId,
+              receiverUserId,
+              senderDeviceId,
+              receiverDeviceId,
+              status: 'DELIVERED',
+              deliveredAt: now,
+              entityVersion: Number(canonical.version || 1),
+              createdAt: now,
+              updatedAt: now
+            };
+
+            await saveTransferReceipt(receipt);
+
+            console.log(
+              `[DeltaSyncClient] Successfully applied/upserted MEASUREMENT ${canonical.id}`
+            );
           }
-        } catch(err: any) {
+        } catch (err: any) {
+          const failedReceipt: TransferReceipt = {
+            transferId: change.change_id,
+            entityType: 'MEASUREMENT',
+            entityId: change.entity_id || 'unknown',
+            senderUserId,
+            receiverUserId,
+            senderDeviceId,
+            receiverDeviceId,
+            status: 'FAILED',
+            failedAt: now,
+            failureReason: 'LOCAL_WRITE_FAILED',
+            entityVersion: Number(change.patch?.data?.version || change.patch?.version || 1),
+            createdAt: now,
+            updatedAt: now
+          };
+
+          await saveTransferReceipt(failedReceipt);
           console.error('[DeltaSyncClient] Failed to apply MEASUREMENT event', err);
         }
+
         continue;
       }
 
@@ -384,9 +444,9 @@ export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise
           suggestedCustomerIds: suggested.map(s => s.id)
         };
 
-        // Don't import our own changes back into the pool to avoid echo
-        if (change.device_id !== 'local-device') { // In real app, compare with actual device ID
-            await saveInboundMeasurement(inbound);
+        // Don't import changes produced by this same device back into the pool.
+        if (change.device_id !== getDeviceId()) {
+          await saveInboundMeasurement(inbound);
         }
       }
     }
