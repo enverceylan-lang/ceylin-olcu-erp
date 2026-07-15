@@ -10,6 +10,69 @@ function utf8ToBase64(str: string): string {
   }));
 }
 
+export function extractMeasurementFromChange(change: any): any {
+  if (!change) return null;
+  const patch = change.patch || {};
+
+  // Rule 1: New format has change.patch.data as canonical measurement
+  if (patch && patch.data && typeof patch.data === 'object' && patch.data.id) {
+    const canonical = patch.data;
+    if (canonical.id && typeof canonical.id === 'string') {
+      return canonical;
+    }
+  }
+
+  // Rule 2: Legacy format has change.patch directly as canonical measurement
+  if (patch && patch.id && typeof patch.id === 'string') {
+    if (patch.customerId || patch.windowId || patch.roomId || patch.templateType || patch.rawValues) {
+      return patch;
+    }
+  }
+
+  return null;
+}
+
+export function isMeasurementEmpty(m: any): boolean {
+  if (!m) return true;
+  if (!m.id || !m.customerId || !m.roomId || !m.windowId) return true;
+  if (!m.templateType) return true;
+  if (!m.rawValues || typeof m.rawValues !== 'object' || Object.keys(m.rawValues).length === 0) {
+    return true;
+  }
+  return false;
+}
+
+export function shouldOverwriteMeasurement(existing: any, incoming: any): { shouldOverwrite: boolean; error?: string } {
+  if (!existing) return { shouldOverwrite: true };
+  if (!incoming) return { shouldOverwrite: false, error: "Incoming measurement is null" };
+
+  const existingEmpty = isMeasurementEmpty(existing);
+  const incomingEmpty = isMeasurementEmpty(incoming);
+
+  // Rule A & B: empty cannot overwrite full, but full can repair empty
+  if (!existingEmpty && incomingEmpty) {
+    return { shouldOverwrite: false, error: "Cannot overwrite full local measurement with empty inbound payload" };
+  }
+
+  // Rule C: version and updatedAt checks
+  const existingVersion = Number(existing.version || 0);
+  const incomingVersion = Number(incoming.version || 0);
+
+  if (incomingVersion < existingVersion) {
+    return { shouldOverwrite: false, error: "Older version cannot overwrite newer local measurement" };
+  }
+
+  if (incomingVersion === existingVersion) {
+    const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+    const incomingTime = new Date(incoming.updatedAt || incoming.createdAt || 0).getTime();
+    if (incomingTime < existingTime) {
+      return { shouldOverwrite: false, error: "Older timestamp cannot overwrite newer local measurement" };
+    }
+  }
+
+  return { shouldOverwrite: true };
+}
+
 export async function pushDeltaSyncEvents(): Promise<{
   success: boolean;
   pushedCount: number;
@@ -264,12 +327,21 @@ export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise
 
       if (change.entity_type === 'MEASUREMENT' && (change.operation === 'INSERT' || change.operation === 'UPDATE')) {
         try {
-          const measPatch = change.patch || {};
-          if (measPatch.id) {
-            useMeasurementStore.getState().batchUpsertMeasurements([measPatch as any]);
-            console.log(`[DeltaSyncClient] Directly upserted MEASUREMENT ${measPatch.id}`);
+          const canonical = extractMeasurementFromChange(change);
+          if (!canonical) {
+            throw new Error(`Invalid or empty wrapper payload for measurement change ${change.change_id}`);
           }
-        } catch(err) {
+
+          const existing = useMeasurementStore.getState().measurements.find(m => m.id === canonical.id);
+          const check = shouldOverwriteMeasurement(existing, canonical);
+
+          if (!check.shouldOverwrite) {
+            console.warn(`[DeltaSyncClient] Skipping measurement change ${change.change_id}: ${check.error}`);
+          } else {
+            await useMeasurementStore.getState().batchUpsertMeasurements([canonical]);
+            console.log(`[DeltaSyncClient] Successfully applied/upserted MEASUREMENT ${canonical.id}`);
+          }
+        } catch(err: any) {
           console.error('[DeltaSyncClient] Failed to apply MEASUREMENT event', err);
         }
         continue;

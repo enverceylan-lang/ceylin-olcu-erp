@@ -21,6 +21,7 @@ export interface MeasurementRecord extends ProductMeasurement {
   archivedBy?: string;
   archiveBatchId?: string;
   deleteBatchId?: string;
+  version?: number;
 }
 
 interface MeasurementState {

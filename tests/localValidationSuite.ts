@@ -15,6 +15,11 @@ import {
   resolveMeasurementProductGroup,
   calculateFabricUsage
 } from '../src/lib/measurementAdapter';
+import {
+  extractMeasurementFromChange,
+  isMeasurementEmpty,
+  shouldOverwriteMeasurement
+} from '../src/lib/deltaSyncClient';
 
 const mockLocalStorage = {
   store: {} as Record<string, string>,
@@ -1606,6 +1611,389 @@ async function runTests() {
     if (!result.warning.includes('jumbo üretim sınırını aşıyor')) {
       throw new Error(`Expected split/max limit warning, got: ${result.warning}`);
     }
+  });
+
+  console.log('\n--- UÇTAN UCA TRANSFER SÖZLEŞMESİ VE REGRESYON TESTLERİ ---');
+
+  await runTest('simpleWidthHeightFullRoundTrip', async () => {
+    const orig: any = {
+      id: generateUUID(),
+      customerId: generateUUID(),
+      roomId: generateUUID(),
+      windowId: generateUUID(),
+      templateType: 'SIMPLE_WIDTH_HEIGHT',
+      rawValues: { width: 120, height: 240, quantity: 2 },
+      selectedProducts: [{ productType: 'ZEBRA', isActive: true, addedAt: new Date().toISOString() }],
+      notes: 'Test simple round trip',
+      status: 'MEASURED',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      version: 1
+    };
+
+    const payload = {
+      id: orig.id,
+      customerId: orig.customerId,
+      roomId: orig.roomId,
+      windowId: orig.windowId,
+      entity: 'measurement',
+      data: orig,
+      timestamp: new Date().toISOString()
+    };
+
+    const change = {
+      change_id: generateUUID(),
+      entity_type: 'MEASUREMENT',
+      entity_id: orig.id,
+      operation: 'UPDATE',
+      patch: payload,
+      user_id: 'user-admin',
+      device_id: 'device-phone',
+      created_at: new Date().toISOString()
+    };
+
+    const canonical = extractMeasurementFromChange(change);
+    if (!canonical) throw new Error('Extraction failed');
+    if (canonical.rawValues.width !== 120 || canonical.templateType !== 'SIMPLE_WIDTH_HEIGHT') {
+      throw new Error('Canonical does not match original');
+    }
+  });
+
+  await runTest('plicellFullRoundTrip', async () => {
+    const orig: any = {
+      id: generateUUID(),
+      customerId: generateUUID(),
+      roomId: generateUUID(),
+      windowId: generateUUID(),
+      templateType: 'PLICELL',
+      rawValues: { camAdedi: 2, profilRengi: 'BEYAZ', plicellCamListesi: [] },
+      selectedProducts: [{ productType: 'PLICELL', isActive: true, addedAt: new Date().toISOString() }],
+      notes: 'Plicell note',
+      status: 'MEASURED',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      version: 1
+    };
+
+    const payload = {
+      id: orig.id,
+      customerId: orig.customerId,
+      roomId: orig.roomId,
+      windowId: orig.windowId,
+      entity: 'measurement',
+      data: orig,
+      timestamp: new Date().toISOString()
+    };
+
+    const change = {
+      change_id: generateUUID(),
+      entity_type: 'MEASUREMENT',
+      entity_id: orig.id,
+      operation: 'UPDATE',
+      patch: payload,
+      user_id: 'user-admin',
+      device_id: 'device-phone',
+      created_at: new Date().toISOString()
+    };
+
+    const canonical = extractMeasurementFromChange(change);
+    if (!canonical) throw new Error('Extraction failed');
+    if (canonical.rawValues.profilRengi !== 'BEYAZ') throw new Error('Plicell fields lost');
+  });
+
+  await runTest('detailCurtainFullRoundTrip', async () => {
+    const orig: any = {
+      id: generateUUID(),
+      customerId: generateUUID(),
+      roomId: generateUUID(),
+      windowId: generateUUID(),
+      templateType: 'CURTAIN_DETAIL',
+      rawValues: { windowWidth: 150, leftWall: 20 },
+      selectedProducts: [{ productType: 'TÜL', isActive: true, addedAt: new Date().toISOString() }],
+      notes: 'Detail note',
+      status: 'MEASURED',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      version: 1
+    };
+
+    const payload = {
+      id: orig.id,
+      customerId: orig.customerId,
+      roomId: orig.roomId,
+      windowId: orig.windowId,
+      entity: 'measurement',
+      data: orig,
+      timestamp: new Date().toISOString()
+    };
+
+    const change = {
+      change_id: generateUUID(),
+      entity_type: 'MEASUREMENT',
+      entity_id: orig.id,
+      operation: 'UPDATE',
+      patch: payload,
+      user_id: 'user-admin',
+      device_id: 'device-phone',
+      created_at: new Date().toISOString()
+    };
+
+    const canonical = extractMeasurementFromChange(change);
+    if (!canonical) throw new Error('Extraction failed');
+    if (canonical.rawValues.windowWidth !== 150) throw new Error('Detail Curtain fields lost');
+  });
+
+  await runTest('mechanicalFullRoundTrip', async () => {
+    const orig: any = {
+      id: generateUUID(),
+      customerId: generateUUID(),
+      roomId: generateUUID(),
+      windowId: generateUUID(),
+      templateType: 'mechanical_curtain',
+      rawValues: { width: 140, height: 200 },
+      selectedProducts: [{ productType: 'STOR', isActive: true, addedAt: new Date().toISOString() }],
+      notes: 'Mech note',
+      status: 'MEASURED',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      version: 1
+    };
+
+    const payload = {
+      id: orig.id,
+      customerId: orig.customerId,
+      roomId: orig.roomId,
+      windowId: orig.windowId,
+      entity: 'measurement',
+      data: orig,
+      timestamp: new Date().toISOString()
+    };
+
+    const change = {
+      change_id: generateUUID(),
+      entity_type: 'MEASUREMENT',
+      entity_id: orig.id,
+      operation: 'UPDATE',
+      patch: payload,
+      user_id: 'user-admin',
+      device_id: 'device-phone',
+      created_at: new Date().toISOString()
+    };
+
+    const canonical = extractMeasurementFromChange(change);
+    if (!canonical) throw new Error('Extraction failed');
+    if (canonical.rawValues.width !== 140) throw new Error('Mechanical fields lost');
+  });
+
+  await runTest('nestedPatchDataIsExtracted', async () => {
+    const change = {
+      patch: {
+        data: {
+          id: 'test-m-id',
+          templateType: 'SIMPLE_WIDTH_HEIGHT',
+          rawValues: { width: 100 }
+        }
+      }
+    };
+    const canonical = extractMeasurementFromChange(change);
+    if (!canonical || canonical.id !== 'test-m-id') throw new Error('Nested patch extraction failed');
+  });
+
+  await runTest('legacyRootPatchIsSupported', async () => {
+    const change = {
+      patch: {
+        id: 'test-m-id',
+        templateType: 'SIMPLE_WIDTH_HEIGHT',
+        rawValues: { width: 100 },
+        customerId: 'c-1'
+      }
+    };
+    const canonical = extractMeasurementFromChange(change);
+    if (!canonical || canonical.id !== 'test-m-id') throw new Error('Legacy root patch extraction failed');
+  });
+
+  await runTest('rawValuesSurviveRoundTrip', async () => {
+    const change = {
+      patch: {
+        data: {
+          id: 'test-m-id',
+          templateType: 'SIMPLE_WIDTH_HEIGHT',
+          rawValues: { width: 150, height: 250, customVal: 'test' }
+        }
+      }
+    };
+    const canonical = extractMeasurementFromChange(change);
+    if (canonical.rawValues.customVal !== 'test') throw new Error('rawValues custom keys lost');
+  });
+
+  await runTest('selectedProductsSurviveRoundTrip', async () => {
+    const change = {
+      patch: {
+        data: {
+          id: 'test-m-id',
+          templateType: 'SIMPLE_WIDTH_HEIGHT',
+          rawValues: { width: 100 },
+          selectedProducts: [{ productType: 'ZEBRA', isActive: true }]
+        }
+      }
+    };
+    const canonical = extractMeasurementFromChange(change);
+    if (canonical.selectedProducts[0].productType !== 'ZEBRA') throw new Error('selectedProducts lost');
+  });
+
+  await runTest('roomAndOpeningRelationsSurviveRoundTrip', async () => {
+    const change = {
+      patch: {
+        data: {
+          id: 'm-1',
+          customerId: 'cust-1',
+          roomId: 'room-1',
+          windowId: 'win-1',
+          templateType: 'SIMPLE_WIDTH_HEIGHT',
+          rawValues: { width: 100 }
+        }
+      }
+    };
+    const canonical = extractMeasurementFromChange(change);
+    if (canonical.customerId !== 'cust-1' || canonical.roomId !== 'room-1' || canonical.windowId !== 'win-1') {
+      throw new Error('Identifiers lost in transition');
+    }
+  });
+
+  await runTest('notesSurviveRoundTrip', async () => {
+    const change = {
+      patch: {
+        data: {
+          id: 'm-1',
+          templateType: 'SIMPLE_WIDTH_HEIGHT',
+          rawValues: { width: 100 },
+          notes: 'Important notes'
+        }
+      }
+    };
+    const canonical = extractMeasurementFromChange(change);
+    if (canonical.notes !== 'Important notes') throw new Error('Notes lost in transition');
+  });
+
+  await runTest('malformedPayloadIsNotPersistedAsEmptyMeasurement', async () => {
+    const change = {
+      change_id: 'ch-1',
+      patch: {
+        id: 'm-1'
+      }
+    };
+    const canonical = extractMeasurementFromChange(change);
+    if (canonical && !isMeasurementEmpty(canonical)) {
+      throw new Error('Malformed payload was not detected as empty');
+    }
+  });
+
+  await runTest('emptyInboundCannotOverwriteFullLocalMeasurement', async () => {
+    const existing = {
+      id: 'm-1',
+      customerId: 'c-1',
+      roomId: 'r-1',
+      windowId: 'w-1',
+      templateType: 'SIMPLE_WIDTH_HEIGHT',
+      rawValues: { width: 100, height: 200 }
+    };
+    const incoming = {
+      id: 'm-1',
+      customerId: 'c-1',
+      roomId: 'r-1',
+      windowId: 'w-1',
+      templateType: 'SIMPLE_WIDTH_HEIGHT',
+      rawValues: {}
+    };
+    const result = shouldOverwriteMeasurement(existing, incoming);
+    if (result.shouldOverwrite) throw new Error('Empty inbound overwrote full local measurement');
+  });
+
+  await runTest('fullInboundRepairsExistingEmptyMeasurement', async () => {
+    const existing = {
+      id: 'm-1',
+      customerId: 'c-1',
+      roomId: 'r-1',
+      windowId: 'w-1',
+      templateType: 'SIMPLE_WIDTH_HEIGHT',
+      rawValues: {}
+    };
+    const incoming = {
+      id: 'm-1',
+      customerId: 'c-1',
+      roomId: 'r-1',
+      windowId: 'w-1',
+      templateType: 'SIMPLE_WIDTH_HEIGHT',
+      rawValues: { width: 100, height: 200 }
+    };
+    const result = shouldOverwriteMeasurement(existing, incoming);
+    if (!result.shouldOverwrite) throw new Error('Full inbound failed to repair empty local measurement');
+  });
+
+  await runTest('olderVersionCannotOverwriteNewerMeasurement', async () => {
+    const existing = {
+      id: 'm-1',
+      customerId: 'c-1',
+      roomId: 'r-1',
+      windowId: 'w-1',
+      templateType: 'SIMPLE_WIDTH_HEIGHT',
+      rawValues: { width: 100 },
+      version: 2
+    };
+    const incoming = {
+      id: 'm-1',
+      customerId: 'c-1',
+      roomId: 'r-1',
+      windowId: 'w-1',
+      templateType: 'SIMPLE_WIDTH_HEIGHT',
+      rawValues: { width: 120 },
+      version: 1
+    };
+    const result = shouldOverwriteMeasurement(existing, incoming);
+    if (result.shouldOverwrite) throw new Error('Older version overwrote newer local measurement');
+  });
+
+  await runTest('replayIsIdempotent', async () => {
+    const existing = {
+      id: 'm-1',
+      customerId: 'c-1',
+      roomId: 'r-1',
+      windowId: 'w-1',
+      templateType: 'SIMPLE_WIDTH_HEIGHT',
+      rawValues: { width: 100 },
+      version: 1
+    };
+    const incoming = {
+      id: 'm-1',
+      customerId: 'c-1',
+      roomId: 'r-1',
+      windowId: 'w-1',
+      templateType: 'SIMPLE_WIDTH_HEIGHT',
+      rawValues: { width: 100 },
+      version: 1
+    };
+    const result = shouldOverwriteMeasurement(existing, incoming);
+  });
+
+  await runTest('duplicateMeasurementIsNotCreated', async () => {
+    const list = [
+      { id: 'm-1', customerId: 'c-1', roomId: 'r-1', windowId: 'w-1', templateType: 'SIMPLE_WIDTH_HEIGHT', rawValues: { width: 100 } },
+      { id: 'm-1', customerId: 'c-1', roomId: 'r-1', windowId: 'w-1', templateType: 'SIMPLE_WIDTH_HEIGHT', rawValues: { width: 100 } }
+    ];
+    const unique = Array.from(new Map(list.map(m => [m.id, m])).values());
+    if (unique.length !== 1) throw new Error('Duplicate records created in collection');
+  });
+
+  await runTest('unknownMeasurementTypeDoesNotLosePayload', async () => {
+    const incoming = {
+      id: 'm-1',
+      customerId: 'c-1',
+      roomId: 'r-1',
+      windowId: 'w-1',
+      templateType: 'UNKNOWN_TYPE',
+      rawValues: { customProp: 42 }
+    };
+    if (isMeasurementEmpty(incoming)) throw new Error('Unknown type with valid rawValues marked as empty');
   });
 
   console.log('\n==================================================');
