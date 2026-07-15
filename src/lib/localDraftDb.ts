@@ -81,7 +81,6 @@ export interface FieldInstallationDraft {
   syncStatus: 'DRAFT' | 'READY_TO_TRANSFER' | 'TRANSFERRING' | 'TRANSFERRED' | 'ERROR';
   recoveryQueuedAt?: string;
 }
-
 export interface DraftMediaFile {
   fileId: string;
   draftId: string;
@@ -92,16 +91,45 @@ export interface DraftMediaFile {
   createdAt: string;
   blob: Blob;
 }
+export type TransferStatus =
+  | "SENT"
+  | "DELIVERED"
+  | "READ"
+  | "ACCEPTED"
+  | "COMPLETED"
+  | "FAILED";
 
+export interface TransferReceipt {
+  transferId: string;
+  entityType: "MEASUREMENT";
+  entityId: string;
+  senderUserId: string;
+  receiverUserId?: string;
+  senderDeviceId: string;
+  receiverDeviceId?: string;
+  status: TransferStatus;
+  sentAt?: string;
+  deliveredAt?: string;
+  readAt?: string;
+  acceptedAt?: string;
+  completedAt?: string;
+  failedAt?: string;
+  failureReason?: string;
+  entityVersion: number;
+  createdAt: string;
+  updatedAt: string;
+}
 class LocalDraftDatabase extends Dexie {
   measurementDrafts!: Table<FieldMeasurementDraft, string>;
   installationDrafts!: Table<FieldInstallationDraft, string>;
   draftMediaFiles!: Table<DraftMediaFile, string>;
   inboundMeasurements!: Table<InboundMeasurement, string>;
   syncCursors!: Table<SyncCursor, string>;
+  transferReceipts!: Table<TransferReceipt, string>;
 
   constructor() {
     super('CeylinLocalDraftDb');
+
     this.version(2).stores({
       measurementDrafts: 'id, draftType, createdBy, syncStatus, customerPhone',
       installationDrafts: 'id, draftType, ticketNo, createdBy, syncStatus',
@@ -109,10 +137,94 @@ class LocalDraftDatabase extends Dexie {
       inboundMeasurements: 'changeId, status, revision',
       syncCursors: 'key'
     });
+
+    this.version(3).stores({
+      measurementDrafts: 'id, draftType, createdBy, syncStatus, customerPhone',
+      installationDrafts: 'id, draftType, ticketNo, createdBy, syncStatus',
+      draftMediaFiles: 'fileId, draftId, category',
+      inboundMeasurements: 'changeId, status, revision',
+      syncCursors: 'key',
+      transferReceipts: 'transferId, entityId, status, updatedAt'
+    });
   }
 }
-
 export const localDraftDb = new LocalDraftDatabase();
+const TRANSFER_STATUS_ORDER: TransferStatus[] = [
+  "SENT",
+  "DELIVERED",
+  "READ",
+  "ACCEPTED",
+  "COMPLETED"
+];
+
+export function canTransferStatusAdvance(
+  currentStatus: TransferStatus,
+  nextStatus: TransferStatus
+): boolean {
+  if (currentStatus === nextStatus) return true;
+
+  if (nextStatus === "FAILED") return true;
+
+  if (currentStatus === "FAILED") {
+    return nextStatus === "SENT";
+  }
+
+  const currentIndex = TRANSFER_STATUS_ORDER.indexOf(currentStatus);
+  const nextIndex = TRANSFER_STATUS_ORDER.indexOf(nextStatus);
+
+  return currentIndex >= 0 && nextIndex > currentIndex;
+}
+
+export async function saveTransferReceipt(
+  receipt: TransferReceipt
+): Promise<boolean> {
+  const existing = await localDraftDb.transferReceipts.get(
+    receipt.transferId
+  );
+
+  if (!existing) {
+    await localDraftDb.transferReceipts.add(receipt);
+    return true;
+  }
+
+  if (receipt.entityVersion < existing.entityVersion) {
+    return false;
+  }
+
+  if (
+    receipt.entityVersion === existing.entityVersion &&
+    receipt.status === existing.status
+  ) {
+    return true;
+  }
+
+  if (!canTransferStatusAdvance(existing.status, receipt.status)) {
+    return false;
+  }
+
+  await localDraftDb.transferReceipts.put({
+    ...existing,
+    ...receipt,
+    sentAt: receipt.sentAt || existing.sentAt,
+    deliveredAt: receipt.deliveredAt || existing.deliveredAt,
+    readAt: receipt.readAt || existing.readAt,
+    acceptedAt: receipt.acceptedAt || existing.acceptedAt,
+    completedAt: receipt.completedAt || existing.completedAt,
+    failedAt: receipt.failedAt || existing.failedAt,
+    receiverUserId:
+      receipt.receiverUserId || existing.receiverUserId,
+    receiverDeviceId:
+      receipt.receiverDeviceId || existing.receiverDeviceId
+  });
+
+  return true;
+}
+
+export async function getTransferReceipt(
+  transferId: string
+): Promise<TransferReceipt | undefined> {
+  return localDraftDb.transferReceipts.get(transferId);
+}
 
 // ─── INBOUND MEASUREMENT HELPERS ───
 
