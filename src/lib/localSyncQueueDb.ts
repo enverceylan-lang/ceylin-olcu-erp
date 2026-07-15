@@ -67,20 +67,30 @@ function sanitizePatch(patch: any): any {
   return sanitized;
 }
 
-export async function enqueueSyncEvent(
+export interface EnqueueSyncResult {
+  success: boolean;
+  changeId?: string;
+  deviceId?: string;
+  userId?: string;
+  createdAt?: string;
+}
+
+export async function enqueueSyncEventDetailed(
   entityType: SyncEvent['entityType'],
   entityId: string,
   operation: SyncEvent['operation'],
   patch: any
-): Promise<boolean> {
+): Promise<EnqueueSyncResult> {
   try {
     const now = new Date().toISOString();
-    const changeId = (typeof crypto !== 'undefined' && crypto.randomUUID)
-      ? crypto.randomUUID()
-      : 'chg-' + Math.random().toString(36).substr(2, 9);
-      
+
+    const changeId =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `chg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
     const deviceId = getDeviceId();
-    // Safely get user from auth store state without hooks
+
     const currentUser = useAuthStore.getState().currentUser;
     const userId = currentUser?.id || 'unknown';
 
@@ -99,20 +109,47 @@ export async function enqueueSyncEvent(
     };
 
     await localSyncQueueDb.pendingSyncEvents.put(fullEvent);
-    
-    // Debug for user
+
     if (typeof window !== 'undefined') {
-      console.log(`[SyncQueue] Successfully enqueued ${operation} for ${entityType} ${entityId}`);
-      // alert(`[DEBUG] Queue Event Created: TRUE\nType: ${entityType}\nStatus: PENDING`);
+      console.log(
+        `[SyncQueue] Successfully enqueued ${operation} for ${entityType} ${entityId}`
+      );
     }
-    return true;
+
+    return {
+      success: true,
+      changeId,
+      deviceId,
+      userId,
+      createdAt: now
+    };
   } catch (err: any) {
     if (typeof window !== 'undefined') {
-      alert(`[DEBUG] Queue Event Created: FALSE\nHATA: ${err.message}`);
+      console.error('[SyncQueue] Queue event could not be created.');
     }
+
     console.error('[SyncQueue] Failed to enqueue event:', err);
-    return false;
+
+    return {
+      success: false
+    };
   }
+}
+
+export async function enqueueSyncEvent(
+  entityType: SyncEvent['entityType'],
+  entityId: string,
+  operation: SyncEvent['operation'],
+  patch: any
+): Promise<boolean> {
+  const result = await enqueueSyncEventDetailed(
+    entityType,
+    entityId,
+    operation,
+    patch
+  );
+
+  return result.success;
 }
 
 export async function getPendingSyncEvents(limit: number = 50): Promise<SyncEvent[]> {
