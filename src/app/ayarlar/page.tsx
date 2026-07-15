@@ -2,7 +2,7 @@
 
 import { Download, Settings, Upload, ShieldCheck, AlertTriangle, UserPlus, Trash2, Check, X, Shield } from "lucide-react";
 import { useRef, useState, useEffect, Fragment } from "react";
-import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, MockUser, sanitizeAuditSnapshot } from "@/store/useAuthStore";
+import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, MockUser } from "@/store/useAuthStore";
 import { syncNow } from "@/lib/syncService";
 import { normalizeUsername } from "@/lib/usernameHelper";
 
@@ -79,6 +79,27 @@ export default function AyarlarPage() {
   }, [mounted, currentUser?.id]);
 
   if (!mounted) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
+
+  const AUDIT_FIELD_LABELS: Record<string, string> = {
+    name: "Ad soyad",
+    username: "Kullanıcı adı",
+    role: "Rol",
+    isActive: "Durum",
+    email: "E-posta",
+    phone: "Telefon",
+    tcNo: "TC kimlik",
+    address: "Adres",
+    passwordChanged: "Şifre",
+  };
+
+  const formatAuditValue = (field: string, value: unknown) => {
+    if (field === "passwordChanged") return "Şifre güncellendi";
+    if (field === "isActive") return value ? "Aktif" : "Pasif";
+    if (value === null || value === undefined || value === "") return "Boş";
+    if (Array.isArray(value)) return value.join(", ") || "Boş";
+    if (typeof value === "object") return "Güncellendi";
+    return String(value);
+  };
 
   const exportBackup = () => {
     const payload: BackupPayload = {
@@ -202,8 +223,8 @@ export default function AyarlarPage() {
   };
 
   const handleSaveEdit = async (id: string) => {
-    if (!editName.trim() || !editUsername.trim() || !editEmail.trim() || !editPhone.trim()) {
-      setMessage("Hata: Ad soyad, kullanıcı adı, mail adresi ve telefon numarası zorunludur.");
+    if (!editName.trim() || !editUsername.trim()) {
+      setMessage("Hata: Ad soyad ve kullanıcı adı zorunludur.");
       return;
     }
 
@@ -502,10 +523,9 @@ export default function AyarlarPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1">Mail Adresi</label>
+                  <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1">Mail Adresi <span className="font-normal text-slate-500">(İsteğe bağlı)</span></label>
                   <input 
                     type="email" 
-                    required 
                     value={newEmail} 
                     onChange={e => setNewEmail(e.target.value)}
                     className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
@@ -513,10 +533,9 @@ export default function AyarlarPage() {
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1">Telefon Numarası</label>
+                  <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1">Telefon Numarası <span className="font-normal text-slate-500">(İsteğe bağlı)</span></label>
                   <input 
                     type="tel" 
-                    required 
                     value={newPhone} 
                     onChange={e => setNewPhone(e.target.value)}
                     className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
@@ -781,7 +800,6 @@ export default function AyarlarPage() {
                                 <label className="block font-semibold text-gray-650 dark:text-gray-400 mb-1">Mail Adresi</label>
                                 <input
                                   type="email"
-                                  required
                                   value={editEmail}
                                   onChange={e => setEditEmail(e.target.value)}
                                   className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
@@ -792,7 +810,6 @@ export default function AyarlarPage() {
                                 <label className="block font-semibold text-gray-650 dark:text-gray-400 mb-1">Telefon Numarası</label>
                                 <input
                                   type="tel"
-                                  required
                                   value={editPhone}
                                   onChange={e => setEditPhone(e.target.value)}
                                   className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
@@ -837,58 +854,69 @@ export default function AyarlarPage() {
           <div className="border-b border-gray-200 p-5 dark:border-gray-800 flex items-center gap-3">
             <ShieldCheck className="h-5 w-5 text-indigo-600" />
             <div>
-              <h2 className="font-semibold text-gray-900 dark:text-white">Kullanıcı Değişiklik Günlüğü (Audit Log)</h2>
-              <p className="text-[10px] text-gray-500 dark:text-gray-400">Yöneticiler tarafından yapılan profil güncellemeleri ve değişiklik snapshots.</p>
+              <h2 className="font-semibold text-gray-900 dark:text-white">Kullanıcı Değişiklik Günlüğü</h2>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                Kim, hangi kullanıcıda, neyi değiştirdi?
+              </p>
             </div>
           </div>
-          <div className="p-5 space-y-4 max-h-[300px] overflow-auto">
+
+          <div className="divide-y divide-gray-100 dark:divide-gray-800 max-h-[360px] overflow-auto">
             {auditLog.length === 0 ? (
-              <p className="text-gray-500 text-center py-4">Henüz bir değişiklik kaydı bulunmuyor.</p>
+              <p className="text-gray-500 text-center py-6">Henüz kullanıcı değişikliği bulunmuyor.</p>
             ) : (
-              <div className="space-y-3">
-                {auditLog.map((entry) => {
-                  const hasPasswordChange = entry.changedFields?.includes('passwordChanged') || entry.field?.includes('password');
-                  const displayFields = entry.changedFields?.map(f => f === 'passwordChanged' ? 'Şifre Değişikliği' : f).join(', ') || entry.field;
-                  return (
-                    <div key={entry.id} className="p-3 rounded-lg border border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-950/20 space-y-2">
-                      <div className="flex justify-between items-center text-[10px]">
-                        <span className="font-bold text-gray-700 dark:text-gray-300">
-                          Kullanıcı ID: {entry.entityId}
-                        </span>
-                        <span className="text-gray-500">
-                          {new Date(entry.changedAt).toLocaleString('tr-TR')}
-                        </span>
-                      </div>
-                      <div className="text-[11px]">
-                        <span className="font-semibold">Değişen Alanlar:</span> <span className="font-mono text-indigo-600 dark:text-indigo-400">{displayFields}</span>
-                      </div>
-                      {hasPasswordChange && (
-                        <div className="text-[10px] text-amber-655 dark:text-amber-450 font-semibold bg-amber-500/5 border border-amber-500/10 p-1.5 rounded">
-                          🔒 Şifre değiştirildi
+              auditLog.map((entry) => {
+                const targetUser = users.find((user) => user.id === entry.entityId);
+                const changedByUser = users.find((user) => user.id === entry.changedBy);
+                const fields = (
+                  entry.changedFields?.length
+                    ? entry.changedFields
+                    : (entry.field || "").split(",")
+                )
+                  .map((field) => field.trim())
+                  .filter(Boolean);
+
+                return (
+                  <div key={entry.id} className="p-4 space-y-3">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="font-bold text-gray-900 dark:text-white">
+                          {targetUser?.name || `Kullanıcı ${entry.entityId}`}
                         </div>
-                      )}
-                      <div className="grid grid-cols-2 gap-4 text-[10px] pt-1">
-                        <div>
-                          <span className="font-semibold text-red-500">Eski Bilgiler:</span>
-                          <pre className="mt-1 p-1.5 rounded bg-red-500/5 border border-red-500/10 font-mono text-[9px] whitespace-pre-wrap overflow-auto max-h-[80px]">
-                            {entry.beforeSnapshot ? JSON.stringify(sanitizeAuditSnapshot(entry.beforeSnapshot), null, 2) : 'Yok'}
-                          </pre>
-                        </div>
-                        <div>
-                          <span className="font-semibold text-green-500">Yeni Bilgiler:</span>
-                          <pre className="mt-1 p-1.5 rounded bg-green-500/5 border border-green-500/10 font-mono text-[9px] whitespace-pre-wrap overflow-auto max-h-[80px]">
-                            {entry.afterSnapshot ? JSON.stringify(sanitizeAuditSnapshot(entry.afterSnapshot), null, 2) : 'Yok'}
-                          </pre>
+                        <div className="text-[10px] text-gray-500">
+                          İşlemi yapan: {changedByUser?.name || entry.changedBy}
                         </div>
                       </div>
-                      <div className="text-[9px] text-gray-400 dark:text-gray-500 flex justify-between pt-1">
-                        <span>Değiştiren: {entry.changedBy}</span>
-                        <span>Neden: {entry.reason}</span>
+                      <div className="text-[10px] text-gray-500">
+                        {new Date(entry.changedAt).toLocaleString("tr-TR")}
                       </div>
                     </div>
-                  );
-                })}
-              </div>
+
+                    <div className="space-y-1.5">
+                      {fields.map((field) => {
+                        const beforeValue = entry.beforeSnapshot?.[field];
+                        const afterValue = entry.afterSnapshot?.[field];
+
+                        return (
+                          <div
+                            key={`${entry.id}-${field}`}
+                            className="grid grid-cols-[110px_1fr] gap-3 rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-950/40"
+                          >
+                            <span className="font-semibold text-gray-600 dark:text-gray-300">
+                              {AUDIT_FIELD_LABELS[field] || field}
+                            </span>
+                            <span className="text-gray-700 dark:text-gray-200">
+                              {field === "passwordChanged"
+                                ? "Şifre güvenli şekilde değiştirildi"
+                                : `${formatAuditValue(field, beforeValue)} → ${formatAuditValue(field, afterValue)}`}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })
             )}
           </div>
         </div>

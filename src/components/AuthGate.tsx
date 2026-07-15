@@ -220,7 +220,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     !currentUser.phone?.trim()
   );
   
-  const shouldBlock = isProfileIncomplete && !(isAdmin && isSettingsPage);
+  const shouldBlock = Boolean(isProfileIncomplete && !isAdmin);
 
   if (shouldBlock && currentUser) {
     const handleProfileSubmit = (e: React.FormEvent) => {
