@@ -13,21 +13,21 @@ import { MediaPreviewModal } from "@/components/MediaPreviewModal";
 import { syncNow } from "@/lib/syncService";
 import { buildWhatsAppShortReport, calculateMechanicalCurtainM2, calculatePlicellM2, getValidNote } from "@/lib/reportFormatters";
 import { MeasurementVisualReport } from "@/components/reports/MeasurementVisualReport";
+import { RoomPreparationModal } from "@/components/reports/RoomPreparationModal";
 import { localDraftDb, FieldMeasurementDraft, forceRequeueCustomerMeasurementTree } from "@/lib/localDraftDb";
 import { useSalesStore } from "@/store/salesStore";
-import { createDraftSaleFromCustomer } from "@/lib/salesAdapter";
+import { createDraftSaleFromCustomer, syncOrCreateDraftSale } from "@/lib/salesAdapter";
 import { ShoppingCart, Edit, Merge, Archive } from "lucide-react";
 import { CariEditModal } from "@/components/modals/CariEditModal";
 import { MergeCustomerModal } from "@/components/modals/MergeCustomerModal";
 import { MoveRoomModal } from "@/components/modals/MoveRoomModal";
 import { FacadeSegmentsEditor } from "@/components/measurements/FacadeSegmentsEditor";
 import { PlicellCamListEditor } from "@/components/measurements/PlicellCamListEditor";
-import { PreSalesIntentSection } from "@/components/measurements/PreSalesIntentSection";
 
 export default function CariDetayPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
   const id = unwrappedParams.id;
-  
+
   const store = useStore();
   const measurementStore = useMeasurementStore();
   const { customers, updateCustomer, addRoom, deleteRoom, addWindow, deleteWindow, updateRoomAttachments, updateWindowItem, addProductMeasurement, updateProductMeasurement, deleteProductMeasurement } = store;
@@ -39,7 +39,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
   const normRole = user ? normalizeRole(user.role) : 'FIELD';
   const cariType = customer?.cariType || 'CUSTOMER';
-  
+
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
   const [isRecovering, setIsRecovering] = useState(false);
@@ -62,7 +62,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   };
   const [isMoveRoomModalOpen, setIsMoveRoomModalOpen] = useState(false);
   const [roomToMove, setRoomToMove] = useState<any>(null);
-  
+
   const canEdit = canEditCari(user, cariType);
   const canMerge = canMergeCari(user);
   const canArchive = canArchiveCari(user, cariType);
@@ -104,7 +104,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       default: return 'bg-blue-100 text-blue-800 dark:bg-blue-950/30 dark:text-blue-400 border border-blue-200 dark:border-blue-900/30';
     }
   };
-  
+
   const [mounted, setMounted] = useState(false);
   const permissions = ROLE_PERMISSIONS[currentUser?.role || "FIELD"] || { label: "Kullanıcı", canAccessOfficeMode: false, canOverrideMeasuredBy: false };
   const [mode, setMode] = useState<"MEASUREMENT" | "OFFICE">("MEASUREMENT");
@@ -167,6 +167,8 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const [isSaving, setIsSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isVisualReportOpen, setIsVisualReportOpen] = useState(false);
+  const [isPrepModalOpen, setIsPrepModalOpen] = useState(false);
+  const [selectedRoomForPrep, setSelectedRoomForPrep] = useState<any>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{
     type: 'room' | 'window' | 'measurement' | 'photo';
     data: any;
@@ -182,7 +184,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const executeDelete = async () => {
     if (!deleteConfirm) return;
     const { type, data } = deleteConfirm;
-    
+
     if (type === 'room') {
       deleteRoom(data.customerId, data.roomId);
     } else if (type === 'window') {
@@ -208,7 +210,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
         updateCustomer(data.customerId, { addressPhotos: updated });
       }
     }
-    
+
     setDeleteConfirm(null);
     try {
       await syncNow();
@@ -438,21 +440,21 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
   const triggerFileSelector = (useCamera: boolean) => {
     if (!mediaUploadType || !mediaUploadCallback) return;
-    
+
     const type = mediaUploadType;
     const callback = mediaUploadCallback;
-    
+
     // Close the modal
     setMediaUploadType(null);
     setMediaUploadCallback(null);
-    
+
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = type === 'photo' ? 'image/*' : 'video/*';
     if (useCamera) {
       input.setAttribute('capture', 'environment');
     }
-    
+
     input.onchange = async (event) => {
       const file = (event.target as HTMLInputElement).files?.[0];
       if (!file) return;
@@ -464,7 +466,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
         showToast(error instanceof Error ? error.message : 'Dosya kaydedilemedi.');
       }
     };
-    
+
     input.click();
   };
 
@@ -615,7 +617,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       async (position) => {
         const { latitude, longitude, accuracy } = position.coords;
         const newCoords = `${latitude.toFixed(6)},${longitude.toFixed(6)}`;
-        
+
         setLocationAccuracy(accuracy);
         if (accuracy > 100) {
           setLocationWarning("Konum doğruluğu düşük. GPS açıkken tekrar deneyin veya haritadan kontrol edin.");
@@ -661,7 +663,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       };
 
       await localDraftDb.measurementDrafts.put(draftData);
-      
+
       // Fix: V1A Queue - Add to sync queue for push
       const { enqueueSyncEvent } = await import('@/lib/localSyncQueueDb');
       await enqueueSyncEvent('DRAFT', draftData.id, existing ? 'UPDATE' : 'INSERT', draftData);
@@ -677,9 +679,8 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     if (!customer) return;
     try {
       setIsSaving(true);
-      const newSale = createDraftSaleFromCustomer(customer);
-      await addSale(newSale);
-      router.push(`/satis/${newSale.id}`);
+      const draftId = await syncOrCreateDraftSale(customer, useSalesStore.getState());
+      router.push(`/satis/${draftId}`);
     } catch (err) {
       console.error(err);
       showToast("Satışa aktarılırken bir hata oluştu.");
@@ -687,7 +688,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       setIsSaving(false);
     }
   };
-  
+
   const handleSaveCustomer = async (id: string, data: Partial<any>) => {
     await updateCustomer(id, data);
     if (user) {
@@ -705,28 +706,28 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   };
 
   const handleArchiveCustomer = async () => {
-    if (confirm("Bu cari ve cariye baYlI ölçü, satIY ve finans iYlemleri aktif ekranlardan kaldIrIlarak arYive taYInacaktIr. Veriler fiziksel olarak silinmeyecek ve geri getirilebilecektir.")) {
+    if (confirm("Bu cari ve cariye bağlı ölçü, satış ve finans işlemleri aktif ekranlardan kaldırılarak arşive taşınacaktır. Veriler fiziksel olarak silinmeyecek ve geri getirilebilecektir.")) {
       await store.archiveCustomer(id, currentUser);
       await syncNow();
     }
   };
 
   const handleRestoreArchivedCustomer = async () => {
-    if (confirm("Cari ve arYivlenen baYlI kayItlar geri getirilecek. Emin misiniz?")) {
+    if (confirm("Cari ve arşivlenen bağlı kayıtlar geri getirilecek. Emin misiniz?")) {
       await store.restoreArchivedCustomer(id, currentUser);
       await syncNow();
     }
   };
 
   const handleMoveToTrash = async () => {
-    if (confirm("Bu cari ve baYlI tüm kayItlar çöp kutusuna taYInacaktIr. Emin misiniz?")) {
+    if (confirm("Bu cari ve bağlı tüm kayıtlar çöp kutusuna taşınacaktır. Emin misiniz?")) {
       await store.moveCustomerToTrash(id, currentUser);
       await syncNow();
     }
   };
 
   const handleRestoreFromTrash = async () => {
-    if (confirm("Çöp kutusundan çIkarIlacaktIr. Emin misiniz?")) {
+    if (confirm("Çöp kutusundan çıkarılacaktır. Emin misiniz?")) {
       await store.restoreCustomerFromTrash(id, currentUser);
         await syncNow();
       }
@@ -766,7 +767,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     }
   };
 
-  
+
   const renderMeasurementForm = (room: any, window: any, isInlineEdit: boolean = false) => {
     return (
       <div key={isInlineEdit ? editingMeasurementId : "new"} className={`mt-4 border-2 border-blue-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-lg ${isInlineEdit ? "" : "ml-6"} relative`}>
@@ -776,13 +777,13 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                 </h5>
                                 <button onClick={() => { setActiveWindowIdForProduct(null); setEditingMeasurementId(null); }}><X className="w-5 h-5 text-blue-400 hover:text-blue-600 dark:text-gray-400 dark:hover:text-gray-200" /></button>
                               </div>
-                              
+
                               <div className="p-4 space-y-4">
                                 <div className="grid grid-cols-2 gap-4">
                                   <div>
                                     <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Ölçüm Şablonu</label>
-                                    <select 
-                                      value={selectedTemplate} 
+                                    <select
+                                      value={selectedTemplate}
                                       onChange={(e) => { setSelectedTemplate(e.target.value); setRawValues({}); }}
                                       className="w-full p-2 border rounded-lg bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                                     >
@@ -795,8 +796,8 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                     <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Ölçüyü Alan</label>
                                     {permissions.canOverrideMeasuredBy ? (
                                       /* ADMIN/SALES can select who measured */
-                                      <select 
-                                        value={overrideMeasuredById} 
+                                      <select
+                                        value={overrideMeasuredById}
                                         onChange={(e) => setOverrideMeasuredById(e.target.value)}
                                         className="w-full p-2 border rounded-lg bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                                       >
@@ -815,7 +816,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
                                 {selectedTemplate === 'CURTAIN_DETAIL' && (
                                   <div className="mb-4">
-                                    <FacadeSegmentsEditor 
+                                    <FacadeSegmentsEditor
                                       key={activeWindowIdForProduct || 'new'}
                                       segments={rawValues.facadeSegments || []}
                                       onChange={(segments) => setRawValues({...rawValues, facadeSegments: segments})}
@@ -825,7 +826,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
                                 {selectedTemplate === 'PLICELL' && (
                                   <div className="mb-4">
-                                    <PlicellCamListEditor 
+                                    <PlicellCamListEditor
                                       camAdedi={rawValues.camAdedi}
                                       ortakCamBoyuCm={rawValues.ortakCamBoyuCm}
                                       profilRengi={rawValues.profilRengi}
@@ -834,7 +835,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                     />
                                   </div>
                                 )}
-                                
+
                                 <div className={`grid gap-3 bg-gray-50 dark:bg-gray-800/50 p-3 rounded border dark:border-gray-700 ${selectedTemplate === 'CURTAIN_DETAIL' ? 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
                                   {selectedTemplate === 'CURTAIN_DETAIL' && (
                                     <div className="col-span-1 sm:col-span-2 md:col-span-3 text-sm font-bold text-gray-700 dark:text-gray-300 mb-2 border-b pb-1 dark:border-gray-700">Yükseklik Bilgileri</div>
@@ -855,7 +856,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                             ))}
                                           </select>
                                         ) : isNotesField ? (
-                                          <textarea 
+                                          <textarea
                                             placeholder={f.label}
                                             value={rawValues[f.key] !== undefined ? rawValues[f.key] : (f.defaultValue !== undefined ? f.defaultValue : '')}
                                             onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
@@ -863,8 +864,8 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                             rows={2}
                                           />
                                         ) : (
-                                          <input 
-                                            type={f.type} 
+                                          <input
+                                            type={f.type}
                                             step={f.type === 'number' ? 'any' : undefined}
                                             placeholder={f.label}
                                             value={rawValues[f.key] !== undefined ? rawValues[f.key] : (f.defaultValue !== undefined ? f.defaultValue : '')}
@@ -879,8 +880,8 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
                                 <div>
                                   <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Saha Notları (İsteğe Bağlı, Engeller vb.)</label>
-                                  <textarea 
-                                    value={measurementNotes} 
+                                  <textarea
+                                    value={measurementNotes}
                                     placeholder="Herhangi bir engel veya not var mı?"
                                     onChange={(e) => setMeasurementNotes(e.target.value)}
                                     className="w-full p-2 border dark:border-gray-700 rounded bg-white dark:bg-gray-900 dark:text-white dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
@@ -903,11 +904,11 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
         <AlertTriangle className="w-5 h-5" />
-        <span className="font-bold">ARIVLENM CAR:</span> Bu kayIt sadece okuma amaçlIdIr. Yeni iYlem yapIlamaz.
+        <span className="font-bold">ARŞİVLENEN CARİ:</span> Bu kayıt sadece okuma amaçlıdır. Yeni işlem yapılamaz.
       </div>
       {(currentUser?.role === 'ADMIN') && (
         <button onClick={handleRestoreArchivedCustomer} className="px-3 py-1 bg-yellow-200 dark:bg-yellow-800 rounded font-medium hover:opacity-80 transition-opacity">
-          ArYivden Geri Al
+          Arşivden Geri Al
         </button>
       )}
     </div>
@@ -918,11 +919,11 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
         <Trash2 className="w-5 h-5" />
-        <span className="font-bold">ÇÖP KUTUSUNDA:</span> Bu kayIt tamamen silinmiY durumdadIr.
+        <span className="font-bold">ÇÖP KUTUSUNDA:</span> Bu kayıt tamamen silinmiş durumdadır.
       </div>
       {(currentUser?.role === 'ADMIN') && (
         <button onClick={handleRestoreFromTrash} className="px-3 py-1 bg-red-200 dark:bg-red-800 rounded font-medium hover:opacity-80 transition-opacity">
-          Çöp Kutusundan ÇIkar
+          Çöp Kutusundan Çıkar
         </button>
       )}
     </div>
@@ -939,7 +940,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
             <p className="text-sm heading-subtitle">Ölçü & Proje Yönetimi (V2)</p>
           </div>
         </div>
-        
+
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
           {currentUser?.role === 'ADMIN' && (
             <button
@@ -966,7 +967,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
               Düzenle
             </button>
           )}
-          
+
           {canMerge && (
             <button
               onClick={() => setIsMergeModalOpen(true)}
@@ -982,7 +983,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     <div className="flex gap-2 mt-4 sm:mt-0">
       <button onClick={handleArchiveCustomer} className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-yellow-200 text-yellow-600 hover:bg-yellow-50 dark:border-yellow-900 dark:text-yellow-500 dark:hover:bg-yellow-900/20 text-sm font-medium transition-colors">
         <Archive className="w-4 h-4" />
-        ArYivle
+        Arşivle
       </button>
       <button onClick={handleMoveToTrash} className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-500 dark:hover:bg-red-900/20 text-sm font-medium transition-colors">
         <Trash2 className="w-4 h-4" />
@@ -1031,21 +1032,21 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
           {/* MODE TOGGLE */}
           <div className="flex bg-gray-200 dark:bg-gray-800 rounded-xl p-1 shadow-inner">
-          <button 
+          <button
             onClick={() => setMode("MEASUREMENT")}
             className={`px-6 py-2 text-sm font-bold rounded-lg transition-colors ${mode === 'MEASUREMENT' ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
           >
             Sahadan Ölçü Modu
           </button>
           {permissions.canAccessOfficeMode ? (
-            <button 
+            <button
               onClick={() => setMode("OFFICE")}
               className={`px-6 py-2 text-sm font-bold rounded-lg transition-colors ${mode === 'OFFICE' ? 'bg-white dark:bg-gray-700 text-orange-600 dark:text-orange-400 shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
             >
               Ofis / Satış Modu
             </button>
           ) : (
-            <button 
+            <button
               disabled
               className="px-6 py-2 text-sm font-bold rounded-lg text-gray-400 dark:text-gray-600 cursor-not-allowed"
               title="Bu mod için yetkiniz yok"
@@ -1123,7 +1124,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                     const mapsUrl = getGoogleMapsUrl(customer);
                     if (mapsUrl) {
                       return (
-                        <a 
+                        <a
                           href={mapsUrl}
                           target="_blank"
                           rel="noopener noreferrer"
@@ -1136,8 +1137,8 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                       );
                     }
                     return (
-                      <div 
-                        className="flex items-start gap-1.5 text-gray-400 dark:text-gray-600 cursor-not-allowed" 
+                      <div
+                        className="flex items-start gap-1.5 text-gray-400 dark:text-gray-600 cursor-not-allowed"
                         title="Konum eklenmemiş"
                       >
                         <MapPin className="w-4 h-4 text-gray-300 dark:text-gray-700 flex-shrink-0 mt-0.5" />
@@ -1153,7 +1154,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                   <div className="font-medium text-gray-900 dark:text-white mb-2 break-all">
                     {customer.mapLocation || "Konum Belirlenmemiş"}
                   </div>
-                  
+
                   {locationAccuracy !== null && (
                     <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
                       Doğruluk: {Math.round(locationAccuracy)} metre
@@ -1212,11 +1213,11 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                   </div>
                 </div>
               )}
-              
+
               {canViewAddressPhoto && (
                 <div>
                   <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase mb-1.5">Bina / Adres Fotoğrafları</span>
-                  
+
                   {(() => {
                     const addressPhotos = customer.addressPhotos || [];
                     if (addressPhotos.length > 0) {
@@ -1290,7 +1291,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
               )}
             </div>
           </div>
-          
+
           {isAddingRoom ? (
             <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 shadow-sm space-y-3">
               <div className="space-y-1">
@@ -1334,8 +1335,8 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
               </div>
             </div>
           ) : (
-            <button 
-              onClick={() => setIsAddingRoom(true)} 
+            <button
+              onClick={() => setIsAddingRoom(true)}
               className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold shadow-sm transition-colors cursor-pointer ${mode === 'MEASUREMENT' ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-800 dark:bg-gray-800 dark:text-white'}`}
             >
               <Plus className="w-5 h-5" />
@@ -1346,11 +1347,11 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
         {/* Main Content Area */}
         <div className="lg:col-span-3 space-y-6">
-          
+
             {/* View Mode Toggle for Measurements */}
             {activeTab === "rooms" && customer.rooms.length > 0 && (
               <div className="flex justify-end mb-4">
-                <button 
+                <button
                   onClick={() => setMeasurementViewMode(prev => prev === 'CARD' ? 'GRID' : 'CARD')}
                   className="px-4 py-2 text-xs font-bold rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors border border-gray-200 dark:border-gray-700 flex items-center gap-2 shadow-sm"
                 >
@@ -1416,12 +1417,12 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                 </div>
               ) : null}
 
-          {customer.rooms.map((room) => {
+          {([...(customer.rooms || [])].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())).map((room) => {
             const isExpanded = expandedRooms[room.id] !== false;
 
             return (
               <div id={`room-card-${room.id}`} key={room.id} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden shadow-sm">
-                
+
                 {/* ROOM HEADER */}
                 <div className="bg-gray-50 dark:bg-gray-800/50 p-4 border-b border-gray-200 dark:border-gray-800">
                   <div className="flex justify-between items-center cursor-pointer" onClick={() => toggleRoom(room.id)}>
@@ -1429,10 +1430,31 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                       {isExpanded ? <ChevronDown className="w-5 h-5 text-gray-500" /> : <ChevronRight className="w-5 h-5 text-gray-500" />}
                       <h3 className="font-bold text-lg text-gray-900 dark:text-white flex items-center gap-2">
                         <span className={`w-2 h-6 rounded-full inline-block ${mode === 'MEASUREMENT' ? 'bg-blue-600' : 'bg-orange-500'}`}></span>
-                        {room.name}
+                        <span
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedRoomForPrep(room);
+                            setIsPrepModalOpen(true);
+                          }}
+                          className="cursor-pointer hover:underline text-blue-600 dark:text-blue-400"
+                          title="SatÄ±ÅŸa HazÄ±rlÄ±k ve ÃœrÃ¼n SeÃ§imi"
+                        >
+                          {room.name}
+                        </span>
                       </h3>
                     </div>
                     <div className="flex gap-4 items-center">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedRoomForPrep(room);
+                          setIsPrepModalOpen(true);
+                        }}
+                        className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 cursor-pointer font-bold text-xs border border-emerald-250 bg-emerald-50 dark:bg-emerald-950/30 dark:border-emerald-800/50 px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+                        title="Oda ÃœrÃ¼n SeÃ§imleri ve SatÄ±ÅŸa HazÄ±rlÄ±k"
+                      >
+                        SatÄ±ÅŸa HazÄ±rlÄ±k
+                      </button>
                       {canMoveRoom && (
                         <button
                           onClick={(e) => {
@@ -1446,27 +1468,27 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                           Taşı
                         </button>
                       )}
-                      <button 
-                        onClick={(e) => { 
-                          e.stopPropagation(); 
-                          setDeleteConfirm({ 
-                            type: 'room', 
-                            data: { customerId: customer.id, roomId: room.id, roomName: room.name } 
-                          }); 
-                        }} 
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteConfirm({
+                            type: 'room',
+                            data: { customerId: customer.id, roomId: room.id, roomName: room.name }
+                          });
+                        }}
                         className="text-red-400 hover:text-red-600 cursor-pointer"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
-                  
+
                   {/* Room Attachments */}
                   {isExpanded && (
                     <div className="mt-4 flex flex-wrap gap-2 items-center">
                       {room.photos?.map((url, i) => (
-                        <div 
-                          key={i} 
+                        <div
+                          key={i}
                           onClick={() => { setPreviewUrl(url); setPreviewType('photo'); }}
                           className="relative w-16 h-16 rounded overflow-hidden border cursor-pointer hover:opacity-85 transition-opacity"
                         >
@@ -1474,8 +1496,8 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                         </div>
                       ))}
                       {room.videos?.map((url, i) => (
-                        <div 
-                          key={i} 
+                        <div
+                          key={i}
                           onClick={() => { setPreviewUrl(url); setPreviewType('video'); }}
                           className="relative w-16 h-16 rounded overflow-hidden border bg-black flex items-center justify-center cursor-pointer hover:opacity-85 transition-opacity"
                         >
@@ -1485,14 +1507,14 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                       ))}
                       {mode === 'MEASUREMENT' && (
                         <div className="flex gap-2">
-                          <button 
+                          <button
                             onClick={() => handleFileUpload('photo', (url) => updateRoomAttachments(customer.id, room.id, [...(room.photos||[]), url], room.videos||[]))}
                             className="w-16 h-16 border-2 border-dashed border-gray-400 dark:border-gray-600 rounded flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                           >
                             <Camera className="w-4 h-4" />
                             <span className="text-[10px] mt-1">Foto Ekle</span>
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleFileUpload('video', (url) => updateRoomAttachments(customer.id, room.id, room.photos||[], [...(room.videos||[]), url]))}
                             className="w-16 h-16 border-2 border-dashed border-gray-400 dark:border-gray-600 rounded flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                           >
@@ -1533,7 +1555,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                       const isSingleDefault = room.windows.length === 1 && window.name === "Pencere 1";
                       return (
                         <div key={window.id} className={isSingleDefault ? "space-y-4" : "border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50/50 dark:bg-gray-900/50 space-y-4 ml-2"}>
-                          
+
                           {!isSingleDefault && (
                             <div className="flex justify-between items-center pb-2 border-b border-gray-200 dark:border-gray-700">
                               <div className="flex items-center gap-4">
@@ -1541,17 +1563,17 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                   <WindowIcon className="w-4 h-4 text-blue-500" />
                                   {window.name}
                                 </h4>
-                                
+
                                 {/* Window Attachments Button */}
                                 {mode === 'MEASUREMENT' && (
                                   <div className="flex gap-2">
-                                    <button 
+                                    <button
                                       onClick={() => handleFileUpload('photo', (url) => updateWindowItem(customer.id, room.id, window.id, { photos: [...(window.photos||[]), url] }))}
                                       className="text-xs bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 px-2 py-1 rounded text-gray-600 dark:text-gray-400 flex items-center gap-1 transition-colors cursor-pointer"
                                     >
                                       <Camera className="w-3 h-3" /> Foto Ekle
                                     </button>
-                                    <button 
+                                    <button
                                       onClick={() => handleFileUpload('video', (url) => updateWindowItem(customer.id, room.id, window.id, { videos: [...(window.videos||[]), url] }))}
                                       className="text-xs bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 px-2 py-1 rounded text-gray-600 dark:text-gray-400 flex items-center gap-1 transition-colors cursor-pointer"
                                     >
@@ -1560,18 +1582,18 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                   </div>
                                 )}
                               </div>
-                              <button 
+                              <button
                                 onClick={() => setDeleteConfirm({
                                   type: 'window',
                                   data: { customerId: customer.id, roomId: room.id, windowId: window.id, windowName: window.name }
-                                })} 
+                                })}
                                 className="text-red-400 hover:text-red-600 cursor-pointer"
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>
                             </div>
                           )}
-                        
+
                         {/* Display Window Attachments */}
                         {((window.photos && window.photos.length > 0) || (window.videos && window.videos.length > 0)) && (
                           <div className="flex gap-2 flex-wrap">
@@ -1599,10 +1621,18 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
                         {/* MEASUREMENTS LIST */}
                         <div className={measurementViewMode === "GRID" ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3" : "space-y-3"}>
-                            {measurementStore.measurements.filter(m => m.windowId === window.id && !m.isDeleted).map(p => {
+                            {measurementStore.measurements
+                              .filter(m => m.windowId === window.id && !m.isDeleted)
+                              .sort((a, b) => {
+                                const timeA = new Date(a.createdAt || a.measuredDate || 0).getTime();
+                                const timeB = new Date(b.createdAt || b.measuredDate || 0).getTime();
+                                if (timeB !== timeA) return timeB - timeA;
+                                return b.id.localeCompare(a.id);
+                              })
+                              .map(p => {
   if (editingMeasurementId === p.id) return renderMeasurementForm(room, window, true);
-  
-  
+
+
   if (measurementViewMode === 'GRID') {
     return (
       <div key={p.id} className="relative bg-[#e6f2ff] dark:bg-blue-900/20 border-2 border-blue-400 dark:border-blue-700 rounded-sm p-2 flex flex-col items-center justify-center text-center shadow-inner min-h-[140px] m-2">
@@ -1625,7 +1655,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                               if (editingMeasurementId === p.id) return renderMeasurementForm(room, window, true);
                             return (
                             <div key={p.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 shadow-sm ml-6 relative">
-                              
+
                               <div className="flex justify-between items-start mb-3">
                                 <div>
                                   <div className="flex items-center gap-2 mb-1">
@@ -1645,7 +1675,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                 <div className="flex items-center gap-2">
                                    {mode === 'MEASUREMENT' && (
                                       (normRole === 'ADMIN' || normRole === 'OFFICE') ? (
-                                        <button 
+                                        <button
                                           onClick={() => {
                                             const resolvedTemplate = p.templateType === 'CURTAIN' ? 'CURTAIN_DETAIL' : p.templateType;
                                             setEditingMeasurementId(p.id);
@@ -1666,11 +1696,11 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                         </span>
                                       )
                                    )}
-                                   <button 
+                                   <button
                                       onClick={() => setDeleteConfirm({
                                         type: 'measurement',
                                         data: { customerId: customer.id, roomId: room.id, windowId: window.id, measurementId: p.id }
-                                      })} 
+                                      })}
                                       className="text-red-400 hover:text-red-600 p-1 cursor-pointer font-bold animate-fade-in"
                                     >
                                       <X className="w-4 h-4" />
@@ -1793,7 +1823,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                     .map(([key, val]) => {
                                     const template = MEASUREMENT_TEMPLATES[p.templateType] || (p.templateType === 'CURTAIN' ? MEASUREMENT_TEMPLATES['CURTAIN_DETAIL'] : undefined);
                                     const label = template?.fields.find(f => f.key === key)?.label || key;
-                                    
+
                                     // Hide old 0x0 values for PLICELL if needed
                                     if (p.templateType === 'PLICELL' && (key === 'glassWidth' || key === 'glassHeight') && Number(val) === 0) return null;
 
@@ -1827,7 +1857,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                       className="relative w-12 h-12 rounded overflow-hidden border cursor-pointer hover:opacity-85 transition-opacity"
                                     >
                                       <img src={url} className="w-full h-full object-cover" />
-                                      <button 
+                                      <button
                                         onClick={(e) => { e.stopPropagation(); setDeleteConfirm({ type: 'photo', data: { url, type: 'measurement', customerId: customer.id, roomId: room.id, windowId: window.id, measurementId: p.id } }); }}
                                         className="absolute top-0 right-0 bg-red-500 text-white rounded-bl p-0.5"
                                       >
@@ -1843,7 +1873,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                     >
                                       <video src={url} className="w-full h-full object-cover" />
                                       <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white text-xs">▶</div>
-                                      <button 
+                                      <button
                                         onClick={(e) => { e.stopPropagation(); setDeleteConfirm({ type: 'photo', data: { url, type: 'measurement', customerId: customer.id, roomId: room.id, windowId: window.id, measurementId: p.id } }); }}
                                         className="absolute top-0 right-0 bg-red-500 text-white rounded-bl p-0.5"
                                       >
@@ -1903,7 +1933,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                             <span className="text-xs font-bold text-red-700 dark:text-red-400">Ölçüm Sorumluluğu Düzeltmesi</span>
                                           </div>
                                           <div className="text-[10px] text-gray-500 dark:text-gray-400">Mevcut: <span className="font-bold text-gray-800 dark:text-gray-200">{p.measuredBy}</span></div>
-                                          <select 
+                                          <select
                                             value={correctionNewUserId}
                                             onChange={e => setCorrectionNewUserId(e.target.value)}
                                             className="w-full p-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-red-500 outline-none"
@@ -1911,7 +1941,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                             <option value="">Yeni sorumlu seç...</option>
                                             {measurementEmployees.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                                           </select>
-                                          <input 
+                                          <input
                                             type="text"
                                             placeholder="Düzeltme sebebi (zorunlu)"
                                             value={correctionReason}
@@ -1919,14 +1949,14 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                             className="w-full p-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-white dark:placeholder-gray-500 focus:ring-2 focus:ring-red-500 outline-none"
                                           />
                                           <div className="flex gap-2">
-                                            <button 
+                                            <button
                                               onClick={() => handleCorrectionSave(room.id, window.id, p)}
                                               disabled={!correctionNewUserId || !correctionReason.trim()}
                                               className="flex-1 text-xs bg-red-600 hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-3 py-1.5 rounded font-bold transition-colors"
                                             >
                                               Düzeltmeyi Kaydet
                                             </button>
-                                            <button 
+                                            <button
                                               onClick={() => { setCorrectionTarget(null); setCorrectionReason(''); setCorrectionNewUserId(''); }}
                                               className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 px-3 py-1.5"
                                             >
@@ -1935,7 +1965,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                           </div>
                                         </div>
                                       ) : (
-                                        <button 
+                                        <button
                                           onClick={() => { setCorrectionTarget(p.id); setCorrectionNewUserId(''); setCorrectionReason(''); }}
                                           className="text-[10px] text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 font-medium flex items-center gap-1 mb-2"
                                         >
@@ -1945,7 +1975,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                     </div>
                                   )}
                                   <div className="flex gap-2 mb-4">
-                                    <select 
+                                    <select
                                       className="text-xs p-1.5 border border-gray-300 dark:border-gray-600 rounded font-medium bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
                                       value={p.status || 'MEASURED'}
                                       onChange={(e) => updateProductMeasurement(customer.id, room.id, window.id, p.id, { status: e.target.value })}
@@ -1956,7 +1986,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                         </option>
                                       ))}
                                     </select>
-                                    <button 
+                                    <button
                                       onClick={() => {
                                         setActiveMeasurementIdForConfig(activeMeasurementIdForConfig === p.id ? null : p.id);
                                       }}
@@ -1995,9 +2025,9 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                       ))}
                                     </div>
                                     <div className="flex gap-2">
-                                      <input 
-                                        type="text" 
-                                        placeholder="Yeni not ekle..." 
+                                      <input
+                                        type="text"
+                                        placeholder="Yeni not ekle..."
                                         value={newNote}
                                         onChange={(e) => setNewNote(e.target.value)}
                                         className="flex-1 p-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-white dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 outline-none"
@@ -2036,12 +2066,12 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                           <button onClick={() => setActiveRoomIdForWindow(null)}><X className="w-5 h-5 dark:text-gray-400 hover:text-white" /></button>
                         </div>
                         <div className="flex gap-3">
-                          <input 
-                            type="text" 
-                            placeholder="örn: Fransız Balkon" 
-                            value={windowName} 
-                            onChange={e=>setWindowName(e.target.value)} 
-                            className="flex-1 p-2.5 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow" 
+                          <input
+                            type="text"
+                            placeholder="örn: Fransız Balkon"
+                            value={windowName}
+                            onChange={e=>setWindowName(e.target.value)}
+                            className="flex-1 p-2.5 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
                           />
                           <button onClick={() => handleAddWindow(room.id)} className="bg-gray-900 dark:bg-blue-600 text-white px-6 font-bold rounded hover:bg-gray-800 dark:hover:bg-blue-700 transition-colors">Kaydet</button>
                         </div>
@@ -2057,7 +2087,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
                     {['ADMIN', 'MODERATOR'].includes(normRole) && (
                       <div className="mt-4 border-t border-gray-200 dark:border-gray-700/50 pt-2">
-                        
+
                         {/* ALT SIRAYA YENİ ODA EKLE */}
                         <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700/50 flex justify-center">
                           {isAddingRoom ? (
@@ -2083,8 +2113,8 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                               </div>
                             </div>
                           ) : (
-                            <button 
-                              onClick={() => setIsAddingRoom(true)} 
+                            <button
+                              onClick={() => setIsAddingRoom(true)}
                               className="text-sm font-bold text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 flex items-center gap-1.5 transition-colors"
                             >
                               <Plus className="w-4 h-4" /> Alt Sıraya Yeni Oda Ekle
@@ -2092,32 +2122,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                           )}
                         </div>
 
-                        <PreSalesIntentSection 
-                          roomId={room.id}
-                          roomName={room.name}
-                          intent={customer.roomProductIntents?.find(i => i.roomId === room.id)}
-                          onSave={async (intent) => {
-                            const currentIntents = customer.roomProductIntents || [];
-                            const existingIndex = currentIntents.findIndex(i => i.roomId === room.id);
-                            let newIntents = [...currentIntents];
-                            if (existingIndex >= 0) {
-                              newIntents[existingIndex] = intent;
-                            } else {
-                              newIntents.push(intent);
-                            }
-                            await updateCustomer(customer.id, { roomProductIntents: newIntents });
-                            addAuditEntry({
-                              entityType: 'Customer',
-                              entityId: customer.id,
-                              field: 'roomProductIntents',
-                              previousValue: 'N/A',
-                              newValue: 'Güncellendi',
-                              changedBy: user.name,
-                              changedAt: new Date().toISOString(),
-                              reason: "Oda ürün isteği kaydedildi: " + room.name
-                            });
-                          }}
-                        />
+
                       </div>
                     )}
                   </div>
@@ -2225,11 +2230,11 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
         {/* Media Upload Modal */}
         {mediaUploadType && (
-          <div 
+          <div
             className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-4 z-50 animate-fade-in"
             onClick={() => { setMediaUploadType(null); setMediaUploadCallback(null); }}
           >
-            <div 
+            <div
               className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-t-2xl sm:rounded-2xl p-6 space-y-4 shadow-2xl animate-slide-up"
               onClick={(e) => e.stopPropagation()}
             >
@@ -2267,10 +2272,10 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
         )}
 
         {/* Media Preview Modal */}
-        <MediaPreviewModal 
-          url={previewUrl} 
-          type={previewType} 
-          onClose={() => { setPreviewUrl(null); setPreviewType(null); }} 
+        <MediaPreviewModal
+          url={previewUrl}
+          type={previewType}
+          onClose={() => { setPreviewUrl(null); setPreviewType(null); }}
         />
 
         {deleteConfirm && (
@@ -2320,7 +2325,36 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
           customer={customer}
           users={users}
         />
-        
+        {isPrepModalOpen && selectedRoomForPrep && (
+          <RoomPreparationModal
+            isOpen={isPrepModalOpen}
+            onClose={() => {
+              setIsPrepModalOpen(false);
+              setSelectedRoomForPrep(null);
+            }}
+            room={selectedRoomForPrep}
+            customerId={customer.id}
+            measurements={measurementStore.measurements}
+            onSave={async (updatedMeas, transferToSale) => {
+              for (const m of updatedMeas) {
+                await measurementStore.updateMeasurement(m, currentUser?.name || 'Sistem');
+              }
+              showToast("Ürün seçimleri başarıyla kaydedildi.");
+
+              if (transferToSale) {
+                try {
+                  const draftId = await syncOrCreateDraftSale(customer, useSalesStore.getState());
+                  showToast("Satış taslağı oluşturuldu / güncellendi.");
+                  router.push(`/satis/${draftId}`);
+                } catch (err) {
+                  console.error(err);
+                  showToast("Satış taslağı oluşturulurken hata.");
+                }
+              }
+            }}
+          />
+        )}
+
         {isEditModalOpen && (
           <CariEditModal
             isOpen={isEditModalOpen}
@@ -2329,7 +2363,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
             onSave={handleSaveCustomer}
           />
         )}
-        
+
         {isMergeModalOpen && (
           <MergeCustomerModal
             isOpen={isMergeModalOpen}
@@ -2338,7 +2372,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
             onConfirm={handleConfirmMerge}
           />
         )}
-        
+
         {isMoveRoomModalOpen && (
           <MoveRoomModal
             isOpen={isMoveRoomModalOpen}

@@ -195,6 +195,17 @@ export const MEASUREMENT_TEMPLATES: Record<string, MeasurementTemplate> = {
   }
 };
 
+export interface SelectedProductItem {
+  productType: string;
+  isActive: boolean;
+  stockId?: string;
+  applicationType?: string;
+  calculation?: Record<string, any>;
+  userOverrides?: Record<string, any>;
+  addedAt?: string;
+  updatedAt?: string;
+}
+
 export interface ProductMeasurement {
   id: string;
   templateType: string;
@@ -202,6 +213,7 @@ export interface ProductMeasurement {
   productId?: string;
   productGroup?: string;
   productType?: string;
+  selectedProducts?: SelectedProductItem[];
   calculatedWidth?: number;
   calculatedHeight?: number;
   details?: Record<string, any>;
@@ -372,6 +384,15 @@ export interface Product {
   cashPrice: number;
   installmentPrice: number;
   dealerPrice: number;
+  // V2 Jumbo fields
+  jumboEnabled?: boolean;
+  jumboThresholdCm?: number;
+  jumboComponentStockId?: string;
+  jumboPricingMode?: 'PER_METER' | 'PER_PIECE' | 'FIXED_SET' | 'INCLUDED_IN_BASE_PRICE';
+  jumboPurchaseUnitPrice?: number;
+  jumboSaleUnitPrice?: number;
+  jumboUnit?: 'METER' | 'PIECE' | 'SET' | 'NONE';
+  jumboMaxWidthCm?: number;
 }
 
 export interface SaleItem {
@@ -1010,7 +1031,7 @@ export const useStore = create<AppState>()(
           const updatedCustomer = {
             ...target,
             updatedAt: now,
-            rooms: [...target.rooms, newRoom]
+            rooms: [newRoom, ...target.rooms]
           };
           await saveLocalCustomer(updatedCustomer);
           set((state) => {

@@ -214,6 +214,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   
   const isProfileIncomplete = currentUser && (
     !currentUser.name?.trim() || 
+    currentUser.name === 'İsimsiz Kullanıcı' ||
     !currentUser.email?.trim() || 
     !currentUser.phone?.trim()
   );
@@ -246,6 +247,16 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       }).then((success) => {
         if (!success) {
           setProfileError("Profil bilgileri sunucuda güncellenemedi.");
+        } else {
+          // Role specific redirect
+          const normRole = normalizeRole(currentUser.role);
+          if (normRole === "TAILOR") {
+            router.replace("/uretim");
+          } else if (normRole === "INSTALLER") {
+            router.replace("/montaj");
+          } else {
+            router.replace("/");
+          }
         }
       }).catch((err) => {
         setProfileError("Profil güncellenirken hata oluştu.");
@@ -326,23 +337,23 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             </div>
 
             <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider font-normal text-slate-400">TC Kimlik Numarası</label>
+              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">TC Kimlik Numarası</label>
               <input
                 type="text"
                 maxLength={11}
                 value={profileTcNo}
                 onChange={(e) => setProfileTcNo(e.target.value.replace(/\D/g, ""))}
-                placeholder="11 haneli TC kimlik no..."
+                placeholder="TC kimlik numaranız..."
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-800 bg-slate-950 text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow placeholder-slate-600"
               />
             </div>
 
             <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider font-normal text-slate-400">Adres</label>
+              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">Adres</label>
               <textarea
                 value={profileAddress}
                 onChange={(e) => setProfileAddress(e.target.value)}
-                placeholder="Ev veya iş adresi..."
+                placeholder="Adresiniz..."
                 rows={2}
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-800 bg-slate-950 text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow placeholder-slate-600 resize-none"
               />
@@ -351,7 +362,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             <div className="pt-2">
               <button
                 type="submit"
-                className="w-full bg-indigo-655 hover:bg-indigo-600 text-white font-bold py-3 rounded-xl text-sm transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/25 cursor-pointer"
+                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl text-sm transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/25 cursor-pointer"
               >
                 Bilgileri Kaydet ve Devam Et
               </button>

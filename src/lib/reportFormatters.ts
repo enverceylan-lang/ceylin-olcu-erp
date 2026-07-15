@@ -1,6 +1,6 @@
 import { MeasurementRecord } from '@/store/measurementStore';
 import { Customer, Room, WindowItem, ProductMeasurement, Note, MEASUREMENT_TEMPLATES } from '@/store/useStore';
-import { getTemplateLabel, getMeasurementDimensions } from './measurementAdapter';
+import { getTemplateLabel, getMeasurementDimensions, resolveMeasurementProductLabel, resolveMeasurementProductGroup } from './measurementAdapter';
 import { formatFacadeForReport } from './facadeHelper';
 
 export function getValidNote(note?: string | null): string {
@@ -157,49 +157,105 @@ export function buildWhatsAppShortReport(customer: Customer, users: { id: string
     let mechanicalCounter = 0;
     windows.forEach((win) => {
       const winProds = allMeasurements.filter(m => m.windowId === win.id);
-      const plicellItems = winProds.filter(p => p.templateType === 'PLICELL');
-      const mechanicalItems = winProds.filter(p => p.templateType === 'mechanical_curtain');
-      const standardItems = winProds.filter(p => p.templateType !== 'PLICELL' && p.templateType !== 'mechanical_curtain');
+      winProds.forEach(m => {
+        const activeProducts = m.selectedProducts?.filter(sp => sp.isActive) || [];
 
-      if (plicellItems.length > 0) {
-        plicellItems.forEach(item => {
-          plicellProducts.push({ p: item, indexInRoom: ++plicellCounter, openingName: win.name });
-        });
-      }
+        if (activeProducts.length === 0) {
+          // Fallback
+          const fallbackGroup = resolveMeasurementProductGroup(m);
+          if (fallbackGroup === 'Plicell') {
+            plicellProducts.push({ p: m, indexInRoom: ++plicellCounter, openingName: win.name });
+          } else if (fallbackGroup === 'Mekanik Perde') {
+            mechanicalCurtainProducts.push({ p: m, indexInRoom: ++mechanicalCounter, openingName: win.name });
+          } else {
+            let entry = standardOpenings.find(so => so.window.id === win.id);
+            if (!entry) {
+              entry = { window: win, products: [] };
+              standardOpenings.push(entry);
+            }
+            entry.products.push(m);
+          }
+        } else {
+          activeProducts.forEach(ap => {
+            const pType = ap.productType;
+            const pGroup = resolveMeasurementProductGroup({ productType: pType });
 
-      if (mechanicalItems.length > 0) {
-        mechanicalItems.forEach(item => {
-          mechanicalCurtainProducts.push({ p: item, indexInRoom: ++mechanicalCounter, openingName: win.name });
-        });
-      }
+            const pObj: ProductMeasurement = {
+              ...m,
+              productType: pType,
+              productGroup: pGroup,
+              selectedProducts: [ap],
+              details: {
+                ...m.details,
+                ...ap.calculation
+              }
+            };
 
-      if (standardItems.length > 0) {
-        standardOpenings.push({ window: win, products: standardItems });
-      }
+            if (pType === 'PLICELL') {
+              plicellProducts.push({ p: pObj, indexInRoom: ++plicellCounter, openingName: win.name });
+            } else if (pGroup === 'Mekanik Perde') {
+              if (ap.calculation?.isSegmented && Array.isArray(ap.calculation.groups) && ap.calculation.groups.length > 0) {
+                ap.calculation.groups.forEach((g: any, gIdx: number) => {
+                  const gObj: ProductMeasurement = {
+                    ...m,
+                    id: `${m.id}-group-${gIdx}`,
+                    productType: pType,
+                    productGroup: pGroup,
+                    selectedProducts: [ap],
+                    rawValues: {
+                      ...m.rawValues,
+                      width: g.realWidthCm,
+                      height: g.realHeightCm,
+                      quantity: g.quantity
+                    },
+                    details: {
+                      ...m.details,
+                      ...ap.calculation,
+                      billingWidth: g.calculatedWidthCm,
+                      billingHeight: g.calculatedHeightCm,
+                      totalM2: g.totalM2
+                    }
+                  };
+                  mechanicalCurtainProducts.push({ p: gObj, indexInRoom: ++mechanicalCounter, openingName: `${win.name} - Parça ${gIdx + 1}` });
+                });
+              } else {
+                mechanicalCurtainProducts.push({ p: pObj, indexInRoom: ++mechanicalCounter, openingName: win.name });
+              }
+            } else {
+              let entry = standardOpenings.find(so => so.window.id === win.id);
+              if (!entry) {
+                entry = { window: win, products: [] };
+                standardOpenings.push(entry);
+              }
+              entry.products.push(pObj);
+            }
+          });
+        }
+      });
     });
 
     // A. Render Standard Openings
     const showOpeningName = windows.length > 1; // only show opening names if there's more than 1 window/opening
-    
+
     standardOpenings.forEach(({ window, products }, openingIndex) => {
       if (showOpeningName) {
         lines.push(`  [Açıklık: ${window.name}]`);
       }
 
       products.forEach((p, pIdx) => {
-        lines.push(`  Ölçü ${pIdx + 1}: ${getTemplateLabel(p.templateType)}`);
-        
+        lines.push(`  Ölçü ${pIdx + 1}: ${resolveMeasurementProductLabel(p)} (${getTemplateLabel(p.templateType)})`);
+
         // Render fields inline
         if (p.templateType === 'CURTAIN_DETAIL' || p.templateType === 'CURTAIN') {
           const dims = getMeasurementDimensions(p);
           const facadeSegments = p.rawValues?.facadeSegments;
-          
+
           if (facadeSegments && Array.isArray(facadeSegments) && facadeSegments.length > 0) {
             lines.push(`  - ${formatFacadeForReport(facadeSegments).replace(/\n/g, '\n    ')}`);
-            
+
             const totalWidth = facadeSegments.reduce((sum: number, s: any) => sum + (s.widthCm > 0 ? s.widthCm : 0), 0);
             lines.push(`  - Toplam En: ${totalWidth} cm`);
-            
+
             // Heights summary
             const sol = p.rawValues?.solYukseklikCm;
             const orta = p.rawValues?.ortaYukseklikCm;
@@ -282,17 +338,17 @@ export function buildWhatsAppShortReport(customer: Customer, users: { id: string
     // B. Render Plicell Group (Kompakt Liste)
     if (plicellProducts.length > 0) {
       lines.push(`  Ölçü: PLICELL CAM İÇİ`);
-      
+
       const notesList: string[] = [];
       let roomPlicellM2 = 0;
       let roomPlicellAdet = 0;
 
       plicellProducts.forEach(({ p, indexInRoom }) => {
         const camListesi = p.rawValues?.plicellCamListesi;
-        
+
         if (camListesi && Array.isArray(camListesi) && camListesi.length > 0) {
           const validCamListesi = camListesi.filter((cam: any) => Number(cam.widthCm) > 0 && Number(cam.heightCm) > 0);
-          
+
           if (validCamListesi.length > 0) {
             const profilRengi = p.rawValues?.profilRengi;
             if (profilRengi) {
@@ -304,7 +360,7 @@ export function buildWhatsAppShortReport(customer: Customer, users: { id: string
             }
             lines.push(`  Cam Adedi: ${validCamListesi.length}`);
             lines.push('');
-            
+
             validCamListesi.forEach((cam: any, idx: number) => {
               const w = Number(cam.widthCm) || 0;
               const h = Number(cam.heightCm) || 0;
@@ -315,7 +371,7 @@ export function buildWhatsAppShortReport(customer: Customer, users: { id: string
               globalPlicellM2 += calc.chargeableM2;
 
               lines.push(`  ${idx + 1}. Cam: ${w} × ${h} cm → Hesap: ${calc.roundedWidth} × ${calc.roundedHeight} = ${calc.chargeableM2.toFixed(2)} m²`);
-              
+
               const validCamNote = getValidNote(cam.note);
               if (validCamNote) {
                 notesList.push(`  - ${idx + 1}. Cam Notu: ${validCamNote}`);
@@ -334,7 +390,7 @@ export function buildWhatsAppShortReport(customer: Customer, users: { id: string
           globalPlicellM2 += calc.chargeableM2;
 
           lines.push(`  ${indexInRoom}) ${w.toFixed(2)} en x ${h.toFixed(2)} boy → Hesap: ${calc.roundedWidth} x ${calc.roundedHeight} = ${calc.chargeableM2.toFixed(2)} m²`);
-          
+
           const validNote = getValidNote(p.notes);
           if (validNote) {
             notesList.push(`  - ${indexInRoom}. Cam: ${validNote}`);
@@ -355,28 +411,32 @@ export function buildWhatsAppShortReport(customer: Customer, users: { id: string
     // C. Render Mechanical Curtain Group (Kompakt Liste)
     if (mechanicalCurtainProducts.length > 0) {
       lines.push(`  Ölçü: Mekanik Perde Ölçüsü`);
-      
+
       const notesList: string[] = [];
       let roomMechanicalM2 = 0;
 
-      mechanicalCurtainProducts.forEach(({ p, indexInRoom }) => {
+      mechanicalCurtainProducts.forEach(({ p, indexInRoom, openingName }) => {
         const w = Number(p.rawValues?.width || 0);
         const h = Number(p.rawValues?.height || 0);
         const q = Number(p.rawValues?.quantity || 1);
-        const productType = p.rawValues?.productType || 'Stor Perde';
-        const calc = calculateMechanicalCurtainM2(w, h, q);
+        const productType = resolveMeasurementProductLabel(p);
 
-        roomMechanicalM2 += calc.totalM2;
+        const calcWidth = p.details?.billingWidth || Math.ceil(w / 10) * 10 || w;
+        const calcHeight = p.details?.billingHeight || h;
+        const totalM2 = p.details?.totalM2 !== undefined ? Number(p.details.totalM2) : calculateMechanicalCurtainM2(w, h, q).totalM2;
+        const unitM2 = totalM2 / q;
+
+        roomMechanicalM2 += totalM2;
         globalMechanicalCount += q;
-        globalMechanicalM2 += calc.totalM2;
+        globalMechanicalM2 += totalM2;
 
         const qtySuffix = q > 1 ? ` x ${q} adet` : '';
-        const m2Formula = q > 1 
-          ? ` = ${calc.unitM2.toFixed(2)} m² x ${q} = ${calc.totalM2.toFixed(2)} m²` 
-          : ` = ${calc.totalM2.toFixed(2)} m²`;
+        const m2Formula = q > 1
+          ? ` = ${unitM2.toFixed(2)} m² x ${q} = ${totalM2.toFixed(2)} m²`
+          : ` = ${totalM2.toFixed(2)} m²`;
 
-        lines.push(`  ${indexInRoom}) ${productType} — ${w} en x ${h} boy${qtySuffix} → Hesap: ${calc.billingWidth} x ${calc.billingHeight}${m2Formula}`);
-        
+        lines.push(`  ${indexInRoom}) [${openingName}] ${productType} — ${w} en x ${h} boy${qtySuffix} → Hesap: ${calcWidth} x ${calcHeight}${m2Formula}`);
+
         // Collect notes if any
         const validNote = getValidNote(p.notes);
         if (validNote) {
@@ -410,8 +470,8 @@ export function buildWhatsAppShortReport(customer: Customer, users: { id: string
 
   // 5. Footer with Google Maps URL and app signature
   const query = encodeURIComponent(customer.address || customer.mapLocation || '');
-  const mapsUrl = customer.mapLocation || customer.address 
-    ? `https://www.google.com/maps/search/?api=1&query=${query}` 
+  const mapsUrl = customer.mapLocation || customer.address
+    ? `https://www.google.com/maps/search/?api=1&query=${query}`
     : '';
 
   if (mapsUrl) {

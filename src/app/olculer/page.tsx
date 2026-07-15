@@ -1075,6 +1075,12 @@ export default function OlculerPage() {
 
                                     {measurementStore.measurements
                                         .filter((p) => p.windowId === window.id && !p.isDeleted)
+                                        .sort((a, b) => {
+                                          const timeA = new Date(a.createdAt || a.measuredDate || 0).getTime();
+                                          const timeB = new Date(b.createdAt || b.measuredDate || 0).getTime();
+                                          if (timeB !== timeA) return timeB - timeA;
+                                          return b.id.localeCompare(a.id);
+                                        })
                                         .map((p) => {
                                         const dims = getMeasurementDimensions(p);
                                         const isAssigned = !!(p.productId || p.productType);

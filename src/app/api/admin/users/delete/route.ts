@@ -26,18 +26,53 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: "Geçersiz kullanıcı ID." }, { status: 400 });
     }
 
-    // Soft delete: update isActive to false
-    const { error } = await supabaseServer
-      .from("users")
-      .update({ isActive: false, updatedAt: new Date().toISOString() })
-      .eq("id", id);
+    // 1. Check linked records in measurements table
+    const { count: measurementCount, error: measError } = await supabaseServer
+      .from("measurements")
+      .select("*", { count: "exact", head: true })
+      .or(`createdById.eq.${id},measuredById.eq.${id}`);
 
-    if (error) {
-      console.error("Soft delete user failed:", error);
-      return NextResponse.json({ success: false, error: "Kullanıcı devre dışı bırakılamadı." }, { status: 500 });
+    if (measError) {
+      console.error("Error checking measurements link:", measError);
     }
 
-    return NextResponse.json({ success: true });
+    // 2. Check linked records in customers table
+    const { count: customerCount, error: custError } = await supabaseServer
+      .from("customers")
+      .select("*", { count: "exact", head: true })
+      .or(`createdById.eq.${id},assignedSalesId.eq.${id},assignedMeasureId.eq.${id},assignedTailorId.eq.${id},assignedInstallerId.eq.${id}`);
+
+    if (custError) {
+      console.error("Error checking customers link:", custError);
+    }
+
+    const linkedMeasurements = measurementCount || 0;
+    const linkedCustomers = customerCount || 0;
+    const totalLinked = linkedMeasurements + linkedCustomers;
+
+    if (totalLinked > 0) {
+      return NextResponse.json({
+        success: false,
+        code: "USER_HAS_LINKED_RECORDS",
+        linkedCounts: {
+          measurements: linkedMeasurements,
+          customers: linkedCustomers
+        }
+      }, { status: 409 });
+    }
+
+    // 3. Perform real delete
+    const { error: deleteError } = await supabaseServer
+      .from("users")
+      .delete()
+      .eq("id", id);
+
+    if (deleteError) {
+      console.error("Real delete user failed:", deleteError);
+      return NextResponse.json({ success: false, error: "Kullanıcı silinemedi." }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, action: "DELETED", userId: id });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message || "Internal server error" }, { status: 500 });
   }

@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:measurements": "tsx tests/localValidationSuite.ts"
+    "test:measurements": "tsx tests/localValidationSuite.ts && tsx tests/userProfileSuite.ts"
   },
   "dependencies": {
     "@prisma/client": "^7.8.0",

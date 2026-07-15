@@ -30,6 +30,8 @@ export interface SaleItem {
   discount: number;
   rowTotal: number;
   note?: string;
+  parentProductRelation?: string;
+  isJumboComponent?: boolean;
 }
 
 export interface Sale {

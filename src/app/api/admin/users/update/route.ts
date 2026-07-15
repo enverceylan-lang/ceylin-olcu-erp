@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { hashPassword, verifyAuth } from "@/lib/authHelper";
+import { normalizeUsername } from "@/lib/usernameHelper";
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder-project.supabase.co";
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "placeholder-service-key";
@@ -34,7 +35,11 @@ export async function POST(req: NextRequest) {
     } = body;
 
     const targetId = (id || "").trim();
-    const cleanUsername = (username || "").trim().toLowerCase();
+    const cleanUsername = username !== undefined ? normalizeUsername(username) : "";
+
+    if (username !== undefined && !cleanUsername) {
+      return NextResponse.json({ success: false, error: "Geçersiz kullanıcı adı." }, { status: 400 });
+    }
 
     if (!targetId) {
       return NextResponse.json({ success: false, error: "Kullanıcı ID gereklidir." }, { status: 400 });
@@ -65,8 +70,30 @@ export async function POST(req: NextRequest) {
     if (isCreate && !isAdmin) {
       return NextResponse.json({ success: false, error: "Yeni kullanıcı oluşturma yetkiniz yok." }, { status: 403 });
     }
+    // 2. Validate required fields
+    if (isCreate) {
+      if (!name || !name.trim()) {
+        return NextResponse.json({ success: false, error: "Adı soyadı zorunludur." }, { status: 400 });
+      }
+      if (!email || !email.trim()) {
+        return NextResponse.json({ success: false, error: "Mail adresi zorunludur." }, { status: 400 });
+      }
+      if (!phone || !phone.trim()) {
+        return NextResponse.json({ success: false, error: "Telefon numarası zorunludur." }, { status: 400 });
+      }
+    } else {
+      if (name !== undefined && (!name || !name.trim())) {
+        return NextResponse.json({ success: false, error: "Adı soyadı zorunludur." }, { status: 400 });
+      }
+      if (email !== undefined && (!email || !email.trim())) {
+        return NextResponse.json({ success: false, error: "Mail adresi zorunludur." }, { status: 400 });
+      }
+      if (phone !== undefined && (!phone || !phone.trim())) {
+        return NextResponse.json({ success: false, error: "Telefon numarası zorunludur." }, { status: 400 });
+      }
+    }
 
-    // 2. Validate password
+    // 3. Validate password
     let finalPassword = existingUser?.password || null;
     let passwordChanged = false;
 
@@ -85,7 +112,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: "Yeni kullanıcı için şifre/PIN zorunludur." }, { status: 400 });
     }
 
-    // 3. Check username uniqueness
+    // 4. Check username uniqueness
     if (cleanUsername) {
       const { data: duplicateUser, error: dupError } = await supabaseServer
         .from("users")
@@ -102,13 +129,13 @@ export async function POST(req: NextRequest) {
         console.log("Duplicate username check status:", {
           duplicateUsernameCount: 1
         });
-        return NextResponse.json({ success: false, error: "Bu kullanıcı adı zaten kullanımda." }, { status: 400 });
+        return NextResponse.json({ success: false, code: "USERNAME_EXISTS", error: "Bu kullanıcı adı zaten kullanımda." }, { status: 409 });
       }
     } else if (isCreate) {
       return NextResponse.json({ success: false, error: "Kullanıcı adı zorunludur." }, { status: 400 });
     }
 
-    // 4. Build user data to save
+    // 5. Build user data to save
     const now = new Date().toISOString();
     let userRecord: any = {};
 
@@ -153,7 +180,12 @@ export async function POST(req: NextRequest) {
       } else {
         // Self-update by non-admin:
         // "Ad soyad/mail/telefon bilgilerini profil tamamlandıktan sonra kendi değiştiremez. Bu alanları sadece admin değiştirebilir."
-        const isProfileComplete = !!existingUser.profileCompletedAt;
+        const isProfileComplete =
+          existingUser.profileCompletedAt &&
+          existingUser.name &&
+          existingUser.name !== 'İsimsiz Kullanıcı' &&
+          existingUser.email &&
+          existingUser.phone;
 
         if (!isProfileComplete) {
           // If profile is incomplete, they can fill it
@@ -164,7 +196,7 @@ export async function POST(req: NextRequest) {
           if (address !== undefined) userRecord.address = address.trim() || null;
           
           // If they are filling the required fields, mark as completed
-          if (userRecord.name && userRecord.email && userRecord.phone) {
+          if (userRecord.name && userRecord.name !== 'İsimsiz Kullanıcı' && userRecord.email && userRecord.phone) {
             userRecord.profileCompletedAt = now;
           }
         } else {
@@ -173,7 +205,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 5. Save to Supabase
+    // Auto-update profileCompletedAt status based on required fields completeness
+    if (userRecord.name && userRecord.name !== 'İsimsiz Kullanıcı' && userRecord.email && userRecord.phone) {
+      if (!userRecord.profileCompletedAt) {
+        userRecord.profileCompletedAt = now;
+      }
+    } else {
+      userRecord.profileCompletedAt = null;
+    }
+
+    // 6. Save to Supabase
     const { error: upsertError } = await supabaseServer
       .from("users")
       .upsert(userRecord);

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useStore, SaleItem, generateUUID } from "@/store/useStore";
 import { getMeasurementDimensions, calculateFabricUsage, getTemplateLabel } from "@/lib/measurementAdapter";
+import { useMeasurementStore } from "@/store/measurementStore";
 
 interface SalesRow extends SaleItem {
   customerId?: string;
@@ -26,6 +27,7 @@ export default function YeniSatisPage() {
   const preselectedCustomerId = searchParams.get('customerId');
 
   const { customers, products, addSale } = useStore();
+  const { measurements } = useMeasurementStore();
   const [mounted, setMounted] = useState(false);
   
   const [selectedCustomerId, setSelectedCustomerId] = useState(preselectedCustomerId || "");
@@ -56,7 +58,8 @@ export default function YeniSatisPage() {
         
         customer.rooms.forEach(room => {
           room.windows.forEach(window => {
-            window.products.forEach(p => {
+            const winMeasurements = measurements.filter(m => m.windowId === window.id && m.customerId === customer.id && !m.isDeleted && !m.isArchived);
+            winMeasurements.forEach(p => {
               const dims = getMeasurementDimensions(p);
               
               // Only auto-select product if it is assigned (productId matches or productType matches category)
@@ -112,7 +115,7 @@ export default function YeniSatisPage() {
         setSaleItems([]);
       }
     }
-  }, [selectedCustomerId, customers, products]);
+  }, [selectedCustomerId, customers, products, measurements]);
 
   // The Calculation Engine using the shared calculateFabricUsage helper
   const calculateRow = (item: SalesRow, allProducts = products): SalesRow => {
@@ -336,7 +339,8 @@ export default function YeniSatisPage() {
                 {/* Windows list */}
                 <div className="grid grid-cols-1 gap-6">
                   {room.windows.map(window => {
-                    return window.products.map(p => {
+                    const winMeasurements = measurements.filter(m => m.windowId === window.id && m.customerId === selectedCustomerId && !m.isDeleted && !m.isArchived);
+                    return winMeasurements.map(p => {
                       const dims = getMeasurementDimensions(p);
                       
                       // Find items belonging to this measurement

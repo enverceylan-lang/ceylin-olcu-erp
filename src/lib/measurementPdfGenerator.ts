@@ -1,8 +1,9 @@
 import jsPDF from 'jspdf';
 import { Customer, ProductMeasurement, MEASUREMENT_TEMPLATES } from '@/store/useStore';
-import { getTemplateLabel, getMeasurementDimensions } from '@/lib/measurementAdapter';
+import { getTemplateLabel, getMeasurementDimensions, resolveMeasurementProductLabel, resolveMeasurementProductGroup } from '@/lib/measurementAdapter';
 import { formatFacadeForReport } from '@/lib/facadeHelper';
 import { getValidNote } from '@/lib/reportFormatters';
+import { useMeasurementStore, MeasurementRecord } from '@/store/measurementStore';
 
 // A4 Dimensions in mm
 const PAGE_WIDTH = 210;
@@ -12,24 +13,24 @@ const MARGIN = 15;
 function drawSimpleTable(doc: jsPDF, startX: number, startY: number, head: string[], body: string[][]): number {
   let y = startY;
   const colWidths = head.map((h, i) => i === 0 ? 30 : i === head.length - 1 ? 50 : 20); // rough widths
-  
+
   // Draw header
   doc.setFillColor(241, 245, 249);
   doc.rect(startX, y, PAGE_WIDTH - startX - MARGIN, 8, 'FD');
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 23, 42);
-  
+
   let currentX = startX + 2;
   head.forEach((h, i) => {
     doc.text(h, currentX, y + 5);
     currentX += colWidths[i];
   });
-  
+
   y += 8;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
-  
+
   // Draw body
   body.forEach(row => {
     // Check page break for row
@@ -37,7 +38,7 @@ function drawSimpleTable(doc: jsPDF, startX: number, startY: number, head: strin
       doc.addPage();
       y = MARGIN;
     }
-    
+
     let maxRowHeight = 8;
     // Calculate row height based on notes wrapping
     const notesStr = row[row.length - 1];
@@ -45,10 +46,10 @@ function drawSimpleTable(doc: jsPDF, startX: number, startY: number, head: strin
     if (notesLines.length > 1) {
       maxRowHeight = notesLines.length * 4 + 4;
     }
-    
+
     doc.setDrawColor(226, 232, 240);
     doc.rect(startX, y, PAGE_WIDTH - startX - MARGIN, maxRowHeight);
-    
+
     currentX = startX + 2;
     row.forEach((cell, i) => {
       if (i === row.length - 1) {
@@ -58,10 +59,10 @@ function drawSimpleTable(doc: jsPDF, startX: number, startY: number, head: strin
       }
       currentX += colWidths[i];
     });
-    
+
     y += maxRowHeight;
   });
-  
+
   return y;
 }
 
@@ -81,15 +82,15 @@ function drawCurtainDetailDiagram(doc: jsPDF, x: number, y: number, rawValues: a
 
   const wallW = 80;
   const wallH = 60;
-  
+
   let wPct = totalWidth > 0 ? windowWidth / totalWidth : 0.6;
   let lPct = totalWidth > 0 ? leftWall / totalWidth : 0.2;
   let rPct = totalWidth > 0 ? rightWall / totalWidth : 0.2;
-  
+
   let hPct = totalHeight > 0 ? windowHeight / totalHeight : 0.6;
   let tPct = totalHeight > 0 ? ceilingGap / totalHeight : 0.2;
   let bPct = totalHeight > 0 ? floorGap / totalHeight : 0.2;
-  
+
   if (wPct < 0.35) {
     const diff = 0.35 - wPct;
     wPct = 0.35;
@@ -102,7 +103,7 @@ function drawCurtainDetailDiagram(doc: jsPDF, x: number, y: number, rawValues: a
     tPct = Math.max(0, tPct - diff/2);
     bPct = Math.max(0, bPct - diff/2);
   }
-  
+
   const winX = x + (lPct * wallW);
   const winY = y + (tPct * wallH);
   const winW = wPct * wallW;
@@ -111,11 +112,11 @@ function drawCurtainDetailDiagram(doc: jsPDF, x: number, y: number, rawValues: a
   doc.setDrawColor(100, 116, 139); // slate-500
   doc.setLineWidth(0.5);
   doc.rect(x, y, wallW, wallH);
-  
+
   doc.setDrawColor(37, 99, 235); // blue-600
   doc.setLineWidth(1);
   doc.rect(winX, winY, winW, winH);
-  
+
   // Center divider
   doc.setLineDashPattern([2, 2], 0);
   doc.line(winX + winW/2, winY, winX + winW/2, winY + winH);
@@ -125,11 +126,11 @@ function drawCurtainDetailDiagram(doc: jsPDF, x: number, y: number, rawValues: a
   doc.setTextColor(220, 38, 38); // red-600
   doc.text(`${leftWall} cm`, x + (winX - x)/2, winY + winH/2, { align: 'center' });
   doc.text(`${rightWall} cm`, winX + winW + (x + wallW - (winX + winW))/2, winY + winH/2, { align: 'center' });
-  
+
   doc.setTextColor(16, 185, 129); // emerald-500
   doc.text(`${ceilingGap} cm`, winX + winW/2, y + (winY - y)/2, { align: 'center' });
   doc.text(`${floorGap} cm`, winX + winW/2, winY + winH + (y + wallH - (winY + winH))/2, { align: 'center' });
-  
+
   doc.setTextColor(37, 99, 235); // blue-600
   doc.setFont('helvetica', 'bold');
   doc.text(`${windowWidth}x${windowHeight}`, winX + winW/2, winY - 2, { align: 'center' });
@@ -154,7 +155,7 @@ function drawFacadeSegmentsDiagram(doc: jsPDF, x: number, y: number, rawValues: 
 
   const drawW = 100; // max width for the diagram
   let currentY = y + 5;
-  
+
   doc.setFontSize(8);
   doc.setTextColor(15, 23, 42);
   doc.setFont('helvetica', 'bold');
@@ -167,29 +168,29 @@ function drawFacadeSegmentsDiagram(doc: jsPDF, x: number, y: number, rawValues: 
   doc.rect(x, currentY, drawW, segH);
 
   let currentX = x;
-  
+
   segments.forEach((seg: any, i: number) => {
     const pct = totalWidth > 0 ? Number(seg.widthCm) / totalWidth : 1/segments.length;
     const w = Math.max(pct * drawW, 8); // min 8mm
-    
+
     if (i > 0) {
       doc.setLineDashPattern([1, 1], 0);
       doc.line(currentX, currentY, currentX, currentY + segH);
       doc.setLineDashPattern([], 0);
     }
-    
+
     doc.setFontSize(7);
     doc.setFont('helvetica', 'bold');
     doc.text(`${seg.widthCm}`, currentX + w/2, currentY + 6, { align: 'center' });
-    
+
     const lbl = seg.label.length > 5 ? seg.label.substring(0,3).toUpperCase() + '.' : seg.label.toUpperCase();
     doc.setFontSize(6);
     doc.setFont('helvetica', 'normal');
     doc.text(lbl, currentX + w/2, currentY + 11, { align: 'center' });
-    
+
     currentX += w;
   });
-  
+
   currentY += segH + 5;
 
   const rightDetails = [];
@@ -216,7 +217,7 @@ function drawFacadeSegmentsDiagram(doc: jsPDF, x: number, y: number, rawValues: 
      doc.setLineDashPattern([1, 1], 0);
      doc.line(x + drawW + 5, y + 5, x + drawW + 5, y + 25);
      doc.setLineDashPattern([], 0);
-     
+
      rightDetails.forEach((d) => {
        doc.text(d, x + drawW + 8, startY);
        startY += 4;
@@ -230,7 +231,7 @@ function drawFacadeSegmentsDiagram(doc: jsPDF, x: number, y: number, rawValues: 
 function drawSimpleDiagram(doc: jsPDF, x: number, y: number, width: number, height: number) {
   const wallW = 80;
   const wallH = 60;
-  
+
   const winX = x + 15;
   const winY = y + 10;
   const winW = 50;
@@ -245,7 +246,7 @@ function drawSimpleDiagram(doc: jsPDF, x: number, y: number, width: number, heig
   doc.setDrawColor(37, 99, 235); // blue-600
   doc.setLineWidth(1);
   doc.rect(winX, winY, winW, winH);
-  
+
   // Center divider
   doc.setLineDashPattern([2, 2], 0);
   doc.line(winX + winW/2, winY, winX + winW/2, winY + winH);
@@ -254,21 +255,25 @@ function drawSimpleDiagram(doc: jsPDF, x: number, y: number, width: number, heig
   doc.setFontSize(8);
   doc.setTextColor(220, 38, 38); // red-600
   doc.text(`${width} cm`, winX + winW/2, winY - 2, { align: 'center' });
-  
+
   doc.setTextColor(16, 185, 129); // emerald-500
   doc.text(`${height} cm`, winX + winW + 4, winY + winH/2);
 
   return wallH;
 }
 
-export async function generateMeasurementPdfBlob(customer: Customer, sameMeasuredBy: string | null): Promise<File> {
+export async function generateMeasurementPdfBlob(
+  customer: Customer,
+  sameMeasuredBy: string | null,
+  measurements?: MeasurementRecord[]
+): Promise<File> {
   const doc = new jsPDF('p', 'mm', 'a4');
-  
-  // Add Unicode font for Turkish chars (using standard helvetica fallback for basic usage, 
+
+  // Add Unicode font for Turkish chars (using standard helvetica fallback for basic usage,
   // but if you have a custom font, it should be registered. jsPDF standard fonts don't fully support all TR chars.
   // We'll use standard and replace unsupported if needed, but jsPDF helvetica supports ISO-8859-1 which covers some.
   // Actually, we'll just proceed with standard font as it's the safest without loading TTF files.
-  
+
   let y = MARGIN;
 
   // Header
@@ -276,13 +281,13 @@ export async function generateMeasurementPdfBlob(customer: Customer, sameMeasure
   doc.setTextColor(37, 99, 235); // blue-600
   doc.setFont('helvetica', 'bold');
   doc.text('CEYLIN OLCU ERP', PAGE_WIDTH / 2, y, { align: 'center' });
-  
+
   y += 6;
   doc.setFontSize(10);
   doc.setTextColor(100, 116, 139);
   doc.setFont('helvetica', 'normal');
   doc.text('Saha Olcu Raporu', PAGE_WIDTH / 2, y, { align: 'center' });
-  
+
   y += 10;
   doc.setDrawColor(203, 213, 225);
   doc.line(MARGIN, y, PAGE_WIDTH - MARGIN, y);
@@ -292,22 +297,22 @@ export async function generateMeasurementPdfBlob(customer: Customer, sameMeasure
   doc.setFontSize(10);
   doc.setTextColor(71, 85, 105);
   doc.setFont('helvetica', 'bold');
-  
+
   const sanitize = (str: string) => str.replace(/İ/g, 'I').replace(/ı/g, 'i').replace(/Ş/g, 'S').replace(/ş/g, 's').replace(/Ğ/g, 'G').replace(/ğ/g, 'g').replace(/Ü/g, 'U').replace(/ü/g, 'u').replace(/Ö/g, 'O').replace(/ö/g, 'o').replace(/Ç/g, 'C').replace(/ç/g, 'c');
-  
+
   doc.text(`Musteri: ${sanitize(customer.name)}`, MARGIN, y);
   doc.setFont('helvetica', 'normal');
   doc.text(`Tarih: ${new Date().toLocaleDateString('tr-TR')}`, PAGE_WIDTH - MARGIN, y, { align: 'right' });
-  
+
   y += 6;
   doc.text(`Telefon: ${customer.phone || '-'}`, MARGIN, y);
   if (sameMeasuredBy) {
     doc.text(`Olcuyu Alan: ${sanitize(sameMeasuredBy)}`, PAGE_WIDTH - MARGIN, y, { align: 'right' });
   }
-  
+
   y += 6;
   doc.text(`Adres: ${sanitize(customer.address || customer.mapLocation || '-')}`, MARGIN, y);
-  
+
   y += 10;
   doc.line(MARGIN, y, PAGE_WIDTH - MARGIN, y);
   y += 10;
@@ -317,29 +322,120 @@ export async function generateMeasurementPdfBlob(customer: Customer, sameMeasure
     doc.setFont('helvetica', 'italic');
     doc.text('Oda ve olcu kaydi bulunmuyor.', PAGE_WIDTH/2, y, { align: 'center' });
   } else {
+    let resolvedMeasurements: MeasurementRecord[] = measurements || [];
+    if (!measurements) {
+      const storeMeas = useMeasurementStore.getState().measurements;
+      if (storeMeas && storeMeas.length > 0) {
+        resolvedMeasurements = storeMeas;
+      } else {
+        const nested: MeasurementRecord[] = [];
+        customer.rooms?.forEach(room => {
+          room.windows?.forEach(win => {
+            win.products?.forEach(p => {
+              nested.push({
+                ...p,
+                customerId: customer.id,
+                roomId: room.id,
+                windowId: win.id
+              } as any);
+            });
+          });
+        });
+        resolvedMeasurements = nested;
+      }
+    }
     customer.rooms.forEach((room, roomIdx) => {
       // Check page break
       if (y > PAGE_HEIGHT - 30) {
         doc.addPage();
         y = MARGIN;
       }
-      
+
       const plicellProducts: { p: ProductMeasurement; index: number; winName: string }[] = [];
       const mechanicalProducts: { p: ProductMeasurement; index: number; winName: string }[] = [];
       const standardOpenings: { winName: string; winItem: any; products: ProductMeasurement[] }[] = [];
 
       (room.windows || []).forEach(win => {
-        const plicell = win.products?.filter(p => p.templateType === 'PLICELL') || [];
-        const mech = win.products?.filter(p => p.templateType === 'mechanical_curtain') || [];
-        const std = win.products?.filter(p => p.templateType !== 'PLICELL' && p.templateType !== 'mechanical_curtain') || [];
-        
-        plicell.forEach((p, i) => plicellProducts.push({ p, index: i, winName: win.name }));
-        mech.forEach((p, i) => mechanicalProducts.push({ p, index: i, winName: win.name }));
-        if (std.length > 0) standardOpenings.push({ winName: win.name, winItem: win, products: std });
+        const winMeasurements = resolvedMeasurements.filter(m => m.windowId === win.id && m.customerId === customer.id && !m.isDeleted && !m.isArchived);
+        winMeasurements.forEach(m => {
+          const activeProducts = m.selectedProducts?.filter(sp => sp.isActive) || [];
+
+          if (activeProducts.length === 0) {
+            // Fallback
+            const fallbackGroup = resolveMeasurementProductGroup(m);
+            if (fallbackGroup === 'Plicell') {
+              plicellProducts.push({ p: m, index: plicellProducts.length, winName: win.name });
+            } else if (fallbackGroup === 'Mekanik Perde') {
+              mechanicalProducts.push({ p: m, index: mechanicalProducts.length, winName: win.name });
+            } else {
+              let entry = standardOpenings.find(so => so.winName === win.name);
+              if (!entry) {
+                entry = { winName: win.name, winItem: win, products: [] };
+                standardOpenings.push(entry);
+              }
+              entry.products.push(m);
+            }
+          } else {
+            activeProducts.forEach(ap => {
+              const pType = ap.productType;
+              const pGroup = resolveMeasurementProductGroup({ productType: pType });
+
+              const pObj: ProductMeasurement = {
+                ...m,
+                productType: pType,
+                productGroup: pGroup,
+                selectedProducts: [ap],
+                details: {
+                  ...m.details,
+                  ...ap.calculation
+                }
+              };
+
+              if (pType === 'PLICELL') {
+                plicellProducts.push({ p: pObj, index: plicellProducts.length, winName: win.name });
+              } else if (pGroup === 'Mekanik Perde') {
+                if (ap.calculation?.isSegmented && Array.isArray(ap.calculation.groups) && ap.calculation.groups.length > 0) {
+                  ap.calculation.groups.forEach((g: any, gIdx: number) => {
+                    const gObj: ProductMeasurement = {
+                      ...m,
+                      id: `${m.id}-group-${gIdx}`,
+                      productType: pType,
+                      productGroup: pGroup,
+                      selectedProducts: [ap],
+                      rawValues: {
+                        ...m.rawValues,
+                        width: g.realWidthCm,
+                        height: g.realHeightCm,
+                        quantity: g.quantity
+                      },
+                      details: {
+                        ...m.details,
+                        ...ap.calculation,
+                        billingWidth: g.calculatedWidthCm,
+                        billingHeight: g.calculatedHeightCm,
+                        totalM2: g.totalM2
+                      }
+                    };
+                    mechanicalProducts.push({ p: gObj, index: mechanicalProducts.length, winName: `${win.name} - Parça ${gIdx + 1}` });
+                  });
+                } else {
+                  mechanicalProducts.push({ p: pObj, index: mechanicalProducts.length, winName: win.name });
+                }
+              } else {
+                let entry = standardOpenings.find(so => so.winName === win.name);
+                if (!entry) {
+                  entry = { winName: win.name, winItem: win, products: [] };
+                  standardOpenings.push(entry);
+                }
+                entry.products.push(pObj);
+              }
+            });
+          }
+        });
       });
 
       const hasAnyProducts = plicellProducts.length > 0 || mechanicalProducts.length > 0 || standardOpenings.length > 0;
-      
+
       doc.setFontSize(12);
       doc.setTextColor(15, 23, 42);
       doc.setFont('helvetica', 'bold');
@@ -354,49 +450,49 @@ export async function generateMeasurementPdfBlob(customer: Customer, sameMeasure
         y += 10;
         return; // continue to next room
       }
-      
+
       // Render Standard Openings (Curtain detail, Simple Width Height, etc)
       standardOpenings.forEach(({ winName, products }) => {
         if (y > PAGE_HEIGHT - 40) { doc.addPage(); y = MARGIN; }
-        
+
         doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(71, 85, 105);
         doc.text(`[Aciklik: ${sanitize(winName)}]`, MARGIN + 4, y);
         y += 6;
-        
+
         products.forEach((p, pIdx) => {
           if (y > PAGE_HEIGHT - 60) { doc.addPage(); y = MARGIN; }
-          
+
           doc.setFillColor(248, 250, 252);
           doc.setDrawColor(226, 232, 240);
           const validNote = getValidNote(p.notes);
           const boxHeight = validNote ? 65 : 55; // Approximate box height
           doc.rect(MARGIN + 4, y, PAGE_WIDTH - MARGIN*2 - 4, boxHeight, 'FD');
-          
+
           let innerY = y + 6;
           doc.setFontSize(10);
           doc.setTextColor(15, 23, 42);
           doc.setFont('helvetica', 'bold');
-          doc.text(`Olcu ${pIdx + 1}: ${sanitize(getTemplateLabel(p.templateType))}`, MARGIN + 8, innerY);
-          
+          doc.text(`Olcu ${pIdx + 1}: ${sanitize(resolveMeasurementProductLabel(p))} (${sanitize(getTemplateLabel(p.templateType))})`, MARGIN + 8, innerY);
+
           const dims = getMeasurementDimensions(p);
           const isCurtain = p.templateType === 'CURTAIN_DETAIL' || p.templateType === 'CURTAIN';
           const isSimple = p.templateType === 'SIMPLE_WIDTH_HEIGHT';
-          
+
           innerY += 8;
           doc.setFontSize(9);
           doc.setFont('helvetica', 'normal');
-          
+
           const rightColX = MARGIN + 80;
-          
+
           if (isCurtain) {
             const facadeSegments = p.rawValues?.facadeSegments;
             if (facadeSegments && Array.isArray(facadeSegments) && facadeSegments.length > 0) {
               const facadeStr = formatFacadeForReport(facadeSegments).replace(/ç/g, 'c').replace(/ş/g, 's').replace(/ğ/g, 'g').replace(/ı/g, 'i').replace(/ö/g, 'o').replace(/ü/g, 'u').replace(/Ç/g, 'C').replace(/Ş/g, 'S').replace(/Ğ/g, 'G').replace(/İ/g, 'I').replace(/Ö/g, 'O').replace(/Ü/g, 'U');
               const linesStr = doc.splitTextToSize(facadeStr, 65);
               doc.text(linesStr, MARGIN + 8, innerY);
-              
+
               let curY = innerY + (linesStr.length * 4) + 4;
               if (p.rawValues?.kartonpiyerBoslukCm) { doc.text(`Kartonpiyer: ${p.rawValues.kartonpiyerBoslukCm}`, MARGIN + 8, curY); curY+=4; }
               if (p.rawValues?.camUstuCm) { doc.text(`Cam Ustu: ${p.rawValues.camUstuCm}`, MARGIN + 8, curY); curY+=4; }
@@ -407,7 +503,7 @@ export async function generateMeasurementPdfBlob(customer: Customer, sameMeasure
               if (p.rawValues?.ortaYukseklikCm) { doc.text(`Orta Yukseklik: ${p.rawValues.ortaYukseklikCm}`, MARGIN + 8, curY); curY+=4; }
               if (p.rawValues?.sagYukseklikCm) { doc.text(`Sag Yukseklik: ${p.rawValues.sagYukseklikCm}`, MARGIN + 8, curY); curY+=4; }
               if (p.rawValues?.yukseklikNotu) { doc.text(`Yukseklik Notu: ${p.rawValues.yukseklikNotu}`, MARGIN + 8, curY); curY+=4; }
-              
+
               // Draw Diagram
               drawFacadeSegmentsDiagram(doc, rightColX, innerY - 4, p.rawValues);
             } else {
@@ -417,22 +513,22 @@ export async function generateMeasurementPdfBlob(customer: Customer, sameMeasure
               doc.text(`Tavan Boslugu: ${p.rawValues?.ceilingGap || 0} cm`, MARGIN + 8, innerY + 18);
               doc.text(`Pencere Boyu: ${p.rawValues?.windowHeight || 0} cm`, MARGIN + 8, innerY + 24);
               doc.text(`Zemin Boslugu: ${p.rawValues?.floorGap || 0} cm`, MARGIN + 8, innerY + 30);
-              
+
               doc.setFont('helvetica', 'bold');
               doc.setTextColor(37, 99, 235);
               doc.text(`Toplam: ${dims.structuralWidth} x ${dims.structuralHeight} cm`, MARGIN + 8, innerY + 38);
-              
+
               // Draw Diagram
               drawCurtainDetailDiagram(doc, rightColX, innerY - 4, p.rawValues);
             }
           } else if (isSimple) {
             doc.text(`Genislik (En): ${p.rawValues?.width || 0} cm`, MARGIN + 8, innerY);
             doc.text(`Yukseklik (Boy): ${p.rawValues?.height || 0} cm`, MARGIN + 8, innerY + 6);
-            
+
             doc.setFont('helvetica', 'bold');
             doc.setTextColor(37, 99, 235);
             doc.text(`Toplam: ${dims.structuralWidth} x ${dims.structuralHeight} cm`, MARGIN + 8, innerY + 14);
-            
+
             drawSimpleDiagram(doc, rightColX, innerY - 4, Number(p.rawValues?.width || 0), Number(p.rawValues?.height || 0));
           } else {
              let customY = innerY;
@@ -443,28 +539,28 @@ export async function generateMeasurementPdfBlob(customer: Customer, sameMeasure
                 customY += 6;
              });
           }
-          
+
           if (validNote) {
             doc.setFontSize(8);
             doc.setTextColor(217, 119, 6);
             doc.setFont('helvetica', 'bold');
             doc.text(`Saha Notu: ${sanitize(validNote)}`, MARGIN + 8, y + boxHeight - 6);
           }
-          
+
           y += boxHeight + 4;
         });
       });
-      
+
       // Render Tables for Plicell
       if (plicellProducts.length > 0) {
         if (y > PAGE_HEIGHT - 30) { doc.addPage(); y = MARGIN; }
-        
+
         doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(71, 85, 105);
         doc.text(`[Olcu Grubu: Plicell Cam Ici Olcusu]`, MARGIN + 4, y);
         y += 4;
-        
+
         const tableData: string[][] = [];
         plicellProducts.forEach(item => {
            const camListesi = item.p.rawValues?.plicellCamListesi;
@@ -472,7 +568,7 @@ export async function generateMeasurementPdfBlob(customer: Customer, sameMeasure
              const validCamListesi = camListesi.filter((cam: any) => Number(cam.widthCm) > 0 && Number(cam.heightCm) > 0);
              const profilRengi = item.p.rawValues?.profilRengi;
              const profilTxt = profilRengi ? `[Renk: ${profilRengi}] ` : '';
-             
+
              validCamListesi.forEach((cam: any, idx: number) => {
                tableData.push([
                  sanitize(item.winName),
@@ -493,39 +589,51 @@ export async function generateMeasurementPdfBlob(customer: Customer, sameMeasure
              ]);
            }
         });
-        
+
         y = drawSimpleTable(doc, MARGIN + 4, y, ['Aciklik', 'No', 'En', 'Boy', 'Notlar'], tableData) + 10;
       }
-      
+
       // Render Tables for Mechanical
       if (mechanicalProducts.length > 0) {
         if (y > PAGE_HEIGHT - 30) { doc.addPage(); y = MARGIN; }
-        
+
         doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(71, 85, 105);
         doc.text(`[Olcu Grubu: Mekanik Perde]`, MARGIN + 4, y);
         y += 4;
-        
-        const tableData = mechanicalProducts.map(item => {
-           const dims = getMeasurementDimensions(item.p);
-           return [
-             sanitize(item.winName),
-             `${item.index}. Olcu`,
-             `${item.p.rawValues?.width || 0} cm`,
-             `${item.p.rawValues?.height || 0} cm`,
-             `${dims.structuralWidth} x ${dims.structuralHeight}`,
-             sanitize(getValidNote(item.p.notes) || '-')
-           ];
-        });
-        
-        y = drawSimpleTable(doc, MARGIN + 4, y, ['Aciklik', 'No', 'Kumas En', 'Boy', 'Kasa/Mekanizma', 'Notlar'], tableData) + 10;
+
+         const tableData = mechanicalProducts.map((item, idx) => {
+            const w = Number(item.p.rawValues?.width || 0);
+            const h = Number(item.p.rawValues?.height || 0);
+            const q = Number(item.p.rawValues?.quantity || 1);
+            const pLabel = resolveMeasurementProductLabel(item.p);
+            const calcWidth = item.p.details?.billingWidth || Math.ceil(w / 10) * 10 || w;
+            const calcHeight = item.p.details?.billingHeight || h;
+            const totalM2 = item.p.details?.totalM2 !== undefined ? Number(item.p.details.totalM2) : (calcWidth * calcHeight * q) / 10000;
+            const unitM2 = totalM2 / q;
+
+            return [
+              sanitize(item.winName),
+              sanitize(pLabel),
+              `${w.toFixed(0)} cm`,
+              `${h.toFixed(0)} cm`,
+              `${calcWidth} cm`,
+              `${calcHeight} cm`,
+              `${q}`,
+              `${unitM2.toFixed(2)}`,
+              `${totalM2.toFixed(2)}`,
+              sanitize(getValidNote(item.p.notes) || '-')
+            ];
+          });
+
+          y = drawSimpleTable(doc, MARGIN + 4, y, ['Aciklik', 'Urun Tipi', 'Gerc.En', 'Gerc.Boy', 'Hesap En', 'Hes.Boy', 'Adet', 'Bir.m2', 'Top.m2', 'Notlar'], tableData) + 10;
       }
-      
+
       y += 4;
     });
   }
-  
+
   const fileName = `olcu-raporu-${sanitize(customer.name).replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}-${new Date().toISOString().split('T')[0]}.pdf`;
   const blob = doc.output('blob');
   return new File([blob], fileName, { type: 'application/pdf' });

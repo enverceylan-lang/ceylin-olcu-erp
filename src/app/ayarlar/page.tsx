@@ -4,6 +4,7 @@ import { Download, Settings, Upload, ShieldCheck, AlertTriangle, UserPlus, Trash
 import { useRef, useState, useEffect, Fragment } from "react";
 import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, MockUser } from "@/store/useAuthStore";
 import { syncNow } from "@/lib/syncService";
+import { normalizeUsername } from "@/lib/usernameHelper";
 
 const DATA_KEYS = ["curtain-erp-storage-v3", "curtain-erp-auth-v1"];
 
@@ -21,7 +22,7 @@ export default function AyarlarPage() {
   const [pendingBackupData, setPendingBackupData] = useState<BackupPayload | null>(null);
   
   // Auth Store
-  const { currentUser, users, addUser, updateUser, deleteUser } = useAuthStore();
+  const { currentUser, users, addUser, updateUser, deleteUser, auditLog } = useAuthStore();
 
   // Logged in user profile edit form states
   const [selfName, setSelfName] = useState("");
@@ -53,6 +54,8 @@ export default function AyarlarPage() {
   const [editPhone, setEditPhone] = useState("");
   const [editTcNo, setEditTcNo] = useState("");
   const [editAddress, setEditAddress] = useState("");
+  const [userLoading, setUserLoading] = useState(false);
+  const [userFilter, setUserFilter] = useState<'ACTIVE' | 'PASSIVE' | 'ALL'>('ACTIVE');
 
   useEffect(() => {
     if (currentUser) {
@@ -119,56 +122,64 @@ export default function AyarlarPage() {
       return;
     }
 
+    setUserLoading(true);
     setMessage("Kullanıcı ekleniyor... Lütfen bekleyin.");
 
-    const success = await addUser({
-      name: newName.trim(),
-      username: newUsername.trim().toLowerCase(),
-      password: newPassword.trim(),
-      role: newRole as any,
-      isActive: true,
-      permissions: [],
-      email: newEmail.trim(),
-      phone: newPhone.trim(),
-      tcNo: newTcNo.trim(),
-      address: newAddress.trim()
-    });
-
-    if (success) {
-      const addedName = newName.trim();
-      const addedEmail = newEmail.trim();
-      const addedPhone = newPhone.trim();
-      const addedTcNo = newTcNo.trim();
-      const addedAddress = newAddress.trim();
-
-      // Reset Form
-      setNewName("");
-      setNewUsername("");
-      setNewPassword("");
-      setNewRole("FIELD");
-      setNewEmail("");
-      setNewPhone("");
-      setNewTcNo("");
-      setNewAddress("");
-      setShowAddForm(false);
-      setMessage("Kullanıcı başarıyla eklendi.");
-
-      try {
-        await syncNow(true);
-      } catch (err: any) {}
-
-      // Secure Logging (Only boolean flags and non-sensitive status)
-      console.log("User profile status (admin created user):", {
-        hasFullName: !!addedName,
-        hasEmail: !!addedEmail,
-        hasPhone: !!addedPhone,
-        hasTcNo: !!addedTcNo,
-        hasAddress: !!addedAddress,
-        role: newRole,
-        active: true
+    try {
+      const success = await addUser({
+        name: newName.trim(),
+        username: newUsername.trim().toLowerCase(),
+        password: newPassword.trim(),
+        role: newRole as any,
+        isActive: true,
+        permissions: [],
+        email: newEmail.trim(),
+        phone: newPhone.trim(),
+        tcNo: newTcNo.trim(),
+        address: newAddress.trim()
       });
-    } else {
-      setMessage("Hata: Kullanıcı eklenemedi.");
+
+      if (success) {
+        const addedName = newName.trim();
+        const addedEmail = newEmail.trim();
+        const addedPhone = newPhone.trim();
+        const addedTcNo = newTcNo.trim();
+        const addedAddress = newAddress.trim();
+
+        // Reset Form
+        setNewName("");
+        setNewUsername("");
+        setNewPassword("");
+        setNewRole("FIELD");
+        setNewEmail("");
+        setNewPhone("");
+        setNewTcNo("");
+        setNewAddress("");
+        setShowAddForm(false);
+        setMessage("Kullanıcı başarıyla eklendi.");
+
+        try {
+          await syncNow(true);
+        } catch (err: any) {}
+
+        // Secure Logging (Only boolean flags and non-sensitive status)
+        console.log("User profile status (admin created user):", {
+          hasFullName: !!addedName,
+          hasEmail: !!addedEmail,
+          hasPhone: !!addedPhone,
+          hasTcNo: !!addedTcNo,
+          hasAddress: !!addedAddress,
+          role: newRole,
+          active: true
+        });
+      } else {
+        setMessage("Hata: Kullanıcı eklenemedi.");
+      }
+    } catch (err) {
+      console.error(err);
+      setMessage("Hata: Bir hata oluştu.");
+    } finally {
+      setUserLoading(false);
     }
   };
 
@@ -185,8 +196,8 @@ export default function AyarlarPage() {
   };
 
   const handleSaveEdit = async (id: string) => {
-    if (!editName.trim() || !editUsername.trim()) {
-      setMessage("Hata: Ad soyad ve kullanıcı adı zorunludur.");
+    if (!editName.trim() || !editUsername.trim() || !editEmail.trim() || !editPhone.trim()) {
+      setMessage("Hata: Ad soyad, kullanıcı adı, mail adresi ve telefon numarası zorunludur.");
       return;
     }
 
@@ -204,30 +215,38 @@ export default function AyarlarPage() {
       updateData.password = editPassword.trim();
     }
 
+    setUserLoading(true);
     setMessage("Güncelleniyor... Lütfen bekleyin.");
 
-    const success = await updateUser(id, updateData);
-    if (success) {
-      setEditingUserId(null);
-      setMessage("Kullanıcı başarıyla güncellendi.");
-      try {
-        await syncNow(true);
-      } catch (err: any) {}
-    } else {
-      setMessage("Hata: Kullanıcı güncellenemedi.");
-    }
+    try {
+      const success = await updateUser(id, updateData);
+      if (success) {
+        setEditingUserId(null);
+        setMessage("Kullanıcı başarıyla güncellendi.");
+        try {
+          await syncNow(true);
+        } catch (err: any) {}
+      } else {
+        setMessage("Hata: Kullanıcı güncellenemedi.");
+      }
 
-    // Secure Logging (Only boolean flags and non-sensitive status)
-    const userRecord = users.find(x => x.id === id);
-    console.log("User profile status (admin update):", {
-      hasFullName: !!editName.trim(),
-      hasEmail: !!editEmail.trim(),
-      hasPhone: !!editPhone.trim(),
-      hasTcNo: !!editTcNo.trim(),
-      hasAddress: !!editAddress.trim(),
-      role: editRole,
-      active: userRecord ? userRecord.isActive : true
-    });
+      // Secure Logging (Only boolean flags and non-sensitive status)
+      const userRecord = users.find(x => x.id === id);
+      console.log("User profile status (admin update):", {
+        hasFullName: !!editName.trim(),
+        hasEmail: !!editEmail.trim(),
+        hasPhone: !!editPhone.trim(),
+        hasTcNo: !!editTcNo.trim(),
+        hasAddress: !!editAddress.trim(),
+        role: editRole,
+        active: userRecord ? userRecord.isActive : true
+      });
+    } catch (err) {
+      console.error(err);
+      setMessage("Hata: Bir hata oluştu.");
+    } finally {
+      setUserLoading(false);
+    }
   };
 
   const handleSelfUpdate = async (e: React.FormEvent) => {
@@ -296,7 +315,7 @@ export default function AyarlarPage() {
       </div>
 
       {/* Profil Bilgilerim Panel */}
-      {currentUser && (
+      {currentUser && normalizeRole(currentUser.role) === 'ADMIN' && (
         <div className="rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 overflow-hidden text-xs">
           <div className="border-b border-gray-200 p-5 dark:border-gray-800 flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-indigo-500/10 text-indigo-650 dark:text-indigo-400 flex items-center justify-center font-bold">
@@ -356,17 +375,19 @@ export default function AyarlarPage() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block font-bold text-gray-650 dark:text-gray-405 mb-1 font-normal text-slate-500">TC Kimlik Numarası</label>
-                <input
-                  type="text"
-                  maxLength={11}
-                  value={selfTcNo}
-                  onChange={e => setSelfTcNo(e.target.value.replace(/\D/g, ""))}
-                  className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
-                  placeholder="11 haneli TC no..."
-                />
-              </div>
+              {normalizeRole(currentUser.role) === 'ADMIN' && (
+                <div>
+                  <label className="block font-bold text-gray-650 dark:text-gray-405 mb-1 font-normal text-slate-500">TC Kimlik Numarası</label>
+                  <input
+                    type="text"
+                    maxLength={11}
+                    value={selfTcNo}
+                    onChange={e => setSelfTcNo(e.target.value.replace(/\D/g, ""))}
+                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
+                    placeholder="11 haneli TC no..."
+                  />
+                </div>
+              )}
               <div>
                 <label className="block font-bold text-gray-655 dark:text-gray-405 mb-1 font-normal text-slate-500">Yeni Şifre (Mevcut şifreyi korumak için boş bırakın)</label>
                 <input
@@ -444,7 +465,7 @@ export default function AyarlarPage() {
                     type="text" 
                     required 
                     value={newUsername} 
-                    onChange={e => setNewUsername(e.target.value)}
+                    onChange={e => setNewUsername(normalizeUsername(e.target.value))}
                     className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
                     placeholder="nihat"
                   />
@@ -519,10 +540,46 @@ export default function AyarlarPage() {
                 </div>
               </div>
               <div className="flex justify-end gap-2">
-                <button type="submit" className="bg-indigo-600 hover:bg-indigo-550 text-white font-bold px-4 py-2 rounded-lg text-xs cursor-pointer transition-colors shadow-md shadow-indigo-650/20">Kaydet</button>
+                <button type="submit" disabled={userLoading} className="bg-indigo-600 hover:bg-indigo-550 disabled:bg-indigo-400 text-white font-bold px-4 py-2 rounded-lg text-xs cursor-pointer transition-colors shadow-md shadow-indigo-650/20">
+                  {userLoading ? "Kaydediliyor..." : "Kaydet"}
+                </button>
               </div>
             </form>
           )}
+
+          {/* User Filtering Tabs */}
+          <div className="flex gap-2 mb-4 mt-2">
+            <button
+              onClick={() => setUserFilter('ACTIVE')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                userFilter === 'ACTIVE'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-750'
+              }`}
+            >
+              Aktif Kullanıcılar
+            </button>
+            <button
+              onClick={() => setUserFilter('PASSIVE')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                userFilter === 'PASSIVE'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-750'
+              }`}
+            >
+              Pasif Kullanıcılar
+            </button>
+            <button
+              onClick={() => setUserFilter('ALL')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                userFilter === 'ALL'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-750'
+              }`}
+            >
+              Tüm Kullanıcılar
+            </button>
+          </div>
 
           {/* Users List Table */}
           <div className="overflow-x-auto text-xs">
@@ -538,7 +595,11 @@ export default function AyarlarPage() {
                 </tr>
               </thead>
               <tbody>
-                {users.map((u) => {
+                {users.filter(u => {
+                  if (userFilter === 'ACTIVE') return u.isActive;
+                  if (userFilter === 'PASSIVE') return !u.isActive;
+                  return true;
+                }).map((u) => {
                   const isEditing = editingUserId === u.id;
                   return (
                     <Fragment key={u.id}>
@@ -552,7 +613,12 @@ export default function AyarlarPage() {
                               className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 text-gray-900 dark:text-white text-xs outline-none" 
                             />
                           ) : (
-                            u.name
+                            <div>
+                              <div>{u.name}</div>
+                              <div className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5 font-normal">
+                                {u.email || "E-posta yok"} • {u.phone || "Telefon yok"} {u.tcNo ? `• TC: ${u.tcNo}` : ""}
+                              </div>
+                            </div>
                           )}
                         </td>
                         <td className="p-4 text-gray-600 dark:text-gray-300">
@@ -560,7 +626,7 @@ export default function AyarlarPage() {
                             <input 
                               type="text" 
                               value={editUsername} 
-                              onChange={e => setEditUsername(e.target.value)}
+                              onChange={e => setEditUsername(normalizeUsername(e.target.value))}
                               className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 text-gray-900 dark:text-white text-xs w-28 outline-none" 
                             />
                           ) : (
@@ -623,24 +689,73 @@ export default function AyarlarPage() {
                           <div className="flex items-center justify-end gap-2.5">
                             {isEditing ? (
                               <>
-                                <button onClick={() => handleSaveEdit(u.id)} className="text-green-500 hover:text-green-700 p-1 cursor-pointer" title="Kaydet"><Check className="w-4 h-4" /></button>
-                                <button onClick={() => setEditingUserId(null)} className="text-gray-400 hover:text-gray-500 p-1 cursor-pointer" title="İptal"><X className="w-4 h-4" /></button>
+                                <button onClick={() => !userLoading && handleSaveEdit(u.id)} disabled={userLoading} className="text-green-500 hover:text-green-700 disabled:text-green-300 p-1 cursor-pointer" title="Kaydet"><Check className="w-4 h-4" /></button>
+                                <button onClick={() => setEditingUserId(null)} disabled={userLoading} className="text-gray-400 hover:text-gray-500 p-1 cursor-pointer" title="İptal"><X className="w-4 h-4" /></button>
                               </>
                             ) : (
                               <>
                                 <button onClick={() => startEditingUser(u)} className="text-blue-500 hover:underline cursor-pointer">Düzenle</button>
                                 {u.id !== 'user-admin' && (
-                                  <button onClick={async () => {
-                                    if (confirm("Bu kullanıcıyı silmek istediğinize emin misiniz? (Devre dışı bırakılacaktır)")) {
-                                      setMessage("Kullanıcı siliniyor...");
-                                      const success = await deleteUser(u.id);
-                                      if (success) {
-                                        setMessage("Kullanıcı başarıyla silindi (pasif yapıldı).");
-                                      } else {
-                                        setMessage("Hata: Kullanıcı silinemedi.");
-                                      }
-                                    }
-                                  }} className="text-red-500 hover:text-red-700 p-1 cursor-pointer" title="Kullanıcı Sil"><Trash2 className="w-4 h-4" /></button>
+                                  <>
+                                    <button
+                                      onClick={async () => {
+                                        setUserLoading(true);
+                                        setMessage(u.isActive ? "Kullanıcı pasife alınıyor..." : "Kullanıcı aktif ediliyor...");
+                                        try {
+                                          const success = await updateUser(u.id, { isActive: !u.isActive });
+                                          if (success) {
+                                            setMessage(u.isActive ? "Kullanıcı başarıyla pasife alındı." : "Kullanıcı başarıyla aktif edildi.");
+                                          } else {
+                                            setMessage("Hata: İşlem gerçekleştirilemedi.");
+                                          }
+                                        } catch (err) {
+                                          setMessage("Hata: Bir sorun oluştu.");
+                                        } finally {
+                                          setUserLoading(false);
+                                        }
+                                      }}
+                                      className="text-amber-600 hover:underline cursor-pointer ml-2"
+                                    >
+                                      {u.isActive ? "Pasife Al" : "Aktif Et"}
+                                    </button>
+
+                                    {currentUser && normalizeRole(currentUser.role) === 'ADMIN' && (
+                                      <button
+                                        onClick={async () => {
+                                          const firstConfirm = confirm("Bu kullanıcı tamamen silinecek. Emin misiniz?");
+                                          if (firstConfirm) {
+                                            const typedUsername = prompt(`Lütfen silme işlemini onaylamak için kullanıcının kullanıcı adını ("${u.username}") yazın:`);
+                                            if (typedUsername?.trim().toLowerCase() === u.username.toLowerCase()) {
+                                              setUserLoading(true);
+                                              setMessage("Kullanıcı siliniyor...");
+                                              try {
+                                                const res = await deleteUser(u.id);
+                                                if (res.success) {
+                                                  setMessage("Kullanıcı başarıyla silindi.");
+                                                } else {
+                                                  if (res.code === "USER_HAS_LINKED_RECORDS") {
+                                                    setMessage("Bu kullanıcının bağlı iş kayıtları bulunduğu için silinemez. Pasife alabilirsiniz.");
+                                                  } else {
+                                                    setMessage("Hata: " + (res.error || "Kullanıcı silinemedi."));
+                                                  }
+                                                }
+                                              } catch (err: any) {
+                                                setMessage("Hata: Bir sorun oluştu.");
+                                              } finally {
+                                                setUserLoading(false);
+                                              }
+                                            } else if (typedUsername !== null) {
+                                              setMessage("Onay geçersiz. Silme işlemi iptal edildi.");
+                                            }
+                                          }
+                                        }}
+                                        className="text-red-500 hover:text-red-700 p-1 cursor-pointer ml-2"
+                                        title="Kullanıcıyı Tamamen Sil"
+                                      >
+                                        <Trash2 className="w-4 h-4 inline" />
+                                      </button>
+                                    )}
+                                  </>
                                 )}
                               </>
                             )}
@@ -655,6 +770,7 @@ export default function AyarlarPage() {
                                 <label className="block font-semibold text-gray-650 dark:text-gray-400 mb-1">Mail Adresi</label>
                                 <input
                                   type="email"
+                                  required
                                   value={editEmail}
                                   onChange={e => setEditEmail(e.target.value)}
                                   className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
@@ -665,6 +781,7 @@ export default function AyarlarPage() {
                                 <label className="block font-semibold text-gray-650 dark:text-gray-400 mb-1">Telefon Numarası</label>
                                 <input
                                   type="tel"
+                                  required
                                   value={editPhone}
                                   onChange={e => setEditPhone(e.target.value)}
                                   className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none"
@@ -701,6 +818,58 @@ export default function AyarlarPage() {
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+      {currentUser && normalizeRole(currentUser.role) === 'ADMIN' && (
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 overflow-hidden text-xs">
+          <div className="border-b border-gray-200 p-5 dark:border-gray-800 flex items-center gap-3">
+            <ShieldCheck className="h-5 w-5 text-indigo-600" />
+            <div>
+              <h2 className="font-semibold text-gray-900 dark:text-white">Kullanıcı Değişiklik Günlüğü (Audit Log)</h2>
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">Yöneticiler tarafından yapılan profil güncellemeleri ve değişiklik snapshots.</p>
+            </div>
+          </div>
+          <div className="p-5 space-y-4 max-h-[300px] overflow-auto">
+            {auditLog.length === 0 ? (
+              <p className="text-gray-500 text-center py-4">Henüz bir değişiklik kaydı bulunmuyor.</p>
+            ) : (
+              <div className="space-y-3">
+                {auditLog.map((entry) => (
+                  <div key={entry.id} className="p-3 rounded-lg border border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-950/20 space-y-2">
+                    <div className="flex justify-between items-center text-[10px]">
+                      <span className="font-bold text-gray-700 dark:text-gray-300">
+                        Kullanıcı ID: {entry.entityId}
+                      </span>
+                      <span className="text-gray-500">
+                        {new Date(entry.changedAt).toLocaleString('tr-TR')}
+                      </span>
+                    </div>
+                    <div className="text-[11px]">
+                      <span className="font-semibold">Değişen Alanlar:</span> <span className="font-mono text-indigo-600 dark:text-indigo-400">{entry.changedFields?.join(', ') || entry.field}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 text-[10px] pt-1">
+                      <div>
+                        <span className="font-semibold text-red-500">Eski Bilgiler:</span>
+                        <pre className="mt-1 p-1.5 rounded bg-red-500/5 border border-red-500/10 font-mono text-[9px] whitespace-pre-wrap overflow-auto max-h-[80px]">
+                          {entry.beforeSnapshot ? JSON.stringify(entry.beforeSnapshot, null, 2) : 'Yok'}
+                        </pre>
+                      </div>
+                      <div>
+                        <span className="font-semibold text-green-500">Yeni Bilgiler:</span>
+                        <pre className="mt-1 p-1.5 rounded bg-green-500/5 border border-green-500/10 font-mono text-[9px] whitespace-pre-wrap overflow-auto max-h-[80px]">
+                          {entry.afterSnapshot ? JSON.stringify(entry.afterSnapshot, null, 2) : 'Yok'}
+                        </pre>
+                      </div>
+                    </div>
+                    <div className="text-[9px] text-gray-400 dark:text-gray-500 flex justify-between pt-1">
+                      <span>Değiştiren: {entry.changedBy}</span>
+                      <span>Neden: {entry.reason}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

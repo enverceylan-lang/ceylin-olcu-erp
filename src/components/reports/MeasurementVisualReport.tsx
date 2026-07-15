@@ -2,24 +2,28 @@ import React from 'react';
 import { X, Printer, Share2, Loader2 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Customer, MEASUREMENT_TEMPLATES, WindowItem, ProductMeasurement } from '@/store/useStore';
-import { getTemplateLabel, getMeasurementDimensions } from '@/lib/measurementAdapter';
+import { getTemplateLabel, getMeasurementDimensions, resolveMeasurementProductLabel, resolveMeasurementProductGroup } from '@/lib/measurementAdapter';
 import { generateMeasurementPdfBlob } from '@/lib/measurementPdfGenerator';
 import { calculatePlicellM2, calculateMechanicalCurtainM2, getValidNote } from '@/lib/reportFormatters';
 import { renderSimpleWidthHeightDiagram, renderCurtainDetailDiagram } from '@/lib/measurementDiagram';
 import { TechnicalMeasurementSketch } from './TechnicalMeasurementSketch';
 import { PlicellMeasurementSketch } from './PlicellMeasurementSketch';
 import { formatFacadeForReport } from '@/lib/facadeHelper';
+import { useMeasurementStore, MeasurementRecord } from '@/store/measurementStore';
 
 interface MeasurementVisualReportProps {
   isOpen: boolean;
   onClose: () => void;
   customer: Customer;
   users: { id: string; name: string }[];
+  measurements?: MeasurementRecord[];
 }
 
-export function MeasurementVisualReport({ isOpen, onClose, customer, users }: MeasurementVisualReportProps) {
+export function MeasurementVisualReport({ isOpen, onClose, customer, users, measurements: propMeasurements }: MeasurementVisualReportProps) {
   const [isGeneratingPdf, setIsGeneratingPdf] = React.useState(false);
   const [previewNode, setPreviewNode] = React.useState<React.ReactNode | null>(null);
+
+  const { measurements: storeMeasurements } = useMeasurementStore();
 
   React.useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -31,28 +35,24 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
 
   if (!isOpen) return null;
 
+  const activeMeasurements = (propMeasurements || storeMeasurements).filter(
+    m => m.customerId === customer.id && !m.isDeleted && !m.isArchived
+  );
+
   // Determine global "Ölçüyü Alan"
   const allMeasuredBy = new Set<string>();
-  customer.rooms?.forEach(room => {
-    room.windows?.forEach(window => {
-      window.products?.forEach(p => {
-        if (p.measuredBy) allMeasuredBy.add(p.measuredBy);
-      });
-    });
+  activeMeasurements.forEach(p => {
+    if (p.measuredBy) allMeasuredBy.add(p.measuredBy);
   });
   const sameMeasuredBy = allMeasuredBy.size === 1 ? Array.from(allMeasuredBy)[0] : null;
 
   // Date checks
   const uniqueDays = new Set<string>();
-  customer.rooms?.forEach(room => {
-    room.windows?.forEach(window => {
-      window.products?.forEach(p => {
-        if (p.measuredDate) {
-          const dayStr = new Date(p.measuredDate).toLocaleDateString('tr-TR');
-          uniqueDays.add(dayStr);
-        }
-      });
-    });
+  activeMeasurements.forEach(p => {
+    if (p.measuredDate) {
+      const dayStr = new Date(p.measuredDate).toLocaleDateString('tr-TR');
+      uniqueDays.add(dayStr);
+    }
   });
   const showDateOnMeasurements = uniqueDays.size > 1;
 
@@ -61,10 +61,92 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
   let globalMechanicalCount = 0;
   let globalMechanicalM2 = 0;
 
+  const renderSelectedProductsSection = (p: MeasurementRecord) => {
+    const activeItems = p.selectedProducts?.filter(sp => sp.isActive) || [];
+    if (activeItems.length === 0) {
+      return (
+        <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-1">
+          <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider block">Seçilen Ürünler & Hesaplar</span>
+          <div className="text-xs text-slate-300 dark:text-slate-400 bg-slate-900/50 p-2.5 rounded border border-slate-800">
+            Ürün: {resolveMeasurementProductLabel(p)} (Hesaplama otomatik)
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
+        <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider block">Seçilen Ürünler & Hesaplar</span>
+        <div className="space-y-2">
+          {activeItems.map(item => {
+            const label = resolveMeasurementProductLabel({ productType: item.productType });
+            const desc = item.calculation?.description || 'Otomatik hesaplanıyor';
+
+            const detailsList: string[] = [];
+            const calc = item.calculation || {};
+
+            if (item.productType === 'TUL' && calc.fabricUsageMeters) {
+              detailsList.push(`Kumaş Eni: ${calc.fabricUsageMeters} metre`);
+            }
+            if (item.productType === 'GUNESLIK' && calc.fabricUsageMeters) {
+              detailsList.push(`Güneşlik Eni: ${calc.billingWidth} cm (${calc.fabricUsageMeters} m)`);
+            }
+            if (item.productType === 'FON' && calc.fabricUsageMeters) {
+              detailsList.push(`Fon Boyu: ${calc.billingHeight} cm (${calc.fabricUsageMeters} m, ${calc.wings} Kanat)`);
+            }
+            if (item.productType === 'RUSTIK' && calc.billingWidth) {
+              detailsList.push(`Rustik Boru Eni: ${calc.billingWidth} cm, Boy: ${calc.billingHeight} cm`);
+            }
+            if (item.productType === 'TAVAN_RUSTIK' && calc.legLengthCm) {
+              detailsList.push(`Miktar: 1 m, Ayak Boyu: ${calc.legLengthCm} cm`);
+            }
+            if ((item.productType === 'STOR' || item.productType === 'ZEBRA') && calc.totalM2) {
+              detailsList.push(`Alan: ${calc.totalM2} m²`);
+              if (calc.hemModel && calc.hemModel !== 'Düz') {
+                detailsList.push(`Etek: ${calc.hemModel}`);
+              }
+              if (calc.laserHem) {
+                detailsList.push(`Lazer Etek: Aktif`);
+              }
+            }
+            if (item.productType === 'DIKEY_STOR' && calc.totalM2) {
+              detailsList.push(`Alan: ${calc.totalM2} m² (Dikey Stor)`);
+            }
+            if (item.productType === 'DIKEY_TUL' && calc.totalM2) {
+              detailsList.push(`Alan: ${calc.totalM2} m² (Dikey Tül)`);
+            }
+            if (item.productType === 'PLICELL' && calc.totalM2) {
+              detailsList.push(`Hesaplanan Ölçü: ${calc.billingWidth} × ${calc.billingHeight} cm (${calc.totalM2} m²)`);
+            }
+            if ((item.productType === 'AHSAP_JALUZI' || item.productType === 'JALUZI' || item.productType === 'PICASSO') && calc.totalM2) {
+              detailsList.push(`Alan: ${calc.totalM2} m²`);
+            }
+            if (item.productType === 'BIRIZ' && calc.birizTulMeters) {
+              detailsList.push(`Biriz Tül: ${calc.birizTulMeters} m, Demir: ${calc.rodLengthMeters} m (2 çubuk), Başlık: ${calc.capsCount} adet`);
+            }
+
+            return (
+              <div key={item.productType} className="bg-slate-900/50 p-2.5 rounded-lg border border-slate-800 text-xs">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="font-bold text-white print:text-black">{label}</span>
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 italic">{desc}</span>
+                </div>
+                {detailsList.length > 0 && (
+                  <div className="text-[11px] text-blue-400 print:text-black font-semibold mt-1">
+                    {detailsList.join(' | ')}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   const handlePrint = async () => {
     try {
       setIsGeneratingPdf(true);
-      const pdfFile = await generateMeasurementPdfBlob(customer, sameMeasuredBy);
+      const pdfFile = await generateMeasurementPdfBlob(customer, sameMeasuredBy, activeMeasurements);
       const url = URL.createObjectURL(pdfFile);
       window.open(url, '_blank');
       setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -79,8 +161,8 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
   const handleWhatsAppShare = async () => {
     try {
       setIsGeneratingPdf(true);
-      const pdfFile = await generateMeasurementPdfBlob(customer, sameMeasuredBy);
-      
+      const pdfFile = await generateMeasurementPdfBlob(customer, sameMeasuredBy, activeMeasurements);
+
       // Web Share API with files support
       if (pdfFile && navigator.share && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
         try {
@@ -103,7 +185,14 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
     }
   };
 
-  const fallbackWhatsApp = (file: File | null) => {
+  const fallbackWhatsApp = (file: File) => {
+    if (typeof window === 'undefined') return;
+    const wpUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(
+      `CEYLİN ÖLÇÜ ERP - ${customer.name} ölçü raporu hazır.`
+    )}`;
+    window.open(wpUrl, '_blank');
+
+    // Also trigger local download as fallback
     if (file) {
       const url = URL.createObjectURL(file);
       const a = document.createElement('a');
@@ -124,6 +213,10 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
       {/* Injecting print-specific CSS directly via style tag to isolate print layout */}
       <style>{`
         @media print {
+          @page {
+            size: A4 portrait;
+            margin: 10mm;
+          }
           /* Hide everything except the print container */
           body * {
             visibility: hidden !important;
@@ -135,22 +228,56 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
             visibility: visible !important;
           }
           #visual-report-print-area {
-            position: absolute !important;
+            visibility: visible !important;
+            position: relative !important;
             left: 0 !important;
             top: 0 !important;
             width: 100% !important;
-            margin: 0 !important;
-            padding: 20px !important;
+            max-width: 190mm !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
             background: white !important;
             color: black !important;
+            box-sizing: border-box !important;
+            overflow: visible !important;
+            box-shadow: none !important;
+            border: none !important;
           }
-          .print-card {
-            border: 1px solid #e2e8f0 !important;
+          .room-section {
+            page-break-inside: auto !important;
+            break-inside: auto !important;
+            margin-bottom: 30px !important;
+          }
+          .measurement-card {
+            border: 1px solid #cbd5e1 !important;
+            padding: 16px !important;
             margin-bottom: 20px !important;
             page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            border-radius: 8px !important;
+            background: white !important;
+            box-sizing: border-box !important;
+          }
+          h3.room-header, h4.opening-header {
+            page-break-after: avoid !important;
+            break-after: avoid !important;
+            margin-top: 15px !important;
+            margin-bottom: 10px !important;
           }
           .print-svg {
-            max-width: 180px !important;
+            max-width: 100% !important;
+            height: auto !important;
+          }
+          tr {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+          .flex-wrap {
+            display: block !important;
+          }
+          * {
+            overflow-wrap: break-word !important;
+            word-break: break-word !important;
           }
         }
       `}</style>
@@ -168,7 +295,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
             <button
               onClick={handleWhatsAppShare}
               disabled={isGeneratingPdf}
-              className="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
+              className="px-4 py-2 rounded-xl bg-green-650 hover:bg-green-700 disabled:opacity-50 text-white text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
             >
               {isGeneratingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Share2 className="w-4 h-4" />} Paylaş
             </button>
@@ -190,7 +317,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
         {/* Modal Body / Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-slate-950/20 print:p-0 print:overflow-visible print:bg-white">
           <div id="visual-report-print-area" className="bg-slate-900 text-white font-sans max-w-4xl mx-auto rounded-xl p-6 border border-slate-800 shadow-sm print:border-none print:shadow-none print:p-0 print:bg-white print:text-black">
-            
+
             {/* Report Header Title */}
             <div className="text-center pb-6 border-b border-slate-800 print:border-slate-300">
               <h1 className="text-2xl font-black tracking-wider text-blue-500 print:text-blue-700">CEYLİN ÖLÇÜ ERP</h1>
@@ -219,53 +346,112 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
               ) : (
                 customer.rooms.map((room, roomIdx) => {
                   const windows = room.windows || [];
-                  
-                  // Split products inside room into plicell, mechanical curtain, and standard
-                  const plicellProducts: { p: ProductMeasurement; index: number; winName: string }[] = [];
-                  const mechanicalCurtainProducts: { p: ProductMeasurement; index: number; winName: string }[] = [];
-                  const standardOpenings: { winName: string; winItem: WindowItem; products: ProductMeasurement[] }[] = [];
+
+                  // Split products inside room into plicell, mechanical curtain, and standard using active selectedProducts
+                  const plicellProducts: { p: MeasurementRecord; index: number; winName: string }[] = [];
+                  const mechanicalCurtainProducts: { p: MeasurementRecord; index: number; winName: string }[] = [];
+                  const standardOpenings: { winName: string; winItem: WindowItem; products: MeasurementRecord[] }[] = [];
 
                   let plicellCounter = 0;
                   let mechanicalCurtainCounter = 0;
                   windows.forEach(win => {
-                    const plicellItems = win.products?.filter(p => p.templateType === 'PLICELL') || [];
-                    const mechanicalCurtainItems = win.products?.filter(p => p.templateType === 'mechanical_curtain') || [];
-                    const standardItems = win.products?.filter(p => p.templateType !== 'PLICELL' && p.templateType !== 'mechanical_curtain') || [];
+                    const winMeasurements = activeMeasurements.filter(m => m.windowId === win.id);
+                    winMeasurements.forEach(m => {
+                      const activeProducts = m.selectedProducts?.filter(sp => sp.isActive) || [];
 
-                    if (plicellItems.length > 0) {
-                      plicellItems.forEach(p => {
-                        plicellProducts.push({ p, index: ++plicellCounter, winName: win.name });
-                      });
-                    }
-                    if (mechanicalCurtainItems.length > 0) {
-                      mechanicalCurtainItems.forEach(p => {
-                        mechanicalCurtainProducts.push({ p, index: ++mechanicalCurtainCounter, winName: win.name });
-                      });
-                    }
-                    if (standardItems.length > 0) {
-                      standardOpenings.push({ winName: win.name, winItem: win, products: standardItems });
-                    }
+                      if (activeProducts.length === 0) {
+                        // Fallback
+                        const fallbackGroup = resolveMeasurementProductGroup(m);
+                        if (fallbackGroup === 'Plicell') {
+                          plicellProducts.push({ p: m, index: ++plicellCounter, winName: win.name });
+                        } else if (fallbackGroup === 'Mekanik Perde') {
+                          mechanicalCurtainProducts.push({ p: m, index: ++mechanicalCurtainCounter, winName: win.name });
+                        } else {
+                          let entry = standardOpenings.find(so => so.winName === win.name);
+                          if (!entry) {
+                            entry = { winName: win.name, winItem: win, products: [] };
+                            standardOpenings.push(entry);
+                          }
+                          entry.products.push(m);
+                        }
+                      } else {
+                        activeProducts.forEach(ap => {
+                          const pType = ap.productType;
+                          const pGroup = resolveMeasurementProductGroup({ productType: pType });
+
+                          const pObj: MeasurementRecord = {
+                            ...m,
+                            productType: pType,
+                            productGroup: pGroup,
+                            selectedProducts: [ap],
+                            details: {
+                              ...m.details,
+                              ...ap.calculation
+                            }
+                          };
+
+                          if (pType === 'PLICELL') {
+                            plicellProducts.push({ p: pObj, index: ++plicellCounter, winName: win.name });
+                          } else if (pGroup === 'Mekanik Perde') {
+                            if (ap.calculation?.isSegmented && Array.isArray(ap.calculation.groups) && ap.calculation.groups.length > 0) {
+                              ap.calculation.groups.forEach((g: any, gIdx: number) => {
+                                const gObj: MeasurementRecord = {
+                                  ...m,
+                                  id: `${m.id}-group-${gIdx}`,
+                                  productType: pType,
+                                  productGroup: pGroup,
+                                  selectedProducts: [ap],
+                                  rawValues: {
+                                    ...m.rawValues,
+                                    width: g.realWidthCm,
+                                    height: g.realHeightCm,
+                                    quantity: g.quantity
+                                  },
+                                  details: {
+                                    ...m.details,
+                                    ...ap.calculation,
+                                    billingWidth: g.calculatedWidthCm,
+                                    billingHeight: g.calculatedHeightCm,
+                                    totalM2: g.totalM2
+                                  }
+                                };
+                                mechanicalCurtainProducts.push({ p: gObj, index: ++mechanicalCurtainCounter, winName: `${win.name} - Parça ${gIdx + 1}` });
+                              });
+                            } else {
+                              mechanicalCurtainProducts.push({ p: pObj, index: ++mechanicalCurtainCounter, winName: win.name });
+                            }
+                          } else {
+                            let entry = standardOpenings.find(so => so.winName === win.name);
+                            if (!entry) {
+                              entry = { winName: win.name, winItem: win, products: [] };
+                              standardOpenings.push(entry);
+                            }
+                            entry.products.push(pObj);
+                          }
+                        });
+                      }
+                    });
                   });
 
-                      const hasAnyProducts = plicellProducts.length > 0 || mechanicalCurtainProducts.length > 0 || standardOpenings.length > 0;
+                  const hasAnyProducts = plicellProducts.length > 0 || mechanicalCurtainProducts.length > 0 || standardOpenings.length > 0;
 
-                      return (
-                        <div key={room.id} className="space-y-4 print-card print:border-slate-200 print:rounded-lg print:p-4">
-                          {/* Room Header */}
-                          <h3 className="text-md font-bold text-slate-100 print:text-black border-l-4 border-blue-500 print:border-blue-700 pl-3 flex items-center justify-between">
-                            <span>{roomIdx + 1}. ODA: {room.name}</span>
-                            {(room.photos?.length > 0 || room.videos?.length > 0) && (
-                              <span className="text-[10px] font-normal text-slate-400 print:text-slate-500">
-                                ({(room.photos||[]).length} Foto, {(room.videos||[]).length} Video eklenmiş)
-                              </span>
-                            )}
-                          </h3>
+                  return (
+                    <div key={room.id} className="space-y-4 room-section">
+                      {/* Room Header */}
+                      <h3 className="room-header text-md font-bold text-slate-100 print:text-black border-l-4 border-blue-500 print:border-blue-700 pl-3 flex items-center justify-between">
+                        <span>{roomIdx + 1}. ODA: {room.name}</span>
+                        {(room.photos?.length > 0 || room.videos?.length > 0) && (
+                          <span className="text-[10px] font-normal text-slate-400 print:text-slate-500">
+                            ({(room.photos||[]).length} Foto, {(room.videos||[]).length} Video eklenmiş)
+                          </span>
+                        )}
+                      </h3>
 
-                          {!hasAnyProducts ? (
-                            <p className="text-xs text-slate-400 print:text-slate-600 pl-4 italic">Bu oda için ölçü detayı yok.</p>
-                          ) : (
+                      {!hasAnyProducts ? (
+                        <p className="text-xs text-slate-400 print:text-slate-600 pl-4 italic">Bu oda için ölçü detayı yok.</p>
+                      ) : (
                         <div className="space-y-6 pl-2">
-                          
+
                           {/* A. Render Standard Openings */}
                           {standardOpenings.map(({ winName, winItem, products }) => {
                             const showWinHeader = windows.length > 1;
@@ -273,7 +459,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                             return (
                               <div key={winItem.id} className="space-y-4">
                                 {showWinHeader && (
-                                  <h4 className="text-xs font-bold text-slate-400 print:text-slate-600 border-b border-slate-800 print:border-slate-200 pb-1 flex items-center justify-between">
+                                  <h4 className="opening-header text-xs font-bold text-slate-400 print:text-slate-600 border-b border-slate-800 print:border-slate-200 pb-1 flex items-center justify-between">
                                     <span>[Açıklık: {winName}]</span>
                                     {(winItem.photos?.length > 0 || winItem.videos?.length > 0) && (
                                       <span className="text-[9px] font-normal">
@@ -287,7 +473,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                                   {products.map((p, pIdx) => {
                                     const isSimple = p.templateType === 'SIMPLE_WIDTH_HEIGHT';
                                     const isCurtain = p.templateType === 'CURTAIN_DETAIL' || p.templateType === 'CURTAIN';
-                                    
+
                                     let segmentsToDraw = [];
                                     let widthToDraw = 0;
                                     let heightToDraw = 0;
@@ -298,26 +484,27 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                                       heightToDraw = Number(p.rawValues?.height || 0);
                                       totalWidth = widthToDraw;
                                     } else if (isCurtain) {
-                                      segmentsToDraw = p.rawValues?.facadeSegments || [];
-                                      totalWidth = Number(p.rawValues?.totalFacadeWidthCm || 0);
-
-                                      if (!segmentsToDraw.length && (Number(p.rawValues?.leftWall) > 0 || Number(p.rawValues?.windowWidth) > 0 || Number(p.rawValues?.rightWall) > 0)) {
-                                          if (Number(p.rawValues?.leftWall) > 0) segmentsToDraw.push({ widthCm: p.rawValues.leftWall, type: 'WALL', label: 'Duvar' });
-                                          if (Number(p.rawValues?.windowWidth) > 0) segmentsToDraw.push({ widthCm: p.rawValues.windowWidth, type: 'WINDOW', label: 'Pencere' });
-                                          if (Number(p.rawValues?.rightWall) > 0) segmentsToDraw.push({ widthCm: p.rawValues.rightWall, type: 'WALL', label: 'Duvar' });
+                                      const facadeSegments = p.rawValues?.facadeSegments;
+                                      if (facadeSegments && Array.isArray(facadeSegments) && facadeSegments.length > 0) {
+                                        segmentsToDraw = facadeSegments;
+                                        totalWidth = facadeSegments.reduce((sum: number, s: any) => sum + (Number(s.widthCm) > 0 ? Number(s.widthCm) : 0), 0);
+                                      } else {
+                                        widthToDraw = Number(p.rawValues?.windowWidth || 0);
+                                        heightToDraw = Number(p.rawValues?.windowHeight || 0);
+                                        totalWidth = widthToDraw;
                                       }
 
                                       if (segmentsToDraw.length > 0 && totalWidth === 0) {
-                                          totalWidth = segmentsToDraw.reduce((sum: number, s: any) => sum + (Number(s.widthCm) > 0 ? Number(s.widthCm) : 0), 0);
+                                        totalWidth = segmentsToDraw.reduce((sum: number, s: any) => sum + (Number(s.widthCm) > 0 ? Number(s.widthCm) : 0), 0);
                                       }
                                     }
 
                                     return (
-                                      <div key={p.id} className="w-full xl:w-[calc(50%-12px)] print:w-full mb-6 print:mb-8 break-inside-avoid bg-white print:bg-white rounded-lg p-5 print:p-0 shadow-sm print:shadow-none border border-slate-200 print:border-none">
+                                      <div key={p.id} className="measurement-card w-full xl:w-[calc(50%-12px)] print:w-full mb-6 print:mb-8 bg-white print:bg-white rounded-lg p-5 shadow-sm border border-slate-200 print:border-none">
                                         <div className="flex justify-between items-start mb-3">
                                           <div>
                                             <h4 className="text-sm font-bold text-slate-800 print:text-black">
-                                              {winName} - Ölçü {pIdx + 1}: {getTemplateLabel(p.templateType)}
+                                              {winName} - Ölçü {pIdx + 1}: {resolveMeasurementProductLabel(p)} ({getTemplateLabel(p.templateType)})
                                             </h4>
                                             <div className="text-[10px] text-slate-500 mt-1 flex flex-wrap gap-x-3">
                                               {!sameMeasuredBy && p.measuredBy && <span>Ölçen: {p.measuredBy}</span>}
@@ -342,11 +529,11 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
 
                                         <div className="w-full flex justify-center mt-2 print:mt-4">
                                           {isSimple || isCurtain ? (
-                                            <div 
-                                              className="cursor-pointer hover:opacity-90 transition-opacity w-full"
+                                            <div
+                                              className="cursor-pointer hover:opacity-90 transition-opacity w-full print-svg"
                                               onClick={() => setPreviewNode(
                                                 <div className="w-full h-full min-h-[50vh] flex items-center justify-center p-4 bg-white rounded-lg">
-                                                  <TechnicalMeasurementSketch 
+                                                  <TechnicalMeasurementSketch
                                                     facadeSegments={segmentsToDraw}
                                                     width={widthToDraw}
                                                     height={heightToDraw}
@@ -363,7 +550,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                                                 </div>
                                               )}
                                             >
-                                              <TechnicalMeasurementSketch 
+                                              <TechnicalMeasurementSketch
                                                 facadeSegments={segmentsToDraw}
                                                 width={widthToDraw}
                                                 height={heightToDraw}
@@ -409,12 +596,12 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
 
                                 if (camListesi && Array.isArray(camListesi) && camListesi.length > 0) {
                                   const validCamListesi = camListesi.filter((cam: any) => Number(cam.widthCm) > 0 && Number(cam.heightCm) > 0);
-                                  
+
                                   if (validCamListesi.length === 0) {
                                     return (
-                                      <div key={p.id}>
+                                      <div key={p.id} className="measurement-card bg-slate-900 border border-slate-800 rounded-xl p-5 mb-6 print:mb-8 print:border-slate-200 print:bg-white">
                                         <h4 className="text-sm font-bold text-slate-800 print:text-black mb-2">
-                                          {winName} - Ölçü {index}: Plicell Cam İçi
+                                          {winName} - Ölçü {index}: {resolveMeasurementProductLabel(p)} (Plicell Cam İçi)
                                         </h4>
                                         <div className="p-4 bg-slate-50 border border-slate-200 text-slate-500 italic text-sm rounded">
                                           Geçerli Plicell cam ölçüsü girilmemiş.
@@ -435,15 +622,15 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                                   });
 
                                   return (
-                                    <div key={p.id}>
+                                    <div key={p.id} className="measurement-card bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5 mb-6 print:mb-8 shadow-sm">
                                       <h4 className="text-sm font-bold text-slate-800 print:text-black mb-2">
-                                        {winName} - Ölçü {index}: Plicell Cam İçi
+                                        {winName} - Ölçü {index}: {resolveMeasurementProductLabel(p)} (Plicell Cam İçi)
                                       </h4>
-                                      <div 
-                                        className="cursor-pointer hover:opacity-90 transition-opacity"
+                                      <div
+                                        className="cursor-pointer hover:opacity-90 transition-opacity print-svg"
                                         onClick={() => setPreviewNode(
                                           <div className="w-full max-w-3xl mx-auto p-4 bg-white rounded-lg overflow-y-auto max-h-[80vh]">
-                                            <PlicellMeasurementSketch 
+                                            <PlicellMeasurementSketch
                                               camAdedi={camAdedi}
                                               ortakCamBoyuCm={ortakBoy}
                                               profilRengi={profilRengi}
@@ -452,7 +639,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                                           </div>
                                         )}
                                       >
-                                        <PlicellMeasurementSketch 
+                                        <PlicellMeasurementSketch
                                           camAdedi={camAdedi}
                                           ortakCamBoyuCm={ortakBoy}
                                           profilRengi={profilRengi}
@@ -466,7 +653,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                                   const w = Number(p.rawValues?.glassWidth || 0);
                                   const h = Number(p.rawValues?.glassHeight || 0);
                                   const calc = calculatePlicellM2(w, h);
-                                  
+
                                   globalPlicellCount++;
                                   globalPlicellM2 += calc.chargeableM2;
 
@@ -477,15 +664,15 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                                   };
 
                                   return (
-                                    <div key={p.id}>
+                                    <div key={p.id} className="measurement-card bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5 mb-6 print:mb-8 shadow-sm">
                                       <h4 className="text-sm font-bold text-slate-800 print:text-black mb-2">
-                                        {winName} - Ölçü {index}: Plicell Cam İçi
+                                        {winName} - Ölçü {index}: {resolveMeasurementProductLabel(p)} (Plicell Cam İçi)
                                       </h4>
-                                      <div 
-                                        className="cursor-pointer hover:opacity-90 transition-opacity"
+                                      <div
+                                        className="cursor-pointer hover:opacity-90 transition-opacity print-svg"
                                         onClick={() => setPreviewNode(
                                           <div className="w-full max-w-3xl mx-auto p-4 bg-white rounded-lg overflow-y-auto max-h-[80vh]">
-                                            <PlicellMeasurementSketch 
+                                            <PlicellMeasurementSketch
                                               camAdedi={1}
                                               ortakCamBoyuCm={h}
                                               plicellCamListesi={[singleCamItem]}
@@ -493,7 +680,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                                           </div>
                                         )}
                                       >
-                                        <PlicellMeasurementSketch 
+                                        <PlicellMeasurementSketch
                                           camAdedi={1}
                                           ortakCamBoyuCm={h}
                                           plicellCamListesi={[singleCamItem]}
@@ -508,11 +695,11 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
 
                           {/* C. Render Mechanical Curtain Group (Tablo) */}
                           {mechanicalCurtainProducts.length > 0 && (
-                            <div className="space-y-3 mt-4">
-                              <h4 className="text-xs font-bold text-slate-400 print:text-slate-600 border-b border-slate-800 print:border-slate-200 pb-1">
+                            <div className="space-y-3 mt-4 measurement-card bg-slate-900 border border-slate-800 rounded-xl p-5 mb-6 print:mb-8 print:border-slate-200 print:bg-white">
+                              <h4 className="opening-header text-xs font-bold text-slate-400 print:text-slate-600 border-b border-slate-800 print:border-slate-200 pb-1">
                                 [Ölçü Grubu: Mekanik Perde Ölçüsü]
                               </h4>
-                              
+
                               <div className="overflow-x-auto rounded-lg border border-slate-850 print:border-slate-200">
                                 <table className="w-full text-xs text-left border-collapse">
                                   <thead>
@@ -525,7 +712,8 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                                       <th className="p-2.5 text-right">Hesap En</th>
                                       <th className="p-2.5 text-right">Hesap Boy</th>
                                       <th className="p-2.5 text-center w-16">Adet</th>
-                                      <th className="p-2.5 text-right w-24">Hesap m²</th>
+                                      <th className="p-2.5 text-right w-20">Birim m²</th>
+                                      <th className="p-2.5 text-right w-24">Toplam m²</th>
                                     </tr>
                                   </thead>
                                   <tbody>
@@ -537,12 +725,16 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                                         const w = Number(p.rawValues?.width || 0);
                                         const h = Number(p.rawValues?.height || 0);
                                         const q = Number(p.rawValues?.quantity || 1);
-                                        const productType = p.rawValues?.productType || 'Stor Perde';
-                                        const calc = calculateMechanicalCurtainM2(w, h, q);
+                                        const productType = resolveMeasurementProductLabel(p);
 
-                                        roomMechanicalM2 += calc.totalM2;
+                                        const calcWidth = p.details?.billingWidth || Math.ceil(w / 10) * 10 || w;
+                                        const calcHeight = p.details?.billingHeight || h;
+                                        const totalM2 = p.details?.totalM2 !== undefined ? Number(p.details.totalM2) : calculateMechanicalCurtainM2(w, h, q).totalM2;
+                                        const unitM2 = totalM2 / q;
+
+                                        roomMechanicalM2 += totalM2;
                                         globalMechanicalCount += q;
-                                        globalMechanicalM2 += calc.totalM2;
+                                        globalMechanicalM2 += totalM2;
 
                                         const validMechNote = getValidNote(p.notes);
                                         if (validMechNote) {
@@ -556,10 +748,11 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                                             <td className="p-2.5 font-medium text-blue-400 print:text-blue-700">{productType}</td>
                                             <td className="p-2.5 text-right font-semibold">{w.toFixed(1)} cm</td>
                                             <td className="p-2.5 text-right font-semibold">{h.toFixed(1)} cm</td>
-                                            <td className="p-2.5 text-right font-bold text-blue-400 print:text-blue-700">{calc.billingWidth} cm</td>
-                                            <td className="p-2.5 text-right font-bold text-blue-400 print:text-blue-700">{calc.billingHeight} cm</td>
+                                            <td className="p-2.5 text-right font-bold text-blue-400 print:text-blue-700">{calcWidth} cm</td>
+                                            <td className="p-2.5 text-right font-bold text-blue-400 print:text-blue-700">{calcHeight} cm</td>
                                             <td className="p-2.5 text-center font-semibold">{q} Adet</td>
-                                            <td className="p-2.5 text-right font-bold text-green-400 print:text-green-700">{calc.totalM2.toFixed(2)} m²</td>
+                                            <td className="p-2.5 text-right font-bold text-blue-400 print:text-blue-750">{unitM2.toFixed(2)} m²</td>
+                                            <td className="p-2.5 text-right font-bold text-green-400 print:text-green-700">{totalM2.toFixed(2)} m²</td>
                                           </tr>
                                         );
                                       });
@@ -569,12 +762,12 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
                                           {rows}
                                           <tr className="bg-slate-950/40 print:bg-slate-50 font-bold border-t-2 border-slate-850 print:border-slate-300">
                                             <td colSpan={3} className="p-3 text-slate-300 print:text-slate-700">Toplam Mekanik Adedi: {mechanicalCurtainProducts.reduce((acc, curr) => acc + Number(curr.p.rawValues?.quantity || 1), 0)}</td>
-                                            <td colSpan={5} className="p-3 text-right text-slate-400 print:text-slate-600">Toplam Oda m²:</td>
+                                            <td colSpan={6} className="p-3 text-right text-slate-400 print:text-slate-600">Toplam Oda m²:</td>
                                             <td className="p-3 text-right text-green-400 print:text-green-700 text-sm">{roomMechanicalM2.toFixed(2)} m²</td>
                                           </tr>
                                           {notesList.length > 0 && (
                                             <tr>
-                                              <td colSpan={9} className="p-3 bg-slate-950/20 border-t border-slate-900 print:border-slate-200">
+                                              <td colSpan={10} className="p-3 bg-slate-950/20 border-t border-slate-900 print:border-slate-200">
                                                 <div className="space-y-1 text-slate-300 print:text-slate-700">
                                                   <span className="font-bold uppercase text-[9.5px] text-amber-500 print:text-amber-700 block">Notlar:</span>
                                                   {notesList.map(n => (
@@ -646,22 +839,22 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users }: Me
           </button>
         </div>
       </div>
-      
+
       {/* Zoom/Preview Modal */}
       {previewNode && (
-        <div 
+        <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4 sm:p-8 no-print animate-fade-in"
           onClick={() => setPreviewNode(null)}
         >
           <div className="absolute top-4 right-4 z-[70]">
-            <button 
+            <button
               onClick={(e) => { e.stopPropagation(); setPreviewNode(null); }}
               className="p-2 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors"
             >
               <X className="w-6 h-6" />
             </button>
           </div>
-          <div 
+          <div
             className="bg-white rounded-xl shadow-2xl overflow-y-auto max-h-full w-full max-w-5xl animate-scale-in"
             onClick={(e) => e.stopPropagation()}
           >

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import { normalizeUsername } from '@/lib/usernameHelper';
 
 // Fallback UUID v4 generator for insecure/HTTP mobile environments
 function generateUUID(): string {
@@ -80,9 +81,15 @@ export function normalizeUser(user: any): MockUser {
     };
   }
 
+  // Normalize legacy fields
+  const rawName = (user.name && user.name !== 'İsimsiz Kullanıcı') ? user.name : '';
+  const legacyName = (rawName || user.fullName || user.adSoyad || user.displayName || '').trim();
+  const legacyEmail = (user.email || user.emailAddress || user.mail || '').trim();
+  const legacyPhone = (user.phone || user.phoneNumber || user.telefon || '').trim();
+
   const role = user.role || (user.id === 'user-admin' ? 'ADMIN' : 'FIELD');
   const isActive = typeof user.isActive === 'boolean' ? user.isActive : true;
-  const username = (user.username || user.name || user.id || '').trim().toLowerCase().replace(/\s+/g, '');
+  const username = (user.username || legacyName || user.id || '').trim().toLowerCase().replace(/\s+/g, '');
   const password = typeof user.password === 'string' ? user.password.trim() : user.password;
   
   const permissions = Array.isArray(user.permissions) && user.permissions.length > 0
@@ -92,7 +99,9 @@ export function normalizeUser(user: any): MockUser {
   return {
     ...user,
     id: user.id || 'user-' + Math.random().toString(36).substring(2, 9),
-    name: user.name || 'İsimsiz Kullanıcı',
+    name: legacyName || 'İsimsiz Kullanıcı',
+    email: legacyEmail || undefined,
+    phone: legacyPhone || undefined,
     username,
     password,
     role,
@@ -507,6 +516,9 @@ export interface AuditEntry {
   changedBy: string;
   changedAt: string;
   reason: string;
+  beforeSnapshot?: any;
+  afterSnapshot?: any;
+  changedFields?: string[];
 }
 
 // ─── Auth State ───
@@ -523,7 +535,7 @@ interface AuthState {
   // User Management
   addUser: (user: Omit<MockUser, 'id'>) => Promise<boolean>;
   updateUser: (id: string, data: Partial<MockUser>) => Promise<boolean>;
-  deleteUser: (id: string) => Promise<boolean>;
+  deleteUser: (id: string) => Promise<{ success: boolean; code?: string; error?: string }>;
 }
 
 const safeAuthStorage = {
@@ -549,7 +561,7 @@ export const useAuthStore = create<AuthState>()(
       auditLog: [],
       
       login: async (username: string, pin: string) => {
-        const cleanInputUsername = (username || '').trim().toLowerCase();
+        const cleanInputUsername = normalizeUsername(username);
         const cleanInputPin = (pin || '').trim();
         
         if (!cleanInputUsername || !cleanInputPin) {
@@ -645,10 +657,17 @@ export const useAuthStore = create<AuthState>()(
           return false;
         }
 
+        const normalizedUser = normalizeUsername(user.username);
+        if (!normalizedUser) {
+          console.error("Geçersiz kullanıcı adı.");
+          return false;
+        }
+
         const now = new Date().toISOString();
         const generatedId = 'user-' + Math.random().toString(36).substring(2, 9);
         const newUser = {
           ...user,
+          username: normalizedUser,
           id: generatedId,
           isActive: true,
           createdAt: now,
@@ -671,11 +690,30 @@ export const useAuthStore = create<AuthState>()(
             if (result.success && result.user) {
               const addedUser = normalizeUser({
                 ...result.user,
-                password: user.password // Keep the plain text password in local list
+                password: user.password
               });
-              set((state: AuthState) => ({
-                users: [...state.users, addedUser]
-              }));
+              set((state: AuthState) => {
+                const userIndex = state.users.findIndex((u: MockUser) => u.id === addedUser.id);
+                let updatedUsers;
+                if (userIndex > -1) {
+                  updatedUsers = state.users.map((u: MockUser) => u.id === addedUser.id ? addedUser : u);
+                } else {
+                  updatedUsers = [...state.users, addedUser];
+                }
+
+                let updatedCurrentUser = state.currentUser;
+                if (state.currentUser && state.currentUser.id === addedUser.id) {
+                  updatedCurrentUser = {
+                    ...addedUser,
+                    password: user.password !== undefined ? user.password : state.currentUser.password
+                  };
+                }
+
+                return {
+                  users: updatedUsers,
+                  currentUser: updatedCurrentUser
+                };
+              });
               return true;
             }
           }
@@ -693,6 +731,14 @@ export const useAuthStore = create<AuthState>()(
         }
 
         const dataCopy = { ...data };
+        if (dataCopy.hasOwnProperty('username') && dataCopy.username !== undefined) {
+          dataCopy.username = normalizeUsername(dataCopy.username);
+          if (!dataCopy.username) {
+            console.error("Geçersiz kullanıcı adı.");
+            return false;
+          }
+        }
+
         if (dataCopy.hasOwnProperty('password')) {
           if (dataCopy.password === undefined || dataCopy.password === null || dataCopy.password.trim() === '' || dataCopy.password.trim() === '••••') {
             delete dataCopy.password;
@@ -717,21 +763,65 @@ export const useAuthStore = create<AuthState>()(
             if (result.success && result.user) {
               const updatedUserFromServer = normalizeUser(result.user);
               
-              set((state: AuthState) => {
-                const updatedUsers = state.users.map((u: MockUser) => {
-                  if (u.id === id) {
-                    return {
-                      ...updatedUserFromServer,
-                      password: dataCopy.password !== undefined ? dataCopy.password : u.password
-                    };
+              const targetUserBefore = get().users.find((u: MockUser) => u.id === id);
+              const beforeSnapshot = targetUserBefore ? { ...targetUserBefore } : null;
+              const afterSnapshot = {
+                ...updatedUserFromServer,
+                password: dataCopy.password !== undefined ? dataCopy.password : (targetUserBefore?.password || '')
+              };
+
+              const fieldsToCheck = ['name', 'email', 'phone', 'tcNo', 'address', 'role', 'isActive'];
+              const changedFields: string[] = [];
+              if (beforeSnapshot) {
+                fieldsToCheck.forEach((f) => {
+                  const prevVal = (beforeSnapshot as any)[f];
+                  const newVal = (afterSnapshot as any)[f];
+                  if (prevVal !== newVal) {
+                    changedFields.push(f);
                   }
-                  return u;
                 });
+              }
+
+              if (currentUser && normalizeRole(currentUser.role) === 'ADMIN' && changedFields.length > 0) {
+                set((state: AuthState) => {
+                  const newAuditEntry: AuditEntry = {
+                    id: generateUUID(),
+                    entityType: 'USER',
+                    entityId: id,
+                    field: changedFields.join(', '),
+                    previousValue: beforeSnapshot ? JSON.stringify(beforeSnapshot) : '',
+                    newValue: JSON.stringify(afterSnapshot),
+                    changedBy: currentUser.id,
+                    changedAt: new Date().toISOString(),
+                    reason: 'Admin user update',
+                    beforeSnapshot,
+                    afterSnapshot,
+                    changedFields
+                  };
+                  return {
+                    auditLog: [newAuditEntry, ...state.auditLog]
+                  };
+                });
+              }
+
+              set((state: AuthState) => {
+                const userIndex = state.users.findIndex((u: MockUser) => u.id === id);
+                const updatedUser = {
+                  ...updatedUserFromServer,
+                  password: dataCopy.password !== undefined ? dataCopy.password : (targetUserBefore?.password || '')
+                };
+
+                let updatedUsers;
+                if (userIndex > -1) {
+                  updatedUsers = state.users.map((u: MockUser) => u.id === id ? updatedUser : u);
+                } else {
+                  updatedUsers = [...state.users, updatedUser];
+                }
 
                 let updatedCurrentUser = state.currentUser;
                 if (state.currentUser && state.currentUser.id === id) {
                   updatedCurrentUser = {
-                    ...updatedUserFromServer,
+                    ...updatedUser,
                     password: dataCopy.password !== undefined ? dataCopy.password : state.currentUser.password
                   };
                 }
@@ -754,7 +844,7 @@ export const useAuthStore = create<AuthState>()(
         const currentUser = get().currentUser;
         if (!currentUser || !currentUser.password) {
           console.error("Yetkilendirme bilgisi eksik.");
-          return false;
+          return { success: false, error: "Yetkilendirme bilgisi eksik." };
         }
 
         try {
@@ -768,35 +858,26 @@ export const useAuthStore = create<AuthState>()(
             body: JSON.stringify({ id })
           });
 
-          if (response.ok) {
-            const result = await response.json();
-            if (result.success) {
-              // Update state locally: Soft delete means set isActive to false
-              set((state: AuthState) => {
-                const updatedUsers = state.users.map((u: MockUser) => {
-                  if (u.id === id) {
-                    return { ...u, isActive: false };
-                  }
-                  return u;
-                });
-                
-                let updatedCurrentUser = state.currentUser;
-                if (state.currentUser && state.currentUser.id === id) {
-                  updatedCurrentUser = { ...state.currentUser, isActive: false };
-                }
-
-                return {
-                  users: updatedUsers,
-                  currentUser: updatedCurrentUser
-                };
-              });
-              return true;
-            }
+          const result = await response.json();
+          if (response.ok && result.success) {
+            set((state: AuthState) => {
+              const updatedUsers = state.users.filter((u: MockUser) => u.id !== id);
+              return {
+                users: updatedUsers
+              };
+            });
+            return { success: true };
+          } else {
+            return {
+              success: false,
+              code: result.code || "UNKNOWN_ERROR",
+              error: result.error || "Silme işlemi başarısız."
+            };
           }
-        } catch (err) {
+        } catch (err: any) {
           console.error("Delete user API failed:", err);
+          return { success: false, error: err.message || "Delete user API failed" };
         }
-        return false;
       },
     }),
     {

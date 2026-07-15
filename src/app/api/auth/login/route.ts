@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { hashPassword } from "@/lib/authHelper";
+import { normalizeUsername } from "@/lib/usernameHelper";
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder-project.supabase.co";
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "placeholder-service-key";
@@ -33,7 +34,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { username, password } = body;
 
-    const cleanUsername = (username || "").trim().toLowerCase();
+    const cleanUsername = normalizeUsername(username);
     const cleanPassword = (password || "").trim();
 
     if (!cleanUsername || !cleanPassword) {
