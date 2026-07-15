@@ -948,24 +948,38 @@ async function runProfileTests() {
   // 13. deleteRequiresExplicitConfirmation
   await runTest('deleteRequiresExplicitConfirmation', async () => {
     let confirmSim = () => true;
-    let promptSim = () => 'correct-username';
+    let promptSim = () => 'Nihat Ceylan';
+
+    const normalizeTurkish = (str: string) => {
+      return (str || "")
+        .replace(/I/g, 'ı')
+        .replace(/İ/g, 'i')
+        .replace(/Ğ/g, 'ğ')
+        .replace(/Ü/g, 'ü')
+        .replace(/Ş/g, 'ş')
+        .replace(/Ö/g, 'ö')
+        .replace(/Ç/g, 'ç')
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, ' ');
+    };
     
-    const handleSimDelete = (username: string) => {
+    const handleSimDelete = (name: string) => {
       if (confirmSim()) {
         const val = promptSim();
-        if (val === username) {
+        if (val && normalizeTurkish(val) === normalizeTurkish(name)) {
           return 'DELETED';
         }
       }
       return 'CANCELLED';
     };
 
-    const res1 = handleSimDelete('correct-username');
-    if (res1 !== 'DELETED') throw new Error('Delete should have been confirmed');
+    const res1 = handleSimDelete('Nihat CEYLAN');
+    if (res1 !== 'DELETED') throw new Error('Delete should have been confirmed with normalized name match');
 
     promptSim = () => 'wrong';
-    const res2 = handleSimDelete('correct-username');
-    if (res2 !== 'CANCELLED') throw new Error('Delete should have been cancelled on username mismatch');
+    const res2 = handleSimDelete('Nihat Ceylan');
+    if (res2 !== 'CANCELLED') throw new Error('Delete should have been cancelled on name mismatch');
   });
 
   // 14. deactivationPreservesUserHistory

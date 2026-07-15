@@ -715,19 +715,37 @@ export default function AyarlarPage() {
                                         type="button"
                                         onClick={async (e) => {
                                           e.stopPropagation();
+                                          if (u.id === currentUser.id) {
+                                            setMessage("Hata: Kendi hesabınızı silemezsiniz.");
+                                            return;
+                                          }
                                           const firstConfirm = confirm("Bu kullanıcı tamamen silinecek. Emin misiniz?");
                                           if (firstConfirm) {
-                                            const typedUsername = prompt(`Lütfen silme işlemini onaylamak için kullanıcının kullanıcı adını ("${u.username}") yazın:`);
-                                            if (typedUsername?.trim().toLowerCase() === u.username.toLowerCase()) {
+                                            const typedName = prompt(`Lütfen silme işlemini onaylamak için kullanıcının adını ("${u.name}") yazın:`);
+                                            const normalizeTurkish = (str: string) => {
+                                              return (str || "")
+                                                .replace(/I/g, 'ı')
+                                                .replace(/İ/g, 'i')
+                                                .replace(/Ğ/g, 'ğ')
+                                                .replace(/Ü/g, 'ü')
+                                                .replace(/Ş/g, 'ş')
+                                                .replace(/Ö/g, 'ö')
+                                                .replace(/Ç/g, 'ç')
+                                                .toLowerCase()
+                                                .trim()
+                                                .replace(/\s+/g, ' ');
+                                            };
+                                            if (typedName && normalizeTurkish(typedName) === normalizeTurkish(u.name)) {
                                               setUserLoading(true);
                                               setMessage("Kullanıcı siliniyor...");
                                               try {
                                                 const res = await deleteUser(u.id);
                                                 if (res.success) {
                                                   setMessage("Kullanıcı başarıyla silindi.");
+                                                  await fetchUsers();
                                                 } else {
                                                   if (res.code === "USER_HAS_LINKED_RECORDS") {
-                                                    setMessage("Bu kullanıcının bağlı iş kayıtları bulunduğu için silinemez. Pasife alabilirsiniz.");
+                                                    setMessage("Bu kullanıcıya bağlı kayıtlar bulunduğu için silinemez. Pasife alın.");
                                                   } else {
                                                     setMessage("Hata: " + (res.error || "Kullanıcı silinemedi."));
                                                   }
@@ -737,7 +755,7 @@ export default function AyarlarPage() {
                                               } finally {
                                                 setUserLoading(false);
                                               }
-                                            } else if (typedUsername !== null) {
+                                            } else if (typedName !== null) {
                                               setMessage("Onay geçersiz. Silme işlemi iptal edildi.");
                                             }
                                           }

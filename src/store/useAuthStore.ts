@@ -147,6 +147,9 @@ export function normalizeUser(user: any): MockUser {
     ? user.permissions 
     : getRoleDefaultPermissions(role);
 
+  const profileCompletedAt = user.profileCompletedAt ||
+    ((legacyName && legacyName !== 'İsimsiz Kullanıcı' && legacyEmail && legacyPhone) ? user.createdAt || now : null);
+
   return {
     ...user,
     id: user.id || 'user-' + Math.random().toString(36).substring(2, 9),
@@ -159,7 +162,8 @@ export function normalizeUser(user: any): MockUser {
     isActive,
     permissions,
     createdAt: user.createdAt || now,
-    updatedAt: user.updatedAt || now
+    updatedAt: user.updatedAt || now,
+    profileCompletedAt
   };
 }
 

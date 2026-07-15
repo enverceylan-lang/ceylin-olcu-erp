@@ -213,6 +213,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const isSettingsPage = pathname.startsWith('/ayarlar');
   
   const isProfileIncomplete = currentUser && (
+    !currentUser.profileCompletedAt ||
     !currentUser.name?.trim() || 
     currentUser.name === 'İsimsiz Kullanıcı' ||
     !currentUser.email?.trim() || 
