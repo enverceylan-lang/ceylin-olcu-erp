@@ -147,8 +147,11 @@ export function normalizeUser(user: any): MockUser {
     ? user.permissions 
     : getRoleDefaultPermissions(role);
 
-  const profileCompletedAt = user.profileCompletedAt ||
-    ((legacyName && legacyName !== 'İsimsiz Kullanıcı' && legacyEmail && legacyPhone) ? user.createdAt || now : null);
+    const profileCompletedAt =
+    typeof user.profileCompletedAt === 'string' &&
+    user.profileCompletedAt.trim() !== ''
+      ? user.profileCompletedAt
+      : undefined;
 
   return {
     ...user,
@@ -726,6 +729,7 @@ export const useAuthStore = create<AuthState>()(
           username: normalizedUser,
           id: generatedId,
           isActive: true,
+          profileCompletedAt: undefined,
           createdAt: now,
           updatedAt: now
         };
