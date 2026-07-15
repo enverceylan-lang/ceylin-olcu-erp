@@ -3,8 +3,14 @@ import { createClient } from "@supabase/supabase-js";
 import { hashPassword, verifyAuth } from "@/lib/authHelper";
 import { normalizeUsername } from "@/lib/usernameHelper";
 
-const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder-project.supabase.co";
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "placeholder-service-key";
+const supabaseUrl =
+  process.env.SUPABASE_URL ||
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||
+  "https://placeholder-project.supabase.co";
+
+const supabaseServiceKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  "placeholder-service-key";
 
 const supabaseServer = createClient(supabaseUrl, supabaseServiceKey, {
   auth: {
@@ -13,46 +19,76 @@ const supabaseServer = createClient(supabaseUrl, supabaseServiceKey, {
   },
 });
 
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
 export async function GET(req: NextRequest) {
   try {
     const caller = await verifyAuth(req);
+
     if (!caller) {
-      return NextResponse.json({ success: false, error: "Yetkisiz erişim." }, { status: 401 });
+      return NextResponse.json(
+        { success: false, error: "Yetkisiz erişim." },
+        { status: 401 }
+      );
     }
 
     const isAdmin = caller.role?.toLowerCase() === "admin";
+
     if (!isAdmin) {
-      return NextResponse.json({ success: false, error: "Bu işlem için yetkiniz yok." }, { status: 403 });
+      return NextResponse.json(
+        { success: false, error: "Bu işlem için yetkiniz yok." },
+        { status: 403 }
+      );
     }
 
     const { data: dbUsers, error } = await supabaseServer
       .from("users")
-      .select("id, name, username, role, isActive, email, phone, tcNo, address, permissions, createdAt, updatedAt, profileCompletedAt")
+      .select(
+        "id, name, username, role, isActive, email, phone, tcNo, address, permissions, createdAt, updatedAt, profileCompletedAt"
+      )
       .order("name", { ascending: true });
 
     if (error) {
       console.error("Failed to fetch users:", error);
-      return NextResponse.json({ success: false, error: "Veritabanı hatası." }, { status: 500 });
+
+      return NextResponse.json(
+        { success: false, error: "Veritabanı hatası." },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({
       success: true,
-      users: dbUsers
+      users: dbUsers,
     });
-  } catch (error: any) {
-    console.error("List users API failed:", error);
-    return NextResponse.json({ success: false, error: error.message || "Internal server error" }, { status: 500 });
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error ? error.message : "Internal server error";
+
+    console.error("List users API failed:", message);
+
+    return NextResponse.json(
+      { success: false, error: message },
+      { status: 500 }
+    );
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
     const caller = await verifyAuth(req);
+
     if (!caller) {
-      return NextResponse.json({ success: false, error: "Yetkisiz erişim." }, { status: 401 });
+      return NextResponse.json(
+        { success: false, error: "Yetkisiz erişim." },
+        { status: 401 }
+      );
     }
 
     const body = await req.json();
+
     const {
       id,
       name,
@@ -66,18 +102,25 @@ export async function POST(req: NextRequest) {
       password,
     } = body;
 
-    const targetId = (id || "").trim();
-    const cleanUsername = username !== undefined ? normalizeUsername(username) : "";
+    const targetId = typeof id === "string" ? id.trim() : "";
 
-    if (username !== undefined && !cleanUsername) {
-      return NextResponse.json({ success: false, error: "Geçersiz kullanıcı adı." }, { status: 400 });
-    }
+    const cleanUsername =
+      username !== undefined ? normalizeUsername(username) : "";
 
     if (!targetId) {
-      return NextResponse.json({ success: false, error: "Kullanıcı ID gereklidir." }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: "Kullanıcı ID gereklidir." },
+        { status: 400 }
+      );
     }
 
-    // 1. Fetch existing user from database
+    if (username !== undefined && !cleanUsername) {
+      return NextResponse.json(
+        { success: false, error: "Geçersiz kullanıcı adı." },
+        { status: 400 }
+      );
+    }
+
     const { data: existingUser, error: fetchError } = await supabaseServer
       .from("users")
       .select("*")
@@ -86,65 +129,104 @@ export async function POST(req: NextRequest) {
 
     if (fetchError) {
       console.error("Error fetching user:", fetchError);
-      return NextResponse.json({ success: false, error: "Veritabanı hatası." }, { status: 500 });
+
+      return NextResponse.json(
+        { success: false, error: "Veritabanı hatası." },
+        { status: 500 }
+      );
     }
 
     const isCreate = !existingUser;
-
-    // Check authorization:
-    // - ADMIN can create or edit anyone.
-    // - Other users can only edit themselves (no creation allowed, no editing others).
     const isAdmin = caller.role?.toLowerCase() === "admin";
-    if (!isAdmin && targetId !== caller.id) {
-      return NextResponse.json({ success: false, error: "Bu işlemi gerçekleştirmek için yetkiniz yok." }, { status: 403 });
+    const isSelfUpdate = !isCreate && targetId === caller.id;
+
+    // Admin herkes üzerinde işlem yapabilir.
+    // Personel yalnız kendi eksik profilini tamamlayabilir.
+    if (!isAdmin && !isSelfUpdate) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Bu işlemi gerçekleştirmek için yetkiniz yok.",
+        },
+        { status: 403 }
+      );
     }
 
     if (isCreate && !isAdmin) {
-      return NextResponse.json({ success: false, error: "Yeni kullanıcı oluşturma yetkiniz yok." }, { status: 403 });
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Yeni kullanıcı oluşturma yetkiniz yok.",
+        },
+        { status: 403 }
+      );
     }
-    // 2. Validate required fields
+
+    // Kullanıcı adı yalnız admin tarafından belirlenebilir.
+    if (
+      !isAdmin &&
+      username !== undefined &&
+      cleanUsername !== existingUser?.username
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: "USERNAME_IMMUTABLE",
+          error: "Kullanıcı adınızı değiştiremezsiniz.",
+        },
+        { status: 403 }
+      );
+    }
+
+    // Yeni kullanıcı oluştururken yalnız ad, kullanıcı adı ve şifre zorunludur.
+    // E-posta ve telefonu personel ilk girişte tamamlar.
     if (isCreate) {
       if (!name || !name.trim()) {
-        return NextResponse.json({ success: false, error: "Adı soyadı zorunludur." }, { status: 400 });
+        return NextResponse.json(
+          { success: false, error: "Ad veya personel etiketi zorunludur." },
+          { status: 400 }
+        );
       }
-      if (!email || !email.trim()) {
-        return NextResponse.json({ success: false, error: "Mail adresi zorunludur." }, { status: 400 });
-      }
-      if (!phone || !phone.trim()) {
-        return NextResponse.json({ success: false, error: "Telefon numarası zorunludur." }, { status: 400 });
-      }
-    } else {
-      if (name !== undefined && (!name || !name.trim())) {
-        return NextResponse.json({ success: false, error: "Adı soyadı zorunludur." }, { status: 400 });
-      }
-      if (email !== undefined && (!email || !email.trim())) {
-        return NextResponse.json({ success: false, error: "Mail adresi zorunludur." }, { status: 400 });
-      }
-      if (phone !== undefined && (!phone || !phone.trim())) {
-        return NextResponse.json({ success: false, error: "Telefon numarası zorunludur." }, { status: 400 });
+
+      if (!cleanUsername) {
+        return NextResponse.json(
+          { success: false, error: "Kullanıcı adı zorunludur." },
+          { status: 400 }
+        );
       }
     }
 
-    // 3. Validate password
     let finalPassword = existingUser?.password || null;
     let passwordChanged = false;
 
     if (password !== undefined && password !== null) {
-      const cleanPassword = password.trim();
+      const cleanPassword = String(password).trim();
+
       if (cleanPassword === "" || cleanPassword === "••••") {
         if (isCreate) {
-          return NextResponse.json({ success: false, error: "Yeni kullanıcı için şifre/PIN zorunludur." }, { status: 400 });
+          return NextResponse.json(
+            {
+              success: false,
+              error: "Yeni kullanıcı için şifre/PIN zorunludur.",
+            },
+            { status: 400 }
+          );
         }
-        // For updates, empty or placeholder password means preserve the existing one
       } else {
         finalPassword = hashPassword(cleanPassword);
         passwordChanged = true;
       }
     } else if (isCreate) {
-      return NextResponse.json({ success: false, error: "Yeni kullanıcı için şifre/PIN zorunludur." }, { status: 400 });
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Yeni kullanıcı için şifre/PIN zorunludur.",
+        },
+        { status: 400 }
+      );
     }
 
-    // 4. Check username uniqueness
+    // Kullanıcı adı benzersiz olmalıdır.
     if (cleanUsername) {
       const { data: duplicateUser, error: dupError } = await supabaseServer
         .from("users")
@@ -155,41 +237,56 @@ export async function POST(req: NextRequest) {
 
       if (dupError) {
         console.error("Error checking duplicate username:", dupError);
+
+        return NextResponse.json(
+          { success: false, error: "Kullanıcı adı kontrol edilemedi." },
+          { status: 500 }
+        );
       }
 
       if (duplicateUser) {
-        console.log("Duplicate username check status:", {
-          duplicateUsernameCount: 1
-        });
-        return NextResponse.json({ success: false, code: "USERNAME_EXISTS", error: "Bu kullanıcı adı zaten kullanımda." }, { status: 409 });
+        return NextResponse.json(
+          {
+            success: false,
+            code: "USERNAME_EXISTS",
+            error: "Bu kullanıcı adı zaten kullanımda.",
+          },
+          { status: 409 }
+        );
       }
-    } else if (isCreate) {
-      return NextResponse.json({ success: false, error: "Kullanıcı adı zorunludur." }, { status: 400 });
     }
 
-    // 5. Build user data to save
     const now = new Date().toISOString();
-    let userRecord: any = {};
+    let userRecord: any;
 
     if (isCreate) {
       userRecord = {
         id: targetId,
-        name: (name || "").trim(),
+        name: String(name).trim(),
         username: cleanUsername,
         password: finalPassword,
         role: role || "FIELD",
-        isActive: isActive !== undefined ? isActive : true,
-        permissions: body.permissions || [],
+        isActive: isActive !== undefined ? Boolean(isActive) : true,
+        permissions: Array.isArray(body.permissions) ? body.permissions : [],
         createdAt: now,
         updatedAt: now,
-        email: email ? email.trim() : null,
-        phone: phone ? phone.trim() : null,
-        tcNo: tcNo ? tcNo.trim() : null,
-        address: address ? address.trim() : null,
+
+        // Admin bu alanları boş bırakabilir.
+        email:
+          typeof email === "string" && email.trim() ? email.trim() : null,
+        phone:
+          typeof phone === "string" && phone.trim() ? phone.trim() : null,
+        tcNo:
+          typeof tcNo === "string" && tcNo.trim() ? tcNo.trim() : null,
+        address:
+          typeof address === "string" && address.trim()
+            ? address.trim()
+            : null,
+
+        // Admin oluşturması profili tamamlamaz.
         profileCompletedAt: null,
       };
     } else {
-      // Update
       userRecord = {
         ...existingUser,
         updatedAt: now,
@@ -200,69 +297,157 @@ export async function POST(req: NextRequest) {
       }
 
       if (isAdmin) {
-        // Admin can update all fields
-        if (name !== undefined) userRecord.name = name.trim();
-        if (username !== undefined) userRecord.username = cleanUsername;
-        if (role !== undefined) userRecord.role = role;
-        if (isActive !== undefined) userRecord.isActive = isActive;
-        if (email !== undefined) userRecord.email = email.trim() || null;
-        if (phone !== undefined) userRecord.phone = phone.trim() || null;
-        if (tcNo !== undefined) userRecord.tcNo = tcNo.trim() || null;
-        if (address !== undefined) userRecord.address = address.trim() || null;
-      } else {
-        // Self-update by non-admin:
-        // "Ad soyad/mail/telefon bilgilerini profil tamamlandıktan sonra kendi değiştiremez. Bu alanları sadece admin değiştirebilir."
-        const isProfileComplete =
-          existingUser.profileCompletedAt &&
-          existingUser.name &&
-          existingUser.name !== 'İsimsiz Kullanıcı' &&
-          existingUser.email &&
-          existingUser.phone;
+        // Admin kullanıcı hesabını yönetebilir.
+        // Fakat adminin yaptığı düzenleme profil tamamlama tarihi oluşturmaz.
+        if (name !== undefined) {
+          const cleanName = String(name).trim();
 
-        if (!isProfileComplete) {
-          // If profile is incomplete, they can fill it
-          if (name !== undefined) userRecord.name = name.trim();
-          if (email !== undefined) userRecord.email = email.trim() || null;
-          if (phone !== undefined) userRecord.phone = phone.trim() || null;
-          if (tcNo !== undefined) userRecord.tcNo = tcNo.trim() || null;
-          if (address !== undefined) userRecord.address = address.trim() || null;
-          
-          // If they are filling the required fields, mark as completed
-          if (userRecord.name && userRecord.name !== 'İsimsiz Kullanıcı' && userRecord.email && userRecord.phone) {
-            userRecord.profileCompletedAt = now;
+          if (!cleanName) {
+            return NextResponse.json(
+              { success: false, error: "Ad veya personel etiketi boş olamaz." },
+              { status: 400 }
+            );
           }
+
+          userRecord.name = cleanName;
+        }
+
+        if (username !== undefined) {
+          userRecord.username = cleanUsername;
+        }
+
+        if (role !== undefined) {
+          userRecord.role = role;
+        }
+
+        if (isActive !== undefined) {
+          userRecord.isActive = Boolean(isActive);
+        }
+
+        if (email !== undefined) {
+          userRecord.email =
+            typeof email === "string" && email.trim() ? email.trim() : null;
+        }
+
+        if (phone !== undefined) {
+          userRecord.phone =
+            typeof phone === "string" && phone.trim() ? phone.trim() : null;
+        }
+
+        if (tcNo !== undefined) {
+          userRecord.tcNo =
+            typeof tcNo === "string" && tcNo.trim() ? tcNo.trim() : null;
+        }
+
+        if (address !== undefined) {
+          userRecord.address =
+            typeof address === "string" && address.trim()
+              ? address.trim()
+              : null;
+        }
+
+        // Admin mevcut profil durumunu değiştirmez.
+        userRecord.profileCompletedAt =
+          existingUser.profileCompletedAt || null;
+      } else {
+        const profileAlreadyCompleted = Boolean(
+          existingUser.profileCompletedAt
+        );
+
+        if (profileAlreadyCompleted) {
+          // Profil tamamlandıktan sonra personel kullanıcı adı,
+          // rol, aktiflik ve kimlik bilgilerini değiştiremez.
+          // Şifre değişikliği yukarıdaki güvenli akıştan yapılabilir.
+          userRecord.profileCompletedAt =
+            existingUser.profileCompletedAt;
         } else {
-          // Profile is complete, they cannot change these fields. Only password is allowed (handled above).
+          const cleanName =
+            typeof name === "string" ? name.trim() : "";
+
+          const cleanEmail =
+            typeof email === "string" ? email.trim() : "";
+
+          const cleanPhone =
+            typeof phone === "string" ? phone.trim() : "";
+
+          if (
+            !cleanName ||
+            cleanName === "İsimsiz Kullanıcı" ||
+            !cleanEmail ||
+            !cleanPhone
+          ) {
+            return NextResponse.json(
+              {
+                success: false,
+                code: "PROFILE_REQUIRED",
+                error:
+                  "Ad soyad, mail adresi ve telefon numarası zorunludur.",
+              },
+              { status: 400 }
+            );
+          }
+
+          if (!isValidEmail(cleanEmail)) {
+            return NextResponse.json(
+              {
+                success: false,
+                code: "INVALID_EMAIL",
+                error: "Geçerli bir mail adresi giriniz.",
+              },
+              { status: 400 }
+            );
+          }
+
+          // Personel ilk girişte gerçek bilgilerini tamamlar.
+          userRecord.name = cleanName;
+          userRecord.email = cleanEmail;
+          userRecord.phone = cleanPhone;
+
+          if (tcNo !== undefined) {
+            userRecord.tcNo =
+              typeof tcNo === "string" && tcNo.trim()
+                ? tcNo.trim()
+                : null;
+          }
+
+          if (address !== undefined) {
+            userRecord.address =
+              typeof address === "string" && address.trim()
+                ? address.trim()
+                : null;
+          }
+
+          // Kullanıcı adı değişmez.
+          userRecord.username = existingUser.username;
+
+          // Profil yalnız personelin başarılı ilk giriş kaydıyla tamamlanır.
+          userRecord.profileCompletedAt = now;
         }
       }
     }
 
-    // Auto-update profileCompletedAt status based on required fields completeness
-    if (userRecord.name && userRecord.name !== 'İsimsiz Kullanıcı' && userRecord.email && userRecord.phone) {
-      if (!userRecord.profileCompletedAt) {
-        userRecord.profileCompletedAt = now;
-      }
-    } else {
-      userRecord.profileCompletedAt = null;
-    }
-
-    // 6. Save to Supabase
     const { error: upsertError } = await supabaseServer
       .from("users")
       .upsert(userRecord);
 
     if (upsertError) {
       console.error("Upsert user failed:", upsertError);
-      return NextResponse.json({ success: false, error: "Kullanıcı kaydedilemedi: " + upsertError.message }, { status: 500 });
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Kullanıcı kaydedilemedi: " + upsertError.message,
+        },
+        { status: 500 }
+      );
     }
 
-    // Secure Logging (Only boolean flags and non-sensitive status)
     console.log("User updated/created status:", {
-      hasPassword: !!userRecord.password,
+      hasPassword: Boolean(userRecord.password),
       passwordChanged,
       role: userRecord.role,
       active: userRecord.isActive,
-      duplicateUsernameCount: 0
+      profileCompleted: Boolean(userRecord.profileCompletedAt),
     });
 
     return NextResponse.json({
@@ -288,11 +473,17 @@ export async function POST(req: NextRequest) {
         address: userRecord.address,
         profileCompletedAt: userRecord.profileCompletedAt,
         hasPassword: true,
-      }
+      },
     });
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error ? error.message : "Internal server error";
 
-  } catch (error: any) {
-    console.error("User update API failed:", error);
-    return NextResponse.json({ success: false, error: error.message || "Internal server error" }, { status: 500 });
+    console.error("User update API failed:", message);
+
+    return NextResponse.json(
+      { success: false, error: message },
+      { status: 500 }
+    );
   }
 }
