@@ -13,6 +13,38 @@ const supabaseServer = createClient(supabaseUrl, supabaseServiceKey, {
   },
 });
 
+export async function GET(req: NextRequest) {
+  try {
+    const caller = await verifyAuth(req);
+    if (!caller) {
+      return NextResponse.json({ success: false, error: "Yetkisiz erişim." }, { status: 401 });
+    }
+
+    const isAdmin = caller.role?.toLowerCase() === "admin";
+    if (!isAdmin) {
+      return NextResponse.json({ success: false, error: "Bu işlem için yetkiniz yok." }, { status: 403 });
+    }
+
+    const { data: dbUsers, error } = await supabaseServer
+      .from("users")
+      .select("id, name, username, role, isActive, email, phone, tcNo, address, permissions, createdAt, updatedAt, profileCompletedAt")
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error("Failed to fetch users:", error);
+      return NextResponse.json({ success: false, error: "Veritabanı hatası." }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      success: true,
+      users: dbUsers
+    });
+  } catch (error: any) {
+    console.error("List users API failed:", error);
+    return NextResponse.json({ success: false, error: error.message || "Internal server error" }, { status: 500 });
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const caller = await verifyAuth(req);

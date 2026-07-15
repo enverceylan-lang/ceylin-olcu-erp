@@ -48,18 +48,20 @@ export async function verifyAuth(req: NextRequest) {
       return null;
     }
 
-    // Prevent default password "123" or default password hash verification under any circumstances
+    if (!user.password || user.password.trim() === "") {
+      return null;
+    }
+
     const defaultHashes = [
       "737cca8746ba4b84c7898f055c9f5c251016bd006f32ddf4be6fc2adde15fe72fa6167ed96001110725115f7308da9763712a5fa0924faf3329f301fc6e20382",
       hashPassword("123")
     ];
 
-    if (
-      credential === "123" ||
-      !user.password ||
-      user.password.trim() === "" ||
-      defaultHashes.includes(user.password)
-    ) {
+    const isDefaultAdminCredentials =
+      (user.username === "admin" || user.id === "user-admin") &&
+      (credential === "123" || defaultHashes.includes(user.password));
+
+    if (isDefaultAdminCredentials) {
       return null;
     }
 

@@ -60,6 +60,57 @@ export function normalizeRole(role: UserRole | undefined): 'ADMIN' | 'MODERATOR'
   return role;
 }
 
+export function sanitizeAuditSnapshot(obj: any): any {
+  if (obj === null || obj === undefined) return obj;
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeAuditSnapshot(item));
+  }
+  if (typeof obj === 'object') {
+    const redactedFields = new Set([
+      'password', 'pin', 'passwordhash', 'hash', 'salt', 'token',
+      'accesstoken', 'refreshtoken', 'sessiontoken', 'jwt',
+      'recoverytoken', 'secret', 'servicerolekey'
+    ]);
+    const cleaned: any = {};
+    for (const key of Object.keys(obj)) {
+      if (redactedFields.has(key.toLowerCase())) {
+        continue;
+      }
+      cleaned[key] = sanitizeAuditSnapshot(obj[key]);
+    }
+    return cleaned;
+  }
+  return obj;
+}
+
+export function sanitizeAuditEntry(entry: any): any {
+  if (!entry) return entry;
+  const cleaned = { ...entry };
+  if (cleaned.beforeSnapshot) {
+    cleaned.beforeSnapshot = sanitizeAuditSnapshot(cleaned.beforeSnapshot);
+  }
+  if (cleaned.afterSnapshot) {
+    cleaned.afterSnapshot = sanitizeAuditSnapshot(cleaned.afterSnapshot);
+  }
+  if (cleaned.previousValue) {
+    try {
+      const parsed = JSON.parse(cleaned.previousValue);
+      cleaned.previousValue = JSON.stringify(sanitizeAuditSnapshot(parsed));
+    } catch (e) {
+      // If it's not JSON, do nothing
+    }
+  }
+  if (cleaned.newValue) {
+    try {
+      const parsed = JSON.parse(cleaned.newValue);
+      cleaned.newValue = JSON.stringify(sanitizeAuditSnapshot(parsed));
+    } catch (e) {
+      // If it's not JSON, do nothing
+    }
+  }
+  return cleaned;
+}
+
 export function getRoleDefaultPermissions(role: UserRole): string[] {
   const normRole = normalizeRole(role);
   const modules = ['dashboard', 'cariler', 'olculer', 'stok', 'satis', 'uretim', 'montaj', 'raporlar', 'ayarlar'];
@@ -536,6 +587,7 @@ interface AuthState {
   addUser: (user: Omit<MockUser, 'id'>) => Promise<boolean>;
   updateUser: (id: string, data: Partial<MockUser>) => Promise<boolean>;
   deleteUser: (id: string) => Promise<{ success: boolean; code?: string; error?: string }>;
+  fetchUsers: () => Promise<boolean>;
 }
 
 const safeAuthStorage = {
@@ -764,14 +816,30 @@ export const useAuthStore = create<AuthState>()(
               const updatedUserFromServer = normalizeUser(result.user);
               
               const targetUserBefore = get().users.find((u: MockUser) => u.id === id);
-              const beforeSnapshot = targetUserBefore ? { ...targetUserBefore } : null;
-              const afterSnapshot = {
-                ...updatedUserFromServer,
-                password: dataCopy.password !== undefined ? dataCopy.password : (targetUserBefore?.password || '')
+              const beforeSnapshot: any = targetUserBefore ? { ...targetUserBefore } : null;
+              const afterSnapshot: any = {
+                ...updatedUserFromServer
               };
 
               const fieldsToCheck = ['name', 'email', 'phone', 'tcNo', 'address', 'role', 'isActive'];
               const changedFields: string[] = [];
+
+              const isPasswordChanged = dataCopy.password !== undefined && dataCopy.password !== null && dataCopy.password.trim() !== '' && dataCopy.password.trim() !== '••••';
+
+              if (isPasswordChanged) {
+                changedFields.push('passwordChanged');
+                if (beforeSnapshot) {
+                  beforeSnapshot.hasPassword = !!targetUserBefore?.password;
+                }
+                afterSnapshot.hasPassword = true;
+                afterSnapshot.passwordChanged = true;
+              } else {
+                if (beforeSnapshot) {
+                  beforeSnapshot.hasPassword = !!targetUserBefore?.password;
+                }
+                afterSnapshot.hasPassword = !!targetUserBefore?.password;
+              }
+
               if (beforeSnapshot) {
                 fieldsToCheck.forEach((f) => {
                   const prevVal = (beforeSnapshot as any)[f];
@@ -783,19 +851,22 @@ export const useAuthStore = create<AuthState>()(
               }
 
               if (currentUser && normalizeRole(currentUser.role) === 'ADMIN' && changedFields.length > 0) {
+                const sanitizedBefore = beforeSnapshot ? sanitizeAuditSnapshot(beforeSnapshot) : null;
+                const sanitizedAfter = sanitizeAuditSnapshot(afterSnapshot);
+
                 set((state: AuthState) => {
                   const newAuditEntry: AuditEntry = {
                     id: generateUUID(),
                     entityType: 'USER',
                     entityId: id,
                     field: changedFields.join(', '),
-                    previousValue: beforeSnapshot ? JSON.stringify(beforeSnapshot) : '',
-                    newValue: JSON.stringify(afterSnapshot),
+                    previousValue: sanitizedBefore ? JSON.stringify(sanitizedBefore) : '',
+                    newValue: JSON.stringify(sanitizedAfter),
                     changedBy: currentUser.id,
                     changedAt: new Date().toISOString(),
                     reason: 'Admin user update',
-                    beforeSnapshot,
-                    afterSnapshot,
+                    beforeSnapshot: sanitizedBefore,
+                    afterSnapshot: sanitizedAfter,
                     changedFields
                   };
                   return {
@@ -879,6 +950,43 @@ export const useAuthStore = create<AuthState>()(
           return { success: false, error: err.message || "Delete user API failed" };
         }
       },
+
+      fetchUsers: async () => {
+        const currentUser = get().currentUser;
+        if (!currentUser || !currentUser.password) {
+          console.error("Yetkilendirme bilgisi eksik.");
+          return false;
+        }
+
+        try {
+          const token = utf8ToBase64(`${currentUser.username}:${currentUser.password}`);
+          const response = await fetch('/api/admin/users/update', {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+
+          if (response.ok) {
+            const result = await response.json();
+            if (result.success && Array.isArray(result.users)) {
+              const fetchedUsers = result.users.map((u: any) => {
+                const existing = get().users.find((ex: MockUser) => ex.id === u.id);
+                return normalizeUser({
+                  ...u,
+                  password: existing?.password || ''
+                });
+              });
+
+              set({ users: fetchedUsers });
+              return true;
+            }
+          }
+        } catch (err) {
+          console.error("Fetch users failed:", err);
+        }
+        return false;
+      },
     }),
     {
       name: 'curtain-erp-auth-v1',
@@ -914,11 +1022,19 @@ export const useAuthStore = create<AuthState>()(
           }
         }
 
+        let auditLog = persistedState.auditLog;
+        if (Array.isArray(auditLog)) {
+          auditLog = auditLog.map((entry: any) => sanitizeAuditEntry(entry));
+        } else {
+          auditLog = [];
+        }
+
         return {
           ...currentState,
           ...persistedState,
           users,
-          currentUser
+          currentUser,
+          auditLog
         };
       },
       storage: createJSONStorage(() => safeAuthStorage),

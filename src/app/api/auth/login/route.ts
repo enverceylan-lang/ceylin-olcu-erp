@@ -64,18 +64,23 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Prevent default password "123" or default password hash logins under any circumstances
+    if (!user.password || user.password.trim() === "") {
+      return NextResponse.json(
+        { success: false, error: "Şifre tanımlanmamış." },
+        { status: 401 }
+      );
+    }
+
     const defaultHashes = [
       "737cca8746ba4b84c7898f055c9f5c251016bd006f32ddf4be6fc2adde15fe72fa6167ed96001110725115f7308da9763712a5fa0924faf3329f301fc6e20382",
       hashPassword("123")
     ];
 
-    if (
-      cleanPassword === "123" ||
-      !user.password ||
-      user.password.trim() === "" ||
-      defaultHashes.includes(user.password)
-    ) {
+    const isDefaultAdminCredentials =
+      (user.username === "admin" || user.id === "user-admin") &&
+      (cleanPassword === "123" || defaultHashes.includes(user.password));
+
+    if (isDefaultAdminCredentials) {
       return NextResponse.json(
         { success: false, error: "Güvenlik nedeniyle varsayılan şifreyle giriş yapılamaz. Lütfen şifrenizi güncelleyin veya yöneticinizle iletişime geçin." },
         { status: 401 }

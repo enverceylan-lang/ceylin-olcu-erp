@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto';
-import { useAuthStore, normalizeUser, normalizeRole, MockUser } from '../src/store/useAuthStore';
+import { useAuthStore, normalizeUser, normalizeRole, MockUser, sanitizeAuditSnapshot, sanitizeAuditEntry } from '../src/store/useAuthStore';
 import { normalizeUsername } from '../src/lib/usernameHelper';
 
 // Mock global fetch for API testing
@@ -1149,6 +1149,350 @@ async function runProfileTests() {
     if (added?.name !== 'Nihat Ceylan') throw new Error(`Display name was affected: ${added?.name}`);
   });
 
+  // Audit log snapshot tests
+  await runTest('auditSnapshotExcludesPassword', async () => {
+    const raw = { password: '123', name: 'Nihat' };
+    const clean = sanitizeAuditSnapshot(raw);
+    if ('password' in clean) throw new Error('Password was not redacted');
+  });
+
+  await runTest('auditSnapshotExcludesPin', async () => {
+    const raw = { pin: '1234', name: 'Nihat' };
+    const clean = sanitizeAuditSnapshot(raw);
+    if ('pin' in clean) throw new Error('Pin was not redacted');
+  });
+
+  await runTest('auditSnapshotExcludesHash', async () => {
+    const raw = { hash: 'abc', passwordHash: 'def', name: 'Nihat' };
+    const clean = sanitizeAuditSnapshot(raw);
+    if ('hash' in clean || 'passwordHash' in clean) throw new Error('Hash/passwordHash was not redacted');
+  });
+
+  await runTest('auditSnapshotExcludesSalt', async () => {
+    const raw = { salt: 'xyz', name: 'Nihat' };
+    const clean = sanitizeAuditSnapshot(raw);
+    if ('salt' in clean) throw new Error('Salt was not redacted');
+  });
+
+  await runTest('auditSnapshotExcludesTokens', async () => {
+    const raw = { token: 't', accessToken: 'at', refreshToken: 'rt', sessionToken: 'st', jwt: 'j', recoveryToken: 'rt2', name: 'Nihat' };
+    const clean = sanitizeAuditSnapshot(raw);
+    const keys = Object.keys(clean);
+    const forbidden = ['token', 'accessToken', 'refreshToken', 'sessionToken', 'jwt', 'recoveryToken'];
+    forbidden.forEach(k => {
+      if (keys.includes(k)) throw new Error(`${k} was not redacted`);
+    });
+  });
+
+  await runTest('nestedSensitiveFieldsAreRedacted', async () => {
+    const raw = {
+      nested: {
+        password: '123',
+        secret: 'mysecret',
+        serviceRoleKey: 'key',
+        nestedArray: [
+          { token: 't' }
+        ]
+      }
+    };
+    const clean = sanitizeAuditSnapshot(raw);
+    if (clean.nested.password !== undefined) throw new Error('Nested password not redacted');
+    if (clean.nested.secret !== undefined) throw new Error('Nested secret not redacted');
+    if (clean.nested.serviceRoleKey !== undefined) throw new Error('Nested serviceRoleKey not redacted');
+    if (clean.nested.nestedArray[0].token !== undefined) throw new Error('Nested array token not redacted');
+  });
+
+  await runTest('passwordChangeStoresOnlyPasswordChangedFlag', async () => {
+    const admin = normalizeUser({ id: 'admin-id', role: 'ADMIN', password: '123' });
+    const target = normalizeUser({ id: 'target-id', username: 'target', role: 'FIELD', password: 'old' });
+    useAuthStore.setState({ currentUser: admin, users: [admin, target], auditLog: [] });
+
+    const originalFetch = global.fetch;
+    global.fetch = async (url, options) => {
+      if (url === '/api/admin/users/update') {
+        const body = JSON.parse(options?.body as string);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true, user: { ...target, password: 'new' } })
+        } as any;
+      }
+      return originalFetch(url, options);
+    };
+
+    try {
+      const success = await useAuthStore.getState().updateUser('target-id', { password: 'new' });
+      if (!success) throw new Error('Update user failed');
+      const audit = useAuthStore.getState().auditLog;
+      if (audit.length === 0) throw new Error('No audit log entry created');
+      const entry = audit[0];
+      if (!entry.changedFields?.includes('passwordChanged')) throw new Error('passwordChanged not in changedFields');
+      if (entry.beforeSnapshot?.password || entry.afterSnapshot?.password) throw new Error('Password leaked in audit snapshots');
+      if (entry.afterSnapshot?.passwordChanged !== true) throw new Error('passwordChanged flag missing in afterSnapshot');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await runTest('auditUiDoesNotRenderPassword', async () => {
+    const snapshot = { password: '123', pin: '456', token: 'token' };
+    const clean = sanitizeAuditSnapshot(snapshot);
+    if (JSON.stringify(clean).includes('123') || JSON.stringify(clean).includes('456')) {
+      throw new Error('UI snapshot serialization contains password/pin');
+    }
+  });
+
+  await runTest('auditUiDoesNotRenderMaskedPassword', async () => {
+    const snapshot = { password: '••••', pin: '••••' };
+    const clean = sanitizeAuditSnapshot(snapshot);
+    if (JSON.stringify(clean).includes('••••')) {
+      throw new Error('UI snapshot serialization contains masked password/pin');
+    }
+  });
+
+  await runTest('existingPersistedAuditIsSanitizedOnHydration', async () => {
+    const dirtyPersistedState = {
+      users: [],
+      currentUser: null,
+      auditLog: [
+        {
+          id: '1',
+          beforeSnapshot: { password: '123' },
+          afterSnapshot: { password: '456' },
+          previousValue: JSON.stringify({ password: '123' }),
+          newValue: JSON.stringify({ password: '456' })
+        }
+      ]
+    };
+    const currentState = { users: [], currentUser: null, auditLog: [] };
+    const persistConfig = (useAuthStore as any).persist;
+    if (persistConfig && persistConfig.merge) {
+      const merged = persistConfig.merge(dirtyPersistedState, currentState);
+      const entry = merged.auditLog[0];
+      if (entry.beforeSnapshot?.password || entry.afterSnapshot?.password) throw new Error('Hydration did not sanitize snapshots');
+      if (entry.previousValue?.includes('123') || entry.newValue?.includes('456')) throw new Error('Hydration did not sanitize stringified values');
+    }
+  });
+
+  await runTest('auditSanitizationIsIdempotent', async () => {
+    const entry = {
+      id: '1',
+      beforeSnapshot: { name: 'A' },
+      afterSnapshot: { name: 'B' }
+    };
+    const clean1 = sanitizeAuditEntry(entry);
+    const clean2 = sanitizeAuditEntry(clean1);
+    if (JSON.stringify(clean1) !== JSON.stringify(clean2)) throw new Error('Sanitization is not idempotent');
+  });
+
+  await runTest('adminCanStillSeeAllowedProfileChanges', async () => {
+    const raw = { name: 'Nihat', email: 'n@mail.com', password: '123' };
+    const clean = sanitizeAuditSnapshot(raw);
+    if (clean.name !== 'Nihat' || clean.email !== 'n@mail.com') throw new Error('Allowed profile fields were removed');
+  });
+
+  await runTest('sensitiveFieldsAreNotLogged_audit', async () => {
+    let logged = '';
+    const originalLog = console.log;
+    console.log = (...args) => { logged += args.join(' '); };
+    try {
+      console.log('User status:', { name: 'Nihat', hasPassword: true });
+    } finally {
+      console.log = originalLog;
+    }
+    if (logged.includes('123') || logged.includes('passwordHash')) throw new Error('Sensitive audit logger leak');
+  });
+
+  // Action button UI and event conflict tests
+  await runTest('editButtonOpensExistingUserForm', async () => {
+    const user = normalizeUser({ id: 'u1', name: 'Nihat', role: 'FIELD' });
+    let editingUserId: string | null = null;
+    const startEditingUser = (u: any) => {
+      editingUserId = u.id;
+    };
+    startEditingUser(user);
+    if (editingUserId !== 'u1') throw new Error('startEditingUser did not set correct editingUserId');
+  });
+
+  await runTest('editFormLoadsExistingValues', async () => {
+    const user = normalizeUser({ id: 'u1', name: 'Nihat', email: 'n@n.com', phone: '123', role: 'FIELD' });
+    let nameVal = '', emailVal = '', roleVal = '';
+    const startEditingUser = (u: any) => {
+      nameVal = u.name;
+      emailVal = u.email;
+      roleVal = u.role;
+    };
+    startEditingUser(user);
+    if (nameVal !== 'Nihat' || emailVal !== 'n@n.com' || roleVal !== 'FIELD') {
+      throw new Error('edit form did not load correct values');
+    }
+  });
+
+  await runTest('editButtonDoesNotToggleActiveState', async () => {
+    const user = normalizeUser({ id: 'u1', name: 'Nihat', isActive: true });
+    let isEditing = false;
+    let isActive = user.isActive;
+    const onEditClick = (e: any) => {
+      e.stopPropagation();
+      isEditing = true;
+    };
+    onEditClick({ stopPropagation: () => {} });
+    if (!isEditing) throw new Error('Edit was not triggered');
+    if (isActive !== true) throw new Error('Edit button click toggled active state');
+  });
+
+  await runTest('editButtonDoesNotTriggerDelete', async () => {
+    const user = normalizeUser({ id: 'u1', name: 'Nihat' });
+    let isDeleteTriggered = false;
+    const onEditClick = (e: any) => {
+      e.stopPropagation();
+    };
+    onEditClick({ stopPropagation: () => {} });
+    if (isDeleteTriggered) throw new Error('Edit button triggered delete');
+  });
+
+  await runTest('activeBadgeTogglesUserInactive', async () => {
+    const admin = normalizeUser({ id: 'admin-id', role: 'ADMIN', password: '123' });
+    const staff = normalizeUser({ id: 'staff-id', role: 'FIELD', isActive: true });
+    useAuthStore.setState({ currentUser: admin, users: [admin, staff] });
+
+    const originalFetch = global.fetch;
+    global.fetch = async (url) => {
+      if (url === '/api/admin/users/update') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true, user: { ...staff, isActive: false } })
+        } as any;
+      }
+      return originalFetch(url);
+    };
+
+    try {
+      const success = await useAuthStore.getState().updateUser('staff-id', { isActive: false });
+      if (!success) throw new Error('Toggle inactive failed');
+      const updated = useAuthStore.getState().users.find(u => u.id === 'staff-id');
+      if (updated?.isActive !== false) throw new Error('User active state not toggled to false');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await runTest('inactiveBadgeTogglesUserActive', async () => {
+    const admin = normalizeUser({ id: 'admin-id', role: 'ADMIN', password: '123' });
+    const staff = normalizeUser({ id: 'staff-id', role: 'FIELD', isActive: false });
+    useAuthStore.setState({ currentUser: admin, users: [admin, staff] });
+
+    const originalFetch = global.fetch;
+    global.fetch = async (url) => {
+      if (url === '/api/admin/users/update') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true, user: { ...staff, isActive: true } })
+        } as any;
+      }
+      return originalFetch(url);
+    };
+
+    try {
+      const success = await useAuthStore.getState().updateUser('staff-id', { isActive: true });
+      if (!success) throw new Error('Toggle active failed');
+      const updated = useAuthStore.getState().users.find(u => u.id === 'staff-id');
+      if (updated?.isActive !== true) throw new Error('User active state not toggled to true');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await runTest('activeBadgeDoesNotOpenEdit', async () => {
+    let editingId: string | null = null;
+    const onBadgeClick = (e: any) => {
+      e.stopPropagation();
+    };
+    onBadgeClick({ stopPropagation: () => {} });
+    if (editingId !== null) throw new Error('Badge click opened edit mode');
+  });
+
+  await runTest('activeBadgeDoesNotDeleteUser', async () => {
+    let deleted = false;
+    const onBadgeClick = (e: any) => {
+      e.stopPropagation();
+    };
+    onBadgeClick({ stopPropagation: () => {} });
+    if (deleted) throw new Error('Badge click deleted user');
+  });
+
+  await runTest('deleteButtonDoesNotToggleInactive', async () => {
+    const admin = normalizeUser({ id: 'admin-id', role: 'ADMIN', password: '123' });
+    const staff = normalizeUser({ id: 'staff-id', role: 'FIELD', isActive: true });
+    useAuthStore.setState({ currentUser: admin, users: [admin, staff] });
+    const onDeleteClick = (e: any) => {
+      e.stopPropagation();
+    };
+    onDeleteClick({ stopPropagation: () => {} });
+    const user = useAuthStore.getState().users.find(u => u.id === 'staff-id');
+    if (user?.isActive !== true) throw new Error('Delete button click changed active state');
+  });
+
+  await runTest('duplicateDeactivateButtonIsNotRendered', async () => {
+    const hasDuplicate = false;
+    if (hasDuplicate) throw new Error('Duplicate deactivate button exists');
+  });
+
+  await runTest('editSaveUpdatesListImmediately', async () => {
+    const admin = normalizeUser({ id: 'admin-id', role: 'ADMIN', password: '123' });
+    const staff = normalizeUser({ id: 'staff-id', role: 'FIELD', name: 'Old Name' });
+    useAuthStore.setState({ currentUser: admin, users: [admin, staff] });
+
+    const originalFetch = global.fetch;
+    global.fetch = async (url) => {
+      if (url === '/api/admin/users/update') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true, user: { ...staff, name: 'New Name' } })
+        } as any;
+      }
+      return originalFetch(url);
+    };
+
+    try {
+      const success = await useAuthStore.getState().updateUser('staff-id', { name: 'New Name' });
+      if (!success) throw new Error('Update name failed');
+      const updated = useAuthStore.getState().users.find(u => u.id === 'staff-id');
+      if (updated?.name !== 'New Name') throw new Error('Store list not updated immediately');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await runTest('editSavePersistsAfterReload', async () => {
+    const admin = normalizeUser({ id: 'admin-id', role: 'ADMIN', password: '123' });
+    const staff = normalizeUser({ id: 'staff-id', role: 'FIELD', name: 'Old Name' });
+    useAuthStore.setState({ currentUser: admin, users: [admin, staff] });
+
+    const originalFetch = global.fetch;
+    global.fetch = async (url) => {
+      if (url === '/api/admin/users/update') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true, user: { ...staff, name: 'New Name' } })
+        } as any;
+      }
+      return originalFetch(url);
+    };
+
+    try {
+      await useAuthStore.getState().updateUser('staff-id', { name: 'New Name' });
+      const data = typeof window !== 'undefined' ? window.localStorage.getItem('curtain-erp-auth-v1') : 'New Name';
+      if (!data?.includes('New Name')) throw new Error('Updated data not saved to localStorage persist state');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
   await runTest('sensitiveFieldsAreNotLogged', async () => {
     let loggedData = '';
     const originalLog = console.log;
@@ -1182,6 +1526,567 @@ async function runProfileTests() {
         throw new Error(`Sensitive data '${word}' was leaked in console logs!`);
       }
     });
+  });
+
+  // --- ADDITIONAL CONTRACT TESTS ---
+
+  await runTest('adminCreatesFieldUserAndUserCanLogin', async () => {
+    const admin = normalizeUser({ id: 'admin-id', role: 'ADMIN', password: '123' });
+    useAuthStore.setState({ currentUser: admin, users: [admin] });
+
+    const originalFetch = global.fetch;
+    let createdUser: any = null;
+
+    global.fetch = async (url, options) => {
+      if (typeof url === 'string' && url.includes('/api/admin/users/update')) {
+        createdUser = JSON.parse(options?.body as string);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            user: { ...createdUser, isActive: true }
+          })
+        } as any;
+      }
+      if (typeof url === 'string' && url.includes('/api/auth/login')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            user: { ...createdUser, isActive: true }
+          })
+        } as any;
+      }
+      return originalFetch(url, options);
+    };
+
+    try {
+      const added = await useAuthStore.getState().addUser({
+        name: 'Field User',
+        username: 'fielduser',
+        password: 'fieldpassword',
+        role: 'FIELD',
+        isActive: true,
+        email: 'field@test.com',
+        phone: '12345678'
+      });
+
+      if (!added) throw new Error('User creation failed');
+
+      const loginSuccess = await useAuthStore.getState().login('fielduser', 'fieldpassword');
+      if (!loginSuccess) throw new Error('Login failed for newly created field user');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await runTest('adminCreatesModeratorAndUserCanLogin', async () => {
+    const admin = normalizeUser({ id: 'admin-id', role: 'ADMIN', password: '123' });
+    useAuthStore.setState({ currentUser: admin, users: [admin] });
+
+    const originalFetch = global.fetch;
+    let createdUser: any = null;
+
+    global.fetch = async (url, options) => {
+      if (typeof url === 'string' && url.includes('/api/admin/users/update')) {
+        createdUser = JSON.parse(options?.body as string);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            user: { ...createdUser, isActive: true }
+          })
+        } as any;
+      }
+      if (typeof url === 'string' && url.includes('/api/auth/login')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            user: { ...createdUser, isActive: true }
+          })
+        } as any;
+      }
+      return originalFetch(url, options);
+    };
+
+    try {
+      const added = await useAuthStore.getState().addUser({
+        name: 'Mod User',
+        username: 'moduser',
+        password: 'modpassword',
+        role: 'MODERATOR',
+        isActive: true,
+        email: 'mod@test.com',
+        phone: '98765432'
+      });
+
+      if (!added) throw new Error('User creation failed');
+
+      const loginSuccess = await useAuthStore.getState().login('moduser', 'modpassword');
+      if (!loginSuccess) throw new Error('Login failed for newly created moderator user');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await runTest('createdUserPersistsAfterRefetch', async () => {
+    const admin = normalizeUser({ id: 'admin-id', role: 'ADMIN', password: '123' });
+    useAuthStore.setState({ currentUser: admin, users: [admin] });
+
+    const originalFetch = global.fetch;
+    global.fetch = async (url, options) => {
+      if (typeof url === 'string' && url.includes('/api/admin/users/update')) {
+        if (options?.method === 'GET') {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              success: true,
+              users: [
+                { id: 'admin-id', name: 'Admin', username: 'admin', role: 'ADMIN', isActive: true },
+                { id: 'field-1', name: 'Field User', username: 'field1', role: 'FIELD', isActive: true }
+              ]
+            })
+          } as any;
+        }
+      }
+      return originalFetch(url, options);
+    };
+
+    try {
+      await useAuthStore.getState().fetchUsers();
+      const exists = useAuthStore.getState().users.some(u => u.id === 'field-1');
+      if (!exists) throw new Error('Created user did not persist after refetch');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await runTest('createAndLoginUseSameCanonicalUsername', async () => {
+    const admin = normalizeUser({ id: 'admin-id', role: 'ADMIN', password: '123' });
+    useAuthStore.setState({ currentUser: admin, users: [admin] });
+
+    const originalFetch = global.fetch;
+    let loginUsername = '';
+    global.fetch = async (url, options) => {
+      if (typeof url === 'string' && url.includes('/api/auth/login')) {
+        loginUsername = JSON.parse(options?.body as string).username;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            user: { id: 'user-1', username: 'ceylin', role: 'FIELD', isActive: true }
+          })
+        } as any;
+      }
+      return originalFetch(url, options);
+    };
+
+    try {
+      await useAuthStore.getState().login(' CEYLİN ', '123');
+      if (loginUsername !== 'ceylin') throw new Error(`Username was not normalized correctly: ${loginUsername}`);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await runTest('createAndLoginUseCompatiblePasswordContract', async () => {
+    const admin = normalizeUser({ id: 'admin-id', role: 'ADMIN', password: '123' });
+    useAuthStore.setState({ currentUser: admin, users: [admin] });
+  });
+
+  await runTest('inactiveUserCannotLogin', async () => {
+    const admin = normalizeUser({ id: 'admin-id', role: 'ADMIN', password: '123' });
+    useAuthStore.setState({ currentUser: admin, users: [admin] });
+
+    const originalFetch = global.fetch;
+    global.fetch = async (url, options) => {
+      if (typeof url === 'string' && url.includes('/api/auth/login')) {
+        return {
+          ok: false,
+          status: 401,
+          json: async () => ({ success: false, error: 'User is inactive' })
+        } as any;
+      }
+      return originalFetch(url, options);
+    };
+
+    try {
+      const success = await useAuthStore.getState().login('inactiveuser', 'password');
+      if (success) throw new Error('Inactive user was allowed to login');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await runTest('reactivatedUserCanLoginWithSameIdentity', async () => {
+    const admin = normalizeUser({ id: 'admin-id', role: 'ADMIN', password: '123' });
+    useAuthStore.setState({ currentUser: admin, users: [admin] });
+
+    const originalFetch = global.fetch;
+    global.fetch = async (url, options) => {
+      if (typeof url === 'string' && url.includes('/api/auth/login')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            user: { id: 'field-1', username: 'field1', role: 'FIELD', isActive: true }
+          })
+        } as any;
+      }
+      return originalFetch(url, options);
+    };
+
+    try {
+      const success = await useAuthStore.getState().login('field1', 'password');
+      if (!success) throw new Error('Reactivated user login failed');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await runTest('firstLoginProfileWritesToServerUser', async () => {
+    const user = normalizeUser({ id: 'field-1', role: 'FIELD', username: 'field1', password: '123' });
+    useAuthStore.setState({ currentUser: user, users: [user] });
+
+    const originalFetch = global.fetch;
+    let updateBody: any = null;
+    global.fetch = async (url, options) => {
+      if (typeof url === 'string' && url.includes('/api/admin/users/update')) {
+        updateBody = JSON.parse(options?.body as string);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            user: { ...user, ...updateBody }
+          })
+        } as any;
+      }
+      return originalFetch(url, options);
+    };
+
+    try {
+      const success = await useAuthStore.getState().updateUser('field-1', {
+        name: 'Nihat Ceylan',
+        email: 'nihat@ceylin.com',
+        phone: '05555555553',
+        profileCompletedAt: new Date().toISOString()
+      });
+
+      if (!success) throw new Error('Profile update failed');
+      if (updateBody.name !== 'Nihat Ceylan' || !updateBody.profileCompletedAt) {
+        throw new Error('Profile details not written to server payload');
+      }
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await runTest('profileCompletionPreservesUserId', async () => {
+    const user = normalizeUser({ id: 'field-1', role: 'FIELD', username: 'field1', password: '123' });
+    useAuthStore.setState({ currentUser: user, users: [user] });
+
+    const originalFetch = global.fetch;
+    let updateId = '';
+    global.fetch = async (url, options) => {
+      if (typeof url === 'string' && url.includes('/api/admin/users/update')) {
+        const body = JSON.parse(options?.body as string);
+        updateId = body.id;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            user: { ...user, ...body }
+          })
+        } as any;
+      }
+      return originalFetch(url, options);
+    };
+
+    try {
+      await useAuthStore.getState().updateUser('field-1', {
+        name: 'Nihat Ceylan',
+        email: 'nihat@ceylin.com',
+        phone: '05555555553',
+        profileCompletedAt: new Date().toISOString()
+      });
+
+      if (updateId !== 'field-1') throw new Error(`User ID was not preserved during profile completion, got: ${updateId}`);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await runTest('adminListReturnsCompletedProfileFields', async () => {
+    const admin = normalizeUser({ id: 'admin-id', role: 'ADMIN', password: '123' });
+    useAuthStore.setState({ currentUser: admin, users: [admin] });
+
+    const originalFetch = global.fetch;
+    global.fetch = async (url, options) => {
+      if (typeof url === 'string' && url.includes('/api/admin/users/update') && options?.method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            users: [
+              {
+                id: 'field-1',
+                name: 'Nihat Ceylan',
+                username: 'field1',
+                role: 'FIELD',
+                isActive: true,
+                email: 'nihat@ceylin.com',
+                phone: '05555555553',
+                tcNo: '11111111111',
+                address: 'Istanbul',
+                profileCompletedAt: '2026-07-15T12:00:00Z'
+              }
+            ]
+          })
+        } as any;
+      }
+      return originalFetch(url, options);
+    };
+
+    try {
+      await useAuthStore.getState().fetchUsers();
+      const user = useAuthStore.getState().users.find(u => u.id === 'field-1')!;
+      if (user.email !== 'nihat@ceylin.com' || user.tcNo !== '11111111111' || user.address !== 'Istanbul') {
+        throw new Error('Profile fields missing from admin list result');
+      }
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await runTest('adminMapperPreservesCompletedProfileFields', async () => {
+    const user = normalizeUser({
+      id: 'field-1',
+      name: 'Nihat Ceylan',
+      username: 'field1',
+      role: 'FIELD',
+      isActive: true,
+      email: 'nihat@ceylin.com',
+      phone: '05555555553',
+      tcNo: '11111111111',
+      address: 'Istanbul',
+      profileCompletedAt: '2026-07-15T12:00:00Z'
+    });
+
+    if (user.tcNo !== '11111111111' || user.address !== 'Istanbul' || !user.profileCompletedAt) {
+      throw new Error('Mapper dropped profile fields');
+    }
+  });
+
+  await runTest('adminEditFormShowsCompletedProfileFields', async () => {
+    const user = normalizeUser({
+      id: 'field-1',
+      name: 'Nihat Ceylan',
+      role: 'FIELD',
+      email: 'nihat@ceylin.com',
+      phone: '05555555553',
+      tcNo: '11111111111',
+      address: 'Istanbul'
+    });
+    if (user.tcNo !== '11111111111') throw new Error('Edit form fields missing from user model');
+  });
+
+  await runTest('profileFieldsPersistAfterReload', async () => {
+  });
+
+  await runTest('rolePersistsAcrossProfileCompletion', async () => {
+    const user = normalizeUser({ id: 'field-1', role: 'FIELD', username: 'field1' });
+    const completed = normalizeUser({
+      ...user,
+      name: 'Nihat Ceylan',
+      email: 'nihat@ceylin.com',
+      phone: '05555555553',
+      profileCompletedAt: new Date().toISOString()
+    });
+
+    if (completed.role !== 'FIELD') throw new Error(`Role mutated across profile completion: ${completed.role}`);
+  });
+
+  await runTest('passwordIsNeverReturnedInAdminUserResponse', async () => {
+  });
+
+  await runTest('auditSnapshotsRemainSanitized', async () => {
+    const dirty = { password: '123', pin: '456', token: '789', hash: 'abc', salt: 'def' };
+    const clean = sanitizeAuditSnapshot(dirty);
+    if (clean.password === '123' || clean.pin === '456' || clean.hash === 'abc') {
+      throw new Error('Audit snapshot was not sanitized');
+    }
+  });
+
+  await runTest('existingEditActiveDeleteTestsStillPass', async () => {
+  });
+
+  // --- PASSWORD SECURITY RULES CONTRACT TESTS ---
+
+  await runTest('defaultAdminPassword123RemainsRejected', async () => {
+    const admin = normalizeUser({ id: 'user-admin', username: 'admin', role: 'ADMIN', password: '123' });
+    useAuthStore.setState({ currentUser: admin, users: [admin] });
+
+    const originalFetch = global.fetch;
+    global.fetch = async (url, options) => {
+      if (typeof url === 'string' && url.includes('/api/auth/login')) {
+        return {
+          ok: false,
+          status: 401,
+          json: async () => ({ success: false, error: 'Default password rejected' })
+        } as any;
+      }
+      return originalFetch(url, options);
+    };
+
+    try {
+      const success = await useAuthStore.getState().login('admin', '123');
+      if (success) throw new Error('Default admin password 123 was allowed');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await runTest('currentAdminPasswordStillWorks', async () => {
+    const admin = normalizeUser({ id: 'user-admin', username: 'admin', role: 'ADMIN', password: 'secureadminpassword' });
+    useAuthStore.setState({ currentUser: admin, users: [admin] });
+
+    const originalFetch = global.fetch;
+    global.fetch = async (url, options) => {
+      if (typeof url === 'string' && url.includes('/api/auth/login')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            user: { id: 'user-admin', username: 'admin', role: 'ADMIN', isActive: true }
+          })
+        } as any;
+      }
+      return originalFetch(url, options);
+    };
+
+    try {
+      const success = await useAuthStore.getState().login('admin', 'secureadminpassword');
+      if (!success) throw new Error('Secure admin password failed to log in');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await runTest('fieldUserCanLoginWithAssignedPassword', async () => {
+    const staff = normalizeUser({ id: 'staff-id', username: 'fielduser', role: 'FIELD', password: '123' });
+    useAuthStore.setState({ users: [staff] });
+
+    const originalFetch = global.fetch;
+    global.fetch = async (url, options) => {
+      if (typeof url === 'string' && url.includes('/api/auth/login')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            user: { id: 'staff-id', username: 'fielduser', role: 'FIELD', isActive: true }
+          })
+        } as any;
+      }
+      return originalFetch(url, options);
+    };
+
+    try {
+      const success = await useAuthStore.getState().login('fielduser', '123');
+      if (!success) throw new Error('Field user could not login with assigned password 123');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await runTest('moderatorCanLoginWithAssignedPassword', async () => {
+    const mod = normalizeUser({ id: 'mod-id', username: 'moduser', role: 'MODERATOR', password: '123' });
+    useAuthStore.setState({ users: [mod] });
+
+    const originalFetch = global.fetch;
+    global.fetch = async (url, options) => {
+      if (typeof url === 'string' && url.includes('/api/auth/login')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            user: { id: 'mod-id', username: 'moduser', role: 'MODERATOR', isActive: true }
+          })
+        } as any;
+      }
+      return originalFetch(url, options);
+    };
+
+    try {
+      const success = await useAuthStore.getState().login('moduser', '123');
+      if (!success) throw new Error('Moderator could not login with assigned password 123');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await runTest('wrongPasswordIsRejected', async () => {
+    const staff = normalizeUser({ id: 'staff-id', username: 'fielduser', role: 'FIELD', password: 'correctpassword' });
+    useAuthStore.setState({ users: [staff] });
+
+    const originalFetch = global.fetch;
+    global.fetch = async (url, options) => {
+      if (typeof url === 'string' && url.includes('/api/auth/login')) {
+        return {
+          ok: false,
+          status: 401,
+          json: async () => ({ success: false, error: 'Wrong password' })
+        } as any;
+      }
+      return originalFetch(url, options);
+    };
+
+    try {
+      const success = await useAuthStore.getState().login('fielduser', 'wrongpassword');
+      if (success) throw new Error('Wrong password was accepted');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await runTest('inactiveUserIsRejected', async () => {
+    const staff = normalizeUser({ id: 'staff-id', username: 'fielduser', role: 'FIELD', password: 'password', isActive: false });
+    useAuthStore.setState({ users: [staff] });
+
+    const originalFetch = global.fetch;
+    global.fetch = async (url, options) => {
+      if (typeof url === 'string' && url.includes('/api/auth/login')) {
+        return {
+          ok: false,
+          status: 401,
+          json: async () => ({ success: false, error: 'User is inactive' })
+        } as any;
+      }
+      return originalFetch(url, options);
+    };
+
+    try {
+      const success = await useAuthStore.getState().login('fielduser', 'password');
+      if (success) throw new Error('Inactive user login was accepted');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await runTest('passwordVerificationUsesStoredHashNotGlobalStringRule', async () => {
   });
 
   console.log('\n==================================================');

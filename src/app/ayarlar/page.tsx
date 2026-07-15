@@ -2,7 +2,7 @@
 
 import { Download, Settings, Upload, ShieldCheck, AlertTriangle, UserPlus, Trash2, Check, X, Shield } from "lucide-react";
 import { useRef, useState, useEffect, Fragment } from "react";
-import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, MockUser } from "@/store/useAuthStore";
+import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, MockUser, sanitizeAuditSnapshot } from "@/store/useAuthStore";
 import { syncNow } from "@/lib/syncService";
 import { normalizeUsername } from "@/lib/usernameHelper";
 
@@ -22,7 +22,7 @@ export default function AyarlarPage() {
   const [pendingBackupData, setPendingBackupData] = useState<BackupPayload | null>(null);
   
   // Auth Store
-  const { currentUser, users, addUser, updateUser, deleteUser, auditLog } = useAuthStore();
+  const { currentUser, users, addUser, updateUser, deleteUser, fetchUsers, auditLog } = useAuthStore();
 
   // Logged in user profile edit form states
   const [selfName, setSelfName] = useState("");
@@ -71,6 +71,12 @@ export default function AyarlarPage() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (mounted && currentUser && normalizeRole(currentUser.role) === 'ADMIN') {
+      fetchUsers().catch((err) => console.error("Failed to fetch users list:", err));
+    }
+  }, [mounted, currentUser?.id]);
 
   if (!mounted) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
 
@@ -667,13 +673,20 @@ export default function AyarlarPage() {
                         </td>
                         <td className="p-4 text-center">
                           <button
-                            onClick={async () => {
-                              setMessage("Durum güncelleniyor...");
-                              const success = await updateUser(u.id, { isActive: !u.isActive });
-                              if (success) {
-                                setMessage("Kullanıcı durumu güncellendi.");
-                              } else {
-                                setMessage("Hata: Kullanıcı durumu güncellenemedi.");
+                            type="button"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              const confirmMsg = u.isActive
+                                ? `${u.name} isimli kullanıcıyı pasife almak istediğinize emin misiniz?`
+                                : `${u.name} isimli kullanıcıyı aktifleştirmek istediğinize emin misiniz?`;
+                              if (confirm(confirmMsg)) {
+                                setMessage("Durum güncelleniyor...");
+                                const success = await updateUser(u.id, { isActive: !u.isActive });
+                                if (success) {
+                                  setMessage("Kullanıcı durumu güncellendi.");
+                                } else {
+                                  setMessage("Hata: Kullanıcı durumu güncellenemedi.");
+                                }
                               }
                             }}
                             className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase border cursor-pointer transition-colors ${
@@ -689,39 +702,19 @@ export default function AyarlarPage() {
                           <div className="flex items-center justify-end gap-2.5">
                             {isEditing ? (
                               <>
-                                <button onClick={() => !userLoading && handleSaveEdit(u.id)} disabled={userLoading} className="text-green-500 hover:text-green-700 disabled:text-green-300 p-1 cursor-pointer" title="Kaydet"><Check className="w-4 h-4" /></button>
-                                <button onClick={() => setEditingUserId(null)} disabled={userLoading} className="text-gray-400 hover:text-gray-500 p-1 cursor-pointer" title="İptal"><X className="w-4 h-4" /></button>
+                                <button type="button" onClick={(e) => { e.stopPropagation(); if (!userLoading) handleSaveEdit(u.id); }} disabled={userLoading} className="text-green-500 hover:text-green-700 disabled:text-green-300 p-1 cursor-pointer" title="Kaydet"><Check className="w-4 h-4" /></button>
+                                <button type="button" onClick={(e) => { e.stopPropagation(); setEditingUserId(null); }} disabled={userLoading} className="text-gray-400 hover:text-gray-500 p-1 cursor-pointer" title="İptal"><X className="w-4 h-4" /></button>
                               </>
                             ) : (
                               <>
-                                <button onClick={() => startEditingUser(u)} className="text-blue-500 hover:underline cursor-pointer">Düzenle</button>
+                                <button type="button" onClick={(e) => { e.stopPropagation(); startEditingUser(u); }} className="text-blue-500 hover:underline cursor-pointer">Düzenle</button>
                                 {u.id !== 'user-admin' && (
                                   <>
-                                    <button
-                                      onClick={async () => {
-                                        setUserLoading(true);
-                                        setMessage(u.isActive ? "Kullanıcı pasife alınıyor..." : "Kullanıcı aktif ediliyor...");
-                                        try {
-                                          const success = await updateUser(u.id, { isActive: !u.isActive });
-                                          if (success) {
-                                            setMessage(u.isActive ? "Kullanıcı başarıyla pasife alındı." : "Kullanıcı başarıyla aktif edildi.");
-                                          } else {
-                                            setMessage("Hata: İşlem gerçekleştirilemedi.");
-                                          }
-                                        } catch (err) {
-                                          setMessage("Hata: Bir sorun oluştu.");
-                                        } finally {
-                                          setUserLoading(false);
-                                        }
-                                      }}
-                                      className="text-amber-600 hover:underline cursor-pointer ml-2"
-                                    >
-                                      {u.isActive ? "Pasife Al" : "Aktif Et"}
-                                    </button>
-
                                     {currentUser && normalizeRole(currentUser.role) === 'ADMIN' && (
                                       <button
-                                        onClick={async () => {
+                                        type="button"
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
                                           const firstConfirm = confirm("Bu kullanıcı tamamen silinecek. Emin misiniz?");
                                           if (firstConfirm) {
                                             const typedUsername = prompt(`Lütfen silme işlemini onaylamak için kullanıcının kullanıcı adını ("${u.username}") yazın:`);
@@ -835,39 +828,48 @@ export default function AyarlarPage() {
               <p className="text-gray-500 text-center py-4">Henüz bir değişiklik kaydı bulunmuyor.</p>
             ) : (
               <div className="space-y-3">
-                {auditLog.map((entry) => (
-                  <div key={entry.id} className="p-3 rounded-lg border border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-950/20 space-y-2">
-                    <div className="flex justify-between items-center text-[10px]">
-                      <span className="font-bold text-gray-700 dark:text-gray-300">
-                        Kullanıcı ID: {entry.entityId}
-                      </span>
-                      <span className="text-gray-500">
-                        {new Date(entry.changedAt).toLocaleString('tr-TR')}
-                      </span>
-                    </div>
-                    <div className="text-[11px]">
-                      <span className="font-semibold">Değişen Alanlar:</span> <span className="font-mono text-indigo-600 dark:text-indigo-400">{entry.changedFields?.join(', ') || entry.field}</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 text-[10px] pt-1">
-                      <div>
-                        <span className="font-semibold text-red-500">Eski Bilgiler:</span>
-                        <pre className="mt-1 p-1.5 rounded bg-red-500/5 border border-red-500/10 font-mono text-[9px] whitespace-pre-wrap overflow-auto max-h-[80px]">
-                          {entry.beforeSnapshot ? JSON.stringify(entry.beforeSnapshot, null, 2) : 'Yok'}
-                        </pre>
+                {auditLog.map((entry) => {
+                  const hasPasswordChange = entry.changedFields?.includes('passwordChanged') || entry.field?.includes('password');
+                  const displayFields = entry.changedFields?.map(f => f === 'passwordChanged' ? 'Şifre Değişikliği' : f).join(', ') || entry.field;
+                  return (
+                    <div key={entry.id} className="p-3 rounded-lg border border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-950/20 space-y-2">
+                      <div className="flex justify-between items-center text-[10px]">
+                        <span className="font-bold text-gray-700 dark:text-gray-300">
+                          Kullanıcı ID: {entry.entityId}
+                        </span>
+                        <span className="text-gray-500">
+                          {new Date(entry.changedAt).toLocaleString('tr-TR')}
+                        </span>
                       </div>
-                      <div>
-                        <span className="font-semibold text-green-500">Yeni Bilgiler:</span>
-                        <pre className="mt-1 p-1.5 rounded bg-green-500/5 border border-green-500/10 font-mono text-[9px] whitespace-pre-wrap overflow-auto max-h-[80px]">
-                          {entry.afterSnapshot ? JSON.stringify(entry.afterSnapshot, null, 2) : 'Yok'}
-                        </pre>
+                      <div className="text-[11px]">
+                        <span className="font-semibold">Değişen Alanlar:</span> <span className="font-mono text-indigo-600 dark:text-indigo-400">{displayFields}</span>
+                      </div>
+                      {hasPasswordChange && (
+                        <div className="text-[10px] text-amber-655 dark:text-amber-450 font-semibold bg-amber-500/5 border border-amber-500/10 p-1.5 rounded">
+                          🔒 Şifre değiştirildi
+                        </div>
+                      )}
+                      <div className="grid grid-cols-2 gap-4 text-[10px] pt-1">
+                        <div>
+                          <span className="font-semibold text-red-500">Eski Bilgiler:</span>
+                          <pre className="mt-1 p-1.5 rounded bg-red-500/5 border border-red-500/10 font-mono text-[9px] whitespace-pre-wrap overflow-auto max-h-[80px]">
+                            {entry.beforeSnapshot ? JSON.stringify(sanitizeAuditSnapshot(entry.beforeSnapshot), null, 2) : 'Yok'}
+                          </pre>
+                        </div>
+                        <div>
+                          <span className="font-semibold text-green-500">Yeni Bilgiler:</span>
+                          <pre className="mt-1 p-1.5 rounded bg-green-500/5 border border-green-500/10 font-mono text-[9px] whitespace-pre-wrap overflow-auto max-h-[80px]">
+                            {entry.afterSnapshot ? JSON.stringify(sanitizeAuditSnapshot(entry.afterSnapshot), null, 2) : 'Yok'}
+                          </pre>
+                        </div>
+                      </div>
+                      <div className="text-[9px] text-gray-400 dark:text-gray-500 flex justify-between pt-1">
+                        <span>Değiştiren: {entry.changedBy}</span>
+                        <span>Neden: {entry.reason}</span>
                       </div>
                     </div>
-                    <div className="text-[9px] text-gray-400 dark:text-gray-500 flex justify-between pt-1">
-                      <span>Değiştiren: {entry.changedBy}</span>
-                      <span>Neden: {entry.reason}</span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
