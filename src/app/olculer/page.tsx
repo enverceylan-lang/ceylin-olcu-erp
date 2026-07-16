@@ -229,6 +229,7 @@ export default function OlculerPage() {
     setMounted(true);
     loadDrafts();
     loadInbound();
+    measurementStore.loadMeasurements();
   }, []);
 
   if (!mounted) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
