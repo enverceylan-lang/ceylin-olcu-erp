@@ -1,9 +1,16 @@
 import { useMeasurementStore } from '@/store/measurementStore';
-import { InboundMeasurement, localDraftDb, updateInboundStatus } from './localDraftDb';
-import { Customer, Room, WindowItem, ProductMeasurement, generateUUID, useStore } from '@/store/useStore';
+import {
+  InboundMeasurement,
+  localDraftDb,
+} from './localDraftDb';
+import {
+  Customer,
+  Room,
+  generateUUID,
+  useStore,
+} from '@/store/useStore';
 import { saveLocalCustomer, loadLocalCustomers } from './localCustomerDb';
 import { ensureMeasurementId } from './measurementIdHelper';
-
 /**
  * Strip only heavy binary/base64 data from media arrays, keeping all metadata
  * (localKey, thumbnailRef, mimeType, size, etc.) so references are not lost.
@@ -140,17 +147,58 @@ export async function processAsNewCustomer(inbound: InboundMeasurement, adminId:
     isDeleted: false
   };
 
-  await saveLocalCustomer(newCustomer);
-
-  // Also extract products to measurementStore
+  // Extract measurements first. Customer tree stores only room/opening structure;
+  // measurements are persisted in the independent measurement database.
   const extractedMeas: any[] = [];
-  newCustomer.rooms?.forEach(r => r.windows?.forEach(w => w.products?.forEach(p => extractedMeas.push({ ...p, customerId: newCustomer.id, roomId: r.id, windowId: w.id }))));
-  if (extractedMeas.length > 0) await useMeasurementStore.getState().batchUpsertMeasurements(extractedMeas);
+  newCustomer.rooms?.forEach((room) =>
+    room.windows?.forEach((windowItem) =>
+      windowItem.products?.forEach((measurement) =>
+        extractedMeas.push({
+          ...measurement,
+          customerId: newCustomer.id,
+          roomId: room.id,
+          windowId: windowItem.id,
+        })
+      )
+    )
+  );
 
-  // Clear products from nested structure to enforce single-source-of-truth
-  newCustomer.rooms?.forEach(r => r.windows?.forEach(w => w.products = []));
-  useStore.getState().addCustomer(newCustomer);
-  
+  const structuralCustomer: Customer = {
+    ...newCustomer,
+    rooms: (newCustomer.rooms || []).map((room) => ({
+      ...room,
+      windows: (room.windows || []).map((windowItem) => ({
+        ...windowItem,
+        products: [],
+      })),
+    })),
+  };
+
+  if (extractedMeas.length > 0) {
+    await useMeasurementStore
+      .getState()
+      .batchUpsertMeasurements(extractedMeas);
+  }
+
+  // addCustomer() forces rooms: []; use direct state insertion so inbound rooms survive.
+  await saveLocalCustomer(structuralCustomer);
+  useStore.setState((state) => {
+    const exists = state.customers.some(
+      (customer) => customer.id === structuralCustomer.id
+    );
+
+    return {
+      customers: exists
+        ? state.customers.map((customer) =>
+            customer.id === structuralCustomer.id
+              ? structuralCustomer
+              : customer
+          )
+        : [structuralCustomer, ...state.customers],
+      syncStatus: 'pending',
+    };
+  });
+
   await localDraftDb.inboundMeasurements.update(inbound.changeId, { 
     status: 'CREATED_CUSTOMER',
     createdCustomerId: newCustomer.id
@@ -198,16 +246,47 @@ export async function processAsMerge(inbound: InboundMeasurement, customerId: st
     updatedAt: new Date().toISOString()
   };
 
-  await saveLocalCustomer(updatedCustomer);
-
-  // Also extract products to measurementStore
+  // Persist only measurements arriving with this inbound payload.
   const extractedMeas2: any[] = [];
-  updatedCustomer.rooms?.forEach(r => r.windows?.forEach(w => w.products?.forEach(p => extractedMeas2.push({ ...p, customerId: updatedCustomer.id, roomId: r.id, windowId: w.id }))));
-  if (extractedMeas2.length > 0) await useMeasurementStore.getState().batchUpsertMeasurements(extractedMeas2);
+  newRooms.forEach((room) =>
+    room.windows?.forEach((windowItem) =>
+      windowItem.products?.forEach((measurement) =>
+        extractedMeas2.push({
+          ...measurement,
+          customerId: updatedCustomer.id,
+          roomId: room.id,
+          windowId: windowItem.id,
+        })
+      )
+    )
+  );
 
-  // Clear products from nested structure to enforce single-source-of-truth
-  updatedCustomer.rooms?.forEach(r => r.windows?.forEach(w => w.products = []));
-  useStore.getState().updateCustomer(updatedCustomer.id, { rooms: updatedCustomer.rooms, updatedAt: updatedCustomer.updatedAt });
+  if (extractedMeas2.length > 0) {
+    await useMeasurementStore
+      .getState()
+      .batchUpsertMeasurements(extractedMeas2);
+  }
+
+  const structuralUpdatedCustomer: Customer = {
+    ...updatedCustomer,
+    rooms: (updatedCustomer.rooms || []).map((room) => ({
+      ...room,
+      windows: (room.windows || []).map((windowItem) => ({
+        ...windowItem,
+        products: [],
+      })),
+    })),
+  };
+
+  await saveLocalCustomer(structuralUpdatedCustomer);
+  useStore.setState((state) => ({
+    customers: state.customers.map((customer) =>
+      customer.id === structuralUpdatedCustomer.id
+        ? structuralUpdatedCustomer
+        : customer
+    ),
+    syncStatus: 'pending',
+  }));
 
   await localDraftDb.inboundMeasurements.update(inbound.changeId, {
     status: 'LINKED_TO_CUSTOMER',
