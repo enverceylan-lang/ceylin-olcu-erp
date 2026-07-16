@@ -14,15 +14,6 @@ function generateUUID(): string {
   });
 }
 
-function utf8ToBase64(str: string): string {
-  if (typeof window !== 'undefined') {
-    return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (_, p1) => {
-      return String.fromCharCode(parseInt(p1, 16));
-    }));
-  }
-  return Buffer.from(str, "utf-8").toString("base64");
-}
-
 // ─── Role Definitions ───
 export type UserRole = 
   | 'ADMIN' 
@@ -584,8 +575,11 @@ interface AuthState {
   users: MockUser[];
   currentUser: MockUser | null;
   auditLog: AuditEntry[];
-  
-  login: (username: string, pin: string) => Promise<boolean>;
+  sessionToken: string | null;
+  sessionExpiresAt: string | null;
+  rememberMe: boolean;
+
+  login: (username: string, pin: string, rememberMe?: boolean) => Promise<boolean>;
   logout: () => void;
   switchUser: (userId: string) => void;
   addAuditEntry: (entry: Omit<AuditEntry, 'id'>) => void;
@@ -600,15 +594,28 @@ interface AuthState {
 const safeAuthStorage = {
   getItem: (name: string) => {
     if (typeof window === "undefined") return null;
-    return window.localStorage.getItem(name);
+    return window.localStorage.getItem(name) || window.sessionStorage.getItem(name);
   },
   setItem: (name: string, value: string) => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(name, value);
+
+    try {
+      const parsed = JSON.parse(value);
+      const rememberMe = parsed?.state?.rememberMe === true;
+      const target = rememberMe ? window.localStorage : window.sessionStorage;
+      const other = rememberMe ? window.sessionStorage : window.localStorage;
+
+      target.setItem(name, value);
+      other.removeItem(name);
+    } catch {
+      window.sessionStorage.setItem(name, value);
+      window.localStorage.removeItem(name);
+    }
   },
   removeItem: (name: string) => {
     if (typeof window === "undefined") return;
     window.localStorage.removeItem(name);
+    window.sessionStorage.removeItem(name);
   },
 };
 
@@ -618,8 +625,11 @@ export const useAuthStore = create<AuthState>()(
       users: INITIAL_USERS,
       currentUser: null, // Start logged out by default
       auditLog: [],
-      
-      login: async (username: string, pin: string) => {
+      sessionToken: null,
+      sessionExpiresAt: null,
+      rememberMe: false,
+
+      login: async (username: string, pin: string, rememberMe = false) => {
         const cleanInputUsername = normalizeUsername(username);
         const cleanInputPin = (pin || '').trim();
         
@@ -640,41 +650,54 @@ export const useAuthStore = create<AuthState>()(
           const response = await fetch('/api/auth/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: cleanInputUsername, password: cleanInputPin })
+            body: JSON.stringify({
+              username: cleanInputUsername,
+              password: cleanInputPin,
+              rememberMe
+            })
           });
 
           if (response.ok) {
             const result = await response.json();
-            if (result.success && result.user) {
-              const remoteUser = normalizeUser(result.user);
-              
-              const loggedInUser = { 
-                ...remoteUser, 
-                password: cleanInputPin, // Keep the plain PIN for auth header during sync/REST
-              };
-              
-              // Update in local users list
-              const updatedUsers = get().users.map((u: MockUser) => {
-                if (u.id === remoteUser.id) {
-                  return loggedInUser;
-                }
-                return u;
+            if (
+              result.success &&
+              result.user &&
+              result.session?.token &&
+              result.session?.expiresAt
+            ) {
+              const remoteUser = normalizeUser({
+                ...result.user,
+                password: undefined
               });
-              
-              // If not found in users list, append it
-              const exists = get().users.some((u: MockUser) => u.id === remoteUser.id);
-              const finalUsers = exists ? updatedUsers : [...get().users, loggedInUser];
 
-              set({ 
-                currentUser: loggedInUser,
-                users: finalUsers
+              const cleanedUsers = get().users.map((u: MockUser) => ({
+                ...u,
+                password: undefined
+              }));
+
+              const exists = cleanedUsers.some(
+                (u: MockUser) => u.id === remoteUser.id
+              );
+
+              const finalUsers = exists
+                ? cleanedUsers.map((u: MockUser) =>
+                    u.id === remoteUser.id ? remoteUser : u
+                  )
+                : [...cleanedUsers, remoteUser];
+
+              set({
+                currentUser: remoteUser,
+                users: finalUsers,
+                sessionToken: result.session.token,
+                sessionExpiresAt: result.session.expiresAt,
+                rememberMe: result.session.rememberMe === true
               });
 
               console.log("Login successful status:", {
-                hasPassword: true,
-                passwordChanged: false,
+                hasSession: true,
                 role: remoteUser.role,
-                active: remoteUser.isActive
+                active: remoteUser.isActive,
+                rememberMe: result.session.rememberMe === true
               });
               return true;
             }
@@ -694,13 +717,17 @@ export const useAuthStore = create<AuthState>()(
         return false;
       },
       
-      logout: () => set({ currentUser: null }),
+      logout: () =>
+        set({
+          currentUser: null,
+          sessionToken: null,
+          sessionExpiresAt: null,
+          rememberMe: false
+        }),
       
-      switchUser: (userId: string) => set((state: AuthState) => {
-        const user = state.users.find((u: MockUser) => u.id === userId);
-        if (!user || !user.isActive) return {};
-        return { currentUser: normalizeUser(user) };
-      }),
+      switchUser: (_userId: string) => {
+        console.warn("Kullanıcı değiştirmek için yeniden giriş yapılmalıdır.");
+      },
       
       addAuditEntry: (entry: Omit<AuditEntry, 'id'>) => set((state: AuthState) => ({
         auditLog: [
@@ -711,7 +738,8 @@ export const useAuthStore = create<AuthState>()(
       
       addUser: async (user: Omit<MockUser, 'id'>) => {
         const currentUser = get().currentUser;
-        if (!currentUser || !currentUser.password) {
+        const sessionToken = get().sessionToken;
+        if (!currentUser || !sessionToken) {
           console.error("Yetkilendirme bilgisi eksik.");
           return false;
         }
@@ -735,7 +763,7 @@ export const useAuthStore = create<AuthState>()(
         };
 
         try {
-          const token = utf8ToBase64(`${currentUser.username}:${currentUser.password}`);
+          const token = sessionToken;
           const response = await fetch('/api/admin/users/update', {
             method: 'POST',
             headers: {
@@ -750,7 +778,7 @@ export const useAuthStore = create<AuthState>()(
             if (result.success && result.user) {
               const addedUser = normalizeUser({
                 ...result.user,
-                password: user.password
+                password: undefined
               });
               set((state: AuthState) => {
                 const userIndex = state.users.findIndex((u: MockUser) => u.id === addedUser.id);
@@ -765,7 +793,7 @@ export const useAuthStore = create<AuthState>()(
                 if (state.currentUser && state.currentUser.id === addedUser.id) {
                   updatedCurrentUser = {
                     ...addedUser,
-                    password: user.password !== undefined ? user.password : state.currentUser.password
+                    password: undefined
                   };
                 }
 
@@ -785,7 +813,8 @@ export const useAuthStore = create<AuthState>()(
       
       updateUser: async (id: string, data: Partial<MockUser>) => {
         const currentUser = get().currentUser;
-        if (!currentUser || !currentUser.password) {
+        const sessionToken = get().sessionToken;
+        if (!currentUser || !sessionToken) {
           console.error("Yetkilendirme bilgisi eksik.");
           return false;
         }
@@ -808,7 +837,7 @@ export const useAuthStore = create<AuthState>()(
         }
 
         try {
-          const token = utf8ToBase64(`${currentUser.username}:${currentUser.password}`);
+          const token = sessionToken;
           const response = await fetch('/api/admin/users/update', {
             method: 'POST',
             headers: {
@@ -887,7 +916,7 @@ export const useAuthStore = create<AuthState>()(
                 const userIndex = state.users.findIndex((u: MockUser) => u.id === id);
                 const updatedUser = {
                   ...updatedUserFromServer,
-                  password: dataCopy.password !== undefined ? dataCopy.password : (targetUserBefore?.password || '')
+                  password: undefined
                 };
 
                 let updatedUsers;
@@ -901,7 +930,7 @@ export const useAuthStore = create<AuthState>()(
                 if (state.currentUser && state.currentUser.id === id) {
                   updatedCurrentUser = {
                     ...updatedUser,
-                    password: dataCopy.password !== undefined ? dataCopy.password : state.currentUser.password
+                    password: undefined
                   };
                 }
 
@@ -921,13 +950,14 @@ export const useAuthStore = create<AuthState>()(
       
       deleteUser: async (id: string) => {
         const currentUser = get().currentUser;
-        if (!currentUser || !currentUser.password) {
+        const sessionToken = get().sessionToken;
+        if (!currentUser || !sessionToken) {
           console.error("Yetkilendirme bilgisi eksik.");
           return { success: false, error: "Yetkilendirme bilgisi eksik." };
         }
 
         try {
-          const token = utf8ToBase64(`${currentUser.username}:${currentUser.password}`);
+          const token = sessionToken;
           const response = await fetch('/api/admin/users/delete', {
             method: 'POST',
             headers: {
@@ -961,13 +991,14 @@ export const useAuthStore = create<AuthState>()(
 
       fetchUsers: async () => {
         const currentUser = get().currentUser;
-        if (!currentUser || !currentUser.password) {
+        const sessionToken = get().sessionToken;
+        if (!currentUser || !sessionToken) {
           console.error("Yetkilendirme bilgisi eksik.");
           return false;
         }
 
         try {
-          const token = utf8ToBase64(`${currentUser.username}:${currentUser.password}`);
+          const token = sessionToken;
           const response = await fetch('/api/admin/users/update', {
             method: 'GET',
             headers: {
@@ -982,7 +1013,7 @@ export const useAuthStore = create<AuthState>()(
                 const existing = get().users.find((ex: MockUser) => ex.id === u.id);
                 return normalizeUser({
                   ...u,
-                  password: existing?.password || ''
+                  password: undefined
                 });
               });
 
@@ -1017,17 +1048,37 @@ export const useAuthStore = create<AuthState>()(
           changed = true;
         }
 
+        users = users.map((u: MockUser) => ({
+          ...u,
+          password: undefined
+        }));
+
         let currentUser = persistedState.currentUser;
-        if (currentUser) {
-          const normCur = normalizeUser(currentUser);
-          const isValid = users.some((u: any) => u.id === normCur.id && u.isActive);
-          if (!isValid) {
-            currentUser = null; // log out invalid/inactive user
-            changed = true;
-          } else if (JSON.stringify(normCur) !== JSON.stringify(currentUser)) {
-            currentUser = normCur;
-            changed = true;
-          }
+        const sessionToken =
+          typeof persistedState.sessionToken === 'string'
+            ? persistedState.sessionToken
+            : null;
+        const sessionExpiresAt =
+          typeof persistedState.sessionExpiresAt === 'string'
+            ? persistedState.sessionExpiresAt
+            : null;
+        const sessionIsValid =
+          !!sessionToken &&
+          !!sessionExpiresAt &&
+          Date.parse(sessionExpiresAt) > Date.now();
+
+        if (currentUser && sessionIsValid) {
+          const normCur = normalizeUser({
+            ...currentUser,
+            password: undefined
+          });
+          const isValid = users.some(
+            (u: any) => u.id === normCur.id && u.isActive
+          );
+
+          currentUser = isValid ? normCur : null;
+        } else {
+          currentUser = null;
         }
 
         let auditLog = persistedState.auditLog;
@@ -1042,7 +1093,10 @@ export const useAuthStore = create<AuthState>()(
           ...persistedState,
           users,
           currentUser,
-          auditLog
+          auditLog,
+          sessionToken: currentUser ? sessionToken : null,
+          sessionExpiresAt: currentUser ? sessionExpiresAt : null,
+          rememberMe: Boolean(currentUser && persistedState.rememberMe === true)
         };
       },
       storage: createJSONStorage(() => safeAuthStorage),

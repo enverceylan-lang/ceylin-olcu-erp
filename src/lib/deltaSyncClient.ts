@@ -11,13 +11,6 @@ import {
 import { useAuthStore } from '@/store/useAuthStore';
 import { getDeviceId } from './deviceIdentity';
 
-// btoa() fails on non-Latin1 characters (e.g. Ş, Ğ, İ, Ü, Ö, Ç).
-function utf8ToBase64(str: string): string {
-  return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (_, p1) => {
-    return String.fromCharCode(parseInt(p1, 16));
-  }));
-}
-
 export function extractMeasurementFromChange(change: any): any {
   if (!change) return null;
   const patch = change.patch || {};
@@ -113,12 +106,12 @@ export async function pushDeltaSyncEvents(): Promise<{
 
     const firstStatus = pendingEvents[0].syncStatus;
 
-    const { currentUser } = useAuthStore.getState();
-    if (!currentUser || !currentUser.username || !currentUser.password) {
+    const { currentUser, sessionToken } = useAuthStore.getState();
+    if (!currentUser || !sessionToken) {
       return {
         success: false,
         pushedCount: 0,
-        errors: ["Local Auth credentials missing."],
+        errors: ["Active session missing."],
         debug: {
           pendingCount: pendingEvents.length,
           apiStatus: 401,
@@ -129,7 +122,7 @@ export async function pushDeltaSyncEvents(): Promise<{
       };
     }
 
-    const token = utf8ToBase64(`${currentUser.username}:${currentUser.password}`);
+    const token = sessionToken;
 
     // Call the server-side API route which uses the Service Role Key
 
@@ -234,12 +227,12 @@ export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise
   errors: string[];
 }> {
   try {
-    const { currentUser } = useAuthStore.getState();
-    if (!currentUser || !currentUser.username || !currentUser.password) {
-      return { success: false, fetchedCount: 0, errors: ["Local Auth credentials missing."] };
+    const { currentUser, sessionToken } = useAuthStore.getState();
+    if (!currentUser || !sessionToken) {
+      return { success: false, fetchedCount: 0, errors: ["Active session missing."] };
     }
 
-    const token = utf8ToBase64(`${currentUser.username}:${currentUser.password}`);
+    const token = sessionToken;
     const draftCursor = await getSyncCursor('draft_changes_cursor');
     const measurementCursor = await getSyncCursor('measurement_changes_cursor');
 
