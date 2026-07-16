@@ -1,16 +1,9 @@
 import { useMeasurementStore } from '@/store/measurementStore';
-import {
-  InboundMeasurement,
-  localDraftDb,
-} from './localDraftDb';
-import {
-  Customer,
-  Room,
-  generateUUID,
-  useStore,
-} from '@/store/useStore';
+import { InboundMeasurement, localDraftDb, updateInboundStatus } from './localDraftDb';
+import { Customer, Room, WindowItem, ProductMeasurement, generateUUID, useStore } from '@/store/useStore';
 import { saveLocalCustomer, loadLocalCustomers } from './localCustomerDb';
 import { ensureMeasurementId } from './measurementIdHelper';
+
 /**
  * Strip only heavy binary/base64 data from media arrays, keeping all metadata
  * (localKey, thumbnailRef, mimeType, size, etc.) so references are not lost.
@@ -40,7 +33,7 @@ function sanitizeMediaArray(arr: any[]): any[] {
  */
 export async function cleanMediaFromRoom(room: any): Promise<Room> {
   const roomId = room.id || `legacy-r-${(room.name || '').replace(/\s/g, '')}` ;
-  const rawWindows = room.windows || [];
+  const rawWindows = room.windows || room.openings || [];
 
   const cleanWindows = await Promise.all(rawWindows.map(async (w: any, wIndex: number) => {
     const winId = w.id || `legacy-w-${roomId}-${(w.name || wIndex).toString().replace(/\s/g, '')}`;
