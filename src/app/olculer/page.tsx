@@ -23,7 +23,10 @@ import {
 } from "@/lib/localDraftDb";
 import { pullInboundMeasurements } from "@/lib/deltaSyncClient";
 import { processAsNewCustomer, processAsMerge } from "@/lib/inboundProcessor";
-import { saveLocalCustomers } from "@/lib/localCustomerDb";
+import {
+  loadLocalCustomers,
+  saveLocalCustomers,
+} from "@/lib/localCustomerDb";
 
 const measurementOpeningId = (measurement: { openingId?: string; windowId?: string }) =>
   measurement.openingId || measurement.windowId || "";
@@ -99,6 +102,11 @@ export default function OlculerPage() {
   const [processingInboundId, setProcessingInboundId] = useState<string | null>(null);
   const [isRepairingOrphans, setIsRepairingOrphans] = useState(false);
   const [completedInboundLinks, setCompletedInboundLinks] = useState<Record<string, string>>({});
+  const [orphanSearchMeasurementId, setOrphanSearchMeasurementId] =
+  useState<string | null>(null);
+
+const [manualRepairingMeasurementId, setManualRepairingMeasurementId] =
+  useState<string | null>(null);
 
   // Cari Rehberi modal state
   const [customerSearchInboundId, setCustomerSearchInboundId] = useState<string | null>(null);
@@ -470,9 +478,8 @@ export default function OlculerPage() {
           .filter(Boolean) as any[];
 
         await saveLocalCustomers(customersToSave);
-        await measurementStore.batchUpsertMeasurements(repairedMeasurements);
-        await measurementStore.loadMeasurements();
-        window.dispatchEvent(new Event("local-customers-updated"));
+await measurementStore.batchUpsertMeasurements(repairedMeasurements);
+await refreshRepairData();
       }
 
       const message =
@@ -488,6 +495,165 @@ export default function OlculerPage() {
       setIsRepairingOrphans(false);
     }
   };
+
+  const refreshRepairData = async () => {
+  const freshCustomers = await loadLocalCustomers();
+
+  useStore.setState({
+    customers: freshCustomers,
+  });
+
+  await measurementStore.loadMeasurements();
+  await loadInbound();
+};
+
+const handleManualOrphanRepair = async (
+  measurementId: string,
+  targetCustomerId: string,
+) => {
+  if (manualRepairingMeasurementId) return;
+
+  const measurement = measurementStore.measurements.find(
+    (item) => item.id === measurementId,
+  );
+
+  const targetCustomer = customers.find(
+    (customer) =>
+      customer.id === targetCustomerId &&
+      !customer.isDeleted &&
+      !customer.isArchived,
+  );
+
+  if (!measurement) {
+    alert("Onarılacak ölçü bulunamadı. Kayıt değiştirilmedi.");
+    return;
+  }
+
+  if (!targetCustomer) {
+    alert("Seçilen cari bulunamadı veya aktif değil. Kayıt değiştirilmedi.");
+    return;
+  }
+
+  const openingId = measurementOpeningId(measurement);
+
+  if (!measurement.roomId || !openingId) {
+    alert(
+      "Ölçünün oda veya açıklık kimliği eksik. Otomatik onarım yapılmadı.",
+    );
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `"${targetCustomer.name}" carisi seçildi.\n\n` +
+      "Bu ölçü yalnız bu cariye bağlanacak. Ölçü değerleri ve ölçü kimliği değişmeyecek.\n\n" +
+      "Devam edilsin mi?",
+  );
+
+  if (!confirmed) return;
+
+  setManualRepairingMeasurementId(measurementId);
+
+  try {
+    const rooms = [...(targetCustomer.rooms || [])];
+
+    let roomIndex = rooms.findIndex(
+      (room: any) =>
+        room.id === measurement.roomId &&
+        !room.isDeleted,
+    );
+
+    if (roomIndex === -1) {
+      rooms.push({
+        id: measurement.roomId,
+        name:
+          (measurement as any).roomName ||
+          (measurement as any).roomLabel ||
+          "Kurtarılan Oda",
+        photos: [],
+        videos: [],
+        windows: [],
+      } as any);
+
+      roomIndex = rooms.length - 1;
+    }
+
+    const room: any = {
+      ...rooms[roomIndex],
+    };
+
+    const windows = Array.isArray(room.windows)
+      ? [...room.windows]
+      : Array.isArray(room.openings)
+        ? [...room.openings]
+        : [];
+
+    const openingExists = windows.some(
+      (opening: any) =>
+        opening.id === openingId &&
+        !opening.isDeleted,
+    );
+
+    if (!openingExists) {
+      windows.push({
+        id: openingId,
+        name:
+          (measurement as any).openingName ||
+          (measurement as any).windowName ||
+          (measurement as any).openingLabel ||
+          "Kurtarılan Açıklık",
+        photos: [],
+        videos: [],
+        products: [],
+      });
+    }
+
+    rooms[roomIndex] = {
+      ...room,
+      windows,
+    };
+
+    const updatedCustomer = {
+      ...targetCustomer,
+      rooms,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const repairedMeasurement = {
+      ...measurement,
+      customerId: targetCustomer.id,
+      openingId,
+      windowId: openingId,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await saveLocalCustomers([updatedCustomer]);
+
+    await measurementStore.batchUpsertMeasurements([
+      repairedMeasurement,
+    ]);
+
+    await refreshRepairData();
+
+    setOrphanSearchMeasurementId(null);
+    setCustomerSearchQuery("");
+
+    alert(
+      `Ölçü "${targetCustomer.name}" carisine bağlandı ve yetim kayıttan çıkarıldı.`,
+    );
+  } catch (error: any) {
+    console.error(
+      "[ManualOrphanRepair] Manuel onarım başarısız:",
+      error,
+    );
+
+    alert(
+      "Manuel onarım tamamlanamadı. Veriler korunuyor. Hata: " +
+        (error?.message || "Bilinmeyen hata"),
+    );
+  } finally {
+    setManualRepairingMeasurementId(null);
+  }
+};
 
   const handleSelectCustomerFromModal = (customerId: string) => {
     if (!customerSearchInboundId) return;
@@ -645,7 +811,24 @@ export default function OlculerPage() {
                       </div>
                     )}
                   </div>
-
+{!display.canAutoRepair && (
+  <button
+    type="button"
+    onClick={() => {
+      setOrphanSearchMeasurementId(measurement.id);
+      setCustomerSearchInboundId(null);
+      setCustomerSearchQuery("");
+    }}
+    disabled={
+      manualRepairingMeasurementId === measurement.id
+    }
+    className="w-full rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-indigo-800 dark:bg-indigo-950/30 dark:text-indigo-300"
+  >
+    {manualRepairingMeasurementId === measurement.id
+      ? "Onarılıyor..."
+      : "Cari Seç ve Onar"}
+  </button>
+)}
                   <details className="text-[10px] text-gray-400">
                     <summary className="cursor-pointer select-none">Teknik kimlikleri göster</summary>
                     <div className="mt-1 break-all">Ölçü: {measurement.id}</div>
@@ -1137,7 +1320,7 @@ export default function OlculerPage() {
       )}
 
       {/* Cari Rehberi Modal */}
-      {customerSearchInboundId && (
+      {(customerSearchInboundId || orphanSearchMeasurementId) && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[85vh]">
             <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-slate-800/50">
@@ -1148,6 +1331,7 @@ export default function OlculerPage() {
               <button
                 onClick={() => {
                   setCustomerSearchInboundId(null);
+                  setOrphanSearchMeasurementId(null);
                   setCustomerSearchQuery("");
                 }}
                 className="text-gray-500 hover:bg-gray-200 dark:hover:bg-slate-700 p-1.5 rounded-lg transition-colors"
@@ -1187,7 +1371,17 @@ export default function OlculerPage() {
                     {searchedCustomers.map(c => (
                       <tr 
                         key={c.id} 
-                        onClick={() => handleSelectCustomerFromModal(c.id)}
+                        onClick={() => {
+  if (orphanSearchMeasurementId) {
+    void handleManualOrphanRepair(
+      orphanSearchMeasurementId,
+      c.id,
+    );
+    return;
+  }
+
+  handleSelectCustomerFromModal(c.id);
+}}
                         className="bg-white border-b dark:bg-gray-800 dark:border-gray-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 cursor-pointer transition-colors"
                       >
                         <td className="px-4 py-3 font-medium text-gray-900 dark:text-white whitespace-nowrap">{c.customerCode || '-'}</td>
