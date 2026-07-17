@@ -186,39 +186,94 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
   const executeDelete = async () => {
     if (!deleteConfirm) return;
-    const { type, data } = deleteConfirm;
 
-    if (type === 'room') {
-      deleteRoom(data.customerId, data.roomId);
-    } else if (type === 'window') {
-      deleteWindow(data.customerId, data.roomId, data.windowId);
-    } else if (type === 'measurement') {
-      deleteProductMeasurement(data.customerId, data.roomId, data.windowId, data.measurementId);
-    } else if (type === 'photo') {
-      if (data.type === 'measurement') {
-        const roomObj = customer?.rooms.find(r => r.id === data.roomId);
-        const winObj = roomObj?.windows.find(w => w.id === data.windowId);
-        const measObj = measurementStore.measurements.find(p => p.id === data.measurementId);
-        if (measObj) {
-          const updatedPhotos = (measObj.photos || []).filter(u => u !== data.url);
-          const updatedVideos = (measObj.videos || []).filter(u => u !== data.url);
-          updateProductMeasurement(data.customerId, data.roomId, data.windowId, data.measurementId, {
-            photos: updatedPhotos,
-            videos: updatedVideos
+    const { type, data } = deleteConfirm;
+    const username =
+      currentUser?.name ||
+      currentUser?.username ||
+      currentUser?.email ||
+      "SYSTEM";
+
+    try {
+      if (type === "room") {
+        await measurementStore.cascadeDeleteRoom(
+          data.customerId,
+          data.roomId,
+          username,
+        );
+        await deleteRoom(data.customerId, data.roomId);
+      } else if (type === "window") {
+        await measurementStore.cascadeDeleteOpening(
+          data.customerId,
+          data.roomId,
+          data.windowId,
+          username,
+        );
+        await deleteWindow(
+          data.customerId,
+          data.roomId,
+          data.windowId,
+        );
+      } else if (type === "measurement") {
+        await deleteProductMeasurement(
+          data.customerId,
+          data.roomId,
+          data.windowId,
+          data.measurementId,
+        );
+      } else if (type === "photo") {
+        if (data.type === "measurement") {
+          const measObj = measurementStore.measurements.find(
+            (measurement) => measurement.id === data.measurementId,
+          );
+
+          if (measObj) {
+            const updatedPhotos = (measObj.photos || []).filter(
+              (url) => url !== data.url,
+            );
+            const updatedVideos = (measObj.videos || []).filter(
+              (url) => url !== data.url,
+            );
+
+            await updateProductMeasurement(
+              data.customerId,
+              data.roomId,
+              data.windowId,
+              data.measurementId,
+              {
+                photos: updatedPhotos,
+                videos: updatedVideos,
+              },
+            );
+          }
+        } else {
+          const addressPhotos = customer?.addressPhotos || [];
+          const updated = addressPhotos.filter(
+            (_, index) => index !== data.index,
+          );
+
+          await updateCustomer(data.customerId, {
+            addressPhotos: updated,
           });
         }
-      } else {
-        const addressPhotos = customer?.addressPhotos || [];
-        const updated = addressPhotos.filter((_, idx) => idx !== data.index);
-        updateCustomer(data.customerId, { addressPhotos: updated });
       }
-    }
 
-    setDeleteConfirm(null);
-    try {
-      await syncNow();
-    } catch (err) {
-      console.error(err);
+      setDeleteConfirm(null);
+      await measurementStore.loadMeasurements();
+
+      try {
+        await syncNow();
+      } catch (syncError) {
+        console.error(syncError);
+      }
+    } catch (error) {
+      console.error(
+        "[CascadeDelete] Silme işlemi tamamlanamadı:",
+        error,
+      );
+      showToast(
+        "Silme işlemi tamamlanamadı. Bağlı kayıtlar korunuyor.",
+      );
     }
   };
 
@@ -723,10 +778,22 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   };
 
   const handleMoveToTrash = async () => {
-    if (confirm("Bu cari ve bağlı tüm kayıtlar çöp kutusuna taşınacaktır. Emin misiniz?")) {
-      await store.moveCustomerToTrash(id, currentUser);
-      await syncNow();
-    }
+    const linkedMeasurementCount = measurementStore.measurements.filter(
+      (measurement) =>
+        measurement.customerId === id &&
+        !measurement.isDeleted,
+    ).length;
+
+    const confirmed = confirm(
+      `Bu cari, tüm odaları, açıklıkları ve bağlı ${linkedMeasurementCount} ölçü çöp kutusuna taşınacaktır.\n\n` +
+        "Cari silindiğinde bağlı ölçüler yetim bırakılmayacaktır. Devam edilsin mi?",
+    );
+
+    if (!confirmed) return;
+
+    await store.moveCustomerToTrash(id, currentUser);
+    await measurementStore.loadMeasurements();
+    await syncNow();
   };
 
   const handleRestoreFromTrash = async () => {

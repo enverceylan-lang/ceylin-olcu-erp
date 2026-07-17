@@ -34,6 +34,17 @@ interface MeasurementState {
   updateMeasurement: (measurement: MeasurementRecord, username: string) => Promise<void>;
   deleteMeasurement: (id: string, username: string) => Promise<void>;
   batchUpsertMeasurements: (measurements: MeasurementRecord[]) => Promise<void>;
+  cascadeDeleteOpening: (
+    customerId: string,
+    roomId: string,
+    openingId: string,
+    username: string
+  ) => Promise<number>;
+  cascadeDeleteRoom: (
+    customerId: string,
+    roomId: string,
+    username: string
+  ) => Promise<number>;
   // Cascade methods for when customer is archived/trashed
   cascadeArchiveCustomer: (customerId: string, batchId: string, username: string) => Promise<void>;
   cascadeRestoreArchivedCustomer: (customerId: string, batchId: string) => Promise<void>;
@@ -203,6 +214,78 @@ export const useMeasurementStore = create<MeasurementState>((set, get) => ({
       enrichedList.forEach(nm => existingMap.set(nm.id, nm));
       return { measurements: Array.from(existingMap.values()) };
     });
+  },
+
+
+  cascadeDeleteOpening: async (customerId, roomId, openingId, username) => {
+    const now = new Date().toISOString();
+    const { measurements } = get();
+
+    const changed = measurements
+      .filter((measurement) =>
+        measurement.customerId === customerId &&
+        measurement.roomId === roomId &&
+        (measurement.openingId || measurement.windowId) === openingId &&
+        !measurement.isDeleted
+      )
+      .map((measurement) => ({
+        ...measurement,
+        isDeleted: true,
+        deletedAt: now,
+        deletedBy: username,
+        deleteSource: 'OPENING_CASCADE'
+      }));
+
+    if (changed.length === 0) return 0;
+
+    await batchSaveLocalMeasurements(changed);
+
+    const changedById = new Map(
+      changed.map((measurement) => [measurement.id, measurement])
+    );
+
+    set((state) => ({
+      measurements: state.measurements.map(
+        (measurement) => changedById.get(measurement.id) || measurement
+      )
+    }));
+
+    return changed.length;
+  },
+
+  cascadeDeleteRoom: async (customerId, roomId, username) => {
+    const now = new Date().toISOString();
+    const { measurements } = get();
+
+    const changed = measurements
+      .filter((measurement) =>
+        measurement.customerId === customerId &&
+        measurement.roomId === roomId &&
+        !measurement.isDeleted
+      )
+      .map((measurement) => ({
+        ...measurement,
+        isDeleted: true,
+        deletedAt: now,
+        deletedBy: username,
+        deleteSource: 'ROOM_CASCADE'
+      }));
+
+    if (changed.length === 0) return 0;
+
+    await batchSaveLocalMeasurements(changed);
+
+    const changedById = new Map(
+      changed.map((measurement) => [measurement.id, measurement])
+    );
+
+    set((state) => ({
+      measurements: state.measurements.map(
+        (measurement) => changedById.get(measurement.id) || measurement
+      )
+    }));
+
+    return changed.length;
   },
 
   cascadeArchiveCustomer: async (customerId, batchId, username) => {
