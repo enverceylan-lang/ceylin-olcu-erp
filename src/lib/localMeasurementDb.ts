@@ -82,6 +82,7 @@ export async function saveLocalMeasurement(measurement: MeasurementRecord): Prom
     await localMeasurementDb.measurements.put(measurement);
   } catch (err) {
     console.error("Local ölçü kaydedilirken hata:", err);
+    throw err;
   }
 }
 
@@ -96,7 +97,7 @@ export async function saveLocalMeasurementWithSync(
       id: measurement.id,
       customerId: measurement.customerId,
       roomId: measurement.roomId,
-      windowId: measurement.windowId,
+      openingId: measurement.openingId,
       entity: 'measurement',
       data: deepSyncSanitize(measurement),
       timestamp: new Date().toISOString()
@@ -133,6 +134,7 @@ export async function saveLocalMeasurementWithSync(
     }
   } catch (err) {
     console.error('Local ölçü sync ile kaydedilirken hata:', err);
+    throw err;
   }
 }
 
@@ -179,5 +181,6 @@ export async function batchSaveLocalMeasurements(
     await localMeasurementDb.measurements.bulkPut(measurements);
   } catch (err) {
     console.error("Toplu local ölçü kaydedilirken hata:", err);
+    throw err;
   }
 }

@@ -20,6 +20,8 @@ export interface InboundMeasurement {
   suggestedCustomerIds?: string[];
   linkedCustomerId?: string;
   createdCustomerId?: string;
+  pendingCustomerId?: string;
+  latestChangeId?: string;
 }
 
 export interface SyncCursor {
@@ -238,61 +240,44 @@ export async function setSyncCursor(key: string, revision: number): Promise<void
 }
 
 export async function saveInboundMeasurement(inbound: InboundMeasurement): Promise<void> {
-  // Prevent duplicate insert if changeId already exists
+  // Idempotency is based only on the immutable event identity.
   const existing = await localDraftDb.inboundMeasurements.get(inbound.changeId);
   if (existing) return;
-  
-  // Strict deduplication requested by user:
-  // If ANY record exists for this entityType + entityId in the pool (even if SKIPPED, LINKED, etc.), 
-  // do NOT insert it again.
+
   const all = await localDraftDb.inboundMeasurements.toArray();
-  const existingEntity = all.find(x => 
-    x.entityId === inbound.entityId && 
-    x.entityType === inbound.entityType
-  );
-  
-  if (existingEntity) {
-    const hasRooms = inbound.patch?.rooms && Array.isArray(inbound.patch.rooms) && inbound.patch.rooms.length > 0;
-    
-    if (inbound.patch?.syncIntent === 'MEASUREMENT_TREE_RECOVERY' && hasRooms) {
-      const now = new Date().toISOString();
-      const rCount = inbound.patch.rooms.length;
-      let oCount = 0, mCount = 0;
-      inbound.patch.rooms.forEach((r: any) => {
-          const w = r.windows || r.openings || [];
-          oCount += w.length;
-          w.forEach((wi: any) => {
-              const p = wi.products || wi.measurements || [];
-              mCount += p.length;
-          });
-      });
+  if (all.some(x => x.latestChangeId === inbound.changeId)) return;
 
-      console.log(`[Inbound] recovery payload upserted {
-  entityType: '${inbound.entityType}',
-  entityIdShort: '${inbound.entityId.substring(0,8)}',
-  roomsCount: ${rCount},
-  openingsCount: ${oCount},
-  measurementsCount: ${mCount},
-  previousStatus: '${existingEntity.status}',
-  newStatus: 'NEW'
-}`);
+  const existingEntity = all
+    .filter(x =>
+      x.entityId === inbound.entityId &&
+      x.entityType === inbound.entityType
+    )
+    .sort((a, b) => b.revision - a.revision)[0];
 
-      const updatedPatch = {
-        ...inbound.patch,
-        _recoveryMetadata: {
-          updatedAt: now,
-          previousStatus: existingEntity.status
-        }
-      };
-
-      await localDraftDb.inboundMeasurements.update(existingEntity.changeId, {
-        patch: updatedPatch,
-        status: 'NEW'
-      });
-      return;
+  // A newer revision is not a duplicate. It upgrades the existing inbound work item
+  // while preserving its local primary key and processing history.
+  if (existingEntity && inbound.revision > existingEntity.revision) {
+    const mergedPatch = { ...(existingEntity.patch || {}), ...(inbound.patch || {}) };
+    if (Array.isArray(existingEntity.patch?.rooms) && existingEntity.patch.rooms.length > 0 &&
+        (!Array.isArray(inbound.patch?.rooms) || inbound.patch.rooms.length === 0)) {
+      mergedPatch.rooms = existingEntity.patch.rooms;
     }
+    const nextStatus: InboundMeasurement['status'] =
+      existingEntity.status === 'NEW' || existingEntity.status === 'MATCH_PENDING'
+        ? 'NEW'
+        : existingEntity.status;
 
-    // If it already exists in the pool and is NOT a valid recovery payload, we do NOT re-add it as NEW.
+    await localDraftDb.inboundMeasurements.update(existingEntity.changeId, {
+      ...inbound,
+      changeId: existingEntity.changeId,
+      latestChangeId: inbound.changeId,
+      patch: mergedPatch,
+      status: nextStatus,
+      pendingCustomerId: existingEntity.pendingCustomerId,
+      linkedCustomerId: existingEntity.linkedCustomerId,
+      createdCustomerId: existingEntity.createdCustomerId,
+      suggestedCustomerIds: existingEntity.suggestedCustomerIds || inbound.suggestedCustomerIds
+    });
     return;
   }
 

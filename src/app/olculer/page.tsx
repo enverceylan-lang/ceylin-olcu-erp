@@ -24,6 +24,18 @@ import {
 import { pullInboundMeasurements } from "@/lib/deltaSyncClient";
 import { processAsNewCustomer, processAsMerge } from "@/lib/inboundProcessor";
 
+const measurementOpeningId = (measurement: { openingId?: string; windowId?: string }) =>
+  measurement.openingId || measurement.windowId || "";
+
+const measurementBelongsTo = (
+  measurement: { customerId: string; roomId: string; openingId?: string; windowId?: string },
+  customerId: string,
+  roomId: string,
+  openingId: string
+) => measurement.customerId === customerId &&
+  measurement.roomId === roomId &&
+  measurementOpeningId(measurement) === openingId;
+
 // ─── Status helpers ────────────────────────────────────────────────────────────
 
 type DraftStatus = FieldMeasurementDraft["syncStatus"];
@@ -114,26 +126,7 @@ export default function OlculerPage() {
 
   const loadInbound = async () => {
     try {
-      let data = await listInboundMeasurements();
-      // Auto-cleanup local duplicates ONLY FOR PENDING ITEMS
-      const pendingData = data.filter(d => d.status === 'NEW' || d.status === 'MATCH_PENDING');
-      const seen = new Set();
-      const duplicatesToRemove: string[] = [];
-      for (const d of pendingData) {
-         const key = `${d.entityType}_${d.entityId}`;
-         if (seen.has(key)) {
-             duplicatesToRemove.push(d.changeId);
-         } else {
-             seen.add(key);
-         }
-      }
-      
-      if (duplicatesToRemove.length > 0) {
-         const { localDraftDb } = await import('@/lib/localDraftDb');
-         await localDraftDb.inboundMeasurements.bulkDelete(duplicatesToRemove);
-         data = await listInboundMeasurements();
-      }
-
+      const data = await listInboundMeasurements();
       setInboundMeasurements(data.filter(d => d.status === 'NEW' || d.status === 'MATCH_PENDING'));
     } catch (err) {}
   };
@@ -260,7 +253,9 @@ export default function OlculerPage() {
         for (const window of activeWindows) {
           photoCount += (window.photos || []).length;
           videoCount += (window.videos || []).length;
-          const activeProducts = measurementStore.measurements.filter(m => m.windowId === window.id && !m.isDeleted);
+          const activeProducts = measurementStore.measurements.filter(m =>
+            measurementBelongsTo(m, customer.id, room.id, window.id) && !m.isDeleted && !m.isArchived
+          );
           measurementCount += activeProducts.length;
           for (const p of activeProducts) {
             photoCount += (p.photos || []).length;
@@ -301,6 +296,14 @@ export default function OlculerPage() {
         (item.customer.phone && item.customer.phone.includes(searchTerm))
     )
     .sort((a, b) => b.sortDate - a.sortDate);
+
+  const orphanMeasurements = measurementStore.measurements.filter((measurement) => {
+    if (measurement.isDeleted || measurement.isArchived) return false;
+    const customer = customers.find(c => c.id === measurement.customerId && !c.isDeleted);
+    const room = customer?.rooms?.find(r => r.id === measurement.roomId && !r.isDeleted);
+    const opening = room?.windows?.find(w => w.id === measurementOpeningId(measurement) && !w.isDeleted);
+    return !customer || !room || !opening;
+  });
 
   const handleSelectCustomerFromModal = (customerId: string) => {
     if (!customerSearchInboundId) return;
@@ -395,6 +398,28 @@ export default function OlculerPage() {
           Müşteri bazında alınan saha ölçüleri ve durum takibi.
         </p>
       </div>
+
+      {orphanMeasurements.length > 0 && (
+        <section className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/20">
+          <h2 className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-300">
+            <AlertCircle className="h-5 w-5" /> Yetim Ölçüler
+            <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs dark:bg-amber-900">{orphanMeasurements.length}</span>
+          </h2>
+          <p className="text-xs text-amber-700 dark:text-amber-400">
+            Bu kayıtlar kalıcı ölçü veritabanında bulunuyor ancak cari, oda veya açıklık bağlantısı tam eşleşmiyor. Kayıtlar silinmedi.
+          </p>
+          <div className="grid gap-2 md:grid-cols-2">
+            {orphanMeasurements.map((measurement) => (
+              <div key={measurement.id} className="rounded-lg border border-amber-200 bg-white p-3 text-xs dark:border-amber-900 dark:bg-gray-900">
+                <div className="font-semibold">Ölçü: {measurement.id}</div>
+                <div>Cari: {measurement.customerId}</div>
+                <div>Oda: {measurement.roomId}</div>
+                <div>Açıklık: {measurementOpeningId(measurement) || "Eksik"}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* V1D Inbound Pool Section */}
       {(currentUser?.role === 'ADMIN' || currentUser?.role === 'MODERATOR') && (
@@ -609,7 +634,7 @@ export default function OlculerPage() {
                   acc +
                   (r.windows || []).reduce(
                     (wacc: number, w: any) =>
-                      wacc + measurementStore.measurements.filter((m: any) => m.windowId === w.id && !m.isDeleted).length,
+                      wacc + (w.products || w.measurements || []).filter((m: any) => !m.isDeleted).length,
                     0
                   ),
                 0
@@ -756,7 +781,7 @@ export default function OlculerPage() {
                             const wCount = (room.windows || []).filter((w: any) => !w.isDeleted).length;
                             const mCount = (room.windows || []).reduce(
                               (a: number, w: any) =>
-                                a + measurementStore.measurements.filter((m: any) => m.windowId === w.id && !m.isDeleted).length,
+                                a + (w.products || w.measurements || []).filter((m: any) => !m.isDeleted).length,
                               0
                             );
                             return (
@@ -1070,12 +1095,12 @@ export default function OlculerPage() {
                                   </h5>
 
                                   <div className="space-y-2 pl-5">
-                                    {measurementStore.measurements.filter((p) => p.windowId === window.id && !p.isDeleted).length === 0 ? (
+                                    {measurementStore.measurements.filter((p) => measurementBelongsTo(p, customer.id, room.id, window.id) && !p.isDeleted && !p.isArchived).length === 0 ? (
                                       <p className="text-[11px] text-gray-400 italic">Alınmış ölçü kaydı yok.</p>
                                     ) : null}
 
                                     {measurementStore.measurements
-                                        .filter((p) => p.windowId === window.id && !p.isDeleted)
+                                        .filter((p) => measurementBelongsTo(p, customer.id, room.id, window.id) && !p.isDeleted && !p.isArchived)
                                         .sort((a, b) => {
                                           const timeA = new Date(a.createdAt || a.measuredDate || 0).getTime();
                                           const timeB = new Date(b.createdAt || b.measuredDate || 0).getTime();

@@ -19,14 +19,16 @@ export function extractMeasurementFromChange(change: any): any {
   if (patch && patch.data && typeof patch.data === 'object' && patch.data.id) {
     const canonical = patch.data;
     if (canonical.id && typeof canonical.id === 'string') {
-      return canonical;
+      const openingId = canonical.openingId || canonical.windowId;
+      return openingId ? { ...canonical, openingId } : canonical;
     }
   }
 
   // Rule 2: Legacy format has change.patch directly as canonical measurement
   if (patch && patch.id && typeof patch.id === 'string') {
     if (patch.customerId || patch.windowId || patch.roomId || patch.templateType || patch.rawValues) {
-      return patch;
+      const openingId = patch.openingId || patch.windowId;
+      return openingId ? { ...patch, openingId } : patch;
     }
   }
 
@@ -35,7 +37,7 @@ export function extractMeasurementFromChange(change: any): any {
 
 export function isMeasurementEmpty(m: any): boolean {
   if (!m) return true;
-  if (!m.id || !m.customerId || !m.roomId || !m.windowId) return true;
+  if (!m.id || !m.customerId || !m.roomId || !(m.openingId || m.windowId)) return true;
   if (!m.templateType) return true;
   if (!m.rawValues || typeof m.rawValues !== 'object' || Object.keys(m.rawValues).length === 0) {
     return true;
@@ -256,52 +258,27 @@ export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise
     }
 
     const rawChanges = data.changes || [];
-    let maxDraftRevision = draftCursor;
-    let maxMeasurementRevision = measurementCursor;
+    let appliedDraftRevision = draftCursor;
+    let appliedMeasurementRevision = measurementCursor;
 
-    // Deduplicate changes by entity_id, merging properties for the same entity in order of revision
+    // changeId is the only event idempotency key. Entity revisions must be applied in order.
     rawChanges.sort((a: any, b: any) => a.revision - b.revision);
+    const changes = rawChanges;
 
-    const latestChanges = new Map<string, any>();
-    for (const change of rawChanges) {
-       const key = `${change.entity_type}_${change.entity_id}`;
-       const existing = latestChanges.get(key);
-
-       if (!existing) {
-           latestChanges.set(key, change);
-       } else {
-           // Merge the patches
-           const mergedPatch = { ...existing.patch, ...change.patch };
-
-           // Ensure critical arrays are not overwritten by undefined, missing fields, or empty arrays in subsequent patches
-           // An empty array in a later patch shouldn't wipe out existing rooms unless explicitly instructed via a deletion operation (which we don't have for rooms yet).
-           if (existing.patch && existing.patch.rooms && existing.patch.rooms.length > 0) {
-               if (!change.patch || !change.patch.rooms || change.patch.rooms.length === 0) {
-                   mergedPatch.rooms = existing.patch.rooms;
-               }
-           }
-
-           latestChanges.set(key, {
-               ...change,
-               patch: mergedPatch
-           });
-       }
-
-       // Advance cursors based on raw changes to not miss any revisions
-       if (change.sourceTable === 'draft_changes' && change.revision > maxDraftRevision) {
-         maxDraftRevision = change.revision;
-       }
-       if (change.sourceTable === 'measurement_changes' && change.revision > maxMeasurementRevision) {
-         maxMeasurementRevision = change.revision;
-       }
-    }
-
-    const changes = Array.from(latestChanges.values());
+    const commitCursor = async (change: any) => {
+      if (change.sourceTable === 'draft_changes' && change.revision > appliedDraftRevision) {
+        await setSyncCursor('draft_changes_cursor', change.revision);
+        appliedDraftRevision = change.revision;
+      } else if (change.sourceTable === 'measurement_changes' && change.revision > appliedMeasurementRevision) {
+        await setSyncCursor('measurement_changes_cursor', change.revision);
+        appliedMeasurementRevision = change.revision;
+      }
+    };
 
 
     let rCount = 0, pCount = 0;
     let hasRaw = false;
-    changes.forEach(change => {
+    changes.forEach((change: any) => {
         const p = change.patch || {};
         if (p.rooms && Array.isArray(p.rooms)) {
             rCount += p.rooms.length;
@@ -395,8 +372,10 @@ export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise
 
           await saveTransferReceipt(failedReceipt);
           console.error('[DeltaSyncClient] Failed to apply MEASUREMENT event', err);
+          throw err;
         }
 
+        await commitCursor(change);
         continue;
       }
 
@@ -410,6 +389,7 @@ export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise
 
             if (!hasRooms && isStatusOnly) {
                 console.warn(`[DeltaSyncClient] Skipping status-only DRAFT patch lacking measurements: ${change.change_id}`);
+                await commitCursor(change);
                 continue;
             }
         }
@@ -442,13 +422,7 @@ export async function pullInboundMeasurements(allLocalCustomers: any[]): Promise
           await saveInboundMeasurement(inbound);
         }
       }
-    }
-
-    if (maxDraftRevision > draftCursor) {
-      await setSyncCursor('draft_changes_cursor', maxDraftRevision);
-    }
-    if (maxMeasurementRevision > measurementCursor) {
-      await setSyncCursor('measurement_changes_cursor', maxMeasurementRevision);
+      await commitCursor(change);
     }
 
     return { success: true, fetchedCount: changes.length, errors: [] };

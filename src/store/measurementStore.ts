@@ -12,7 +12,9 @@ import {
 export interface MeasurementRecord extends ProductMeasurement {
   customerId: string;
   roomId: string;
-  windowId: string;
+  openingId: string;
+  /** Legacy compatibility only. New code must use openingId. */
+  windowId?: string;
   isDeleted?: boolean;
   deletedAt?: string;
   deletedBy?: string;
@@ -40,7 +42,7 @@ interface MeasurementState {
 }
 
 function enrichMeasurement(m: MeasurementRecord): MeasurementRecord {
-  const copy = { ...m };
+  const copy = normalizeMeasurementIdentity(m);
 
   // 1. Initialize selectedProducts if missing
   if (!copy.selectedProducts || copy.selectedProducts.length === 0) {
@@ -143,6 +145,17 @@ function enrichMeasurement(m: MeasurementRecord): MeasurementRecord {
   return copy;
 }
 
+function normalizeMeasurementIdentity(
+  m: MeasurementRecord,
+  requireOpeningId = true
+): MeasurementRecord {
+  const openingId = m.openingId || m.windowId || '';
+  if (!openingId && requireOpeningId) {
+    throw new Error(`Ölçü ${m.id || '(kimliksiz)'} için openingId eksik.`);
+  }
+  return { ...m, openingId };
+}
+
 export const useMeasurementStore = create<MeasurementState>((set, get) => ({
   measurements: [],
   isLoading: false,
@@ -152,7 +165,7 @@ export const useMeasurementStore = create<MeasurementState>((set, get) => ({
     set({ isLoading: true });
     try {
       const data = await loadLocalMeasurements();
-      set({ measurements: data || [], isLoading: false });
+      set({ measurements: (data || []).map((measurement) => normalizeMeasurementIdentity(measurement, false)), isLoading: false });
     } catch (error) {
       console.error("Ölçüler yüklenirken hata:", error);
       set({ isLoading: false });
