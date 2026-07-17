@@ -1440,7 +1440,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                             setIsPrepModalOpen(true);
                           }}
                           className="cursor-pointer hover:underline text-blue-600 dark:text-blue-400"
-                          title="SatÄ±ÅŸa HazÄ±rlÄ±k ve ÃœrÃ¼n SeÃ§imi"
+                          title="Satışa Hazırlık ve Ürün Seçimi"
                         >
                           {room.name}
                         </span>
@@ -1454,9 +1454,9 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                           setIsPrepModalOpen(true);
                         }}
                         className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 cursor-pointer font-bold text-xs border border-emerald-250 bg-emerald-50 dark:bg-emerald-950/30 dark:border-emerald-800/50 px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1"
-                        title="Oda ÃœrÃ¼n SeÃ§imleri ve SatÄ±ÅŸa HazÄ±rlÄ±k"
+                        title="Oda Ürün Seçimleri ve Satışa Hazırlık"
                       >
-                        SatÄ±ÅŸa HazÄ±rlÄ±k
+                        Satışa Hazırlık
                       </button>
                       {canMoveRoom && (
                         <button
