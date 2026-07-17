@@ -288,12 +288,12 @@ export async function pushDeltaSyncEvents(): Promise<{
 
     const firstStatus = pendingEvents[0].syncStatus;
 
-    const { currentUser } = useAuthStore.getState();
-    if (!currentUser || !currentUser.username || !currentUser.password) {
+    const { currentUser, sessionToken } = useAuthStore.getState();
+    if (!currentUser || !sessionToken) {
       return {
         success: false,
         pushedCount: 0,
-        errors: ["Local Auth credentials missing."],
+        errors: ["Oturum anahtarı bulunamadı. Çıkış yapıp yeniden giriş yapın."],
         debug: {
           pendingCount: pendingEvents.length,
           apiStatus: 401,
@@ -304,9 +304,7 @@ export async function pushDeltaSyncEvents(): Promise<{
       };
     }
 
-    const token = utf8ToBase64(
-      `${currentUser.username}:${currentUser.password}`,
-    );
+    const token = sessionToken;
 
     // Call the server-side API route which uses the Service Role Key
 
@@ -418,18 +416,16 @@ export async function pullInboundMeasurements(
   errors: string[];
 }> {
   try {
-    const { currentUser } = useAuthStore.getState();
-    if (!currentUser || !currentUser.username || !currentUser.password) {
+    const { currentUser, sessionToken } = useAuthStore.getState();
+    if (!currentUser || !sessionToken) {
       return {
         success: false,
         fetchedCount: 0,
-        errors: ["Local Auth credentials missing."],
+        errors: ["Oturum anahtarı bulunamadı. Çıkış yapıp yeniden giriş yapın."],
       };
     }
 
-    const token = utf8ToBase64(
-      `${currentUser.username}:${currentUser.password}`,
-    );
+    const token = sessionToken;
     const draftCursor = await getSyncCursor("draft_changes_cursor");
     const measurementCursor = await getSyncCursor("measurement_changes_cursor");
 
