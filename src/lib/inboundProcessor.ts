@@ -291,9 +291,39 @@ async function persistAndVerifyMeasurements(
     );
   }
 
-  await useMeasurementStore.getState().batchUpsertMeasurements(measurements);
+  const now = new Date().toISOString();
+  const normalizedMeasurements = measurements.map((measurement) => {
+    const openingId = measurement.openingId || measurement.windowId;
+    if (!measurement.id || !measurement.customerId || !measurement.roomId || !openingId) {
+      throw new Error(
+        `Geçersiz ölçü bağlantısı: ${measurement.id || "kimliksiz ölçü"}`,
+      );
+    }
+
+    return {
+      ...measurement,
+      openingId,
+      windowId: openingId,
+      updatedAt: now,
+    };
+  });
+
+  // Kimlik mutabakatı (geçici cari -> gerçek cari) normal senkron sürüm
+  // karşılaştırmasına takılmamalı. Aynı ölçü kimliğiyle doğrudan IndexedDB üzerinde
+  // atomik olarak güncellenir; bu işlem yeni/kopya ölçü üretmez.
+  await localMeasurementDb.transaction(
+    "rw",
+    localMeasurementDb.measurements,
+    async () => {
+      await localMeasurementDb.measurements.bulkPut(normalizedMeasurements);
+    },
+  );
+
+  // Zustand belleğini IndexedDB'nin kesin son haliyle eşitle.
+  await useMeasurementStore.getState().loadMeasurements();
+
   const persisted = await localMeasurementDb.measurements.bulkGet(
-    measurements.map((m) => m.id),
+    normalizedMeasurements.map((measurement) => measurement.id),
   );
   const persistedById = new Map(
     persisted
@@ -301,7 +331,7 @@ async function persistAndVerifyMeasurements(
       .map((measurement: any) => [measurement.id, measurement]),
   );
 
-  const invalid = measurements.filter((expected) => {
+  const invalid = normalizedMeasurements.filter((expected) => {
     const actual: any = persistedById.get(expected.id);
     if (!actual) return true;
     return (
@@ -455,6 +485,11 @@ export async function processAsNewCustomer(
     createdCustomerId: structuralCustomer.id,
   });
 
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("local-customers-updated"));
+    window.dispatchEvent(new Event("local-measurements-updated"));
+  }
+
   return structuralCustomer;
 }
 
@@ -534,6 +569,11 @@ export async function processAsMerge(
     status: "LINKED_TO_CUSTOMER",
     linkedCustomerId: structuralUpdatedCustomer.id,
   });
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("local-customers-updated"));
+    window.dispatchEvent(new Event("local-measurements-updated"));
+  }
 
   return structuralUpdatedCustomer;
 }

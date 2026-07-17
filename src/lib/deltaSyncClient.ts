@@ -1,6 +1,6 @@
 import { useMeasurementStore } from "@/store/measurementStore";
 import { useStore } from "@/store/useStore";
-import { saveLocalCustomer } from "./localCustomerDb";
+import { loadLocalCustomers, saveLocalCustomer } from "./localCustomerDb";
 import {
   getPendingSyncEvents,
   markSyncEventsSynced,
@@ -11,6 +11,7 @@ import {
   setSyncCursor,
   saveInboundMeasurement,
   saveTransferReceipt,
+  localDraftDb,
   type InboundMeasurement,
   type TransferReceipt,
 } from "./localDraftDb";
@@ -28,6 +29,30 @@ function utf8ToBase64(str: string): string {
 
 function getOpeningId(measurement: any): string {
   return measurement?.openingId || measurement?.windowId || "";
+}
+
+
+async function buildCompletedInboundCustomerMap(): Promise<Map<string, string>> {
+  const rows = await localDraftDb.inboundMeasurements.toArray();
+  const completed = rows
+    .filter((item) =>
+      (item.status === "LINKED_TO_CUSTOMER" ||
+        item.status === "CREATED_CUSTOMER") &&
+      Boolean(item.linkedCustomerId || item.createdCustomerId),
+    )
+    .sort((a, b) => Number(a.revision || 0) - Number(b.revision || 0));
+
+  const result = new Map<string, string>();
+  for (const item of completed) {
+    const sourceCustomerId = String(item.entityId || "").trim();
+    const targetCustomerId = String(
+      item.linkedCustomerId || item.createdCustomerId || "",
+    ).trim();
+    if (sourceCustomerId && targetCustomerId) {
+      result.set(sourceCustomerId, targetCustomerId);
+    }
+  }
+  return result;
 }
 
 function getInboundCustomerMeta(
@@ -439,6 +464,22 @@ export async function pullInboundMeasurements(
     let maxDraftRevision = draftCursor;
     let maxMeasurementRevision = measurementCursor;
 
+    // The UI snapshot can be stale immediately after an inbound approval.
+    // Merge the persisted customer database into the working set before matching.
+    const persistedCustomers = await loadLocalCustomers();
+    for (const persistedCustomer of persistedCustomers) {
+      const index = allLocalCustomers.findIndex(
+        (customer: any) => customer.id === persistedCustomer.id,
+      );
+      if (index >= 0) allLocalCustomers[index] = persistedCustomer;
+      else allLocalCustomers.push(persistedCustomer);
+    }
+
+    // Permanent source->target reconciliation created by the admin's earlier
+    // "Mevcut Cariye Bağla" or "Yeni Cari Aç" decision.
+    const completedInboundCustomerMap =
+      await buildCompletedInboundCustomerMap();
+
     // Deduplicate changes by entity_id, merging properties for the same entity in order of revision
     rawChanges.sort((a: any, b: any) => a.revision - b.revision);
 
@@ -567,14 +608,24 @@ export async function pullInboundMeasurements(
               `[DeltaSyncClient] Skipping measurement change ${change.change_id}: ${check.error}`,
             );
           } else {
+            const sourceCustomerId = String(
+              canonical.customerId || "",
+            ).trim();
+            const resolvedCustomerId =
+              completedInboundCustomerMap.get(sourceCustomerId) ||
+              sourceCustomerId;
+
             const localCustomer = allLocalCustomers.find(
               (customer: any) =>
-                !customer.isDeleted && customer.id === canonical.customerId,
+                !customer.isDeleted && customer.id === resolvedCustomerId,
             );
 
+            const openingId = getOpeningId(canonical);
             let measurementToPersist = {
               ...canonical,
-              openingId: getOpeningId(canonical),
+              customerId: resolvedCustomerId,
+              openingId,
+              windowId: openingId,
             };
 
             if (localCustomer) {
@@ -589,17 +640,18 @@ export async function pullInboundMeasurements(
               if (customerIndex >= 0) {
                 allLocalCustomers[customerIndex] = updatedCustomer;
               }
-            } else {
-              const sourceCustomerId = String(
-                canonical.customerId || "",
-              ).trim();
-              if (sourceCustomerId) {
-                const meta = getInboundCustomerMeta(change, canonical);
-                unmatchedMeasurementGroups.set(sourceCustomerId, {
-                  latestChange: change,
-                  ...meta,
-                });
+
+              if (resolvedCustomerId !== sourceCustomerId) {
+                console.log(
+                  `[DeltaSyncClient] Reconciled inbound measurement ${canonical.id}: ${sourceCustomerId} -> ${resolvedCustomerId}`,
+                );
               }
+            } else if (sourceCustomerId) {
+              const meta = getInboundCustomerMeta(change, canonical);
+              unmatchedMeasurementGroups.set(sourceCustomerId, {
+                latestChange: change,
+                ...meta,
+              });
             }
 
             await useMeasurementStore
