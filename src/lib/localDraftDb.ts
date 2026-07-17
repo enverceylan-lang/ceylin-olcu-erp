@@ -254,30 +254,39 @@ export async function saveInboundMeasurement(inbound: InboundMeasurement): Promi
     )
     .sort((a, b) => b.revision - a.revision)[0];
 
-  // A newer revision is not a duplicate. It upgrades the existing inbound work item
-  // while preserving its local primary key and processing history.
+  // A newer revision may update an open work item, but it must never be swallowed
+  // by an item that was already linked/created/skipped. A completed item represents
+  // an earlier field transfer; later measurements for the same source customer are
+  // a new piece of work and must appear in the inbound pool again.
   if (existingEntity && inbound.revision > existingEntity.revision) {
-    const mergedPatch = { ...(existingEntity.patch || {}), ...(inbound.patch || {}) };
-    if (Array.isArray(existingEntity.patch?.rooms) && existingEntity.patch.rooms.length > 0 &&
-        (!Array.isArray(inbound.patch?.rooms) || inbound.patch.rooms.length === 0)) {
-      mergedPatch.rooms = existingEntity.patch.rooms;
-    }
-    const nextStatus: InboundMeasurement['status'] =
-      existingEntity.status === 'NEW' || existingEntity.status === 'MATCH_PENDING'
-        ? 'NEW'
-        : existingEntity.status;
+    const isOpenWorkItem =
+      existingEntity.status === 'NEW' ||
+      existingEntity.status === 'MATCH_PENDING';
 
-    await localDraftDb.inboundMeasurements.update(existingEntity.changeId, {
-      ...inbound,
-      changeId: existingEntity.changeId,
-      latestChangeId: inbound.changeId,
-      patch: mergedPatch,
-      status: nextStatus,
-      pendingCustomerId: existingEntity.pendingCustomerId,
-      linkedCustomerId: existingEntity.linkedCustomerId,
-      createdCustomerId: existingEntity.createdCustomerId,
-      suggestedCustomerIds: existingEntity.suggestedCustomerIds || inbound.suggestedCustomerIds
-    });
+    if (isOpenWorkItem) {
+      const mergedPatch = { ...(existingEntity.patch || {}), ...(inbound.patch || {}) };
+      if (Array.isArray(existingEntity.patch?.rooms) && existingEntity.patch.rooms.length > 0 &&
+          (!Array.isArray(inbound.patch?.rooms) || inbound.patch.rooms.length === 0)) {
+        mergedPatch.rooms = existingEntity.patch.rooms;
+      }
+
+      await localDraftDb.inboundMeasurements.update(existingEntity.changeId, {
+        ...inbound,
+        changeId: existingEntity.changeId,
+        latestChangeId: inbound.changeId,
+        patch: mergedPatch,
+        status: 'NEW',
+        pendingCustomerId: existingEntity.pendingCustomerId,
+        linkedCustomerId: existingEntity.linkedCustomerId,
+        createdCustomerId: existingEntity.createdCustomerId,
+        suggestedCustomerIds: existingEntity.suggestedCustomerIds || inbound.suggestedCustomerIds
+      });
+      return;
+    }
+
+    // The previous work item is complete. Keep its audit/history untouched and
+    // insert the newer immutable event as a fresh pool item.
+    await localDraftDb.inboundMeasurements.add(inbound);
     return;
   }
 

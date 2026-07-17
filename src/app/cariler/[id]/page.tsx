@@ -24,6 +24,9 @@ import { MoveRoomModal } from "@/components/modals/MoveRoomModal";
 import { FacadeSegmentsEditor } from "@/components/measurements/FacadeSegmentsEditor";
 import { PlicellCamListEditor } from "@/components/measurements/PlicellCamListEditor";
 
+const measurementOpeningId = (measurement: { openingId?: string; windowId?: string }) =>
+  measurement.openingId || measurement.windowId || "";
+
 export default function CariDetayPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
   const id = unwrappedParams.id;
@@ -278,7 +281,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     // 2. Measurements
     customer.rooms.forEach(room => {
       room.windows?.forEach(win => {
-        measurementStore.measurements.filter(m => m.windowId === win.id && !m.isDeleted).forEach(p => {
+        measurementStore.measurements.filter(m => measurementOpeningId(m) === win.id && !m.isDeleted).forEach(p => {
           const date = p.measuredDate || p.createdAt || customer.createdAt || "";
           if (date) {
             events.push({
@@ -330,7 +333,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       room.windows.forEach((opening, openingIndex) => {
         lines.push(`${openingIndex + 1}.${roomIndex + 1} Açıklık: ${opening.name}`);
 
-        const mProds = measurementStore.measurements.filter(m => m.windowId === opening.id && !m.isDeleted);
+        const mProds = measurementStore.measurements.filter(m => measurementOpeningId(m) === opening.id && !m.isDeleted);
         if (mProds.length === 0) {
           lines.push('  - Ölçü alınmamış');
         }
@@ -1622,7 +1625,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                         {/* MEASUREMENTS LIST */}
                         <div className={measurementViewMode === "GRID" ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3" : "space-y-3"}>
                             {measurementStore.measurements
-                              .filter(m => m.windowId === window.id && !m.isDeleted)
+                              .filter(m => measurementOpeningId(m) === window.id && !m.isDeleted)
                               .sort((a, b) => {
                                 const timeA = new Date(a.createdAt || a.measuredDate || 0).getTime();
                                 const timeB = new Date(b.createdAt || b.measuredDate || 0).getTime();

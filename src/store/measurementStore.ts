@@ -153,7 +153,7 @@ function normalizeMeasurementIdentity(
   if (!openingId && requireOpeningId) {
     throw new Error(`Ölçü ${m.id || '(kimliksiz)'} için openingId eksik.`);
   }
-  return { ...m, openingId };
+  return { ...m, openingId, windowId: m.windowId || openingId };
 }
 
 export const useMeasurementStore = create<MeasurementState>((set, get) => ({

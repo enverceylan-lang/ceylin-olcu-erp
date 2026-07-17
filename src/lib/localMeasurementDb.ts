@@ -68,6 +68,15 @@ class LocalMeasurementDatabase extends Dexie {
 
 export const localMeasurementDb = new LocalMeasurementDatabase();
 
+function normalizeMeasurementLinks(measurement: MeasurementRecord): MeasurementRecord {
+  const openingId = measurement.openingId || measurement.windowId || '';
+  return {
+    ...measurement,
+    openingId,
+    windowId: measurement.windowId || openingId
+  };
+}
+
 export async function loadLocalMeasurements(): Promise<MeasurementRecord[]> {
   try {
     return await localMeasurementDb.measurements.toArray();
@@ -79,7 +88,7 @@ export async function loadLocalMeasurements(): Promise<MeasurementRecord[]> {
 
 export async function saveLocalMeasurement(measurement: MeasurementRecord): Promise<void> {
   try {
-    await localMeasurementDb.measurements.put(measurement);
+    await localMeasurementDb.measurements.put(normalizeMeasurementLinks(measurement));
   } catch (err) {
     console.error("Local ölçü kaydedilirken hata:", err);
     throw err;
@@ -91,15 +100,17 @@ export async function saveLocalMeasurementWithSync(
   username: string
 ): Promise<void> {
   try {
-    await localMeasurementDb.measurements.put(measurement);
+    const normalizedMeasurement = normalizeMeasurementLinks(measurement);
+    await localMeasurementDb.measurements.put(normalizedMeasurement);
 
     const payload = {
-      id: measurement.id,
-      customerId: measurement.customerId,
-      roomId: measurement.roomId,
-      openingId: measurement.openingId,
+      id: normalizedMeasurement.id,
+      customerId: normalizedMeasurement.customerId,
+      roomId: normalizedMeasurement.roomId,
+      openingId: normalizedMeasurement.openingId,
+      windowId: normalizedMeasurement.windowId,
       entity: 'measurement',
-      data: deepSyncSanitize(measurement),
+      data: deepSyncSanitize(normalizedMeasurement),
       timestamp: new Date().toISOString()
     };
 
@@ -178,7 +189,7 @@ export async function batchSaveLocalMeasurements(
   measurements: MeasurementRecord[]
 ): Promise<void> {
   try {
-    await localMeasurementDb.measurements.bulkPut(measurements);
+    await localMeasurementDb.measurements.bulkPut(measurements.map(normalizeMeasurementLinks));
   } catch (err) {
     console.error("Toplu local ölçü kaydedilirken hata:", err);
     throw err;
