@@ -85,7 +85,7 @@ export function calculateMechanicalCurtainM2(widthCm: number, heightCm: number, 
 
 export function buildWhatsAppShortReport(customer: Customer, users: { id: string; name: string }[], measurements: MeasurementRecord[] = []): string {
   const lines: string[] = [
-    `*ÖLÇÜ ERP V1 - SAHA ÖLÇÜ RAPORU*`,
+    `*CEYLİN ERP - SAHA ÖLÇÜ RAPORU*`,
     `Müşteri: ${customer.name}`,
     `Telefon: ${customer.phone || '-'}`,
     `Adres: ${customer.address || customer.mapLocation || '-'}`,
@@ -477,7 +477,7 @@ export function buildWhatsAppShortReport(customer: Customer, users: { id: string
   if (mapsUrl) {
     lines.push(`Konum: ${mapsUrl}`);
   }
-  lines.push('Ölçü ERP V1.0 - Saha Pilot');
+  lines.push('CEYLİN ERP.0 - Saha Pilot');
 
   return lines.join('\n');
 }

@@ -167,7 +167,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
       if (pdfFile && navigator.share && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
         try {
           await navigator.share({
-            title: 'CEYLİN ÖLÇÜ ERP',
+            title: 'CEYLİN ERP',
             files: [pdfFile]
           });
         } catch (err) {
@@ -188,7 +188,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
   const fallbackWhatsApp = (file: File) => {
     if (typeof window === 'undefined') return;
     const wpUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(
-      `CEYLİN ÖLÇÜ ERP - ${customer.name} ölçü raporu hazır.`
+      `CEYLİN ERP - ${customer.name} ölçü raporu hazır.`
     )}`;
     window.open(wpUrl, '_blank');
 
@@ -320,7 +320,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
 
             {/* Report Header Title */}
             <div className="text-center pb-6 border-b border-slate-800 print:border-slate-300">
-              <h1 className="text-2xl font-black tracking-wider text-blue-500 print:text-blue-700">CEYLİN ÖLÇÜ ERP</h1>
+              <h1 className="text-2xl font-black tracking-wider text-blue-500 print:text-blue-700">CEYLİN ERP</h1>
               <h2 className="text-xs font-bold uppercase tracking-widest text-slate-400 print:text-slate-600 mt-1">Saha Ölçü Raporu</h2>
             </div>
 
@@ -823,7 +823,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
 
             {/* Document footer signature */}
             <div className="text-center text-[10px] text-slate-500 print:text-slate-600 mt-6 pt-4 border-t border-slate-850/50 print:border-slate-200">
-              <p>Ölçü ERP V1.0.1 - Saha Pilot Uygulaması</p>
+              <p>CEYLİN ERP - Saha Pilot Uygulaması</p>
             </div>
 
           </div>

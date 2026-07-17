@@ -280,7 +280,7 @@ export async function generateMeasurementPdfBlob(
   doc.setFontSize(18);
   doc.setTextColor(37, 99, 235); // blue-600
   doc.setFont('helvetica', 'bold');
-  doc.text('CEYLIN OLCU ERP', PAGE_WIDTH / 2, y, { align: 'center' });
+  doc.text('CEYLIN ERP', PAGE_WIDTH / 2, y, { align: 'center' });
 
   y += 6;
   doc.setFontSize(10);
@@ -298,7 +298,7 @@ export async function generateMeasurementPdfBlob(
   doc.setTextColor(71, 85, 105);
   doc.setFont('helvetica', 'bold');
 
-  const sanitize = (str: string) => str.replace(/İ/g, 'I').replace(/ı/g, 'i').replace(/Ş/g, 'S').replace(/ş/g, 's').replace(/Ğ/g, 'G').replace(/ğ/g, 'g').replace(/Ü/g, 'U').replace(/ü/g, 'u').replace(/Ö/g, 'O').replace(/ö/g, 'o').replace(/Ç/g, 'C').replace(/ç/g, 'c');
+  const sanitize = (str: string) => str.replace(/Ä°/g, 'I').replace(/Ä±/g, 'i').replace(/Å/g, 'S').replace(/ÅŸ/g, 's').replace(/Ä/g, 'G').replace(/ÄŸ/g, 'g').replace(/Ãœ/g, 'U').replace(/Ã¼/g, 'u').replace(/Ã–/g, 'O').replace(/Ã¶/g, 'o').replace(/Ã‡/g, 'C').replace(/Ã§/g, 'c');
 
   doc.text(`Musteri: ${sanitize(customer.name)}`, MARGIN, y);
   doc.setFont('helvetica', 'normal');
@@ -416,7 +416,7 @@ export async function generateMeasurementPdfBlob(
                         totalM2: g.totalM2
                       }
                     };
-                    mechanicalProducts.push({ p: gObj, index: mechanicalProducts.length, winName: `${win.name} - Parça ${gIdx + 1}` });
+                    mechanicalProducts.push({ p: gObj, index: mechanicalProducts.length, winName: `${win.name} - ParÃ§a ${gIdx + 1}` });
                   });
                 } else {
                   mechanicalProducts.push({ p: pObj, index: mechanicalProducts.length, winName: win.name });
@@ -489,7 +489,7 @@ export async function generateMeasurementPdfBlob(
           if (isCurtain) {
             const facadeSegments = p.rawValues?.facadeSegments;
             if (facadeSegments && Array.isArray(facadeSegments) && facadeSegments.length > 0) {
-              const facadeStr = formatFacadeForReport(facadeSegments).replace(/ç/g, 'c').replace(/ş/g, 's').replace(/ğ/g, 'g').replace(/ı/g, 'i').replace(/ö/g, 'o').replace(/ü/g, 'u').replace(/Ç/g, 'C').replace(/Ş/g, 'S').replace(/Ğ/g, 'G').replace(/İ/g, 'I').replace(/Ö/g, 'O').replace(/Ü/g, 'U');
+              const facadeStr = formatFacadeForReport(facadeSegments).replace(/Ã§/g, 'c').replace(/ÅŸ/g, 's').replace(/ÄŸ/g, 'g').replace(/Ä±/g, 'i').replace(/Ã¶/g, 'o').replace(/Ã¼/g, 'u').replace(/Ã‡/g, 'C').replace(/Å/g, 'S').replace(/Ä/g, 'G').replace(/Ä°/g, 'I').replace(/Ã–/g, 'O').replace(/Ãœ/g, 'U');
               const linesStr = doc.splitTextToSize(facadeStr, 65);
               doc.text(linesStr, MARGIN + 8, innerY);
 

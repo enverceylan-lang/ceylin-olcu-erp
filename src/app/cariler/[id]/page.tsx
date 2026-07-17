@@ -366,7 +366,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
   const buildWhatsAppReport = () => {
     const lines: string[] = [
-      `*ÖLÇÜ ERP V1 - SAHA ÖLÇÜ RAPORU*`,
+      `*CEYLİN ERP - SAHA ÖLÇÜ RAPORU*`,
       `Müşteri: ${customer.name}`,
       `Telefon: ${customer.phone || '-'}`,
       `Adres: ${customer.address || customer.mapLocation || '-'}`,
@@ -420,7 +420,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
     const mapsUrl = getGoogleMapsUrl(customer);
     if (mapsUrl) lines.push(`Konum: ${mapsUrl}`);
-    lines.push('Ölçü ERP V1.0 - Saha Pilot');
+    lines.push('CEYLİN ERP.0 - Saha Pilot');
 
     return lines.join('\n');
   };

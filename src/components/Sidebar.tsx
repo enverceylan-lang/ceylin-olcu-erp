@@ -86,7 +86,7 @@ export function Sidebar() {
         <div className="p-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400">
-              Ölçü ERP
+              CEYLİN ERP
             </h1>
             <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
               V1.0 SAHA PİLOT

@@ -130,7 +130,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             <div className="w-12 h-12 bg-indigo-600/20 text-indigo-400 rounded-2xl flex items-center justify-center mx-auto border border-indigo-500/20">
               <Lock className="w-6 h-6" />
             </div>
-            <h2 className="text-2xl font-bold text-white">Ölçü ERP Giriş</h2>
+            <h2 className="text-2xl font-bold text-white">CEYLİN ERP Giriş</h2>
             <p className="text-xs text-slate-400">Saha pilot sürümüne erişmek için kimliğinizi doğrulayın.</p>
           </div>
 
