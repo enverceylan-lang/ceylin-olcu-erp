@@ -296,6 +296,19 @@ export function createMechanicalPartsFromFacade(
     let currentStart = runStartIndex;
     let currentWidth = 0;
 
+    const pushCurrentPart = (
+      lastIndex: number
+    ): void => {
+      if (currentWidth <= 0) return;
+
+      rawParts.push({
+        groupType: "CAM_PENCERE",
+        firstIndex: currentStart,
+        lastIndex,
+        baseWidthCm: currentWidth
+      });
+    };
+
     for (
       let index = runStartIndex;
       index <= runEndIndex;
@@ -306,40 +319,37 @@ export function createMechanicalPartsFromFacade(
 
       if (segmentWidth <= 0) continue;
 
-      const isFirstPart =
+      const partStartsAtRunStart =
         currentStart === runStartIndex;
 
-      const isLastSegment =
+      const segmentEndsRun =
         index === runEndIndex;
 
-      const projectedWidth =
+      const projectedActualWidth =
         currentWidth +
         segmentWidth +
-        (isFirstPart ? leftOuterAllowance : 0) +
-        (isLastSegment ? rightOuterAllowance : 0);
+        (
+          partStartsAtRunStart
+            ? leftOuterAllowance
+            : 0
+        ) +
+        (
+          segmentEndsRun
+            ? rightOuterAllowance
+            : 0
+        );
 
       /*
-       * Yeni segment eklendiğinde 270 cm aşılacaksa,
-       * mevcut parçayı segment sınırından bitir.
-       *
-       * Örnek:
-       * 80 P + 130 C + 130 C + 80 P
-       *
-       * 80 + 130 = 210
-       * Sonraki 130 eklendiğinde sınır aşılacağı için:
-       * Sol parça: 80 + 130
-       * Sağ parça: 130 + 80
+       * Yeni segment mevcut parçaya eklendiğinde
+       * gerçek mekanik en 270 cm'yi aşacaksa,
+       * önceki segment sınırından parçayı bitir.
        */
       if (
         currentWidth > 0 &&
-        projectedWidth > MAX_MECHANICAL_WIDTH_CM
+        projectedActualWidth >
+          MAX_MECHANICAL_WIDTH_CM
       ) {
-        rawParts.push({
-          groupType: "CAM_PENCERE",
-          firstIndex: currentStart,
-          lastIndex: index - 1,
-          baseWidthCm: currentWidth
-        });
+        pushCurrentPart(index - 1);
 
         currentStart = index;
         currentWidth = segmentWidth;
@@ -348,16 +358,8 @@ export function createMechanicalPartsFromFacade(
       }
     }
 
-    if (currentWidth > 0) {
-      rawParts.push({
-        groupType: "CAM_PENCERE",
-        firstIndex: currentStart,
-        lastIndex: runEndIndex,
-        baseWidthCm: currentWidth
-      });
-    }
+    pushCurrentPart(runEndIndex);
   }
-
   let index = 0;
 
   while (index < segments.length) {
@@ -532,8 +534,25 @@ export function calculateTulleQuantity(
     }
   }
 
+  /*
+   * Kumaş metrajını 10 cm, yani 0.10 metre yukarı tamamla.
+   *
+   * 14.24  -> 14.30
+   * 17.95  -> 18.00
+   * 17.955 -> 18.00
+   *
+   * Number.EPSILON, tam 10 cm katlarının kayan nokta
+   * hassasiyeti yüzünden gereksiz yere bir üst değere
+   * çıkmasını önler.
+   */
   const automaticRoundedMeters =
-    roundMetersUpTo10Cm(rawMeters);
+    Number(
+      (
+        Math.ceil(
+          (rawMeters - Number.EPSILON) * 10
+        ) / 10
+      ).toFixed(2)
+    );
 
   const hasManualOverride =
     Number.isFinite(manualMeters) &&

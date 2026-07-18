@@ -241,7 +241,26 @@ export function createJumboSaleItem(
   parentProductType: string
 ): SaleItem {
   const norm = parentProductType.toUpperCase();
-  const compName = g.jumboPurchaseUnitPrice === 250 ? 'Ağır hizmet mekanizması' : (g.jumboPurchaseUnitPrice === 400 ? 'Güçlendirilmiş üst kasa / ağır sistem' : `Jumbo ${parentProductType} Mekanizması`);
+
+  const parentLabel =
+    norm === 'STOR'
+      ? 'Stor'
+      : norm === 'ZEBRA'
+        ? 'Zebra'
+        : norm === 'AHSAP_JALUZI'
+          ? 'Ahşap Jaluzi'
+          : norm === 'JALUZI' ||
+              norm === 'METAL_JALUZI'
+            ? 'Jaluzi'
+            : parentProductType;
+
+  const compName =
+    norm === 'AHSAP_JALUZI'
+      ? 'Ahşap Jaluzi Güçlendirilmiş Üst Kasa Farkı'
+      : norm === 'JALUZI' ||
+          norm === 'METAL_JALUZI'
+        ? 'Jaluzi Ağır Hizmet Mekanizma Farkı'
+        : `Jumbo ${parentLabel} Mekanizma Farkı`;
 
   let unit: 'm2' | 'mt' | 'adet' = 'mt';
   if (g.jumboUnit === 'PIECE' || g.jumboUnit === 'SET') unit = 'adet';
@@ -252,7 +271,7 @@ export function createJumboSaleItem(
     roomName,
     windowName: `${windowName}${g.sourceSegments?.length > 0 ? ` - Parça ${gIdx + 1}` : ''}`,
     productType: compName,
-    productGroup: 'Mekanik Perde',
+    productGroup: 'Jumbo Mekanizma Farkı',
     width: g.realWidthCm,
     height: g.realHeightCm,
     calcWidth: g.calculatedWidthCm,
@@ -260,10 +279,23 @@ export function createJumboSaleItem(
     quantity: g.quantity,
     metricSize: g.jumboQuantity,
     metricUnit: unit,
-    unitPrice: g.originalSaleUnitPrice || 0, // default sale price
+    unitPrice:
+      g.appliedSaleUnitPrice ??
+      g.originalSaleUnitPrice ??
+      0,
     discount: 0,
-    rowTotal: Number((g.jumboQuantity * (g.originalSaleUnitPrice || 0) * g.quantity).toFixed(2)),
-    note: 'Jumbo Mekanizma Farkı',
+    rowTotal: Number(
+      (
+        Number(g.jumboQuantity || 0) *
+        Number(
+          g.appliedSaleUnitPrice ??
+          g.originalSaleUnitPrice ??
+          0
+        ) *
+        Number(g.quantity || 1)
+      ).toFixed(2)
+    ),
+    note: `${parentLabel} için ek jumbo mekanizma farkı`,
     parentProductRelation: parentItemId,
     isJumboComponent: true
   } as any;

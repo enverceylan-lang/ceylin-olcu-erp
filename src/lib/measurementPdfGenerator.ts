@@ -132,62 +132,205 @@ function buildPdfCalculationSummary(
 
   return parts.join(' | ');
 }
-function drawSimpleTable(doc: jsPDF, startX: number, startY: number, head: string[], body: string[][]): number {
+function drawSimpleTable(
+  doc: jsPDF,
+  startX: number,
+  startY: number,
+  head: string[],
+  body: string[][]
+): number {
   let y = startY;
-  const colWidths = head.map((h, i) => i === 0 ? 30 : i === head.length - 1 ? 50 : 20); // rough widths
 
-  // Draw header
-  doc.setFillColor(241, 245, 249);
-  doc.rect(startX, y, PAGE_WIDTH - startX - MARGIN, 8, 'FD');
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 23, 42);
+  /*
+   * Kullanılabilir A4 genişliği:
+   * 210 - sol boşluk - sağ boşluk.
+   *
+   * Bu genişlikler toplam 176 mm'dir ve
+   * MARGIN + 4 başlangıcında A4 içine sığar.
+   */
+  const colWidths = [
+    27, // Açıklık
+    23, // Ürün tipi
+    14, // Gerçek en
+    14, // Gerçek boy
+    14, // Hesap en
+    14, // Hesap boy
+    9,  // Adet
+    12, // Zincir
+    13, // Birim m2
+    13, // Toplam m2
+    23  // Not
+  ];
 
-  let currentX = startX + 2;
-  head.forEach((h, i) => {
-    doc.text(h, currentX, y + 5);
-    currentX += colWidths[i];
-  });
+  const tableWidth =
+    colWidths.reduce(
+      (total, width) => total + width,
+      0
+    );
 
-  y += 8;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
+  const drawHeader = (): void => {
+    doc.setFillColor(241, 245, 249);
+    doc.setDrawColor(203, 213, 225);
 
-  // Draw body
-  body.forEach(row => {
-    // Check page break for row
-    if (y > PAGE_HEIGHT - 20) {
-      doc.addPage();
-      y = MARGIN;
-    }
+    doc.rect(
+      startX,
+      y,
+      tableWidth,
+      9,
+      'FD'
+    );
 
-    let maxRowHeight = 8;
-    // Calculate row height based on notes wrapping
-    const notesStr = row[row.length - 1];
-    const notesLines = doc.splitTextToSize(notesStr, colWidths[colWidths.length - 1] - 4);
-    if (notesLines.length > 1) {
-      maxRowHeight = notesLines.length * 4 + 4;
-    }
+    doc.setFontSize(6.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42);
 
-    doc.setDrawColor(226, 232, 240);
-    doc.rect(startX, y, PAGE_WIDTH - startX - MARGIN, maxRowHeight);
+    let currentX = startX;
 
-    currentX = startX + 2;
-    row.forEach((cell, i) => {
-      if (i === row.length - 1) {
-        doc.text(notesLines, currentX, y + 5);
-      } else {
-        doc.text(cell, currentX, y + 5);
-      }
-      currentX += colWidths[i];
+    head.forEach((heading, index) => {
+      const width = colWidths[index] || 15;
+
+      const lines = doc.splitTextToSize(
+        heading,
+        Math.max(4, width - 2)
+      );
+
+      doc.text(
+        lines.slice(0, 2),
+        currentX + 1,
+        y + 3.5
+      );
+
+      currentX += width;
     });
 
-    y += maxRowHeight;
+    y += 9;
+
+    doc.setFont(
+      'helvetica',
+      'normal'
+    );
+
+    doc.setFontSize(6.5);
+  };
+
+  /*
+   * Başlık ve ilk satır için yer yoksa
+   * tabloyu yeni sayfadan başlat.
+   */
+  if (y > PAGE_HEIGHT - 30) {
+    doc.addPage();
+    y = MARGIN;
+  }
+
+  drawHeader();
+
+  body.forEach((row) => {
+    const preparedCells = row.map(
+      (cell, index) => {
+        const width =
+          colWidths[index] || 15;
+
+        return doc.splitTextToSize(
+          String(cell ?? ''),
+          Math.max(4, width - 2)
+        );
+      }
+    );
+
+    const maximumLineCount =
+      Math.max(
+        1,
+        ...preparedCells.map(
+          lines => lines.length
+        )
+      );
+
+    const rowHeight =
+      Math.max(
+        8,
+        maximumLineCount * 3.2 + 2
+      );
+
+    /*
+     * Yeni satır sayfaya sığmıyorsa:
+     * yeni sayfa + tablo başlığını tekrar çiz.
+     */
+    if (
+      y + rowHeight >
+      PAGE_HEIGHT - MARGIN
+    ) {
+      doc.addPage();
+      y = MARGIN;
+      drawHeader();
+    }
+
+    doc.setDrawColor(
+      226,
+      232,
+      240
+    );
+
+    doc.rect(
+      startX,
+      y,
+      tableWidth,
+      rowHeight
+    );
+
+    let currentX = startX;
+
+    preparedCells.forEach(
+      (lines, index) => {
+        const width =
+          colWidths[index] || 15;
+
+        /*
+         * Sayısal kolonları sağa,
+         * adet kolonunu ortaya hizala.
+         */
+        const isNumericColumn =
+          index >= 2 &&
+          index <= 9 &&
+          index !== 7;
+
+        const isQuantityColumn =
+          index === 6;
+
+        if (isQuantityColumn) {
+          doc.text(
+            lines,
+            currentX + width / 2,
+            y + 4,
+            {
+              align: 'center'
+            }
+          );
+        } else if (isNumericColumn) {
+          doc.text(
+            lines,
+            currentX + width - 1,
+            y + 4,
+            {
+              align: 'right'
+            }
+          );
+        } else {
+          doc.text(
+            lines,
+            currentX + 1,
+            y + 4
+          );
+        }
+
+        currentX += width;
+      }
+    );
+
+    y += rowHeight;
   });
 
   return y;
 }
-
 /**
  * Draws the curtain diagram via jsPDF primitives.
  */
@@ -260,96 +403,287 @@ function drawCurtainDetailDiagram(doc: jsPDF, x: number, y: number, rawValues: a
   return wallH;
 }
 
-function drawFacadeSegmentsDiagram(doc: jsPDF, x: number, y: number, rawValues: any) {
-  const segments = rawValues.facadeSegments || [];
-  if (segments.length === 0) return 60;
+function drawFacadeSegmentsDiagram(
+  doc: jsPDF,
+  x: number,
+  y: number,
+  rawValues: any
+) {
+  const segments =
+    Array.isArray(rawValues.facadeSegments)
+      ? rawValues.facadeSegments
+      : [];
 
-  const totalWidth = segments.reduce((sum: number, s: any) => sum + (Number(s.widthCm) > 0 ? Number(s.widthCm) : 0), 0);
-  const karton = Number(rawValues.kartonpiyerBoslukCm || 0);
-  const camUstu = Number(rawValues.camUstuCm || 0);
-  const camIci = Number(rawValues.camIciCm || 0);
-  const kaloriferMermer = Number(rawValues.kaloriferMermerBoyuCm || 0);
-  const camAlti = Number(rawValues.camAltiCm || 0);
+  if (segments.length === 0) {
+    return 40;
+  }
 
-  const sol = Number(rawValues.solYukseklikCm || 0);
-  const orta = Number(rawValues.ortaYukseklikCm || 0);
-  const sag = Number(rawValues.sagYukseklikCm || 0);
+  const totalWidth = segments.reduce(
+    (sum: number, segment: any) =>
+      sum + Math.max(
+        0,
+        Number(segment.widthCm || 0)
+      ),
+    0
+  );
 
-  const drawW = 100; // max width for the diagram
-  let currentY = y + 5;
+  const karton =
+    Number(rawValues.kartonpiyerBoslukCm || 0);
+
+  const camUstu =
+    Number(rawValues.camUstuCm || 0);
+
+  const camIci =
+    Number(rawValues.camIciCm || 0);
+
+  const kaloriferMermer =
+    Number(rawValues.kaloriferMermerBoyuCm || 0);
+
+  const camAlti =
+    Number(rawValues.camAltiCm || 0);
+
+  const sol =
+    Number(rawValues.solYukseklikCm || 0);
+
+  const orta =
+    Number(rawValues.ortaYukseklikCm || 0);
+
+  const sag =
+    Number(rawValues.sagYukseklikCm || 0);
+
+  /*
+   * Sağ kolonda kullanılabilir alan yaklaşık 100 mm.
+   * Çizimi ve bütün notları bu alanın içinde tutuyoruz.
+   */
+  const drawW = 96;
+  const segH = 17;
+
+  let currentY = y + 4;
 
   doc.setFontSize(8);
   doc.setTextColor(15, 23, 42);
   doc.setFont('helvetica', 'bold');
-  doc.text(`${totalWidth} EN`, x + drawW/2, currentY, { align: 'center' });
-  currentY += 2;
 
-  const segH = 15;
+  doc.text(
+    `${totalWidth} EN`,
+    x + drawW / 2,
+    currentY,
+    { align: 'center' }
+  );
+
+  currentY += 3;
+
   doc.setDrawColor(15, 23, 42);
   doc.setLineWidth(0.3);
-  doc.rect(x, currentY, drawW, segH);
+
+  doc.rect(
+    x,
+    currentY,
+    drawW,
+    segH
+  );
 
   let currentX = x;
+  let consumedWidth = 0;
 
-  segments.forEach((seg: any, i: number) => {
-    const pct = totalWidth > 0 ? Number(seg.widthCm) / totalWidth : 1/segments.length;
-    const w = Math.max(pct * drawW, 8); // min 8mm
+  segments.forEach(
+    (segment: any, index: number) => {
+      const numericWidth =
+        Math.max(
+          0,
+          Number(segment.widthCm || 0)
+        );
 
-    if (i > 0) {
-      doc.setLineDashPattern([1, 1], 0);
-      doc.line(currentX, currentY, currentX, currentY + segH);
-      doc.setLineDashPattern([], 0);
+      const remainingWidth =
+        drawW - consumedWidth;
+
+      const proportionalWidth =
+        totalWidth > 0
+          ? (numericWidth / totalWidth) * drawW
+          : drawW / segments.length;
+
+      /*
+       * Son segment kalan alanı tamamen kullanır.
+       * Böylece min-width nedeniyle çizim sağa taşmaz.
+       */
+      const segmentDrawWidth =
+        index === segments.length - 1
+          ? remainingWidth
+          : Math.min(
+              remainingWidth,
+              Math.max(6, proportionalWidth)
+            );
+
+      if (index > 0) {
+        doc.setLineDashPattern([1, 1], 0);
+        doc.line(
+          currentX,
+          currentY,
+          currentX,
+          currentY + segH
+        );
+        doc.setLineDashPattern([], 0);
+      }
+
+      doc.setFontSize(6.5);
+      doc.setFont('helvetica', 'bold');
+
+      doc.text(
+        String(numericWidth),
+        currentX + segmentDrawWidth / 2,
+        currentY + 6,
+        { align: 'center' }
+      );
+
+      const rawLabel =
+        String(
+          segment.label ||
+          segment.type ||
+          ''
+        );
+
+      const shortLabel =
+        rawLabel.length > 6
+          ? `${rawLabel.substring(0, 3).toUpperCase()}.`
+          : rawLabel.toUpperCase();
+
+      doc.setFontSize(5.5);
+      doc.setFont('helvetica', 'normal');
+
+      doc.text(
+        shortLabel,
+        currentX + segmentDrawWidth / 2,
+        currentY + 12,
+        {
+          align: 'center',
+          maxWidth: Math.max(
+            4,
+            segmentDrawWidth - 1
+          )
+        }
+      );
+
+      currentX += segmentDrawWidth;
+      consumedWidth += segmentDrawWidth;
     }
-
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`${seg.widthCm}`, currentX + w/2, currentY + 6, { align: 'center' });
-
-    const lbl = seg.label.length > 5 ? seg.label.substring(0,3).toUpperCase() + '.' : seg.label.toUpperCase();
-    doc.setFontSize(6);
-    doc.setFont('helvetica', 'normal');
-    doc.text(lbl, currentX + w/2, currentY + 11, { align: 'center' });
-
-    currentX += w;
-  });
+  );
 
   currentY += segH + 5;
 
-  const rightDetails = [];
-  if (karton > 0) rightDetails.push(`KARTONPIYER B.: ${karton}`);
-  if (camUstu > 0) rightDetails.push(`CAM USTU: ${camUstu}`);
-  if (camIci > 0) rightDetails.push(`CAM ICI: ${camIci}`);
-  if (kaloriferMermer > 0) rightDetails.push(`KALORIFER/MERMER: ${kaloriferMermer}`);
-  if (camAlti > 0) rightDetails.push(`CAM ALTI: ${camAlti}`);
+  const heightParts: string[] = [];
 
-  if (sol > 0 || orta > 0 || sag > 0) {
-    doc.setFontSize(7);
+  if (sol > 0) {
+    heightParts.push(`${sol} SOL YUKS.`);
+  }
+
+  if (orta > 0) {
+    heightParts.push(`${orta} ORTA YUKS.`);
+  }
+
+  if (sag > 0) {
+    heightParts.push(`${sag} SAG YUKS.`);
+  }
+
+  if (heightParts.length > 0) {
+    doc.setFontSize(6.5);
     doc.setFont('helvetica', 'normal');
-    let hTxt = [];
-    if (sol > 0) hTxt.push(`${sol} SOL YUKS.`);
-    if (orta > 0) hTxt.push(`${orta} ORTA YUKS.`);
-    if (sag > 0) hTxt.push(`${sag} SAG YUKS.`);
-    doc.text(hTxt.join('   '), x + drawW/2, currentY, { align: 'center' });
-    currentY += 5;
+    doc.setTextColor(15, 23, 42);
+
+    const heightLines =
+      doc.splitTextToSize(
+        heightParts.join('   '),
+        drawW
+      );
+
+    doc.text(
+      heightLines,
+      x,
+      currentY
+    );
+
+    currentY +=
+      heightLines.length * 3.2 + 2;
   }
 
-  if (rightDetails.length > 0) {
-     let startY = y + 5;
-     doc.setFontSize(6);
-     doc.setLineDashPattern([1, 1], 0);
-     doc.line(x + drawW + 5, y + 5, x + drawW + 5, y + 25);
-     doc.setLineDashPattern([], 0);
+  const detailParts: string[] = [];
 
-     rightDetails.forEach((d) => {
-       doc.text(d, x + drawW + 8, startY);
-       startY += 4;
-     });
-     currentY = Math.max(currentY, startY);
+  if (karton > 0) {
+    detailParts.push(
+      `KARTONPIYER: ${karton}`
+    );
   }
 
-  return Math.max(40, currentY - y);
+  if (camUstu > 0) {
+    detailParts.push(
+      `CAM USTU: ${camUstu}`
+    );
+  }
+
+  if (camIci > 0) {
+    detailParts.push(
+      `CAM ICI: ${camIci}`
+    );
+  }
+
+  if (kaloriferMermer > 0) {
+    detailParts.push(
+      `KALORIFER/MERMER: ${kaloriferMermer}`
+    );
+  }
+
+  if (camAlti > 0) {
+    detailParts.push(
+      `CAM ALTI: ${camAlti}`
+    );
+  }
+
+  if (detailParts.length > 0) {
+    doc.setDrawColor(203, 213, 225);
+
+    doc.line(
+      x,
+      currentY,
+      x + drawW,
+      currentY
+    );
+
+    currentY += 3;
+
+    doc.setFontSize(6);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(71, 85, 105);
+
+    /*
+     * Bilgileri iki kolon halinde çizimin altına yerleştir.
+     */
+    const columnWidth = drawW / 2;
+
+    detailParts.forEach(
+      (detail, index) => {
+        const column = index % 2;
+        const row = Math.floor(index / 2);
+
+        doc.text(
+          detail,
+          x + column * columnWidth,
+          currentY + row * 4,
+          {
+            maxWidth: columnWidth - 2
+          }
+        );
+      }
+    );
+
+    currentY +=
+      Math.ceil(detailParts.length / 2) * 4 +
+      2;
+  }
+
+  return Math.max(
+    45,
+    currentY - y
+  );
 }
-
 function drawSimpleDiagram(doc: jsPDF, x: number, y: number, width: number, height: number) {
   const wallW = 80;
   const wallH = 60;
@@ -589,8 +923,27 @@ export async function generateMeasurementPdfBlob(
 
           doc.setFillColor(248, 250, 252);
           doc.setDrawColor(226, 232, 240);
-          const validNote = getValidNote(p.notes);
-          const boxHeight = validNote ? 65 : 55; // Approximate box height
+          const validNote =
+            getValidNote(p.notes);
+
+          const hasFacadeSegments =
+            Array.isArray(
+              p.rawValues?.facadeSegments
+            ) &&
+            p.rawValues.facadeSegments.length > 0;
+
+          /*
+           * Segmentli cephede çizim + yükseklikler +
+           * kartonpiyer/cam bilgileri daha fazla alan ister.
+           */
+          const boxHeight =
+            hasFacadeSegments
+              ? validNote
+                ? 88
+                : 78
+              : validNote
+                ? 65
+                : 55;
           doc.rect(MARGIN + 4, y, PAGE_WIDTH - MARGIN*2 - 4, boxHeight, 'FD');
 
           let innerY = y + 6;
@@ -765,6 +1118,13 @@ export async function generateMeasurementPdfBlob(
             const totalM2 = item.p.details?.totalM2 !== undefined ? Number(item.p.details.totalM2) : (calcWidth * calcHeight * q) / 10000;
             const unitM2 = totalM2 / q;
 
+            const chainDirection =
+              item.p.details?.chainDirection ||
+              item.p.selectedProducts?.[0]
+                ?.calculation
+                ?.chainDirection ||
+              'RIGHT';
+
             return [
               sanitize(item.winName),
               sanitize(pLabel),
@@ -773,13 +1133,34 @@ export async function generateMeasurementPdfBlob(
               `${calcWidth} cm`,
               `${calcHeight} cm`,
               `${q}`,
+              chainDirection === 'LEFT'
+                ? 'Sol'
+                : 'Sag',
               `${unitM2.toFixed(2)}`,
               `${totalM2.toFixed(2)}`,
               sanitize(getValidNote(item.p.notes) || '-')
             ];
           });
 
-          y = drawSimpleTable(doc, MARGIN + 4, y, ['Aciklik', 'Urun Tipi', 'Gerc.En', 'Gerc.Boy', 'Hesap En', 'Hes.Boy', 'Adet', 'Bir.m2', 'Top.m2', 'Notlar'], tableData) + 10;
+          y = drawSimpleTable(
+            doc,
+            MARGIN + 4,
+            y,
+            [
+              'Aciklik',
+              'Urun Tipi',
+              'Gerc.En',
+              'Gerc.Boy',
+              'Hesap En',
+              'Hes.Boy',
+              'Adet',
+              'Zincir',
+              'Bir.m2',
+              'Top.m2',
+              'Notlar'
+            ],
+            tableData
+          ) + 10;
       }
 
       y += 4;
