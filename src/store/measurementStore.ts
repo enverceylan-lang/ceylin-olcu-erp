@@ -105,7 +105,34 @@ function enrichMeasurement(m: MeasurementRecord): MeasurementRecord {
 
     if (productGroup === 'Mekanik Perde') {
       // Keep only mechanical fields
-      const allowed = ['width', 'height', 'quantity', 'productType'];
+      const allowed = [
+        'width',
+        'height',
+        'quantity',
+        'productType',
+
+        // Sistem ve kullanım seçenekleri
+        'systemType',
+        'chainDirection',
+        'openingType',
+
+        // Detay cephe mekanik hesabı
+        'facadeSegments',
+        'kaloriferMermerBoyuCm',
+        'camUstuCm',
+        'camIciCm',
+        'camAltiCm',
+        'solYukseklikCm',
+        'ortaYukseklikCm',
+        'sagYukseklikCm',
+
+        // Stor ek seçenekleri
+        'hemModel',
+        'etekStockId',
+        'etekUnitPrice',
+        'laserHem',
+        'laserHemPrice'
+      ];
       Object.keys(raw).forEach(key => {
         if (!allowed.includes(key)) {
           delete raw[key];
@@ -124,7 +151,18 @@ function enrichMeasurement(m: MeasurementRecord): MeasurementRecord {
       }
     } else if (productGroup === 'Plicell') {
       // Keep only plicell fields
-      const allowed = ['plicellCamListesi', 'camAdedi', 'ortakCamBoyuCm', 'profilRengi', 'glassWidth', 'glassHeight'];
+      const allowed = [
+        'plicellCamListesi',
+        'camAdedi',
+        'ortakCamBoyuCm',
+        'profilRengi',
+        'glassWidth',
+        'glassHeight',
+        'quantity',
+
+        // Tekli / çiftli sistem
+        'systemType'
+      ];
       Object.keys(raw).forEach(key => {
         if (!allowed.includes(key)) {
           delete raw[key];

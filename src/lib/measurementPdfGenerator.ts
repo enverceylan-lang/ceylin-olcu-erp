@@ -10,6 +10,128 @@ const PAGE_WIDTH = 210;
 const PAGE_HEIGHT = 297;
 const MARGIN = 15;
 
+function buildPdfCalculationSummary(
+  productType: string,
+  calculation: any
+): string {
+  const calc = calculation || {};
+  const type = String(productType || '').toUpperCase();
+  const parts: string[] = [];
+
+  if (calc.systemType === 'DOUBLE') {
+    parts.push('Ciftli Sistem');
+  }
+
+  if (
+    calc.billingWidth !== undefined &&
+    calc.billingHeight !== undefined
+  ) {
+    parts.push(
+      `Hesap: ${calc.billingWidth}x${calc.billingHeight} cm`
+    );
+  } else if (
+    calc.billingWidthCm !== undefined &&
+    calc.billingHeightCm !== undefined
+  ) {
+    parts.push(
+      `Hesap: ${calc.billingWidthCm}x${calc.billingHeightCm} cm`
+    );
+  }
+
+  if (calc.totalM2 !== undefined) {
+    parts.push(
+      `Alan: ${Number(calc.totalM2).toFixed(2)} m2`
+    );
+  }
+
+  if (calc.chainDirection === 'LEFT') {
+    parts.push('Zincir: Sol');
+  } else if (calc.chainDirection === 'RIGHT') {
+    parts.push('Zincir: Sag');
+  }
+
+  if (
+    type === 'DIKEY_STOR' ||
+    type === 'DIKEY_TUL'
+  ) {
+    if (
+      calc.productionWidth !== undefined &&
+      calc.productionHeight !== undefined
+    ) {
+      parts.push(
+        `Uretim: ${calc.productionWidth}x${calc.productionHeight} cm`
+      );
+    }
+
+    if (calc.openingType === 'DOUBLE') {
+      parts.push('Acilim: Ortadan Iki Yana');
+    } else if (calc.openingType === 'SINGLE') {
+      parts.push('Acilim: Tek');
+    }
+  }
+
+  if (type === 'TUL') {
+    if (calc.tulleStyle === 'REGISTER') {
+      parts.push('Model: Register');
+    } else if (calc.tulleStyle === 'CROSSOVER') {
+      parts.push('Model: Kruvaze');
+    } else if (calc.tulleStyle === 'PLEATED') {
+      parts.push('Model: Pileli');
+    }
+
+    if (calc.pleatFactor !== undefined) {
+      parts.push(`Pile: ${calc.pleatFactor}`);
+    }
+
+    if (calc.fabricUsageMeters !== undefined) {
+      parts.push(
+        `Kumas: ${Number(calc.fabricUsageMeters).toFixed(2)} m`
+      );
+    }
+  }
+
+  if (
+    type === 'GUNESLIK' ||
+    type === 'FON'
+  ) {
+    if (calc.fabricUsageMeters !== undefined) {
+      parts.push(
+        `Kumas: ${Number(calc.fabricUsageMeters).toFixed(2)} m`
+      );
+    }
+  }
+
+  if (
+    calc.cutHeightCm !== undefined ||
+    (
+      (type === 'TUL' ||
+       type === 'GUNESLIK' ||
+       type === 'FON') &&
+      calc.billingHeight !== undefined
+    )
+  ) {
+    parts.push(
+      `Kesim Boyu: ${
+        calc.cutHeightCm ??
+        calc.billingHeight
+      } cm`
+    );
+  }
+
+  if (
+    Array.isArray(calc.salesItems) &&
+    calc.salesItems.length > 1
+  ) {
+    parts.push(
+      calc.salesItems
+        .map((item: any) => item.label)
+        .filter(Boolean)
+        .join(' + ')
+    );
+  }
+
+  return parts.join(' | ');
+}
 function drawSimpleTable(doc: jsPDF, startX: number, startY: number, head: string[], body: string[][]): number {
   let y = startY;
   const colWidths = head.map((h, i) => i === 0 ? 30 : i === head.length - 1 ? 50 : 20); // rough widths
@@ -413,7 +535,8 @@ export async function generateMeasurementPdfBlob(
                         ...ap.calculation,
                         billingWidth: g.calculatedWidthCm,
                         billingHeight: g.calculatedHeightCm,
-                        totalM2: g.totalM2
+                        totalM2: g.totalM2,
+                        chainDirection: g.chainDirection
                       }
                     };
                     mechanicalProducts.push({ p: gObj, index: mechanicalProducts.length, winName: `${win.name} - ParÃ§a ${gIdx + 1}` });
@@ -480,9 +603,38 @@ export async function generateMeasurementPdfBlob(
           const isCurtain = p.templateType === 'CURTAIN_DETAIL' || p.templateType === 'CURTAIN';
           const isSimple = p.templateType === 'SIMPLE_WIDTH_HEIGHT';
 
-          innerY += 8;
+          innerY += 6;
+
+          const calculationSummary =
+            buildPdfCalculationSummary(
+              String(p.productType || ''),
+              p.details || {}
+            );
+
+          if (calculationSummary) {
+            doc.setFontSize(7.5);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(37, 99, 235);
+
+            const calculationLines =
+              doc.splitTextToSize(
+                calculationSummary,
+                165
+              );
+
+            doc.text(
+              calculationLines,
+              MARGIN + 8,
+              innerY
+            );
+
+            innerY +=
+              calculationLines.length * 4 + 3;
+          }
+
           doc.setFontSize(9);
           doc.setFont('helvetica', 'normal');
+          doc.setTextColor(15, 23, 42);
 
           const rightColX = MARGIN + 80;
 

@@ -18,7 +18,7 @@ import {
 import { useAuthStore } from "@/store/useAuthStore";
 import { getDeviceId } from "./deviceIdentity";
 
-// btoa() fails on non-Latin1 characters (e.g. Ş, Ğ, İ, Ü, Ö, Ç).
+// btoa() fails on non-Latin1 characters (e.g. Å, Ä, Ä°, Ãœ, Ã–, Ã‡).
 function utf8ToBase64(str: string): string {
   return btoa(
     encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (_, p1) => {
@@ -106,7 +106,7 @@ async function ensureCustomerStructureForMeasurement(
     measurement.openingName ||
     measurement.windowName ||
     measurement.openingLabel ||
-    "Gelen Açıklık";
+    "Gelen AÃ§Ä±klÄ±k";
 
   if (roomIndex === -1) {
     rooms.push({
@@ -293,7 +293,7 @@ export async function pushDeltaSyncEvents(): Promise<{
       return {
         success: false,
         pushedCount: 0,
-        errors: ["Oturum anahtarı bulunamadı. Çıkış yapıp yeniden giriş yapın."],
+        errors: ["Oturum anahtarÄ± bulunamadÄ±. Ã‡Ä±kÄ±ÅŸ yapÄ±p yeniden giriÅŸ yapÄ±n."],
         debug: {
           pendingCount: pendingEvents.length,
           apiStatus: 401,
@@ -421,7 +421,7 @@ export async function pullInboundMeasurements(
       return {
         success: false,
         fetchedCount: 0,
-        errors: ["Oturum anahtarı bulunamadı. Çıkış yapıp yeniden giriş yapın."],
+        errors: ["Oturum anahtarÄ± bulunamadÄ±. Ã‡Ä±kÄ±ÅŸ yapÄ±p yeniden giriÅŸ yapÄ±n."],
       };
     }
 
@@ -472,7 +472,7 @@ export async function pullInboundMeasurements(
     }
 
     // Permanent source->target reconciliation created by the admin's earlier
-    // "Mevcut Cariye Bağla" or "Yeni Cari Aç" decision.
+    // "Mevcut Cariye BaÄŸla" or "Yeni Cari AÃ§" decision.
     const completedInboundCustomerMap =
       await buildCompletedInboundCustomerMap();
 
@@ -549,7 +549,7 @@ export async function pullInboundMeasurements(
       }
     });
     console.log(
-      `[SYNC-DIAGNOSTIC] PC pull sonrası: pulledRawEventCount=${rawChanges.length}, uniqueMergedCount=${changes.length}, mergedRoomsCount=${rCount}, mergedProductsCount=${pCount}, hasRawValues=${hasRaw}`,
+      `[SYNC-DIAGNOSTIC] PC pull sonrasÄ±: pulledRawEventCount=${rawChanges.length}, uniqueMergedCount=${changes.length}, mergedRoomsCount=${rCount}, mergedProductsCount=${pCount}, hasRawValues=${hasRaw}`,
     );
 
     const unmatchedMeasurementGroups = new Map<

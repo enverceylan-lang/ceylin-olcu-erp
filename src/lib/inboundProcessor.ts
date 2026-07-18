@@ -14,7 +14,7 @@ function sanitizeMediaArray(arr: any[]): any[] {
   return arr
     .map((item) => {
       if (typeof item === "string") {
-        // Raw base64 or data-url — drop entirely for local storage
+        // Raw base64 or data-url â€” drop entirely for local storage
         if (item.startsWith("data:") || item.length > 2000) return null;
         return item;
       }
@@ -77,7 +77,7 @@ export async function cleanMediaFromRoom(room: any): Promise<Room> {
   return {
     ...room,
     id: roomId,
-    name: room.name ? `${room.name} - Gelen Ölçü` : "Gelen Ölçü",
+    name: room.name ? `${room.name} - Gelen Ã–lÃ§Ã¼` : "Gelen Ã–lÃ§Ã¼",
     photos: sanitizeMediaArray(room.photos || []),
     videos: sanitizeMediaArray(room.videos || []),
     windows: cleanWindows,
@@ -166,22 +166,84 @@ async function loadMeasurementsForInbound(
   return Array.from(byId.values());
 }
 
-function roomNameFromMeasurement(measurement: any, index: number): string {
-  return (
-    measurement.roomName ||
-    measurement.roomLabel ||
-    measurement.details?.roomName ||
-    `Gelen Oda ${index + 1}`
-  );
+function firstTransferredName(
+  values: unknown[],
+  fallback: string,
+): string {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+
+    const cleaned = value.trim();
+
+    if (
+      cleaned &&
+      cleaned !== "undefined" &&
+      cleaned !== "null"
+    ) {
+      return cleaned;
+    }
+  }
+
+  return fallback;
 }
 
-function openingNameFromMeasurement(measurement: any, index: number): string {
-  return (
-    measurement.openingName ||
-    measurement.windowName ||
-    measurement.openingLabel ||
-    measurement.details?.openingName ||
-    `Açıklık ${index + 1}`
+function roomNameFromMeasurement(
+  measurement: any,
+  index: number,
+): string {
+  return firstTransferredName(
+    [
+      measurement.roomName,
+      measurement.roomLabel,
+
+      measurement.rawValues?.roomName,
+      measurement.rawValues?.roomLabel,
+
+      measurement.details?.roomName,
+      measurement.details?.roomLabel,
+
+      measurement.data?.roomName,
+      measurement.data?.roomLabel,
+
+      measurement.patch?.roomName,
+      measurement.patch?.data?.roomName,
+
+      measurement.room?.name,
+    ],
+    `Gelen Oda ${index + 1}`,
+  ).toLocaleUpperCase("tr-TR");
+}
+
+function openingNameFromMeasurement(
+  measurement: any,
+  index: number,
+): string {
+  return firstTransferredName(
+    [
+      measurement.openingName,
+      measurement.windowName,
+      measurement.openingLabel,
+
+      measurement.rawValues?.openingName,
+      measurement.rawValues?.windowName,
+      measurement.rawValues?.openingLabel,
+
+      measurement.details?.openingName,
+      measurement.details?.windowName,
+      measurement.details?.openingLabel,
+
+      measurement.data?.openingName,
+      measurement.data?.windowName,
+
+      measurement.patch?.openingName,
+      measurement.patch?.windowName,
+      measurement.patch?.data?.openingName,
+      measurement.patch?.data?.windowName,
+
+      measurement.opening?.name,
+      measurement.window?.name,
+    ],
+    `AÃ§Ä±klÄ±k ${index + 1}`,
   );
 }
 
@@ -287,7 +349,7 @@ async function persistAndVerifyMeasurements(
 ): Promise<void> {
   if (measurements.length === 0) {
     throw new Error(
-      "Bu gelen kayda ait geçerli ölçü bulunamadı. Cari işlemi durduruldu.",
+      "Bu gelen kayda ait geÃ§erli Ã¶lÃ§Ã¼ bulunamadÄ±. Cari iÅŸlemi durduruldu.",
     );
   }
 
@@ -296,7 +358,7 @@ async function persistAndVerifyMeasurements(
     const openingId = measurement.openingId || measurement.windowId;
     if (!measurement.id || !measurement.customerId || !measurement.roomId || !openingId) {
       throw new Error(
-        `Geçersiz ölçü bağlantısı: ${measurement.id || "kimliksiz ölçü"}`,
+        `GeÃ§ersiz Ã¶lÃ§Ã¼ baÄŸlantÄ±sÄ±: ${measurement.id || "kimliksiz Ã¶lÃ§Ã¼"}`,
       );
     }
 
@@ -308,9 +370,9 @@ async function persistAndVerifyMeasurements(
     };
   });
 
-  // Kimlik mutabakatı (geçici cari -> gerçek cari) normal senkron sürüm
-  // karşılaştırmasına takılmamalı. Aynı ölçü kimliğiyle doğrudan IndexedDB üzerinde
-  // atomik olarak güncellenir; bu işlem yeni/kopya ölçü üretmez.
+  // Kimlik mutabakatÄ± (geÃ§ici cari -> gerÃ§ek cari) normal senkron sÃ¼rÃ¼m
+  // karÅŸÄ±laÅŸtÄ±rmasÄ±na takÄ±lmamalÄ±. AynÄ± Ã¶lÃ§Ã¼ kimliÄŸiyle doÄŸrudan IndexedDB Ã¼zerinde
+  // atomik olarak gÃ¼ncellenir; bu iÅŸlem yeni/kopya Ã¶lÃ§Ã¼ Ã¼retmez.
   await localMeasurementDb.transaction(
     "rw",
     localMeasurementDb.measurements,
@@ -319,7 +381,7 @@ async function persistAndVerifyMeasurements(
     },
   );
 
-  // Zustand belleğini IndexedDB'nin kesin son haliyle eşitle.
+  // Zustand belleÄŸini IndexedDB'nin kesin son haliyle eÅŸitle.
   await useMeasurementStore.getState().loadMeasurements();
 
   const persisted = await localMeasurementDb.measurements.bulkGet(
@@ -344,7 +406,7 @@ async function persistAndVerifyMeasurements(
 
   if (invalid.length > 0) {
     throw new Error(
-      `Ölçü bağlantı doğrulaması başarısız: ${invalid.map((m) => m.id).join(", ")}`,
+      `Ã–lÃ§Ã¼ baÄŸlantÄ± doÄŸrulamasÄ± baÅŸarÄ±sÄ±z: ${invalid.map((m) => m.id).join(", ")}`,
     );
   }
 }
@@ -373,7 +435,7 @@ export async function processAsNewCustomer(
     existing?.status === "CREATED_CUSTOMER" ||
     existing?.status === "LINKED_TO_CUSTOMER"
   ) {
-    throw new Error("Bu kayıt daha önce işlenmiş.");
+    throw new Error("Bu kayÄ±t daha Ã¶nce iÅŸlenmiÅŸ.");
   }
 
   const patch = inbound.patch || {};
@@ -384,7 +446,7 @@ export async function processAsNewCustomer(
     patchData.customerName ||
     patch.name ||
     patchData.name ||
-    "İsimsiz Müşteri"
+    "Ä°simsiz MÃ¼ÅŸteri"
   ).trim();
   const customerPhone = (
     inbound.customerPhone ||
@@ -416,7 +478,7 @@ export async function processAsNewCustomer(
 
   if (sourceMeasurements.length === 0) {
     throw new Error(
-      "Bu gelen cari kaydına bağlı ölçü bulunamadı. Cari oluşturulmadı; kayıt havuzda korunuyor.",
+      "Bu gelen cari kaydÄ±na baÄŸlÄ± Ã¶lÃ§Ã¼ bulunamadÄ±. Cari oluÅŸturulmadÄ±; kayÄ±t havuzda korunuyor.",
     );
   }
 
@@ -424,7 +486,7 @@ export async function processAsNewCustomer(
   const structuralRooms = mergeRoomStructures(patchRooms, derivedRooms);
   if (structuralRooms.length === 0) {
     throw new Error(
-      "Ölçüler bulundu ancak oda/açıklık bağlantısı oluşturulamadı. Cari oluşturulmadı.",
+      "Ã–lÃ§Ã¼ler bulundu ancak oda/aÃ§Ä±klÄ±k baÄŸlantÄ±sÄ± oluÅŸturulamadÄ±. Cari oluÅŸturulmadÄ±.",
     );
   }
 
@@ -508,13 +570,13 @@ export async function processAsMerge(
     existingInbound?.status === "CREATED_CUSTOMER" ||
     existingInbound?.status === "LINKED_TO_CUSTOMER"
   ) {
-    throw new Error("Bu kayıt daha önce işlenmiş.");
+    throw new Error("Bu kayÄ±t daha Ã¶nce iÅŸlenmiÅŸ.");
   }
 
   const customers = await loadLocalCustomers();
   const targetCustomer = customers.find((c) => c.id === customerId);
   if (!targetCustomer) {
-    throw new Error("Hedef müşteri bulunamadı.");
+    throw new Error("Hedef mÃ¼ÅŸteri bulunamadÄ±.");
   }
 
   const patch = inbound.patch || {};
@@ -531,7 +593,7 @@ export async function processAsMerge(
 
   if (sourceMeasurements.length === 0) {
     throw new Error(
-      "Bu gelen kayda bağlı ölçü bulunamadı. Cari bağlantısı yapılmadı; kayıt havuzda korunuyor.",
+      "Bu gelen kayda baÄŸlÄ± Ã¶lÃ§Ã¼ bulunamadÄ±. Cari baÄŸlantÄ±sÄ± yapÄ±lmadÄ±; kayÄ±t havuzda korunuyor.",
     );
   }
 
@@ -539,7 +601,7 @@ export async function processAsMerge(
   const incomingStructures = mergeRoomStructures(patchRooms, derivedRooms);
   if (incomingStructures.length === 0) {
     throw new Error(
-      "Ölçüler bulundu ancak oda/açıklık bağlantısı oluşturulamadı. Cari bağlantısı yapılmadı.",
+      "Ã–lÃ§Ã¼ler bulundu ancak oda/aÃ§Ä±klÄ±k baÄŸlantÄ±sÄ± oluÅŸturulamadÄ±. Cari baÄŸlantÄ±sÄ± yapÄ±lmadÄ±.",
     );
   }
 

@@ -27,45 +27,166 @@ function calculateMetricSize(p: ProductMeasurement, group: string, width: number
 /**
  * Ölçüden tek bir satış satırı oluşturur.
  */
-function createSaleItemFromMeasurement(p: ProductMeasurement, roomName: string, windowName: string, selectedType?: string): SaleItem {
+function createSaleItemFromMeasurement(
+  p: ProductMeasurement,
+  roomName: string,
+  windowName: string,
+  selectedType?: string,
+  salesItemOverride?: {
+    productType?: string;
+    label?: string;
+    totalM2?: number;
+    metricSize?: number;
+    metricUnit?: 'm2' | 'mt' | 'adet';
+  }
+): SaleItem {
   const dims = getMeasurementDimensions(p);
-  const w = dims.structuralWidth || 0;
-  const h = dims.structuralHeight || 0;
 
-  const group = resolveMeasurementProductGroup(p);
-  const label = resolveMeasurementProductLabel(p);
+  const calculation = {
+    ...(p.details || {}),
+    ...(p.selectedProducts?.[0]?.calculation || {})
+  } as any;
 
-  let size = w / 100;
-  let unit: 'm2' | 'mt' | 'adet' = 'mt';
+  const w = Number(
+    calculation.actualWidthCm ||
+    calculation.realWidthCm ||
+    dims.structuralWidth ||
+    0
+  );
 
-  const typeUpper = (selectedType || p.productType || '').toUpperCase();
+  const h = Number(
+    calculation.actualHeightCm ||
+    calculation.realHeightCm ||
+    dims.structuralHeight ||
+    0
+  );
 
-  if (group === 'Plicell' || group === 'Mekanik Perde') {
-    size = p.details?.totalM2 !== undefined ? Number(p.details.totalM2) : (w * h) / 10000;
+  const selectedProductType =
+    salesItemOverride?.productType ||
+    selectedType ||
+    p.productType ||
+    '';
+
+  const group = resolveMeasurementProductGroup({
+    ...p,
+    productType: selectedProductType
+  });
+
+  const label =
+    salesItemOverride?.label ||
+    resolveMeasurementProductLabel({
+      ...p,
+      productType: selectedProductType
+    });
+
+  let size = 0;
+  let unit: 'm2' | 'mt' | 'adet' = 'adet';
+
+  const typeUpper =
+    String(selectedProductType).toUpperCase();
+
+  if (salesItemOverride?.metricSize !== undefined) {
+    size = Number(salesItemOverride.metricSize);
+    unit = salesItemOverride.metricUnit || 'adet';
+  } else if (salesItemOverride?.totalM2 !== undefined) {
+    size = Number(salesItemOverride.totalM2);
+    unit = 'm2';
+  } else if (
+    group === 'Plicell' ||
+    group === 'Mekanik Perde'
+  ) {
+    size = Number(
+      calculation.totalM2 ??
+      calculation.totalSystemM2 ??
+      0
+    );
+
     unit = 'm2';
   } else if (typeUpper === 'TUL') {
-    size = p.details?.fabricUsageMeters !== undefined ? Number(p.details.fabricUsageMeters) : (w * 3.15) / 100;
+    size = Number(
+      calculation.fabricUsageMeters ??
+      calculation.roundedMeters ??
+      0
+    );
+
     unit = 'mt';
   } else if (typeUpper === 'GUNESLIK') {
-    size = p.details?.fabricUsageMeters !== undefined ? Number(p.details.fabricUsageMeters) : (w + 30) / 100;
+    size = Number(
+      calculation.fabricUsageMeters ??
+      calculation.meters ??
+      0
+    );
+
     unit = 'mt';
   } else if (typeUpper === 'FON') {
-    size = p.details?.fabricUsageMeters !== undefined ? Number(p.details.fabricUsageMeters) : (w * 2.5) / 100;
+    size = Number(
+      calculation.fabricUsageMeters ??
+      0
+    );
+
     unit = 'mt';
   } else if (typeUpper === 'RUSTIK') {
-    size = p.details?.billingWidth !== undefined ? Number(p.details.billingWidth) / 100 : (w + 40) / 100;
+    size = Number(
+      calculation.billingWidth !== undefined
+        ? Number(calculation.billingWidth) / 100
+        : 0
+    );
+
     unit = 'mt';
   } else if (typeUpper === 'TAVAN_RUSTIK') {
-    size = 1.0;
-    unit = 'mt';
+    size = Number(calculation.quantity || 1);
+    unit = 'adet';
   } else if (typeUpper === 'BIRIZ') {
-    size = p.details?.birizTulMeters !== undefined ? Number(p.details.birizTulMeters) : (w * 3.20) / 100;
+    size = Number(
+      calculation.birizTulMeters || 0
+    );
+
     unit = 'mt';
   } else {
-    const metric = calculateMetricSize(p, group, w, h);
+    const metric = calculateMetricSize(
+      p,
+      group,
+      w,
+      h
+    );
+
     size = metric.size;
     unit = metric.unit;
   }
+
+  const quantity =
+    unit === 'adet'
+      ? Number(p.rawValues?.quantity || 1)
+      : 1;
+
+  const pleatLabel =
+    calculation.pleatType ||
+    calculation.pleatLabel ||
+    p.rawValues?.pleat ||
+    undefined;
+
+  const systemNotes: string[] = [];
+
+  if (calculation.systemType === 'DOUBLE') {
+    systemNotes.push('Çiftli Sistem');
+  }
+
+  if (calculation.chainDirection === 'LEFT') {
+    systemNotes.push('Zincir: Sol');
+  } else if (calculation.chainDirection === 'RIGHT') {
+    systemNotes.push('Zincir: Sağ');
+  }
+
+  if (calculation.openingType === 'DOUBLE') {
+    systemNotes.push('Çift Açılır');
+  } else if (calculation.openingType === 'SINGLE') {
+    systemNotes.push('Tek Açılır');
+  }
+
+  const notes = [
+    p.notes,
+    ...systemNotes
+  ].filter(Boolean);
 
   return {
     id: crypto.randomUUID(),
@@ -74,21 +195,42 @@ function createSaleItemFromMeasurement(p: ProductMeasurement, roomName: string, 
     windowName,
     productType: label,
     productGroup: group,
+
     width: w,
     height: h,
-    calcWidth: p.details?.billingWidth || w,
-    calcHeight: p.details?.billingHeight || h,
-    quantity: Number(p.rawValues?.quantity || 1),
-    metricSize: Number(size.toFixed(2)),
+
+    calcWidth: Number(
+      calculation.billingWidth ??
+      calculation.billingWidthCm ??
+      w
+    ),
+
+    calcHeight: Number(
+      calculation.billingHeight ??
+      calculation.billingHeightCm ??
+      h
+    ),
+
+    quantity,
+
+    metricSize: Number(
+      Number(size || 0).toFixed(2)
+    ),
+
     metricUnit: unit,
-    pleatDetails: p.rawValues?.pleat || undefined,
+
+    pleatDetails: pleatLabel,
+
     unitPrice: 0,
     discount: 0,
     rowTotal: 0,
-    note: p.notes || undefined
+
+    note:
+      notes.length > 0
+        ? notes.join(' | ')
+        : undefined
   };
 }
-
 export function createJumboSaleItem(
   p: MeasurementRecord,
   g: any,
@@ -177,20 +319,86 @@ export function createDraftSaleFromCustomer(customer: Customer): Sale {
           const pObj: ProductMeasurement = {
             ...m,
             productType: ap.productType,
-            productGroup: resolveMeasurementProductGroup({ productType: ap.productType }),
+            productGroup:
+              resolveMeasurementProductGroup({
+                productType: ap.productType
+              }),
             selectedProducts: [ap],
             details: {
               ...m.details,
               ...calc
             }
           };
-          const mainItem = createSaleItemFromMeasurement(pObj, room?.name || 'Oda', win?.name || 'Pencere', ap.productType);
-          mainItem.id = `${m.id}-${ap.productType}-g0`;
-          items.push(mainItem);
+
+          const salesItems =
+            Array.isArray(calc.salesItems) &&
+            calc.salesItems.length > 0
+              ? calc.salesItems
+              : null;
+
+          if (salesItems) {
+            salesItems.forEach(
+              (saleCalc: any, saleIndex: number) => {
+                const saleItem =
+                  createSaleItemFromMeasurement(
+                    pObj,
+                    room?.name || 'Oda',
+                    win?.name || 'Pencere',
+                    saleCalc.productType ||
+                      ap.productType,
+                    {
+                      productType:
+                        saleCalc.productType,
+                      label:
+                        saleCalc.label,
+                      totalM2:
+                        saleCalc.totalM2,
+                      metricSize:
+                        saleCalc.metricSize,
+                      metricUnit:
+                        saleCalc.metricUnit
+                    }
+                  );
+
+                saleItem.id =
+                  `${m.id}-${ap.productType}-sale-${saleIndex}`;
+
+                items.push(saleItem);
+              }
+            );
+          } else {
+            const mainItem =
+              createSaleItemFromMeasurement(
+                pObj,
+                room?.name || 'Oda',
+                win?.name || 'Pencere',
+                ap.productType
+              );
+
+            mainItem.id =
+              `${m.id}-${ap.productType}-g0`;
+
+            items.push(mainItem);
+          }
 
           const singleGroup = calc.groups?.[0];
+
           if (singleGroup?.requiresJumbo) {
-            const jumboItem = createJumboSaleItem(m, singleGroup, 0, mainItem.id, room?.name || 'Oda', win?.name || 'Pencere', ap.productType);
+            const parentItemId =
+              salesItems
+                ? `${m.id}-${ap.productType}-sale-0`
+                : `${m.id}-${ap.productType}-g0`;
+
+            const jumboItem = createJumboSaleItem(
+              m,
+              singleGroup,
+              0,
+              parentItemId,
+              room?.name || 'Oda',
+              win?.name || 'Pencere',
+              ap.productType
+            );
+
             items.push(jumboItem);
           }
         }

@@ -1,3 +1,17 @@
+import {
+  calculatePlicell,
+  calculateMechanicalCurtain,
+  calculateDetailMechanicalHeight,
+  createMechanicalPartsFromFacade,
+  calculateVerticalCurtain,
+  calculateTulleQuantity,
+  calculateSunshadeQuantity,
+  calculateCurtainCutHeight,
+  type VerticalOpeningType,
+  type PleatType,
+  type TulleStyle
+} from "./measurementCalculations";
+
 export const TEMPLATE_LABELS: Record<string, string> = {
   CURTAIN_DETAIL: "Detay Perde Ölçüsü",
   SIMPLE_WIDTH_HEIGHT: "Basit En-Boy Ölçüsü",
@@ -453,35 +467,34 @@ export function resolveMeasurementProductGroup(measurement: any): string {
   return 'Diğer';
 }
 
-export function getMechanicalEffectiveHeight(rawValues: any, fallbackHeight: number): number {
-  if (rawValues.kaloriferMermerBoyuCm && Number(rawValues.kaloriferMermerBoyuCm) > 0) {
-    return Number(rawValues.kaloriferMermerBoyuCm);
-  }
-  if (rawValues.camAltiCm && Number(rawValues.camAltiCm) > 0) {
-    return Number(rawValues.camAltiCm);
-  }
-  const fullHeight = Number(
-    rawValues.solYukseklikCm ||
-    rawValues.ortaYukseklikCm ||
-    rawValues.sagYukseklikCm ||
-    rawValues.windowHeight ||
-    rawValues.height ||
-    fallbackHeight ||
-    0
+export function getMechanicalEffectiveHeight(
+  rawValues: any,
+  fallbackHeight: number
+): number {
+  return calculateDetailMechanicalHeight(
+    rawValues || {},
+    fallbackHeight
   );
-  return fullHeight;
 }
-
-export function roundMechanicalWidth(realWidthCm: number): number {
-  if (realWidthCm < 100) return 100;
-  return Math.ceil(realWidthCm / 10) * 10;
+export function roundMechanicalWidth(
+  realWidthCm: number
+): number {
+  return calculateMechanicalCurtain(
+    realWidthCm,
+    200,
+    1
+  ).billingWidthCm;
 }
-
 export interface MechanicalGroupResult {
   groupType: 'CAM_PENCERE' | 'KAPI';
   sourceSegments: any[];
   realWidthCm: number;
   realHeightCm: number;
+  calculatedWidthCm?: number;
+  calculatedHeightCm?: number;
+  unitM2?: number;
+  totalM2?: number;
+  chainDirection?: 'LEFT' | 'RIGHT';
 }
 
 export function groupFacadeSegmentsForMechanical(
@@ -489,111 +502,135 @@ export function groupFacadeSegmentsForMechanical(
   rawValues: any,
   fallbackHeight: number
 ): MechanicalGroupResult[] {
-  if (!segments || segments.length === 0) return [];
-
-  const results: any[] = [];
-  let currentRun: any[] = [];
-  let currentRunType: 'CAM_PENCERE' | 'KAPI' | null = null;
-
-  const finishRun = () => {
-    if (currentRun.length > 0 && currentRunType) {
-      const firstIndex = currentRun[0].index;
-      const lastIndex = currentRun[currentRun.length - 1].index;
-      results.push({
-        groupType: currentRunType,
-        sourceSegments: currentRun.map(item => item.seg),
-        firstIndex,
-        lastIndex,
-        leftWall: null,
-        rightWall: null
-      });
-    }
-    currentRun = [];
-    currentRunType = null;
-  };
-
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i];
-    const isCamPencere = seg.type === 'GLASS' || seg.type === 'WINDOW';
-    const isKapi = seg.type === 'DOOR';
-
-    if (isCamPencere) {
-      if (currentRunType === 'CAM_PENCERE') {
-        currentRun.push({ seg, index: i });
-      } else {
-        finishRun();
-        currentRun = [{ seg, index: i }];
-        currentRunType = 'CAM_PENCERE';
-      }
-    } else if (isKapi) {
-      if (currentRunType === 'KAPI') {
-        currentRun.push({ seg, index: i });
-      } else {
-        finishRun();
-        currentRun = [{ seg, index: i }];
-        currentRunType = 'KAPI';
-      }
-    } else {
-      finishRun();
-    }
-  }
-  finishRun();
-
-  const usedWallIds = new Set<string>();
-
-  for (let i = 0; i < results.length; i++) {
-    const res = results[i];
-    const firstIndex = res.firstIndex;
-    const lastIndex = res.lastIndex;
-
-    if (firstIndex > 0) {
-      const leftSeg = segments[firstIndex - 1];
-      if (leftSeg.type === 'WALL' && !usedWallIds.has(leftSeg.id)) {
-        usedWallIds.add(leftSeg.id);
-        res.leftWall = leftSeg;
-      }
-    }
-
-    if (lastIndex < segments.length - 1) {
-      const rightSeg = segments[lastIndex + 1];
-      if (rightSeg.type === 'WALL' && !usedWallIds.has(rightSeg.id)) {
-        usedWallIds.add(rightSeg.id);
-        res.rightWall = rightSeg;
-      }
-    }
+  if (!Array.isArray(segments) || segments.length === 0) {
+    return [];
   }
 
-  const finalGroups: MechanicalGroupResult[] = results.map(res => {
-    const baseWidth = res.sourceSegments.reduce((sum: number, s: any) => sum + s.widthCm, 0);
+  const effectiveHeight =
+    calculateDetailMechanicalHeight(
+      rawValues || {},
+      fallbackHeight
+    );
 
-    let leftAllowance = 0;
-    if (res.leftWall) {
-      leftAllowance = res.leftWall.widthCm <= 20 ? res.leftWall.widthCm : 10;
-    }
+  const parts = createMechanicalPartsFromFacade(
+    segments.map((segment: any) => ({
+      id: segment.id,
+      type: segment.type,
+      widthCm: Number(segment.widthCm || 0)
+    })),
+    effectiveHeight
+  );
 
-    let rightAllowance = 0;
-    if (res.rightWall) {
-      rightAllowance = res.rightWall.widthCm <= 20 ? res.rightWall.widthCm : 10;
-    }
-
-    const realWidth = baseWidth + leftAllowance + rightAllowance;
-    const realHeight = getMechanicalEffectiveHeight(rawValues, fallbackHeight);
-
-    const sourceSegmentsWithWalls = [...res.sourceSegments];
-    if (res.leftWall) sourceSegmentsWithWalls.unshift(res.leftWall);
-    if (res.rightWall) sourceSegmentsWithWalls.push(res.rightWall);
-
-    return {
-      groupType: res.groupType,
-      sourceSegments: sourceSegmentsWithWalls,
-      realWidthCm: realWidth,
-      realHeightCm: realHeight
-    };
-  });
-
-  return finalGroups;
+  return parts.map((part) => ({
+    groupType: part.groupType,
+    sourceSegments: [],
+    realWidthCm: part.actualWidthCm,
+    realHeightCm: part.actualHeightCm,
+    calculatedWidthCm: part.billingWidthCm,
+    calculatedHeightCm: part.billingHeightCm,
+    unitM2: part.unitM2,
+    totalM2: part.totalM2,
+    chainDirection: part.chainDirection
+  }));
+}
+function resolveVerticalOpeningType(
+  rawValues: any
+): VerticalOpeningType {
+  return rawValues?.openingType === 'DOUBLE'
+    ? 'DOUBLE'
+    : 'SINGLE';
 }
 
+function resolveTulleStyle(
+  rawValues: any
+): TulleStyle {
+  const value = String(
+    rawValues?.tulleStyle ||
+    rawValues?.tulTipi ||
+    rawValues?.curtainStyle ||
+    'PLEATED'
+  ).toUpperCase();
+
+  if (
+    value === 'CROSSOVER' ||
+    value === 'KRUVAZE'
+  ) {
+    return 'CROSSOVER';
+  }
+
+  if (
+    value === 'REGISTER' ||
+    value === 'RECISTER'
+  ) {
+    return 'REGISTER';
+  }
+
+  return 'PLEATED';
+}
+
+function resolvePleatType(
+  rawValues: any
+): PleatType {
+  const value = String(
+    rawValues?.pleatType ||
+    rawValues?.pileType ||
+    'TIGHT'
+  ).toUpperCase();
+
+  if (value === 'NORMAL') {
+    return 'NORMAL';
+  }
+
+  if (
+    value === 'SPARSE' ||
+    value === 'SEYREK'
+  ) {
+    return 'SPARSE';
+  }
+
+  if (
+    value === 'AMERICAN' ||
+    value === 'AMERIKAN'
+  ) {
+    return 'AMERICAN';
+  }
+
+  if (
+    value === 'CUSTOM' ||
+    value === 'USER_DEFINED'
+  ) {
+    return 'CUSTOM';
+  }
+
+  return 'TIGHT';
+}
+
+function resolveFabricSourceWidth(
+  width: number,
+  rawValues: any,
+  siblingProducts: any[]
+): number {
+  const rusticProduct = siblingProducts.find(
+    (product: any) =>
+      product?.isActive &&
+      (
+        product.productType === 'RUSTIK' ||
+        product.productType === 'TAVAN_RUSTIK'
+      )
+  );
+
+  const rusticWidth = Number(
+    rawValues?.rustikEnCm ||
+    rawValues?.rusticWidthCm ||
+    rusticProduct?.calculation?.billingWidth ||
+    rusticProduct?.calculation?.billingWidthCm ||
+    0
+  );
+
+  return rusticWidth > 0
+    ? rusticWidth
+    : width;
+}
 function lookupProductPrices(productType: string): { purchasePrice: number, salePrice: number, stockCard: any } {
   const norm = productType.toUpperCase();
   const testName = (global as any).currentTestName || '';
@@ -727,33 +764,144 @@ export function calculateSelectedProduct(
   const norm = productType.toUpperCase();
 
   if (norm === 'TUL') {
-    const pleatFactor = 3.15;
-    const fabricUsageMeters = Number(((width * pleatFactor) / 100).toFixed(2));
+    const sourceWidth =
+      resolveFabricSourceWidth(
+        width,
+        rawValues,
+        siblingProducts
+      );
+
+    const tulleStyle =
+      resolveTulleStyle(rawValues);
+
+    const pleatType =
+      resolvePleatType(rawValues);
+
+    const customFactor =
+      Number(rawValues?.customPleatFactor || 0);
+
+    const manualMeters =
+      Number(rawValues?.manualFabricMeters || 0);
+
+    const calculation =
+      calculateTulleQuantity(
+        sourceWidth,
+        tulleStyle,
+        pleatType,
+        customFactor > 0
+          ? customFactor
+          : undefined,
+        manualMeters > 0
+          ? manualMeters
+          : undefined
+      );
+
+    const cutHeight =
+      calculateCurtainCutHeight(
+        height,
+        'TUL'
+      );
+
     return {
-      pleatType: 'Sık',
-      pleatFactor,
-      fabricUsageMeters,
-      description: 'Sık Pile (3.15 Kat)'
+      sourceWidthCm:
+        sourceWidth,
+
+      tulleStyle:
+        calculation.tulleStyle,
+
+      pleatType:
+        calculation.pleatType,
+
+      pleatFactor:
+        calculation.pleatFactor,
+
+      rawFabricUsageMeters:
+        calculation.rawMeters,
+
+      fabricUsageMeters:
+        calculation.roundedMeters,
+
+      manuallyOverridden:
+        calculation.manuallyOverridden,
+
+      billingHeight:
+        cutHeight,
+
+      cutHeightCm:
+        cutHeight,
+
+      description:
+        tulleStyle === 'REGISTER'
+          ? 'Register Tül (3.65 Kat)'
+          : tulleStyle === 'CROSSOVER'
+            ? `Kruvaze Tül (${calculation.pleatFactor} Kat + 1 Metre)`
+            : `Pileli Tül (${calculation.pleatFactor} Kat)`
     };
   }
-
   if (norm === 'GUNESLIK') {
-    const billingWidth = width + 30;
-    const fabricUsageMeters = Number((billingWidth / 100).toFixed(2));
+    const sourceWidth =
+      resolveFabricSourceWidth(
+        width,
+        rawValues,
+        siblingProducts
+      );
+
+    const manualMeters =
+      Number(rawValues?.manualFabricMeters || 0);
+
+    const calculation =
+      calculateSunshadeQuantity(
+        sourceWidth,
+        manualMeters > 0
+          ? manualMeters
+          : undefined
+      );
+
+    const cutHeight =
+      calculateCurtainCutHeight(
+        height,
+        'GUNESLIK'
+      );
+
     return {
-      billingWidth,
-      billingHeight: height,
-      fabricUsageMeters,
-      description: 'Normal Düz Güneşlik (+30 cm pay)'
+      sourceWidthCm:
+        sourceWidth,
+
+      billingWidth:
+        calculation.roundedWidthCm,
+
+      billingHeight:
+        cutHeight,
+
+      cutHeightCm:
+        cutHeight,
+
+      widthAllowanceCm:
+        calculation.allowanceCm,
+
+      rawWidthCm:
+        calculation.rawWidthCm,
+
+      fabricUsageMeters:
+        calculation.meters,
+
+      manuallyOverridden:
+        calculation.manuallyOverridden,
+
+      description:
+        'Düz Güneşlik (+30 cm, 10 cm yukarı tamlama)'
     };
   }
-
   if (norm === 'FON') {
     const isCeilingRusticActive = siblingProducts.some(p => p.productType === 'TAVAN_RUSTIK' && p.isActive);
     const ceilingGap = Number(rawValues.ceilingGap || 0);
     const netHeight = Number(rawValues.ortaYukseklikCm || rawValues.sagYukseklikCm || rawValues.solYukseklikCm || rawValues.windowHeight || rawValues.height || height || 0);
 
-    let fonHeight = height;
+    let fonHeight =
+      calculateCurtainCutHeight(
+        height,
+        'FON'
+      );
     if (isCeilingRusticActive) {
       fonHeight = netHeight - ceilingGap - 1;
     }
@@ -825,11 +973,25 @@ export function calculateSelectedProduct(
       groupsData = mGroups.map((g, idx) => {
         const realW = g.realWidthCm;
         const realH = g.realHeightCm;
-        const calcW = roundMechanicalWidth(realW);
-        const calcH = realH;
 
-        const unitM2 = Number(Math.max((calcW / 100) * (calcH / 100), 2.0).toFixed(2));
-        const totalM2 = Number((unitM2 * q).toFixed(2));
+        const coreCalculation =
+          calculateMechanicalCurtain(
+            realW,
+            realH,
+            q
+          );
+
+        const calcW =
+          coreCalculation.billingWidthCm;
+
+        const calcH =
+          coreCalculation.billingHeightCm;
+
+        const unitM2 =
+          coreCalculation.unitM2;
+
+        const totalM2 =
+          coreCalculation.totalM2;
 
         const requiresJumbo = calcW >= jumboConfig.jumboThresholdCm;
 
@@ -885,6 +1047,8 @@ export function calculateSelectedProduct(
           quantity: q,
           unitM2,
           totalM2,
+          chainDirection:
+            g.chainDirection || 'RIGHT',
           requiresJumbo,
           jumboThresholdCm: jumboConfig.jumboThresholdCm,
           jumboQuantity: jumboQty,
@@ -908,12 +1072,31 @@ export function calculateSelectedProduct(
       });
     } else {
       const realW = width;
-      const realH = getMechanicalEffectiveHeight(rawValues, height);
-      const calcW = roundMechanicalWidth(realW);
-      const calcH = realH;
 
-      const unitM2 = Number(Math.max((calcW / 100) * (calcH / 100), 2.0).toFixed(2));
-      const totalM2 = Number((unitM2 * q).toFixed(2));
+      const realH =
+        getMechanicalEffectiveHeight(
+          rawValues,
+          height
+        );
+
+      const coreCalculation =
+        calculateMechanicalCurtain(
+          realW,
+          realH,
+          q
+        );
+
+      const calcW =
+        coreCalculation.billingWidthCm;
+
+      const calcH =
+        coreCalculation.billingHeightCm;
+
+      const unitM2 =
+        coreCalculation.unitM2;
+
+      const totalM2 =
+        coreCalculation.totalM2;
 
       let requiresJumbo = calcW >= jumboConfig.jumboThresholdCm;
       if ((global as any).currentTestName === 'width239NoJumbo') {
@@ -972,6 +1155,10 @@ export function calculateSelectedProduct(
         quantity: q,
         unitM2,
         totalM2,
+        chainDirection:
+          rawValues?.chainDirection === 'LEFT'
+            ? 'LEFT'
+            : 'RIGHT',
         requiresJumbo,
         jumboThresholdCm: jumboConfig.jumboThresholdCm,
         jumboQuantity: jumboQty,
@@ -1017,8 +1204,51 @@ export function calculateSelectedProduct(
       description: combinedDescription,
       requiresJumbo: groupsData.some(g => g.requiresJumbo),
       warning: groupsData.find(g => g.warning)?.warning || '',
-      billingWidth: groupsData[0].calculatedWidthCm,
-      billingHeight: groupsData[0].calculatedHeightCm,
+      billingWidth:
+        groupsData[0].calculatedWidthCm,
+
+      billingHeight:
+        groupsData[0].calculatedHeightCm,
+
+      systemType:
+        rawValues?.systemType === 'DOUBLE'
+          ? 'DOUBLE'
+          : 'SINGLE',
+
+      salesItems:
+        norm === 'STOR' &&
+        rawValues?.systemType === 'DOUBLE'
+          ? [
+              {
+                productType: 'STOR_TUL',
+                label: 'Stor Tül',
+                totalM2: combinedTotalM2
+              },
+              {
+                productType: 'STOR',
+                label: 'Stor',
+                totalM2: combinedTotalM2
+              }
+            ]
+          : [
+              {
+                productType: norm,
+                label:
+                  norm === 'STOR'
+                    ? 'Stor'
+                    : productType,
+                totalM2: combinedTotalM2
+              }
+            ],
+
+      totalSystemM2:
+        norm === 'STOR' &&
+        rawValues?.systemType === 'DOUBLE'
+          ? Number(
+              (combinedTotalM2 * 2).toFixed(2)
+            )
+          : combinedTotalM2,
+
       // Backward compatibility fields
       hemModel,
       etekStockId,
@@ -1032,47 +1262,165 @@ export function calculateSelectedProduct(
   }
 
   if (norm === 'DIKEY_STOR') {
-    const area = (width / 100) * (height / 100);
-    const m2 = Number(Math.max(area, 2.0).toFixed(2));
+    const calculation =
+      calculateVerticalCurtain(
+        width,
+        height,
+        resolveVerticalOpeningType(rawValues)
+      );
+
     return {
-      totalM2: m2,
-      applicationType: 'DIKEY_STOR',
-      description: 'Dikey Stor Perde'
+      totalM2:
+        calculation.salesM2,
+
+      billingWidth:
+        calculation.measurementWidthCm,
+
+      billingHeight:
+        calculation.measurementHeightCm,
+
+      productionWidth:
+        calculation.productionWidthCm,
+
+      productionHeight:
+        calculation.productionHeightCm,
+
+      openingType:
+        calculation.openingType,
+
+      applicationType:
+        'DIKEY_STOR',
+
+      description:
+        calculation.openingType === 'DOUBLE'
+          ? 'Dikey Stor - Çift Açılır'
+          : 'Dikey Stor - Tek Açılır'
     };
   }
-
   if (norm === 'DIKEY_TUL') {
-    const area = (width / 100) * (height / 100);
-    const m2 = Number(Math.max(area, 2.0).toFixed(2));
+    const calculation =
+      calculateVerticalCurtain(
+        width,
+        height,
+        resolveVerticalOpeningType(rawValues)
+      );
+
     return {
-      totalM2: m2,
-      description: 'Dikey Tül Perde'
+      totalM2:
+        calculation.salesM2,
+
+      billingWidth:
+        calculation.measurementWidthCm,
+
+      billingHeight:
+        calculation.measurementHeightCm,
+
+      productionWidth:
+        calculation.productionWidthCm,
+
+      productionHeight:
+        calculation.productionHeightCm,
+
+      openingType:
+        calculation.openingType,
+
+      description:
+        calculation.openingType === 'DOUBLE'
+          ? 'Dikey Tül - Çift Açılır'
+          : 'Dikey Tül - Tek Açılır'
     };
   }
-
   if (norm === 'PLICELL') {
-    const completedWidth = Math.ceil(width / 10) * 10;
-    const completedHeight = Math.ceil(height / 10) * 10;
-    const area = (completedWidth / 100) * (completedHeight / 100);
-    const m2 = Number(Math.max(area, 1.0).toFixed(2));
+    const systemType =
+      rawValues?.systemType === 'DOUBLE'
+        ? 'DOUBLE'
+        : 'SINGLE';
+
+    const calculation = calculatePlicell(
+      width,
+      height,
+      Number(rawValues?.quantity || 1),
+      systemType
+    );
+
+    const singleLayerTotalM2 = Number(
+      (
+        calculation.unitM2 *
+        calculation.quantity
+      ).toFixed(2)
+    );
 
     return {
-      billingWidth: completedWidth,
-      billingHeight: completedHeight,
-      totalM2: m2,
-      description: 'Plicell Perde (Üst 10 cm tamamlanır, min 1 m2)'
+      billingWidth: calculation.billingWidthCm,
+      billingHeight: calculation.billingHeightCm,
+      unitM2: calculation.unitM2,
+      totalM2: calculation.totalM2,
+      quantity: calculation.quantity,
+      systemType: calculation.systemType,
+      layerCount: calculation.layerCount,
+      minimumAreaApplied: calculation.minimumAreaApplied,
+
+      salesItems:
+        systemType === 'DOUBLE'
+          ? [
+              {
+                productType: 'PLICELL_TUL',
+                label: 'Plicell Tül',
+                totalM2: singleLayerTotalM2
+              },
+              {
+                productType: 'PLICELL',
+                label: 'Plicell',
+                totalM2: singleLayerTotalM2
+              }
+            ]
+          : [
+              {
+                productType: 'PLICELL',
+                label: 'Plicell',
+                totalM2: calculation.totalM2
+              }
+            ],
+
+      description:
+        systemType === 'DOUBLE'
+          ? 'Çiftli Plicell Sistem'
+          : 'Plicell Perde'
     };
   }
-
   if (norm === 'PICASSO') {
-    const area = (width / 100) * (height / 100);
-    const m2 = Number(Math.max(area, 2.0).toFixed(2));
+    const calculation =
+      calculateMechanicalCurtain(
+        width,
+        getMechanicalEffectiveHeight(
+          rawValues,
+          height
+        ),
+        Number(rawValues?.quantity || 1)
+      );
+
     return {
-      totalM2: m2,
-      description: `${norm} Perde (min 2 m2)`
+      billingWidth:
+        calculation.billingWidthCm,
+
+      billingHeight:
+        calculation.billingHeightCm,
+
+      unitM2:
+        calculation.unitM2,
+
+      totalM2:
+        calculation.totalM2,
+
+      chainDirection:
+        rawValues?.chainDirection === 'LEFT'
+          ? 'LEFT'
+          : 'RIGHT',
+
+      description:
+        'Picasso Perde'
     };
   }
-
   if (norm === 'BIRIZ') {
     const tülMiktar = Number(((width * 3.20) / 100).toFixed(2));
     const rodCount = 2;

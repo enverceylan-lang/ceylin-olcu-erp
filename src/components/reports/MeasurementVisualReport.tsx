@@ -11,6 +11,154 @@ import { PlicellMeasurementSketch } from './PlicellMeasurementSketch';
 import { formatFacadeForReport } from '@/lib/facadeHelper';
 import { useMeasurementStore, MeasurementRecord } from '@/store/measurementStore';
 
+function buildCalculationReportDetails(
+  productType: string,
+  calculation: any
+): string[] {
+  const calc = calculation || {};
+  const details: string[] = [];
+  const type = String(productType || '').toUpperCase();
+
+  const systemType =
+    calc.systemType === 'DOUBLE'
+      ? 'Çiftli Sistem'
+      : calc.systemType === 'SINGLE'
+        ? 'Tekli Sistem'
+        : '';
+
+  if (systemType) {
+    details.push(systemType);
+  }
+
+  if (
+    calc.billingWidth !== undefined &&
+    calc.billingHeight !== undefined
+  ) {
+    details.push(
+      `Hesap Ölçüsü: ${calc.billingWidth} × ${calc.billingHeight} cm`
+    );
+  } else if (
+    calc.billingWidthCm !== undefined &&
+    calc.billingHeightCm !== undefined
+  ) {
+    details.push(
+      `Hesap Ölçüsü: ${calc.billingWidthCm} × ${calc.billingHeightCm} cm`
+    );
+  }
+
+  if (calc.totalM2 !== undefined) {
+    details.push(
+      `Alan: ${Number(calc.totalM2).toFixed(2)} m²`
+    );
+  }
+
+  if (
+    calc.chainDirection === 'LEFT' ||
+    calc.chainDirection === 'RIGHT'
+  ) {
+    details.push(
+      `Zincir: ${
+        calc.chainDirection === 'LEFT'
+          ? 'Sol'
+          : 'Sağ'
+      }`
+    );
+  }
+
+  if (
+    type === 'DIKEY_STOR' ||
+    type === 'DIKEY_TUL'
+  ) {
+    if (
+      calc.productionWidth !== undefined &&
+      calc.productionHeight !== undefined
+    ) {
+      details.push(
+        `Üretim: ${calc.productionWidth} × ${calc.productionHeight} cm`
+      );
+    }
+
+    if (calc.openingType === 'DOUBLE') {
+      details.push('Açılım: Ortadan İki Yana');
+    } else if (calc.openingType === 'SINGLE') {
+      details.push('Açılım: Tek Açılır');
+    }
+  }
+
+  if (type === 'TUL') {
+    if (calc.tulleStyle === 'REGISTER') {
+      details.push('Model: Register');
+    } else if (calc.tulleStyle === 'CROSSOVER') {
+      details.push('Model: Kruvaze');
+    } else if (calc.tulleStyle === 'PLEATED') {
+      details.push('Model: Pileli');
+    }
+
+    if (calc.pleatFactor !== undefined) {
+      details.push(`Pile: ${calc.pleatFactor} Kat`);
+    }
+
+    if (calc.fabricUsageMeters !== undefined) {
+      details.push(
+        `Kumaş: ${Number(calc.fabricUsageMeters).toFixed(2)} m`
+      );
+    }
+
+    if (calc.cutHeightCm !== undefined) {
+      details.push(`Kesim Boyu: ${calc.cutHeightCm} cm`);
+    }
+  }
+
+  if (type === 'GUNESLIK') {
+    if (calc.fabricUsageMeters !== undefined) {
+      details.push(
+        `Kumaş: ${Number(calc.fabricUsageMeters).toFixed(2)} m`
+      );
+    }
+
+    if (calc.cutHeightCm !== undefined) {
+      details.push(`Kesim Boyu: ${calc.cutHeightCm} cm`);
+    }
+  }
+
+  if (type === 'FON') {
+    if (calc.fabricUsageMeters !== undefined) {
+      details.push(
+        `Kumaş: ${Number(calc.fabricUsageMeters).toFixed(2)} m`
+      );
+    }
+
+    if (calc.wings !== undefined) {
+      details.push(`Kanat: ${calc.wings}`);
+    }
+
+    if (
+      calc.cutHeightCm !== undefined ||
+      calc.billingHeight !== undefined
+    ) {
+      details.push(
+        `Kesim Boyu: ${
+          calc.cutHeightCm ??
+          calc.billingHeight
+        } cm`
+      );
+    }
+  }
+
+  if (
+    Array.isArray(calc.salesItems) &&
+    calc.salesItems.length > 1
+  ) {
+    details.push(
+      `Satış Kalemleri: ${calc.salesItems
+        .map((item: any) => item.label)
+        .filter(Boolean)
+        .join(' + ')}`
+    );
+  }
+
+  return Array.from(new Set(details));
+}
 interface MeasurementVisualReportProps {
   isOpen: boolean;
   onClose: () => void;
@@ -81,44 +229,43 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
             const label = resolveMeasurementProductLabel({ productType: item.productType });
             const desc = item.calculation?.description || 'Otomatik hesaplanıyor';
 
-            const detailsList: string[] = [];
             const calc = item.calculation || {};
 
-            if (item.productType === 'TUL' && calc.fabricUsageMeters) {
-              detailsList.push(`Kumaş Eni: ${calc.fabricUsageMeters} metre`);
-            }
-            if (item.productType === 'GUNESLIK' && calc.fabricUsageMeters) {
-              detailsList.push(`Güneşlik Eni: ${calc.billingWidth} cm (${calc.fabricUsageMeters} m)`);
-            }
-            if (item.productType === 'FON' && calc.fabricUsageMeters) {
-              detailsList.push(`Fon Boyu: ${calc.billingHeight} cm (${calc.fabricUsageMeters} m, ${calc.wings} Kanat)`);
-            }
+            const detailsList: string[] =
+              buildCalculationReportDetails(
+                item.productType,
+                calc
+              );
+
+
+
+
             if (item.productType === 'RUSTIK' && calc.billingWidth) {
               detailsList.push(`Rustik Boru Eni: ${calc.billingWidth} cm, Boy: ${calc.billingHeight} cm`);
             }
             if (item.productType === 'TAVAN_RUSTIK' && calc.legLengthCm) {
               detailsList.push(`Miktar: 1 m, Ayak Boyu: ${calc.legLengthCm} cm`);
             }
-            if ((item.productType === 'STOR' || item.productType === 'ZEBRA') && calc.totalM2) {
-              detailsList.push(`Alan: ${calc.totalM2} m²`);
-              if (calc.hemModel && calc.hemModel !== 'Düz') {
-                detailsList.push(`Etek: ${calc.hemModel}`);
-              }
-              if (calc.laserHem) {
-                detailsList.push(`Lazer Etek: Aktif`);
-              }
+
+
+
+
+
+            if (
+              (item.productType === 'STOR' ||
+               item.productType === 'ZEBRA') &&
+              calc.hemModel &&
+              calc.hemModel !== 'Düz'
+            ) {
+              detailsList.push(`Etek: ${calc.hemModel}`);
             }
-            if (item.productType === 'DIKEY_STOR' && calc.totalM2) {
-              detailsList.push(`Alan: ${calc.totalM2} m² (Dikey Stor)`);
-            }
-            if (item.productType === 'DIKEY_TUL' && calc.totalM2) {
-              detailsList.push(`Alan: ${calc.totalM2} m² (Dikey Tül)`);
-            }
-            if (item.productType === 'PLICELL' && calc.totalM2) {
-              detailsList.push(`Hesaplanan Ölçü: ${calc.billingWidth} × ${calc.billingHeight} cm (${calc.totalM2} m²)`);
-            }
-            if ((item.productType === 'AHSAP_JALUZI' || item.productType === 'JALUZI' || item.productType === 'PICASSO') && calc.totalM2) {
-              detailsList.push(`Alan: ${calc.totalM2} m²`);
+
+            if (
+              (item.productType === 'STOR' ||
+               item.productType === 'ZEBRA') &&
+              calc.laserHem
+            ) {
+              detailsList.push('Lazer Etek: Aktif');
             }
             if (item.productType === 'BIRIZ' && calc.birizTulMeters) {
               detailsList.push(`Biriz Tül: ${calc.birizTulMeters} m, Demir: ${calc.rodLengthMeters} m (2 çubuk), Başlık: ${calc.capsCount} adet`);
@@ -412,7 +559,8 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                     ...ap.calculation,
                                     billingWidth: g.calculatedWidthCm,
                                     billingHeight: g.calculatedHeightCm,
-                                    totalM2: g.totalM2
+                                    totalM2: g.totalM2,
+                                    chainDirection: g.chainDirection
                                   }
                                 };
                                 mechanicalCurtainProducts.push({ p: gObj, index: ++mechanicalCurtainCounter, winName: `${win.name} - Parça ${gIdx + 1}` });
@@ -712,6 +860,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                       <th className="p-2.5 text-right">Hesap En</th>
                                       <th className="p-2.5 text-right">Hesap Boy</th>
                                       <th className="p-2.5 text-center w-16">Adet</th>
+                                      <th className="p-2.5 text-center w-20">Zincir</th>
                                       <th className="p-2.5 text-right w-20">Birim m²</th>
                                       <th className="p-2.5 text-right w-24">Toplam m²</th>
                                     </tr>
@@ -732,6 +881,13 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                         const totalM2 = p.details?.totalM2 !== undefined ? Number(p.details.totalM2) : calculateMechanicalCurtainM2(w, h, q).totalM2;
                                         const unitM2 = totalM2 / q;
 
+                                        const chainDirection =
+                                          p.details?.chainDirection ||
+                                          p.selectedProducts?.[0]
+                                            ?.calculation
+                                            ?.chainDirection ||
+                                          'RIGHT';
+
                                         roomMechanicalM2 += totalM2;
                                         globalMechanicalCount += q;
                                         globalMechanicalM2 += totalM2;
@@ -751,6 +907,9 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                             <td className="p-2.5 text-right font-bold text-blue-400 print:text-blue-700">{calcWidth} cm</td>
                                             <td className="p-2.5 text-right font-bold text-blue-400 print:text-blue-700">{calcHeight} cm</td>
                                             <td className="p-2.5 text-center font-semibold">{q} Adet</td>
+                                            <td className="p-2.5 text-center font-bold text-amber-400 print:text-black">
+                                              {chainDirection === 'LEFT' ? 'Sol' : 'Sağ'}
+                                            </td>
                                             <td className="p-2.5 text-right font-bold text-blue-400 print:text-blue-750">{unitM2.toFixed(2)} m²</td>
                                             <td className="p-2.5 text-right font-bold text-green-400 print:text-green-700">{totalM2.toFixed(2)} m²</td>
                                           </tr>
@@ -762,12 +921,12 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                           {rows}
                                           <tr className="bg-slate-950/40 print:bg-slate-50 font-bold border-t-2 border-slate-850 print:border-slate-300">
                                             <td colSpan={3} className="p-3 text-slate-300 print:text-slate-700">Toplam Mekanik Adedi: {mechanicalCurtainProducts.reduce((acc, curr) => acc + Number(curr.p.rawValues?.quantity || 1), 0)}</td>
-                                            <td colSpan={6} className="p-3 text-right text-slate-400 print:text-slate-600">Toplam Oda m²:</td>
+                                            <td colSpan={7} className="p-3 text-right text-slate-400 print:text-slate-600">Toplam Oda m²:</td>
                                             <td className="p-3 text-right text-green-400 print:text-green-700 text-sm">{roomMechanicalM2.toFixed(2)} m²</td>
                                           </tr>
                                           {notesList.length > 0 && (
                                             <tr>
-                                              <td colSpan={10} className="p-3 bg-slate-950/20 border-t border-slate-900 print:border-slate-200">
+                                              <td colSpan={11} className="p-3 bg-slate-950/20 border-t border-slate-900 print:border-slate-200">
                                                 <div className="space-y-1 text-slate-300 print:text-slate-700">
                                                   <span className="font-bold uppercase text-[9.5px] text-amber-500 print:text-amber-700 block">Notlar:</span>
                                                   {notesList.map(n => (
