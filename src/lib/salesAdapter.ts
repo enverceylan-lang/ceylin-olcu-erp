@@ -317,36 +317,213 @@ export function createDraftSaleFromCustomer(customer: Customer): Sale {
     } else {
       activeProducts.forEach(ap => {
         const calc = ap.calculation || {};
-        if (calc.isSegmented && Array.isArray(calc.groups) && calc.groups.length > 0) {
-          calc.groups.forEach((g: any, gIdx: number) => {
-            const pObj: ProductMeasurement = {
-              ...m,
-              productType: ap.productType,
-              productGroup: resolveMeasurementProductGroup({ productType: ap.productType }),
-              selectedProducts: [ap],
-              rawValues: {
-                ...m.rawValues,
-                width: g.realWidthCm,
-                height: g.realHeightCm,
-                quantity: g.quantity
-              },
-              details: {
-                ...m.details,
-                ...calc,
-                billingWidth: g.calculatedWidthCm,
-                billingHeight: g.calculatedHeightCm,
-                totalM2: g.totalM2
-              }
-            };
-            const mainItem = createSaleItemFromMeasurement(pObj, room?.name || 'Oda', `${win?.name || 'Pencere'} - Parça ${gIdx + 1}`, ap.productType);
-            mainItem.id = `${m.id}-${ap.productType}-g${gIdx}`;
-            items.push(mainItem);
+        if (
+          calc.isSegmented &&
+          Array.isArray(calc.groups) &&
+          calc.groups.length > 0
+        ) {
+          /*
+           * Segmentli mekanik ürünler satış ekranında
+           * parça parça gösterilmez.
+           *
+           * Ölçü, montaj ve tedarikçi işlemleri için
+           * calc.groups teknik detayları korunur.
+           */
+          const totalSegmentM2 =
+            Number(calc.totalM2) > 0
+              ? Number(calc.totalM2)
+              : Number(
+                  calc.groups
+                    .reduce(
+                      (total: number, group: any) =>
+                        total +
+                        Number(
+                          group.totalM2 ||
+                          (
+                            Number(group.unitM2 || 0) *
+                            Number(group.quantity || 1)
+                          )
+                        ),
+                      0
+                    )
+                    .toFixed(2)
+                );
 
-            if (g.requiresJumbo) {
-              const jumboItem = createJumboSaleItem(m, g, gIdx, mainItem.id, room?.name || 'Oda', win?.name || 'Pencere', ap.productType);
-              items.push(jumboItem);
+          const totalQuantity =
+            calc.groups.reduce(
+              (total: number, group: any) =>
+                total + Number(group.quantity || 1),
+              0
+            );
+
+          const firstGroup = calc.groups[0];
+
+          const pObj: ProductMeasurement = {
+            ...m,
+
+            productType:
+              ap.productType,
+
+            productGroup:
+              resolveMeasurementProductGroup({
+                productType: ap.productType
+              }),
+
+            selectedProducts: [
+              {
+                ...ap,
+
+                calculation: {
+                  ...calc,
+
+                  totalM2:
+                    totalSegmentM2,
+
+                  quantity:
+                    totalQuantity,
+
+                  /*
+                   * Teknik gruplar özellikle korunuyor.
+                   * Satış satırı tek olsa da ölçü parçaları
+                   * montaj ve tedarikçi tarafında kaybolmaz.
+                   */
+                  groups:
+                    calc.groups
+                }
+              }
+            ],
+
+            rawValues: {
+              ...m.rawValues,
+
+              width:
+                Number(calc.actualWidthCm) ||
+                Number(calc.realWidthCm) ||
+                Number(
+                  calc.groups.reduce(
+                    (total: number, group: any) =>
+                      total +
+                      Number(group.realWidthCm || 0),
+                    0
+                  )
+                ),
+
+              height:
+                Number(calc.actualHeightCm) ||
+                Number(calc.realHeightCm) ||
+                Number(firstGroup?.realHeightCm || 0),
+
+              quantity:
+                totalQuantity
+            },
+
+            details: {
+              ...m.details,
+              ...calc,
+
+              totalM2:
+                totalSegmentM2,
+
+              quantity:
+                totalQuantity,
+
+              groups:
+                calc.groups
             }
-          });
+          };
+
+          const mainItem =
+            createSaleItemFromMeasurement(
+              pObj,
+              room?.name || 'Oda',
+              win?.name || 'Pencere',
+              ap.productType,
+              {
+                productType:
+                  ap.productType,
+
+                totalM2:
+                  totalSegmentM2,
+
+                metricSize:
+                  totalSegmentM2,
+
+                metricUnit:
+                  'm2'
+              }
+            );
+
+          /*
+           * Kimlik oda/pencere içindeki ürün için sabit kalır.
+           * Parça sayısı değişse bile satış satırı çoğalmaz.
+           */
+          mainItem.id =
+            `${m.id}-${ap.productType}-g0`;
+
+          mainItem.quantity = 1;
+          mainItem.metricSize = totalSegmentM2;
+          mainItem.metricUnit = 'm2';
+
+          items.push(mainItem);
+
+          /*
+           * Jumbo gereken birden fazla parça varsa,
+           * satışta tek bir toplam jumbo farkı satırı oluştur.
+           */
+          const jumboGroups =
+            calc.groups.filter(
+              (group: any) =>
+                Boolean(group.requiresJumbo)
+            );
+
+          if (jumboGroups.length > 0) {
+            const totalJumboM2 =
+              Number(
+                jumboGroups
+                  .reduce(
+                    (total: number, group: any) =>
+                      total +
+                      Number(
+                        group.totalM2 ||
+                        (
+                          Number(group.unitM2 || 0) *
+                          Number(group.quantity || 1)
+                        )
+                      ),
+                    0
+                  )
+                  .toFixed(2)
+              );
+
+            const aggregateJumboGroup = {
+              ...jumboGroups[0],
+
+              quantity:
+                1,
+
+              unitM2:
+                totalJumboM2,
+
+              totalM2:
+                totalJumboM2
+            };
+
+            const jumboItem =
+              createJumboSaleItem(
+                m,
+                aggregateJumboGroup,
+                0,
+                mainItem.id,
+                room?.name || 'Oda',
+                win?.name || 'Pencere',
+                ap.productType
+              );
+
+            jumboItem.id =
+              `${m.id}-${ap.productType}-jumbo-total`;
+
+            items.push(jumboItem);
+          }
         } else {
           const pObj: ProductMeasurement = {
             ...m,
@@ -495,56 +672,190 @@ export function createDraftSaleFromCustomer(customer: Customer): Sale {
   };
 }
 
-export async function syncOrCreateDraftSale(customer: Customer, salesStore: any): Promise<string> {
-  const existingDraft = salesStore.sales.find((s: any) => s.customerId === customer.id && s.status === 'TASLAK' && !s.isDeleted);
-  const newSaleObj = createDraftSaleFromCustomer(customer);
-  const newItems = newSaleObj.items;
+export async function syncOrCreateDraftSale(
+  customer: Customer,
+  salesStore: any
+): Promise<string> {
+  const existingDraft = salesStore.sales.find(
+    (sale: any) =>
+      sale.customerId === customer.id &&
+      sale.status === 'TASLAK' &&
+      !sale.isDeleted
+  );
+
+  const newSaleObj =
+    createDraftSaleFromCustomer(customer);
+
+  /*
+   * Ölçüden üretilen otomatik satış satırlarında
+   * boş veya geçersiz metraj kabul edilmez.
+   */
+  const calculatedItems =
+    newSaleObj.items.filter((item: SaleItem) => {
+      if (!item.measurementId) {
+        return true;
+      }
+
+      return (
+        Number.isFinite(Number(item.metricSize)) &&
+        Number(item.metricSize) > 0 &&
+        Number.isFinite(Number(item.quantity)) &&
+        Number(item.quantity) > 0
+      );
+    });
 
   if (!existingDraft) {
-    await salesStore.addSale(newSaleObj);
+    await salesStore.addSale({
+      ...newSaleObj,
+      items: calculatedItems
+    });
+
     return newSaleObj.id;
   }
 
-  const mergedItems: SaleItem[] = [];
+  const existingItems =
+    Array.isArray(existingDraft.items)
+      ? existingDraft.items
+      : [];
 
-  existingDraft.items.forEach((existing: any) => {
-    if (!existing.measurementId) {
-      mergedItems.push(existing);
-      return;
+  /*
+   * Kullanıcının elle eklediği, herhangi bir ölçüye
+   * bağlı olmayan satış satırları korunur.
+   */
+  const manualItems: SaleItem[] =
+    existingItems.filter(
+      (item: SaleItem) => !item.measurementId
+    );
+
+  const normalizeKeyPart = (
+    value: unknown
+  ): string =>
+    String(value || '')
+      .trim()
+      .toLocaleUpperCase('tr-TR');
+
+  const createItemKey = (
+    item: SaleItem
+  ): string =>
+    [
+      item.measurementId,
+      normalizeKeyPart(item.productType),
+      normalizeKeyPart(item.roomName),
+      normalizeKeyPart(item.windowName),
+      item.metricUnit
+    ].join('|');
+
+  /*
+   * Eski otomatik satırlardan fiyat ve iskonto
+   * bilgilerini indeksle. Tekrarlı eski satırlardan
+   * yalnız ilk geçerli kayıt dikkate alınır.
+   */
+  const oldAutomaticItemsByKey =
+    new Map<string, SaleItem>();
+
+  existingItems.forEach((item: SaleItem) => {
+    if (!item.measurementId) return;
+
+    const key = createItemKey(item);
+
+    if (!oldAutomaticItemsByKey.has(key)) {
+      oldAutomaticItemsByKey.set(key, item);
     }
+  });
 
-    const match = newItems.find(n => n.id === existing.id || (n.measurementId === existing.measurementId && n.productType === existing.productType && n.windowName === existing.windowName));
-    if (match) {
-      mergedItems.push({
-        ...existing,
-        id: match.id,
-        roomName: match.roomName,
-        windowName: match.windowName,
-        width: match.width,
-        height: match.height,
-        calcWidth: match.calcWidth,
-        calcHeight: match.calcHeight,
-        metricSize: match.metricSize,
-        metricUnit: match.metricUnit,
-        quantity: match.quantity
+  /*
+   * Yeni hesap listesi ana kaynaktır.
+   * Eski otomatik satırlar doğrudan taşınmaz.
+   * Yalnız kullanıcının girdiği fiyat ve iskonto korunur.
+   */
+  const refreshedAutomaticItems: SaleItem[] =
+    calculatedItems
+      .filter(
+        (item: SaleItem) =>
+          Boolean(item.measurementId)
+      )
+      .map((newItem: SaleItem) => {
+        const exactOldItem =
+          existingItems.find(
+            (oldItem: SaleItem) =>
+              oldItem.measurementId &&
+              oldItem.id === newItem.id
+          );
+
+        const matchingOldItem =
+          exactOldItem ||
+          oldAutomaticItemsByKey.get(
+            createItemKey(newItem)
+          );
+
+        if (!matchingOldItem) {
+          return newItem;
+        }
+
+        const preservedUnitPrice =
+          Number(matchingOldItem.unitPrice || 0);
+
+        const preservedDiscount =
+          Number(matchingOldItem.discount || 0);
+
+        const grossTotal =
+          Number(newItem.metricSize || 0) *
+          Number(newItem.quantity || 1) *
+          preservedUnitPrice;
+
+        const rowTotal =
+          grossTotal *
+          (
+            1 -
+            Math.min(
+              100,
+              Math.max(0, preservedDiscount)
+            ) / 100
+          );
+
+        return {
+          ...newItem,
+
+          unitPrice:
+            preservedUnitPrice,
+
+          discount:
+            preservedDiscount,
+
+          rowTotal:
+            Number(rowTotal.toFixed(2))
+        };
       });
-    }
-  });
 
-  newItems.forEach(n => {
-    if (!n.measurementId) return;
-    const exists = existingDraft.items.some((e: any) => e.id === n.id || (e.measurementId === n.measurementId && e.productType === n.productType && e.windowName === n.windowName));
-    if (!exists) {
-      mergedItems.push(n);
-    }
-  });
+  /*
+   * Aynı otomatik satırın birden fazla kez eklenmesini
+   * son savunma olarak engelle.
+   */
+  const uniqueAutomaticItems =
+    Array.from(
+      new Map(
+        refreshedAutomaticItems.map(
+          (item: SaleItem) => [
+            createItemKey(item),
+            item
+          ]
+        )
+      ).values()
+    );
 
   const updatedSale = {
     ...existingDraft,
-    items: mergedItems,
-    updatedAt: new Date().toISOString()
+
+    items: [
+      ...manualItems,
+      ...uniqueAutomaticItems
+    ],
+
+    updatedAt:
+      new Date().toISOString()
   };
 
   await salesStore.updateSale(updatedSale);
+
   return existingDraft.id;
 }
