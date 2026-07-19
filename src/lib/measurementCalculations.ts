@@ -287,78 +287,146 @@ export function createMechanicalPartsFromFacade(
     runStartIndex: number,
     runEndIndex: number
   ): void {
-    const leftOuterAllowance =
-      getAdjacentWallAllowance(runStartIndex - 1);
+    /*
+     * Doğal eşleşme kuralı:
+     *
+     * C + P veya P + C yan yana ise öncelikle bir mekanik
+     * ürün parçası olarak değerlendirilir.
+     *
+     * Örnek:
+     * C90 + P75 + P75 + C90
+     * =>
+     * C90 + P75 | P75 + C90
+     *
+     * İki ürün parçasının orta birleşiminde pay verilmez.
+     * Yalnız koşunun dışındaki gerçek duvarlardan,
+     * duvar kadar ve en fazla 10 cm pay alınır.
+     */
+    const naturalGroups: Array<{
+      firstIndex: number;
+      lastIndex: number;
+      baseWidthCm: number;
+    }> = [];
 
-    const rightOuterAllowance =
-      getAdjacentWallAllowance(runEndIndex + 1);
+    let cursor = runStartIndex;
 
-    let currentStart = runStartIndex;
-    let currentWidth = 0;
+    while (cursor <= runEndIndex) {
+      const currentType =
+        normalizeSegmentType(segments[cursor]?.type);
 
-    const pushCurrentPart = (
-      lastIndex: number
-    ): void => {
-      if (currentWidth <= 0) return;
+      const nextType =
+        cursor + 1 <= runEndIndex
+          ? normalizeSegmentType(
+              segments[cursor + 1]?.type
+            )
+          : "OTHER";
 
-      rawParts.push({
-        groupType: "CAM_PENCERE",
-        firstIndex: currentStart,
-        lastIndex,
-        baseWidthCm: currentWidth
-      });
-    };
+      const currentWidth =
+        Number(segments[cursor]?.widthCm || 0);
 
-    for (
-      let index = runStartIndex;
-      index <= runEndIndex;
-      index++
-    ) {
-      const segmentWidth =
-        Number(segments[index]?.widthCm || 0);
+      const nextWidth =
+        cursor + 1 <= runEndIndex
+          ? Number(
+              segments[cursor + 1]?.widthCm || 0
+            )
+          : 0;
 
-      if (segmentWidth <= 0) continue;
-
-      const partStartsAtRunStart =
-        currentStart === runStartIndex;
-
-      const segmentEndsRun =
-        index === runEndIndex;
-
-      const projectedActualWidth =
-        currentWidth +
-        segmentWidth +
+      const isNaturalPair =
         (
-          partStartsAtRunStart
-            ? leftOuterAllowance
-            : 0
-        ) +
+          currentType === "GLASS" &&
+          nextType === "WINDOW"
+        ) ||
         (
-          segmentEndsRun
-            ? rightOuterAllowance
-            : 0
+          currentType === "WINDOW" &&
+          nextType === "GLASS"
         );
 
-      /*
-       * Yeni segment mevcut parçaya eklendiğinde
-       * gerçek mekanik en 270 cm'yi aşacaksa,
-       * önceki segment sınırından parçayı bitir.
-       */
       if (
+        isNaturalPair &&
         currentWidth > 0 &&
-        projectedActualWidth >
-          MAX_MECHANICAL_WIDTH_CM
+        nextWidth > 0
       ) {
-        pushCurrentPart(index - 1);
+        naturalGroups.push({
+          firstIndex: cursor,
+          lastIndex: cursor + 1,
+          baseWidthCm:
+            currentWidth + nextWidth
+        });
 
-        currentStart = index;
-        currentWidth = segmentWidth;
-      } else {
-        currentWidth += segmentWidth;
+        cursor += 2;
+        continue;
       }
+
+      if (currentWidth > 0) {
+        naturalGroups.push({
+          firstIndex: cursor,
+          lastIndex: cursor,
+          baseWidthCm: currentWidth
+        });
+      }
+
+      cursor++;
     }
 
-    pushCurrentPart(runEndIndex);
+    naturalGroups.forEach(group => {
+      const leftAllowance =
+        group.firstIndex === runStartIndex
+          ? getAdjacentWallAllowance(
+              runStartIndex - 1
+            )
+          : 0;
+
+      const rightAllowance =
+        group.lastIndex === runEndIndex
+          ? getAdjacentWallAllowance(
+              runEndIndex + 1
+            )
+          : 0;
+
+      const actualWidthCm =
+        group.baseWidthCm +
+        leftAllowance +
+        rightAllowance;
+
+      /*
+       * Doğal çift 270 cm'yi geçmiyorsa aynen korunur.
+       * Geçerse yalnız segment sınırından ayrılır.
+       */
+      if (
+        actualWidthCm <=
+          MAX_MECHANICAL_WIDTH_CM ||
+        group.firstIndex === group.lastIndex
+      ) {
+        rawParts.push({
+          groupType: "CAM_PENCERE",
+          firstIndex: group.firstIndex,
+          lastIndex: group.lastIndex,
+          baseWidthCm: group.baseWidthCm
+        });
+
+        return;
+      }
+
+      for (
+        let segmentIndex = group.firstIndex;
+        segmentIndex <= group.lastIndex;
+        segmentIndex++
+      ) {
+        const segmentWidth =
+          Number(
+            segments[segmentIndex]?.widthCm || 0
+          );
+
+        if (segmentWidth <= 0) continue;
+
+        rawParts.push({
+          groupType: "CAM_PENCERE",
+          firstIndex: segmentIndex,
+          lastIndex: segmentIndex,
+          baseWidthCm: segmentWidth
+        });
+      }
+    });
   }
   let index = 0;
 

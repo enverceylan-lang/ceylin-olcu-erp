@@ -1,4 +1,7 @@
 import React from 'react';
+import {
+  getProductVisualLegendItems
+} from '@/lib/productVisualLegend';
 
 export interface TechnicalMeasurementSketchProps {
   facadeSegments?: { widthCm: number; type: string; label: string; id?: string }[];
@@ -13,6 +16,7 @@ export interface TechnicalMeasurementSketchProps {
   solYukseklikCm?: number;
   ortaYukseklikCm?: number;
   sagYukseklikCm?: number;
+  productTypes?: string[];
 }
 
 export function TechnicalMeasurementSketch(props: TechnicalMeasurementSketchProps) {
@@ -28,6 +32,7 @@ export function TechnicalMeasurementSketch(props: TechnicalMeasurementSketchProp
     solYukseklikCm = 0,
     ortaYukseklikCm = 0,
     sagYukseklikCm = 0,
+    productTypes = [],
   } = props;
 
   let totalWidth = props.totalFacadeWidthCm || 0;
@@ -181,6 +186,175 @@ export function TechnicalMeasurementSketch(props: TechnicalMeasurementSketchProp
   } else {
     // Empty drawing area
     yCursor += totalSegH;
+  }
+
+  /*
+   * Seçili ürünleri cephe üzerinde belirgin çizgilerle göster.
+   * Teknik ölçü çizgileri değişmez; ürün çizgileri ayrı katmandır.
+   */
+  const productLegendItems =
+    getProductVisualLegendItems(productTypes);
+
+  if (productLegendItems.length > 0) {
+    const layerStartY =
+      segStartY + 8;
+
+    const availableHeight =
+      Math.max(20, totalSegH - 16);
+
+    const layerGap =
+      Math.min(
+        12,
+        availableHeight /
+          Math.max(productLegendItems.length, 1)
+      );
+
+    productLegendItems.forEach(
+      (item, index) => {
+        const lineY =
+          layerStartY + index * layerGap;
+
+        /*
+         * Fon iki kanat şeklinde, sağ ve sol tarafta gösterilir.
+         */
+        if (item.productType === 'FON') {
+          elements.push(
+            <g
+              key={`product-layer-${item.productType}`}
+              stroke={item.color}
+              strokeWidth={item.lineWidth}
+              fill="none"
+              strokeLinecap="round"
+            >
+              <line
+                x1={startX + 10}
+                y1={segStartY + 8}
+                x2={startX + 10}
+                y2={segStartY + totalSegH - 8}
+              />
+
+              <line
+                x1={endX - 10}
+                y1={segStartY + 8}
+                x2={endX - 10}
+                y2={segStartY + totalSegH - 8}
+              />
+            </g>
+          );
+
+          return;
+        }
+
+        /*
+         * Tavan rustik cephenin üstünde mavi hat olarak gösterilir.
+         */
+        const effectiveY =
+          item.productType === 'TAVAN_RUSTIK'
+            ? segStartY + 3
+            : lineY;
+
+        elements.push(
+          <g
+            key={`product-layer-${item.productType}`}
+            stroke={item.color}
+            strokeWidth={item.lineWidth}
+            fill="none"
+            strokeLinecap="round"
+          >
+            <line
+              x1={startX + 8}
+              y1={effectiveY}
+              x2={endX - 8}
+              y2={effectiveY}
+            />
+
+            {item.doubleLine && (
+              <line
+                x1={startX + 8}
+                y1={effectiveY + 4}
+                x2={endX - 8}
+                y2={effectiveY + 4}
+              />
+            )}
+          </g>
+        );
+      }
+    );
+
+    yCursor += 16;
+
+    const legendStartY =
+      yCursor;
+
+    const legendColumnWidth =
+      190;
+
+    const legendRowHeight =
+      18;
+
+    productLegendItems.forEach(
+      (item, index) => {
+        const column =
+          index % 3;
+
+        const row =
+          Math.floor(index / 3);
+
+        const legendX =
+          startX +
+          column * legendColumnWidth;
+
+        const legendY =
+          legendStartY +
+          row * legendRowHeight;
+
+        elements.push(
+          <g
+            key={`product-legend-${item.productType}`}
+          >
+            <line
+              x1={legendX}
+              y1={legendY}
+              x2={legendX + 28}
+              y2={legendY}
+              stroke={item.color}
+              strokeWidth={item.lineWidth}
+              strokeLinecap="round"
+            />
+
+            {item.doubleLine && (
+              <line
+                x1={legendX}
+                y1={legendY + 4}
+                x2={legendX + 28}
+                y2={legendY + 4}
+                stroke={item.color}
+                strokeWidth={item.lineWidth}
+                strokeLinecap="round"
+              />
+            )}
+
+            <text
+              x={legendX + 36}
+              y={legendY + 4}
+              fill="#111"
+              fontSize="11"
+              fontWeight="bold"
+              stroke="none"
+            >
+              {item.label}
+            </text>
+          </g>
+        );
+      }
+    );
+
+    yCursor +=
+      Math.ceil(
+        productLegendItems.length / 3
+      ) *
+        legendRowHeight +
+      8;
   }
 
   // 4. Yükseklik Özeti (Bottom)

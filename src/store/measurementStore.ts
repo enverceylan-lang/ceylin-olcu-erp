@@ -75,11 +75,16 @@ function enrichMeasurement(m: MeasurementRecord): MeasurementRecord {
   const height = dims.structuralHeight || 0;
 
   copy.selectedProducts = copy.selectedProducts.map(item => {
+    const productRawValues = {
+      ...(copy.rawValues || {}),
+      ...(item.userOverrides || {})
+    };
+
     const calc = calculateSelectedProduct(
       item.productType,
       width,
       height,
-      copy.rawValues || {},
+      productRawValues,
       copy.selectedProducts || []
     );
     return {

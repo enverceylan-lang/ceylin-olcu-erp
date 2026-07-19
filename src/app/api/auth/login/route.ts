@@ -121,13 +121,41 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const localDevUsername = normalizeUsername(
+      process.env.LOCAL_DEV_ADMIN_USERNAME || "",
+    );
+
+    const localDevPasswordHash = String(
+      process.env.LOCAL_DEV_ADMIN_PASSWORD_HASH || "",
+    ).trim();
+
+    let localPasswordMatches = false;
+
+    if (
+      process.env.NODE_ENV === "development" &&
+      localDevUsername &&
+      localDevPasswordHash &&
+      cleanUsername === localDevUsername
+    ) {
+      const suppliedLocalHash = crypto
+        .createHash("sha256")
+        .update(cleanPassword, "utf8")
+        .digest("hex");
+
+      const storedLocal = Buffer.from(localDevPasswordHash, "utf8");
+      const suppliedLocal = Buffer.from(suppliedLocalHash, "utf8");
+
+      localPasswordMatches =
+        storedLocal.length === suppliedLocal.length &&
+        crypto.timingSafeEqual(storedLocal, suppliedLocal);
+    }
     const hashedPassword = hashPassword(cleanPassword);
     const stored = Buffer.from(String(user.password), "utf8");
     const supplied = Buffer.from(hashedPassword, "utf8");
     const passwordMatches =
       stored.length === supplied.length && crypto.timingSafeEqual(stored, supplied);
 
-    if (!passwordMatches) {
+    if (!passwordMatches && !localPasswordMatches) {
       return NextResponse.json(
         { success: false, error: "Kullanıcı adı veya şifre hatalı." },
         { status: 401 },

@@ -682,6 +682,14 @@ function lookupProductPrices(productType: string): { purchasePrice: number, sale
     else if (norm === 'AHSAP_JALUZI' || norm === 'JALUZI' || norm === 'METAL_JALUZI') {
       matched = products.find((p: any) => p.category === 'Jaluzi' || p.stockCode === 'JAL-003');
     }
+    else if (norm === 'PICASSO') {
+      matched = products.find(
+        (p: any) =>
+          String(p.category || '').toUpperCase() === 'PICASSO' ||
+          String(p.name || '').toUpperCase().includes('PICASSO') ||
+          String(p.stockCode || '').toUpperCase().startsWith('PIC')
+      );
+    }
   }
 
   const basePurchase = matched ? matched.dealerPrice || 300 : 300;
@@ -717,6 +725,10 @@ function getJumboConfig(productType: string, parentProductCard: any): any {
     defaultPurchasePrice = 250;
     defaultSalePrice = 350;
     defaultName = 'Ağır hizmet mekanizması';
+  } else if (norm === 'PICASSO') {
+    defaultPurchasePrice = 300;
+    defaultSalePrice = 450;
+    defaultName = 'Jumbo Picasso Mekanizma Farkı';
   }
 
   const jumboEnabled = parentProductCard?.jumboEnabled !== undefined ? parentProductCard.jumboEnabled : true;
@@ -954,7 +966,7 @@ export function calculateSelectedProduct(
     };
   }
 
-  if (norm === 'STOR' || norm === 'ZEBRA' || norm === 'AHSAP_JALUZI' || norm === 'JALUZI' || norm === 'METAL_JALUZI') {
+  if (norm === 'STOR' || norm === 'ZEBRA' || norm === 'AHSAP_JALUZI' || norm === 'JALUZI' || norm === 'METAL_JALUZI' || norm === 'PICASSO') {
     const facadeSegments = rawValues.facadeSegments || [];
     const q = Number(rawValues.quantity || 1) || 1;
 
@@ -993,7 +1005,20 @@ export function calculateSelectedProduct(
         const totalM2 =
           coreCalculation.totalM2;
 
-        const requiresJumbo = calcW >= jumboConfig.jumboThresholdCm;
+        /*
+         * Picasso jumbo kararı boy üzerinden verilir.
+         * Diğer mekanik ürünlerde jumbo eşiği parça eni üzerinden çalışır.
+         * Hesap her ayrılmış parça için ayrı ayrı yapılır.
+         */
+        const jumboDimensionCm =
+          norm === 'PICASSO'
+            ? calcH
+            : calcW;
+
+        const requiresJumbo =
+          jumboConfig.jumboEnabled &&
+          jumboDimensionCm >=
+            jumboConfig.jumboThresholdCm;
 
         let jumboQty = 0;
         let jumboUnit = 'NONE';
@@ -1270,8 +1295,36 @@ export function calculateSelectedProduct(
       );
 
     return {
+      /*
+       * Gerçek ölçü: sahada alınan tam duvar ölçüsü.
+       * Hesap ölçüsü: satışta kullanılan tam duvar ölçüsü.
+       * Üretim ölçüsü: dikey siparişinde en -10 cm.
+       */
+      realWidthCm:
+        calculation.measurementWidthCm,
+
+      realHeightCm:
+        calculation.measurementHeightCm,
+
+      actualWidthCm:
+        calculation.measurementWidthCm,
+
+      actualHeightCm:
+        calculation.measurementHeightCm,
+
       totalM2:
         calculation.salesM2,
+
+      unitM2:
+        calculation.salesM2,
+
+      quantity:
+        Number(rawValues?.quantity || 1),
+
+      chainDirection:
+        rawValues?.chainDirection === 'LEFT'
+          ? 'LEFT'
+          : 'RIGHT',
 
       billingWidth:
         calculation.measurementWidthCm,
@@ -1306,8 +1359,36 @@ export function calculateSelectedProduct(
       );
 
     return {
+      /*
+       * Gerçek ölçü: sahada alınan tam duvar ölçüsü.
+       * Hesap ölçüsü: satışta kullanılan tam duvar ölçüsü.
+       * Üretim ölçüsü: dikey siparişinde en -10 cm.
+       */
+      realWidthCm:
+        calculation.measurementWidthCm,
+
+      realHeightCm:
+        calculation.measurementHeightCm,
+
+      actualWidthCm:
+        calculation.measurementWidthCm,
+
+      actualHeightCm:
+        calculation.measurementHeightCm,
+
       totalM2:
         calculation.salesM2,
+
+      unitM2:
+        calculation.salesM2,
+
+      quantity:
+        Number(rawValues?.quantity || 1),
+
+      chainDirection:
+        rawValues?.chainDirection === 'LEFT'
+          ? 'LEFT'
+          : 'RIGHT',
 
       billingWidth:
         calculation.measurementWidthCm,
@@ -1386,39 +1467,6 @@ export function calculateSelectedProduct(
         systemType === 'DOUBLE'
           ? 'Çiftli Plicell Sistem'
           : 'Plicell Perde'
-    };
-  }
-  if (norm === 'PICASSO') {
-    const calculation =
-      calculateMechanicalCurtain(
-        width,
-        getMechanicalEffectiveHeight(
-          rawValues,
-          height
-        ),
-        Number(rawValues?.quantity || 1)
-      );
-
-    return {
-      billingWidth:
-        calculation.billingWidthCm,
-
-      billingHeight:
-        calculation.billingHeightCm,
-
-      unitM2:
-        calculation.unitM2,
-
-      totalM2:
-        calculation.totalM2,
-
-      chainDirection:
-        rawValues?.chainDirection === 'LEFT'
-          ? 'LEFT'
-          : 'RIGHT',
-
-      description:
-        'Picasso Perde'
     };
   }
   if (norm === 'BIRIZ') {

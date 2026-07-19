@@ -136,7 +136,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
                 <thead className="bg-gray-50 dark:bg-gray-800/50 text-gray-500 dark:text-gray-400 font-medium border-b border-gray-200 dark:border-gray-800">
                   <tr>
                     <th className="px-4 py-3">Oda / Pencere</th>
-                    <th className="px-4 py-3">Ürün Grubu</th>
+                    <th className="px-4 py-3">Ürün</th>
                     <th className="px-4 py-3 text-right">Ölçü ({sale.items[0]?.metricUnit || 'br'})</th>
                     <th className="px-4 py-3 text-right">Miktar</th>
                     <th className="px-4 py-3 text-right">Birim Fiyat</th>
@@ -153,7 +153,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
                       </td>
                       <td className="px-4 py-3">
                         <span className="inline-block bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-2 py-1 rounded text-xs font-semibold">
-                          {item.productGroup}
+                          {item.productType || item.productGroup || 'Ürün'}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right">
