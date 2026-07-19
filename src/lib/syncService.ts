@@ -11,15 +11,6 @@ const CLOUD_SYNC_DISABLED = true;
 // Track last 413 Payload Too Large error timestamp
 let last413Time = 0;
 
-// Helper to encode base64 safely with UTF-8 support (avoids Turkish character btoa crashes)
-// btoa() fails on non-Latin1 characters (e.g. Ş, Ğ, İ, Ü, Ö, Ç).
-// This implementation encodes the string as UTF-8 bytes first, then base64-encodes the bytes.
-function utf8ToBase64(str: string): string {
-  return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (_, p1) => {
-    return String.fromCharCode(parseInt(p1, 16));
-  }));
-}
-
 // Deep clone payload and strip any raw base64 data URLs / media arrays
 // Helper to identify if a string is a base64 / data URL
 function isDataUrl(val: any): boolean {
@@ -361,15 +352,15 @@ export async function syncNow(isManual: boolean = false) {
     const pendingDeletes = store.pendingDeletes || [];
     const localUsers = authStore.users || [];
     const currentUser = authStore.currentUser;
+    const sessionToken = authStore.sessionToken;
 
     // ── Diagnostic logs (no secret values printed) ──
     console.log('[Client Sync] currentUser exists:', !!currentUser);
     if (currentUser) {
       console.log('[Client Sync] currentUser.username:', currentUser.username);
       console.log('[Client Sync] currentUser.role:', currentUser.role);
-      console.log('[Client Sync] credential/password exists:', !!currentUser.password);
     }
-    console.log('[Client Sync] Authorization header will be sent:', !!(currentUser && currentUser.password));
+    console.log('[Client Sync] session token present:', !!sessionToken);
 
     // ── Guard: no user logged in ──
     // Do NOT set status to 'synced' here — no sync actually occurred.
@@ -381,12 +372,9 @@ export async function syncNow(isManual: boolean = false) {
       return;
     }
 
-    // ── Guard: user has no stored credential ──
-    // This can happen when sanitized remote users overwrite the local users list
-    // and the currentUser's password gets lost. Force re-login rather than
-    // silently failing or showing a false "synced" status.
-    if (!currentUser.password) {
-      console.warn('[Client Sync] currentUser has no stored credential. Sync aborted — please log out and log in again.');
+    // ── Guard: authenticated user has no active session token ──
+    if (!sessionToken) {
+      console.warn('[Client Sync] Active session token is missing. Sync aborted.');
       store.setSyncStatus('error');
       isSyncing = false;
       return;
@@ -518,9 +506,8 @@ export async function syncNow(isManual: boolean = false) {
     console.log('[Client Sync Outgoing Count] outgoing nested windows/openings count:', outgoingOpeningsCount);
     console.log('[Client Sync Outgoing Count] outgoing nested products/measurements count:', outgoingMeasurementsCount);
 
-    // ── Build Authorization header using UTF-8-safe base64 ──
-    // Prevents btoa crash on Turkish characters (Ş, Ğ, İ, Ü, Ö, Ç) in usernames/passwords.
-    const token = utf8ToBase64(`${currentUser.username}:${currentUser.password}`);
+    // ── Build Authorization header using the signed session token ──
+    const token = sessionToken;
 
     const response = await fetch('/api/sync/customers', {
       method: 'POST',
@@ -637,41 +624,20 @@ export async function syncNow(isManual: boolean = false) {
       store.setCustomers(merged);
     }
 
-    // ── Safe user merge — never overwrite valid local credentials ──
+    // ── Safe user merge — passwords are never stored on the client ──
     if (result.users) {
       const latestLocalUsers = useAuthStore.getState().users || [];
-      // Keep a reference to the active session password BEFORE modifying the users list.
-      // currentUser.password is the plain-text PIN/password entered at login time and
-      // is never included in sanitized server responses. We must preserve it.
-      const activeSessionPassword = currentUser.password;
       const activeUserId = currentUser.id;
 
       const mergedUsers = result.users.map((remoteUser: any) => {
         const localUser = latestLocalUsers.find((u: any) => u.id === remoteUser.id);
 
-        // Priority for credential resolution:
-        // 1. Active session user's password (most trustworthy — was just used to authenticate)
-        // 2. Existing local users list password (may be plain-text or hashed)
-        // 3. Remote user's password (only if server did not sanitize it — should not happen)
-        // Never assign undefined, null, or empty string as the password.
-        let preservedPassword: string | undefined;
-        if (remoteUser.id === activeUserId) {
-          // If the local user record has a newer/different password than the active session password,
-          // it means there was a local password change. Promote it once sync succeeds.
-          preservedPassword = localUser?.password || activeSessionPassword;
-        } else {
-          // For other users, use what's already locally stored
-          preservedPassword = localUser?.password || remoteUser.password;
-        }
-
-        if (!preservedPassword) {
-          console.warn(`[Client Sync] User "${remoteUser.username}" has no recoverable local credential.`);
-        }
-
-        // Merge logic: local profile field populated, remote empty -> local is preserved.
-        // If both are populated, prefer the one with the newer updatedAt timestamp.
-        const localUpdate = localUser?.updatedAt ? new Date(localUser.updatedAt).getTime() : 0;
-        const remoteUpdate = remoteUser.updatedAt ? new Date(remoteUser.updatedAt).getTime() : 0;
+        const localUpdate = localUser?.updatedAt
+          ? new Date(localUser.updatedAt).getTime()
+          : 0;
+        const remoteUpdate = remoteUser.updatedAt
+          ? new Date(remoteUser.updatedAt).getTime()
+          : 0;
 
         let email = remoteUser.email;
         let phone = remoteUser.phone;
@@ -680,40 +646,33 @@ export async function syncNow(isManual: boolean = false) {
         let profileCompletedAt = remoteUser.profileCompletedAt;
 
         if (localUser) {
-          if (localUser.email && !remoteUser.email) {
-            email = localUser.email;
-          } else if (remoteUser.email && localUser.email && localUpdate > remoteUpdate) {
+          if (localUser.email && (!remoteUser.email || localUpdate > remoteUpdate)) {
             email = localUser.email;
           }
 
-          if (localUser.phone && !remoteUser.phone) {
-            phone = localUser.phone;
-          } else if (remoteUser.phone && localUser.phone && localUpdate > remoteUpdate) {
+          if (localUser.phone && (!remoteUser.phone || localUpdate > remoteUpdate)) {
             phone = localUser.phone;
           }
 
-          if (localUser.tcNo && !remoteUser.tcNo) {
-            tcNo = localUser.tcNo;
-          } else if (remoteUser.tcNo && localUser.tcNo && localUpdate > remoteUpdate) {
+          if (localUser.tcNo && (!remoteUser.tcNo || localUpdate > remoteUpdate)) {
             tcNo = localUser.tcNo;
           }
 
-          if (localUser.address && !remoteUser.address) {
-            address = localUser.address;
-          } else if (remoteUser.address && localUser.address && localUpdate > remoteUpdate) {
+          if (localUser.address && (!remoteUser.address || localUpdate > remoteUpdate)) {
             address = localUser.address;
           }
 
-          if (localUser.profileCompletedAt && !remoteUser.profileCompletedAt) {
-            profileCompletedAt = localUser.profileCompletedAt;
-          } else if (remoteUser.profileCompletedAt && localUser.profileCompletedAt && localUpdate > remoteUpdate) {
+          if (
+            localUser.profileCompletedAt &&
+            (!remoteUser.profileCompletedAt || localUpdate > remoteUpdate)
+          ) {
             profileCompletedAt = localUser.profileCompletedAt;
           }
         }
 
         return {
           ...remoteUser,
-          password: preservedPassword,  // may be undefined for users never locally logged in
+          password: undefined,
           email,
           phone,
           tcNo,
@@ -724,16 +683,18 @@ export async function syncNow(isManual: boolean = false) {
 
       useAuthStore.setState({ users: mergedUsers });
 
-      // Ensure currentUser in the session still has its password and profile fields intact and synchronized
-      const updatedCurrentUser = mergedUsers.find((u: any) => u.id === activeUserId);
+      const updatedCurrentUser = mergedUsers.find(
+        (u: any) => u.id === activeUserId
+      );
+
       if (updatedCurrentUser) {
         useAuthStore.setState({
           currentUser: {
             ...updatedCurrentUser,
-            password: updatedCurrentUser.password || activeSessionPassword
+            password: undefined
           }
         });
-        console.log('[Client Sync] Synchronized currentUser profile and session password after merge.');
+        console.log('[Client Sync] Synchronized current user profile.');
       }
     }
 

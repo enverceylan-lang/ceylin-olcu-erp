@@ -3,7 +3,7 @@
 import {
   Search, Ruler, ArrowRight, ChevronDown, ChevronUp, User, Calendar, Layers,
   Image, Video as VideoIcon, CheckCircle2, AlertCircle, ClipboardList,
-  Trash2, Edit3, X, Save, BadgeCheck, Filter, CloudDownload, RefreshCw, MapPin
+  Trash2, Edit3, X, Save, BadgeCheck, Filter, CloudDownload, RefreshCw, MapPin, Wrench
 } from "lucide-react";
 import Link from "next/link";
 import { useStore } from "@/store/useStore";
@@ -23,6 +23,22 @@ import {
 } from "@/lib/localDraftDb";
 import { pullInboundMeasurements } from "@/lib/deltaSyncClient";
 import { processAsNewCustomer, processAsMerge } from "@/lib/inboundProcessor";
+import {
+  loadLocalCustomers,
+  saveLocalCustomers,
+} from "@/lib/localCustomerDb";
+
+const measurementOpeningId = (measurement: { openingId?: string; windowId?: string }) =>
+  measurement.openingId || measurement.windowId || "";
+
+const measurementBelongsTo = (
+  measurement: { customerId: string; roomId: string; openingId?: string; windowId?: string },
+  customerId: string,
+  roomId: string,
+  openingId: string
+) => measurement.customerId === customerId &&
+  measurement.roomId === roomId &&
+  measurementOpeningId(measurement) === openingId;
 
 // ─── Status helpers ────────────────────────────────────────────────────────────
 
@@ -84,6 +100,13 @@ export default function OlculerPage() {
   const [isPulling, setIsPulling] = useState(false);
   const [inboundSelections, setInboundSelections] = useState<Record<string, string>>({});
   const [processingInboundId, setProcessingInboundId] = useState<string | null>(null);
+  const [isRepairingOrphans, setIsRepairingOrphans] = useState(false);
+  const [completedInboundLinks, setCompletedInboundLinks] = useState<Record<string, string>>({});
+  const [orphanSearchMeasurementId, setOrphanSearchMeasurementId] =
+  useState<string | null>(null);
+
+const [manualRepairingMeasurementId, setManualRepairingMeasurementId] =
+  useState<string | null>(null);
 
   // Cari Rehberi modal state
   const [customerSearchInboundId, setCustomerSearchInboundId] = useState<string | null>(null);
@@ -114,28 +137,27 @@ export default function OlculerPage() {
 
   const loadInbound = async () => {
     try {
-      let data = await listInboundMeasurements();
-      // Auto-cleanup local duplicates ONLY FOR PENDING ITEMS
-      const pendingData = data.filter(d => d.status === 'NEW' || d.status === 'MATCH_PENDING');
-      const seen = new Set();
-      const duplicatesToRemove: string[] = [];
-      for (const d of pendingData) {
-         const key = `${d.entityType}_${d.entityId}`;
-         if (seen.has(key)) {
-             duplicatesToRemove.push(d.changeId);
-         } else {
-             seen.add(key);
-         }
-      }
-      
-      if (duplicatesToRemove.length > 0) {
-         const { localDraftDb } = await import('@/lib/localDraftDb');
-         await localDraftDb.inboundMeasurements.bulkDelete(duplicatesToRemove);
-         data = await listInboundMeasurements();
-      }
-
+      const data = await listInboundMeasurements();
       setInboundMeasurements(data.filter(d => d.status === 'NEW' || d.status === 'MATCH_PENDING'));
-    } catch (err) {}
+
+      const links: Record<string, string> = {};
+      data
+        .filter((item) =>
+          (item.status === "LINKED_TO_CUSTOMER" || item.status === "CREATED_CUSTOMER") &&
+          Boolean(item.linkedCustomerId || item.createdCustomerId)
+        )
+        .sort((a, b) => Number(a.revision || 0) - Number(b.revision || 0))
+        .forEach((item) => {
+          const sourceId = String(
+            item.entityId || item.patch?.temporaryCustomerId || item.patch?.customerId || ""
+          ).trim();
+          const targetId = String(item.linkedCustomerId || item.createdCustomerId || "").trim();
+          if (sourceId && targetId) links[sourceId] = targetId;
+        });
+      setCompletedInboundLinks(links);
+    } catch (err) {
+      console.error("Gelen ölçü geçmişi yüklenemedi:", err);
+    }
   };
 
   const handlePullInbound = async () => {
@@ -229,6 +251,7 @@ export default function OlculerPage() {
     setMounted(true);
     loadDrafts();
     loadInbound();
+    measurementStore.loadMeasurements();
   }, []);
 
   if (!mounted) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
@@ -259,7 +282,9 @@ export default function OlculerPage() {
         for (const window of activeWindows) {
           photoCount += (window.photos || []).length;
           videoCount += (window.videos || []).length;
-          const activeProducts = measurementStore.measurements.filter(m => m.windowId === window.id && !m.isDeleted);
+          const activeProducts = measurementStore.measurements.filter(m =>
+            measurementBelongsTo(m, customer.id, room.id, window.id) && !m.isDeleted && !m.isArchived
+          );
           measurementCount += activeProducts.length;
           for (const p of activeProducts) {
             photoCount += (p.photos || []).length;
@@ -300,6 +325,335 @@ export default function OlculerPage() {
         (item.customer.phone && item.customer.phone.includes(searchTerm))
     )
     .sort((a, b) => b.sortDate - a.sortDate);
+
+  const orphanMeasurements = measurementStore.measurements.filter((measurement) => {
+    if (measurement.isDeleted || measurement.isArchived) return false;
+    const customer = customers.find(c => c.id === measurement.customerId && !c.isDeleted);
+    const room = customer?.rooms?.find(r => r.id === measurement.roomId && !r.isDeleted);
+    const opening = room?.windows?.find(w => w.id === measurementOpeningId(measurement) && !w.isDeleted);
+    return !customer || !room || !opening;
+  });
+
+  const getOrphanDisplay = (measurement: any) => {
+    const sourceCustomer = customers.find(
+      (customer) => customer.id === measurement.customerId && !customer.isDeleted
+    );
+    const targetCustomerId = completedInboundLinks[measurement.customerId];
+    const targetCustomer = targetCustomerId
+      ? customers.find((customer) => customer.id === targetCustomerId && !customer.isDeleted)
+      : undefined;
+    const displayCustomer = targetCustomer || sourceCustomer;
+    const room = displayCustomer?.rooms?.find(
+      (item: any) => item.id === measurement.roomId && !item.isDeleted
+    );
+    const openingId = measurementOpeningId(measurement);
+    const opening = room?.windows?.find(
+      (item: any) => item.id === openingId && !item.isDeleted
+    );
+    const dimensions = getMeasurementDimensions(measurement);
+
+    return {
+      sourceCustomer,
+      targetCustomer,
+      roomName: room?.name || measurement.roomName || measurement.roomLabel || "Oda adı bulunamadı",
+      openingName:
+        opening?.name ||
+        measurement.openingName ||
+        measurement.windowName ||
+        measurement.openingLabel ||
+        "Açıklık adı bulunamadı",
+      templateLabel: getTemplateLabel(dimensions.templateType),
+      summaryLabel: dimensions.summaryLabel || "Ölçü değerleri kayıtlı",
+      canAutoRepair: Boolean(targetCustomer || sourceCustomer),
+    };
+  };
+
+  const handleRepairOrphans = async () => {
+    if (orphanMeasurements.length === 0 || isRepairingOrphans) return;
+
+    const confirmed = window.confirm(
+      `${orphanMeasurements.length} yetim ölçü için güvenli onarım çalıştırılacak. Ölçüler silinmeyecek; yalnız kesin cari eşleşmeleri ve eksik oda/açıklık bağlantıları düzeltilecek. Devam edilsin mi?`
+    );
+    if (!confirmed) return;
+
+    setIsRepairingOrphans(true);
+    try {
+      const history = await listInboundMeasurements();
+      const completed = history
+        .filter((item) =>
+          (item.status === "LINKED_TO_CUSTOMER" || item.status === "CREATED_CUSTOMER") &&
+          Boolean(item.linkedCustomerId || item.createdCustomerId)
+        )
+        .sort((a, b) => Number(a.revision || 0) - Number(b.revision || 0));
+
+      const sourceToTarget = new Map<string, string>();
+      for (const item of completed) {
+        const sourceId = String(
+          item.entityId ||
+          item.patch?.temporaryCustomerId ||
+          item.patch?.customerId ||
+          ""
+        ).trim();
+        const targetId = String(item.linkedCustomerId || item.createdCustomerId || "").trim();
+        if (sourceId && targetId) sourceToTarget.set(sourceId, targetId);
+      }
+
+      const customerMap = new Map(
+        customers
+          .filter((customer) => !customer.isDeleted)
+          .map((customer) => [customer.id, { ...customer, rooms: [...(customer.rooms || [])] }] as const)
+      );
+
+      const repairedMeasurements: any[] = [];
+      const touchedCustomerIds = new Set<string>();
+      const unresolved: string[] = [];
+
+      for (const measurement of orphanMeasurements) {
+        const sourceCustomerId = String(measurement.customerId || "").trim();
+        const targetCustomerId = sourceToTarget.get(sourceCustomerId) || sourceCustomerId;
+        const customer = customerMap.get(targetCustomerId);
+        const openingId = measurementOpeningId(measurement);
+
+        if (!customer || !measurement.roomId || !openingId) {
+          unresolved.push(measurement.id);
+          continue;
+        }
+
+        const rooms = [...(customer.rooms || [])];
+        let roomIndex = rooms.findIndex((room: any) => room.id === measurement.roomId && !room.isDeleted);
+
+        if (roomIndex === -1) {
+          rooms.push({
+            id: measurement.roomId,
+            name: (measurement as any).roomName || (measurement as any).roomLabel || "Kurtarılan Oda",
+            photos: [],
+            videos: [],
+            windows: [],
+          } as any);
+          roomIndex = rooms.length - 1;
+        }
+
+        const room: any = { ...rooms[roomIndex] };
+        const windows = Array.isArray(room.windows)
+          ? [...room.windows]
+          : Array.isArray(room.openings)
+            ? [...room.openings]
+            : [];
+
+        if (!windows.some((opening: any) => opening.id === openingId && !opening.isDeleted)) {
+          windows.push({
+            id: openingId,
+            name:
+              (measurement as any).openingName ||
+              (measurement as any).windowName ||
+              (measurement as any).openingLabel ||
+              "Kurtarılan Açıklık",
+            photos: [],
+            videos: [],
+            products: [],
+          });
+        }
+
+        rooms[roomIndex] = { ...room, windows };
+        const updatedCustomer = {
+          ...customer,
+          rooms,
+          updatedAt: new Date().toISOString(),
+        };
+        customerMap.set(targetCustomerId, updatedCustomer);
+        touchedCustomerIds.add(targetCustomerId);
+
+        repairedMeasurements.push({
+          ...measurement,
+          customerId: targetCustomerId,
+          openingId,
+          windowId: openingId,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+
+      if (repairedMeasurements.length > 0) {
+        const customersToSave = Array.from(touchedCustomerIds)
+          .map((id) => customerMap.get(id))
+          .filter(Boolean) as any[];
+
+        await saveLocalCustomers(customersToSave);
+await measurementStore.batchUpsertMeasurements(repairedMeasurements);
+await refreshRepairData();
+      }
+
+      const message =
+        `${repairedMeasurements.length} ölçü onarıldı.` +
+        (unresolved.length > 0
+          ? ` ${unresolved.length} ölçü için kesin cari eşleşmesi bulunamadı; kayıtlar korunuyor.`
+          : " Yetim ölçü kalmadı.");
+      alert(message);
+    } catch (error: any) {
+      console.error("[OrphanRepair] Onarım başarısız:", error);
+      alert(`Yetim ölçü onarımı tamamlanamadı. Veriler korunuyor. Hata: ${error?.message || "Bilinmeyen hata"}`);
+    } finally {
+      setIsRepairingOrphans(false);
+    }
+  };
+
+  const refreshRepairData = async () => {
+  const freshCustomers = await loadLocalCustomers();
+
+  useStore.setState({
+    customers: freshCustomers,
+  });
+
+  await measurementStore.loadMeasurements();
+  await loadInbound();
+};
+
+const handleManualOrphanRepair = async (
+  measurementId: string,
+  targetCustomerId: string,
+) => {
+  if (manualRepairingMeasurementId) return;
+
+  const measurement = measurementStore.measurements.find(
+    (item) => item.id === measurementId,
+  );
+
+  const targetCustomer = customers.find(
+    (customer) =>
+      customer.id === targetCustomerId &&
+      !customer.isDeleted &&
+      !customer.isArchived,
+  );
+
+  if (!measurement) {
+    alert("Onarılacak ölçü bulunamadı. Kayıt değiştirilmedi.");
+    return;
+  }
+
+  if (!targetCustomer) {
+    alert("Seçilen cari bulunamadı veya aktif değil. Kayıt değiştirilmedi.");
+    return;
+  }
+
+  const openingId = measurementOpeningId(measurement);
+
+  if (!measurement.roomId || !openingId) {
+    alert(
+      "Ölçünün oda veya açıklık kimliği eksik. Otomatik onarım yapılmadı.",
+    );
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `"${targetCustomer.name}" carisi seçildi.\n\n` +
+      "Bu ölçü yalnız bu cariye bağlanacak. Ölçü değerleri ve ölçü kimliği değişmeyecek.\n\n" +
+      "Devam edilsin mi?",
+  );
+
+  if (!confirmed) return;
+
+  setManualRepairingMeasurementId(measurementId);
+
+  try {
+    const rooms = [...(targetCustomer.rooms || [])];
+
+    let roomIndex = rooms.findIndex(
+      (room: any) =>
+        room.id === measurement.roomId &&
+        !room.isDeleted,
+    );
+
+    if (roomIndex === -1) {
+      rooms.push({
+        id: measurement.roomId,
+        name:
+          (measurement as any).roomName ||
+          (measurement as any).roomLabel ||
+          "Kurtarılan Oda",
+        photos: [],
+        videos: [],
+        windows: [],
+      } as any);
+
+      roomIndex = rooms.length - 1;
+    }
+
+    const room: any = {
+      ...rooms[roomIndex],
+    };
+
+    const windows = Array.isArray(room.windows)
+      ? [...room.windows]
+      : Array.isArray(room.openings)
+        ? [...room.openings]
+        : [];
+
+    const openingExists = windows.some(
+      (opening: any) =>
+        opening.id === openingId &&
+        !opening.isDeleted,
+    );
+
+    if (!openingExists) {
+      windows.push({
+        id: openingId,
+        name:
+          (measurement as any).openingName ||
+          (measurement as any).windowName ||
+          (measurement as any).openingLabel ||
+          "Kurtarılan Açıklık",
+        photos: [],
+        videos: [],
+        products: [],
+      });
+    }
+
+    rooms[roomIndex] = {
+      ...room,
+      windows,
+    };
+
+    const updatedCustomer = {
+      ...targetCustomer,
+      rooms,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const repairedMeasurement = {
+      ...measurement,
+      customerId: targetCustomer.id,
+      openingId,
+      windowId: openingId,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await saveLocalCustomers([updatedCustomer]);
+
+    await measurementStore.batchUpsertMeasurements([
+      repairedMeasurement,
+    ]);
+
+    await refreshRepairData();
+
+    setOrphanSearchMeasurementId(null);
+    setCustomerSearchQuery("");
+
+    alert(
+      `Ölçü "${targetCustomer.name}" carisine bağlandı ve yetim kayıttan çıkarıldı.`,
+    );
+  } catch (error: any) {
+    console.error(
+      "[ManualOrphanRepair] Manuel onarım başarısız:",
+      error,
+    );
+
+    alert(
+      "Manuel onarım tamamlanamadı. Veriler korunuyor. Hata: " +
+        (error?.message || "Bilinmeyen hata"),
+    );
+  } finally {
+    setManualRepairingMeasurementId(null);
+  }
+};
 
   const handleSelectCustomerFromModal = (customerId: string) => {
     if (!customerSearchInboundId) return;
@@ -394,6 +748,100 @@ export default function OlculerPage() {
           Müşteri bazında alınan saha ölçüleri ve durum takibi.
         </p>
       </div>
+
+      {orphanMeasurements.length > 0 && (
+        <section className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/20">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-300">
+              <AlertCircle className="h-5 w-5" /> Yetim Ölçüler
+              <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs dark:bg-amber-900">{orphanMeasurements.length}</span>
+            </h2>
+            {(currentUser?.role === "ADMIN" || currentUser?.role === "MODERATOR") && (
+              <button
+                type="button"
+                onClick={handleRepairOrphans}
+                disabled={isRepairingOrphans}
+                className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-800 shadow-sm hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-800 dark:bg-gray-900 dark:text-amber-300 dark:hover:bg-amber-950/40"
+              >
+                <Wrench className={`h-4 w-4 ${isRepairingOrphans ? "animate-spin" : ""}`} />
+                {isRepairingOrphans ? "Onarılıyor..." : "Yetimleri Güvenle Onar"}
+              </button>
+            )}
+          </div>
+          <p className="text-xs text-amber-700 dark:text-amber-400">
+            Bu kayıtlar kalıcı ölçü veritabanında bulunuyor ancak cari, oda veya açıklık bağlantısı tam eşleşmiyor. Kayıtlar silinmedi.
+          </p>
+          <div className="grid gap-2 md:grid-cols-2">
+            {orphanMeasurements.map((measurement) => {
+              const display = getOrphanDisplay(measurement);
+              return (
+                <div key={measurement.id} className="space-y-2 rounded-lg border border-amber-200 bg-white p-3 text-xs dark:border-amber-900 dark:bg-gray-900">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <div className="font-bold text-gray-900 dark:text-white">
+                        {display.targetCustomer?.name || display.sourceCustomer?.name || "Cari bilgisi bulunamadı"}
+                      </div>
+                      {display.targetCustomer && display.sourceCustomer?.id !== display.targetCustomer.id && (
+                        <div className="mt-0.5 text-[11px] text-green-700 dark:text-green-400">
+                          Kesin eşleşme bulundu → {display.targetCustomer.name}
+                        </div>
+                      )}
+                    </div>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                      display.canAutoRepair
+                        ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300"
+                        : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
+                    }`}>
+                      {display.canAutoRepair ? "ONARILABİLİR" : "MANUEL EŞLEŞME GEREKİYOR"}
+                    </span>
+                  </div>
+
+                  <div className="rounded-md bg-amber-50 p-2 dark:bg-amber-950/30">
+                    <div><span className="font-semibold">Oda:</span> {display.roomName}</div>
+                    <div><span className="font-semibold">Açıklık:</span> {display.openingName}</div>
+                    <div><span className="font-semibold">Ölçü türü:</span> {display.templateLabel}</div>
+                    <div><span className="font-semibold">Ölçü:</span> {display.summaryLabel}</div>
+                    {(measurement.measuredBy || measurement.measuredDate) && (
+                      <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                        {measurement.measuredBy ? `Ölçen: ${measurement.measuredBy}` : ""}
+                        {measurement.measuredBy && measurement.measuredDate ? " • " : ""}
+                        {measurement.measuredDate
+                          ? new Date(measurement.measuredDate).toLocaleString("tr-TR")
+                          : ""}
+                      </div>
+                    )}
+                  </div>
+{!display.canAutoRepair && (
+  <button
+    type="button"
+    onClick={() => {
+      setOrphanSearchMeasurementId(measurement.id);
+      setCustomerSearchInboundId(null);
+      setCustomerSearchQuery("");
+    }}
+    disabled={
+      manualRepairingMeasurementId === measurement.id
+    }
+    className="w-full rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-indigo-800 dark:bg-indigo-950/30 dark:text-indigo-300"
+  >
+    {manualRepairingMeasurementId === measurement.id
+      ? "Onarılıyor..."
+      : "Cari Seç ve Onar"}
+  </button>
+)}
+                  <details className="text-[10px] text-gray-400">
+                    <summary className="cursor-pointer select-none">Teknik kimlikleri göster</summary>
+                    <div className="mt-1 break-all">Ölçü: {measurement.id}</div>
+                    <div className="break-all">Cari: {measurement.customerId}</div>
+                    <div className="break-all">Oda: {measurement.roomId}</div>
+                    <div className="break-all">Açıklık: {measurementOpeningId(measurement) || "Eksik"}</div>
+                  </details>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* V1D Inbound Pool Section */}
       {(currentUser?.role === 'ADMIN' || currentUser?.role === 'MODERATOR') && (
@@ -608,7 +1056,7 @@ export default function OlculerPage() {
                   acc +
                   (r.windows || []).reduce(
                     (wacc: number, w: any) =>
-                      wacc + measurementStore.measurements.filter((m: any) => m.windowId === w.id && !m.isDeleted).length,
+                      wacc + (w.products || w.measurements || []).filter((m: any) => !m.isDeleted).length,
                     0
                   ),
                 0
@@ -755,7 +1203,7 @@ export default function OlculerPage() {
                             const wCount = (room.windows || []).filter((w: any) => !w.isDeleted).length;
                             const mCount = (room.windows || []).reduce(
                               (a: number, w: any) =>
-                                a + measurementStore.measurements.filter((m: any) => m.windowId === w.id && !m.isDeleted).length,
+                                a + (w.products || w.measurements || []).filter((m: any) => !m.isDeleted).length,
                               0
                             );
                             return (
@@ -872,7 +1320,7 @@ export default function OlculerPage() {
       )}
 
       {/* Cari Rehberi Modal */}
-      {customerSearchInboundId && (
+      {(customerSearchInboundId || orphanSearchMeasurementId) && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[85vh]">
             <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-slate-800/50">
@@ -883,6 +1331,7 @@ export default function OlculerPage() {
               <button
                 onClick={() => {
                   setCustomerSearchInboundId(null);
+                  setOrphanSearchMeasurementId(null);
                   setCustomerSearchQuery("");
                 }}
                 className="text-gray-500 hover:bg-gray-200 dark:hover:bg-slate-700 p-1.5 rounded-lg transition-colors"
@@ -922,7 +1371,17 @@ export default function OlculerPage() {
                     {searchedCustomers.map(c => (
                       <tr 
                         key={c.id} 
-                        onClick={() => handleSelectCustomerFromModal(c.id)}
+                        onClick={() => {
+  if (orphanSearchMeasurementId) {
+    void handleManualOrphanRepair(
+      orphanSearchMeasurementId,
+      c.id,
+    );
+    return;
+  }
+
+  handleSelectCustomerFromModal(c.id);
+}}
                         className="bg-white border-b dark:bg-gray-800 dark:border-gray-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 cursor-pointer transition-colors"
                       >
                         <td className="px-4 py-3 font-medium text-gray-900 dark:text-white whitespace-nowrap">{c.customerCode || '-'}</td>
@@ -1069,12 +1528,12 @@ export default function OlculerPage() {
                                   </h5>
 
                                   <div className="space-y-2 pl-5">
-                                    {measurementStore.measurements.filter((p) => p.windowId === window.id && !p.isDeleted).length === 0 ? (
+                                    {measurementStore.measurements.filter((p) => measurementBelongsTo(p, customer.id, room.id, window.id) && !p.isDeleted && !p.isArchived).length === 0 ? (
                                       <p className="text-[11px] text-gray-400 italic">Alınmış ölçü kaydı yok.</p>
                                     ) : null}
 
                                     {measurementStore.measurements
-                                        .filter((p) => p.windowId === window.id && !p.isDeleted)
+                                        .filter((p) => measurementBelongsTo(p, customer.id, room.id, window.id) && !p.isDeleted && !p.isArchived)
                                         .sort((a, b) => {
                                           const timeA = new Date(a.createdAt || a.measuredDate || 0).getTime();
                                           const timeB = new Date(b.createdAt || b.measuredDate || 0).getTime();

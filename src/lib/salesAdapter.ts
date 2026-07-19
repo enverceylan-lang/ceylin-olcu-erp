@@ -27,45 +27,166 @@ function calculateMetricSize(p: ProductMeasurement, group: string, width: number
 /**
  * Ölçüden tek bir satış satırı oluşturur.
  */
-function createSaleItemFromMeasurement(p: ProductMeasurement, roomName: string, windowName: string, selectedType?: string): SaleItem {
+function createSaleItemFromMeasurement(
+  p: ProductMeasurement,
+  roomName: string,
+  windowName: string,
+  selectedType?: string,
+  salesItemOverride?: {
+    productType?: string;
+    label?: string;
+    totalM2?: number;
+    metricSize?: number;
+    metricUnit?: 'm2' | 'mt' | 'adet';
+  }
+): SaleItem {
   const dims = getMeasurementDimensions(p);
-  const w = dims.structuralWidth || 0;
-  const h = dims.structuralHeight || 0;
 
-  const group = resolveMeasurementProductGroup(p);
-  const label = resolveMeasurementProductLabel(p);
+  const calculation = {
+    ...(p.details || {}),
+    ...(p.selectedProducts?.[0]?.calculation || {})
+  } as any;
 
-  let size = w / 100;
-  let unit: 'm2' | 'mt' | 'adet' = 'mt';
+  const w = Number(
+    calculation.actualWidthCm ||
+    calculation.realWidthCm ||
+    dims.structuralWidth ||
+    0
+  );
 
-  const typeUpper = (selectedType || p.productType || '').toUpperCase();
+  const h = Number(
+    calculation.actualHeightCm ||
+    calculation.realHeightCm ||
+    dims.structuralHeight ||
+    0
+  );
 
-  if (group === 'Plicell' || group === 'Mekanik Perde') {
-    size = p.details?.totalM2 !== undefined ? Number(p.details.totalM2) : (w * h) / 10000;
+  const selectedProductType =
+    salesItemOverride?.productType ||
+    selectedType ||
+    p.productType ||
+    '';
+
+  const group = resolveMeasurementProductGroup({
+    ...p,
+    productType: selectedProductType
+  });
+
+  const label =
+    salesItemOverride?.label ||
+    resolveMeasurementProductLabel({
+      ...p,
+      productType: selectedProductType
+    });
+
+  let size = 0;
+  let unit: 'm2' | 'mt' | 'adet' = 'adet';
+
+  const typeUpper =
+    String(selectedProductType).toUpperCase();
+
+  if (salesItemOverride?.metricSize !== undefined) {
+    size = Number(salesItemOverride.metricSize);
+    unit = salesItemOverride.metricUnit || 'adet';
+  } else if (salesItemOverride?.totalM2 !== undefined) {
+    size = Number(salesItemOverride.totalM2);
+    unit = 'm2';
+  } else if (
+    group === 'Plicell' ||
+    group === 'Mekanik Perde'
+  ) {
+    size = Number(
+      calculation.totalM2 ??
+      calculation.totalSystemM2 ??
+      0
+    );
+
     unit = 'm2';
   } else if (typeUpper === 'TUL') {
-    size = p.details?.fabricUsageMeters !== undefined ? Number(p.details.fabricUsageMeters) : (w * 3.15) / 100;
+    size = Number(
+      calculation.fabricUsageMeters ??
+      calculation.roundedMeters ??
+      0
+    );
+
     unit = 'mt';
   } else if (typeUpper === 'GUNESLIK') {
-    size = p.details?.fabricUsageMeters !== undefined ? Number(p.details.fabricUsageMeters) : (w + 30) / 100;
+    size = Number(
+      calculation.fabricUsageMeters ??
+      calculation.meters ??
+      0
+    );
+
     unit = 'mt';
   } else if (typeUpper === 'FON') {
-    size = p.details?.fabricUsageMeters !== undefined ? Number(p.details.fabricUsageMeters) : (w * 2.5) / 100;
+    size = Number(
+      calculation.fabricUsageMeters ??
+      0
+    );
+
     unit = 'mt';
   } else if (typeUpper === 'RUSTIK') {
-    size = p.details?.billingWidth !== undefined ? Number(p.details.billingWidth) / 100 : (w + 40) / 100;
+    size = Number(
+      calculation.billingWidth !== undefined
+        ? Number(calculation.billingWidth) / 100
+        : 0
+    );
+
     unit = 'mt';
   } else if (typeUpper === 'TAVAN_RUSTIK') {
-    size = 1.0;
-    unit = 'mt';
+    size = Number(calculation.quantity || 1);
+    unit = 'adet';
   } else if (typeUpper === 'BIRIZ') {
-    size = p.details?.birizTulMeters !== undefined ? Number(p.details.birizTulMeters) : (w * 3.20) / 100;
+    size = Number(
+      calculation.birizTulMeters || 0
+    );
+
     unit = 'mt';
   } else {
-    const metric = calculateMetricSize(p, group, w, h);
+    const metric = calculateMetricSize(
+      p,
+      group,
+      w,
+      h
+    );
+
     size = metric.size;
     unit = metric.unit;
   }
+
+  const quantity =
+    unit === 'adet'
+      ? Number(p.rawValues?.quantity || 1)
+      : 1;
+
+  const pleatLabel =
+    calculation.pleatType ||
+    calculation.pleatLabel ||
+    p.rawValues?.pleat ||
+    undefined;
+
+  const systemNotes: string[] = [];
+
+  if (calculation.systemType === 'DOUBLE') {
+    systemNotes.push('Çiftli Sistem');
+  }
+
+  if (calculation.chainDirection === 'LEFT') {
+    systemNotes.push('Zincir: Sol');
+  } else if (calculation.chainDirection === 'RIGHT') {
+    systemNotes.push('Zincir: Sağ');
+  }
+
+  if (calculation.openingType === 'DOUBLE') {
+    systemNotes.push('Çift Açılır');
+  } else if (calculation.openingType === 'SINGLE') {
+    systemNotes.push('Tek Açılır');
+  }
+
+  const notes = [
+    p.notes,
+    ...systemNotes
+  ].filter(Boolean);
 
   return {
     id: crypto.randomUUID(),
@@ -74,21 +195,42 @@ function createSaleItemFromMeasurement(p: ProductMeasurement, roomName: string, 
     windowName,
     productType: label,
     productGroup: group,
+
     width: w,
     height: h,
-    calcWidth: p.details?.billingWidth || w,
-    calcHeight: p.details?.billingHeight || h,
-    quantity: Number(p.rawValues?.quantity || 1),
-    metricSize: Number(size.toFixed(2)),
+
+    calcWidth: Number(
+      calculation.billingWidth ??
+      calculation.billingWidthCm ??
+      w
+    ),
+
+    calcHeight: Number(
+      calculation.billingHeight ??
+      calculation.billingHeightCm ??
+      h
+    ),
+
+    quantity,
+
+    metricSize: Number(
+      Number(size || 0).toFixed(2)
+    ),
+
     metricUnit: unit,
-    pleatDetails: p.rawValues?.pleat || undefined,
+
+    pleatDetails: pleatLabel,
+
     unitPrice: 0,
     discount: 0,
     rowTotal: 0,
-    note: p.notes || undefined
+
+    note:
+      notes.length > 0
+        ? notes.join(' | ')
+        : undefined
   };
 }
-
 export function createJumboSaleItem(
   p: MeasurementRecord,
   g: any,
@@ -99,7 +241,26 @@ export function createJumboSaleItem(
   parentProductType: string
 ): SaleItem {
   const norm = parentProductType.toUpperCase();
-  const compName = g.jumboPurchaseUnitPrice === 250 ? 'Ağır hizmet mekanizması' : (g.jumboPurchaseUnitPrice === 400 ? 'Güçlendirilmiş üst kasa / ağır sistem' : `Jumbo ${parentProductType} Mekanizması`);
+
+  const parentLabel =
+    norm === 'STOR'
+      ? 'Stor'
+      : norm === 'ZEBRA'
+        ? 'Zebra'
+        : norm === 'AHSAP_JALUZI'
+          ? 'Ahşap Jaluzi'
+          : norm === 'JALUZI' ||
+              norm === 'METAL_JALUZI'
+            ? 'Jaluzi'
+            : parentProductType;
+
+  const compName =
+    norm === 'AHSAP_JALUZI'
+      ? 'Ahşap Jaluzi Güçlendirilmiş Üst Kasa Farkı'
+      : norm === 'JALUZI' ||
+          norm === 'METAL_JALUZI'
+        ? 'Jaluzi Ağır Hizmet Mekanizma Farkı'
+        : `Jumbo ${parentLabel} Mekanizma Farkı`;
 
   let unit: 'm2' | 'mt' | 'adet' = 'mt';
   if (g.jumboUnit === 'PIECE' || g.jumboUnit === 'SET') unit = 'adet';
@@ -110,7 +271,7 @@ export function createJumboSaleItem(
     roomName,
     windowName: `${windowName}${g.sourceSegments?.length > 0 ? ` - Parça ${gIdx + 1}` : ''}`,
     productType: compName,
-    productGroup: 'Mekanik Perde',
+    productGroup: 'Jumbo Mekanizma Farkı',
     width: g.realWidthCm,
     height: g.realHeightCm,
     calcWidth: g.calculatedWidthCm,
@@ -118,10 +279,23 @@ export function createJumboSaleItem(
     quantity: g.quantity,
     metricSize: g.jumboQuantity,
     metricUnit: unit,
-    unitPrice: g.originalSaleUnitPrice || 0, // default sale price
+    unitPrice:
+      g.appliedSaleUnitPrice ??
+      g.originalSaleUnitPrice ??
+      0,
     discount: 0,
-    rowTotal: Number((g.jumboQuantity * (g.originalSaleUnitPrice || 0) * g.quantity).toFixed(2)),
-    note: 'Jumbo Mekanizma Farkı',
+    rowTotal: Number(
+      (
+        Number(g.jumboQuantity || 0) *
+        Number(
+          g.appliedSaleUnitPrice ??
+          g.originalSaleUnitPrice ??
+          0
+        ) *
+        Number(g.quantity || 1)
+      ).toFixed(2)
+    ),
+    note: `${parentLabel} için ek jumbo mekanizma farkı`,
     parentProductRelation: parentItemId,
     isJumboComponent: true
   } as any;
@@ -143,54 +317,297 @@ export function createDraftSaleFromCustomer(customer: Customer): Sale {
     } else {
       activeProducts.forEach(ap => {
         const calc = ap.calculation || {};
-        if (calc.isSegmented && Array.isArray(calc.groups) && calc.groups.length > 0) {
-          calc.groups.forEach((g: any, gIdx: number) => {
-            const pObj: ProductMeasurement = {
-              ...m,
-              productType: ap.productType,
-              productGroup: resolveMeasurementProductGroup({ productType: ap.productType }),
-              selectedProducts: [ap],
-              rawValues: {
-                ...m.rawValues,
-                width: g.realWidthCm,
-                height: g.realHeightCm,
-                quantity: g.quantity
-              },
-              details: {
-                ...m.details,
-                ...calc,
-                billingWidth: g.calculatedWidthCm,
-                billingHeight: g.calculatedHeightCm,
-                totalM2: g.totalM2
-              }
-            };
-            const mainItem = createSaleItemFromMeasurement(pObj, room?.name || 'Oda', `${win?.name || 'Pencere'} - Parça ${gIdx + 1}`, ap.productType);
-            mainItem.id = `${m.id}-${ap.productType}-g${gIdx}`;
-            items.push(mainItem);
+        if (
+          calc.isSegmented &&
+          Array.isArray(calc.groups) &&
+          calc.groups.length > 0
+        ) {
+          /*
+           * Segmentli mekanik ürünler satış ekranında
+           * parça parça gösterilmez.
+           *
+           * Ölçü, montaj ve tedarikçi işlemleri için
+           * calc.groups teknik detayları korunur.
+           */
+          const totalSegmentM2 =
+            Number(calc.totalM2) > 0
+              ? Number(calc.totalM2)
+              : Number(
+                  calc.groups
+                    .reduce(
+                      (total: number, group: any) =>
+                        total +
+                        Number(
+                          group.totalM2 ||
+                          (
+                            Number(group.unitM2 || 0) *
+                            Number(group.quantity || 1)
+                          )
+                        ),
+                      0
+                    )
+                    .toFixed(2)
+                );
 
-            if (g.requiresJumbo) {
-              const jumboItem = createJumboSaleItem(m, g, gIdx, mainItem.id, room?.name || 'Oda', win?.name || 'Pencere', ap.productType);
-              items.push(jumboItem);
+          const totalQuantity =
+            calc.groups.reduce(
+              (total: number, group: any) =>
+                total + Number(group.quantity || 1),
+              0
+            );
+
+          const firstGroup = calc.groups[0];
+
+          const pObj: ProductMeasurement = {
+            ...m,
+
+            productType:
+              ap.productType,
+
+            productGroup:
+              resolveMeasurementProductGroup({
+                productType: ap.productType
+              }),
+
+            selectedProducts: [
+              {
+                ...ap,
+
+                calculation: {
+                  ...calc,
+
+                  totalM2:
+                    totalSegmentM2,
+
+                  quantity:
+                    totalQuantity,
+
+                  /*
+                   * Teknik gruplar özellikle korunuyor.
+                   * Satış satırı tek olsa da ölçü parçaları
+                   * montaj ve tedarikçi tarafında kaybolmaz.
+                   */
+                  groups:
+                    calc.groups
+                }
+              }
+            ],
+
+            rawValues: {
+              ...m.rawValues,
+
+              width:
+                Number(calc.actualWidthCm) ||
+                Number(calc.realWidthCm) ||
+                Number(
+                  calc.groups.reduce(
+                    (total: number, group: any) =>
+                      total +
+                      Number(group.realWidthCm || 0),
+                    0
+                  )
+                ),
+
+              height:
+                Number(calc.actualHeightCm) ||
+                Number(calc.realHeightCm) ||
+                Number(firstGroup?.realHeightCm || 0),
+
+              quantity:
+                totalQuantity
+            },
+
+            details: {
+              ...m.details,
+              ...calc,
+
+              totalM2:
+                totalSegmentM2,
+
+              quantity:
+                totalQuantity,
+
+              groups:
+                calc.groups
             }
-          });
+          };
+
+          const mainItem =
+            createSaleItemFromMeasurement(
+              pObj,
+              room?.name || 'Oda',
+              win?.name || 'Pencere',
+              ap.productType,
+              {
+                productType:
+                  ap.productType,
+
+                totalM2:
+                  totalSegmentM2,
+
+                metricSize:
+                  totalSegmentM2,
+
+                metricUnit:
+                  'm2'
+              }
+            );
+
+          /*
+           * Kimlik oda/pencere içindeki ürün için sabit kalır.
+           * Parça sayısı değişse bile satış satırı çoğalmaz.
+           */
+          mainItem.id =
+            `${m.id}-${ap.productType}-g0`;
+
+          mainItem.quantity = 1;
+          mainItem.metricSize = totalSegmentM2;
+          mainItem.metricUnit = 'm2';
+
+          items.push(mainItem);
+
+          /*
+           * Jumbo gereken birden fazla parça varsa,
+           * satışta tek bir toplam jumbo farkı satırı oluştur.
+           */
+          const jumboGroups =
+            calc.groups.filter(
+              (group: any) =>
+                Boolean(group.requiresJumbo)
+            );
+
+          if (jumboGroups.length > 0) {
+            const totalJumboM2 =
+              Number(
+                jumboGroups
+                  .reduce(
+                    (total: number, group: any) =>
+                      total +
+                      Number(
+                        group.totalM2 ||
+                        (
+                          Number(group.unitM2 || 0) *
+                          Number(group.quantity || 1)
+                        )
+                      ),
+                    0
+                  )
+                  .toFixed(2)
+              );
+
+            const aggregateJumboGroup = {
+              ...jumboGroups[0],
+
+              quantity:
+                1,
+
+              unitM2:
+                totalJumboM2,
+
+              totalM2:
+                totalJumboM2
+            };
+
+            const jumboItem =
+              createJumboSaleItem(
+                m,
+                aggregateJumboGroup,
+                0,
+                mainItem.id,
+                room?.name || 'Oda',
+                win?.name || 'Pencere',
+                ap.productType
+              );
+
+            jumboItem.id =
+              `${m.id}-${ap.productType}-jumbo-total`;
+
+            items.push(jumboItem);
+          }
         } else {
           const pObj: ProductMeasurement = {
             ...m,
             productType: ap.productType,
-            productGroup: resolveMeasurementProductGroup({ productType: ap.productType }),
+            productGroup:
+              resolveMeasurementProductGroup({
+                productType: ap.productType
+              }),
             selectedProducts: [ap],
             details: {
               ...m.details,
               ...calc
             }
           };
-          const mainItem = createSaleItemFromMeasurement(pObj, room?.name || 'Oda', win?.name || 'Pencere', ap.productType);
-          mainItem.id = `${m.id}-${ap.productType}-g0`;
-          items.push(mainItem);
+
+          const salesItems =
+            Array.isArray(calc.salesItems) &&
+            calc.salesItems.length > 0
+              ? calc.salesItems
+              : null;
+
+          if (salesItems) {
+            salesItems.forEach(
+              (saleCalc: any, saleIndex: number) => {
+                const saleItem =
+                  createSaleItemFromMeasurement(
+                    pObj,
+                    room?.name || 'Oda',
+                    win?.name || 'Pencere',
+                    saleCalc.productType ||
+                      ap.productType,
+                    {
+                      productType:
+                        saleCalc.productType,
+                      label:
+                        saleCalc.label,
+                      totalM2:
+                        saleCalc.totalM2,
+                      metricSize:
+                        saleCalc.metricSize,
+                      metricUnit:
+                        saleCalc.metricUnit
+                    }
+                  );
+
+                saleItem.id =
+                  `${m.id}-${ap.productType}-sale-${saleIndex}`;
+
+                items.push(saleItem);
+              }
+            );
+          } else {
+            const mainItem =
+              createSaleItemFromMeasurement(
+                pObj,
+                room?.name || 'Oda',
+                win?.name || 'Pencere',
+                ap.productType
+              );
+
+            mainItem.id =
+              `${m.id}-${ap.productType}-g0`;
+
+            items.push(mainItem);
+          }
 
           const singleGroup = calc.groups?.[0];
+
           if (singleGroup?.requiresJumbo) {
-            const jumboItem = createJumboSaleItem(m, singleGroup, 0, mainItem.id, room?.name || 'Oda', win?.name || 'Pencere', ap.productType);
+            const parentItemId =
+              salesItems
+                ? `${m.id}-${ap.productType}-sale-0`
+                : `${m.id}-${ap.productType}-g0`;
+
+            const jumboItem = createJumboSaleItem(
+              m,
+              singleGroup,
+              0,
+              parentItemId,
+              room?.name || 'Oda',
+              win?.name || 'Pencere',
+              ap.productType
+            );
+
             items.push(jumboItem);
           }
         }
@@ -255,56 +672,190 @@ export function createDraftSaleFromCustomer(customer: Customer): Sale {
   };
 }
 
-export async function syncOrCreateDraftSale(customer: Customer, salesStore: any): Promise<string> {
-  const existingDraft = salesStore.sales.find((s: any) => s.customerId === customer.id && s.status === 'TASLAK' && !s.isDeleted);
-  const newSaleObj = createDraftSaleFromCustomer(customer);
-  const newItems = newSaleObj.items;
+export async function syncOrCreateDraftSale(
+  customer: Customer,
+  salesStore: any
+): Promise<string> {
+  const existingDraft = salesStore.sales.find(
+    (sale: any) =>
+      sale.customerId === customer.id &&
+      sale.status === 'TASLAK' &&
+      !sale.isDeleted
+  );
+
+  const newSaleObj =
+    createDraftSaleFromCustomer(customer);
+
+  /*
+   * Ölçüden üretilen otomatik satış satırlarında
+   * boş veya geçersiz metraj kabul edilmez.
+   */
+  const calculatedItems =
+    newSaleObj.items.filter((item: SaleItem) => {
+      if (!item.measurementId) {
+        return true;
+      }
+
+      return (
+        Number.isFinite(Number(item.metricSize)) &&
+        Number(item.metricSize) > 0 &&
+        Number.isFinite(Number(item.quantity)) &&
+        Number(item.quantity) > 0
+      );
+    });
 
   if (!existingDraft) {
-    await salesStore.addSale(newSaleObj);
+    await salesStore.addSale({
+      ...newSaleObj,
+      items: calculatedItems
+    });
+
     return newSaleObj.id;
   }
 
-  const mergedItems: SaleItem[] = [];
+  const existingItems =
+    Array.isArray(existingDraft.items)
+      ? existingDraft.items
+      : [];
 
-  existingDraft.items.forEach((existing: any) => {
-    if (!existing.measurementId) {
-      mergedItems.push(existing);
-      return;
+  /*
+   * Kullanıcının elle eklediği, herhangi bir ölçüye
+   * bağlı olmayan satış satırları korunur.
+   */
+  const manualItems: SaleItem[] =
+    existingItems.filter(
+      (item: SaleItem) => !item.measurementId
+    );
+
+  const normalizeKeyPart = (
+    value: unknown
+  ): string =>
+    String(value || '')
+      .trim()
+      .toLocaleUpperCase('tr-TR');
+
+  const createItemKey = (
+    item: SaleItem
+  ): string =>
+    [
+      item.measurementId,
+      normalizeKeyPart(item.productType),
+      normalizeKeyPart(item.roomName),
+      normalizeKeyPart(item.windowName),
+      item.metricUnit
+    ].join('|');
+
+  /*
+   * Eski otomatik satırlardan fiyat ve iskonto
+   * bilgilerini indeksle. Tekrarlı eski satırlardan
+   * yalnız ilk geçerli kayıt dikkate alınır.
+   */
+  const oldAutomaticItemsByKey =
+    new Map<string, SaleItem>();
+
+  existingItems.forEach((item: SaleItem) => {
+    if (!item.measurementId) return;
+
+    const key = createItemKey(item);
+
+    if (!oldAutomaticItemsByKey.has(key)) {
+      oldAutomaticItemsByKey.set(key, item);
     }
+  });
 
-    const match = newItems.find(n => n.id === existing.id || (n.measurementId === existing.measurementId && n.productType === existing.productType && n.windowName === existing.windowName));
-    if (match) {
-      mergedItems.push({
-        ...existing,
-        id: match.id,
-        roomName: match.roomName,
-        windowName: match.windowName,
-        width: match.width,
-        height: match.height,
-        calcWidth: match.calcWidth,
-        calcHeight: match.calcHeight,
-        metricSize: match.metricSize,
-        metricUnit: match.metricUnit,
-        quantity: match.quantity
+  /*
+   * Yeni hesap listesi ana kaynaktır.
+   * Eski otomatik satırlar doğrudan taşınmaz.
+   * Yalnız kullanıcının girdiği fiyat ve iskonto korunur.
+   */
+  const refreshedAutomaticItems: SaleItem[] =
+    calculatedItems
+      .filter(
+        (item: SaleItem) =>
+          Boolean(item.measurementId)
+      )
+      .map((newItem: SaleItem) => {
+        const exactOldItem =
+          existingItems.find(
+            (oldItem: SaleItem) =>
+              oldItem.measurementId &&
+              oldItem.id === newItem.id
+          );
+
+        const matchingOldItem =
+          exactOldItem ||
+          oldAutomaticItemsByKey.get(
+            createItemKey(newItem)
+          );
+
+        if (!matchingOldItem) {
+          return newItem;
+        }
+
+        const preservedUnitPrice =
+          Number(matchingOldItem.unitPrice || 0);
+
+        const preservedDiscount =
+          Number(matchingOldItem.discount || 0);
+
+        const grossTotal =
+          Number(newItem.metricSize || 0) *
+          Number(newItem.quantity || 1) *
+          preservedUnitPrice;
+
+        const rowTotal =
+          grossTotal *
+          (
+            1 -
+            Math.min(
+              100,
+              Math.max(0, preservedDiscount)
+            ) / 100
+          );
+
+        return {
+          ...newItem,
+
+          unitPrice:
+            preservedUnitPrice,
+
+          discount:
+            preservedDiscount,
+
+          rowTotal:
+            Number(rowTotal.toFixed(2))
+        };
       });
-    }
-  });
 
-  newItems.forEach(n => {
-    if (!n.measurementId) return;
-    const exists = existingDraft.items.some((e: any) => e.id === n.id || (e.measurementId === n.measurementId && e.productType === n.productType && e.windowName === n.windowName));
-    if (!exists) {
-      mergedItems.push(n);
-    }
-  });
+  /*
+   * Aynı otomatik satırın birden fazla kez eklenmesini
+   * son savunma olarak engelle.
+   */
+  const uniqueAutomaticItems =
+    Array.from(
+      new Map(
+        refreshedAutomaticItems.map(
+          (item: SaleItem) => [
+            createItemKey(item),
+            item
+          ]
+        )
+      ).values()
+    );
 
   const updatedSale = {
     ...existingDraft,
-    items: mergedItems,
-    updatedAt: new Date().toISOString()
+
+    items: [
+      ...manualItems,
+      ...uniqueAutomaticItems
+    ],
+
+    updatedAt:
+      new Date().toISOString()
   };
 
   await salesStore.updateSale(updatedSale);
+
   return existingDraft.id;
 }

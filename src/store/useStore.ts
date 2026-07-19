@@ -1215,6 +1215,7 @@ export const useStore = create<AppState>()(
           ...newMeas,
           customerId,
           roomId,
+          openingId: windowId,
           windowId
         }, measurement.createdById || 'SYSTEM');
         // No longer writing to Customer tree

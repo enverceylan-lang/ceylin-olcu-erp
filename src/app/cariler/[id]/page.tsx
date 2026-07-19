@@ -24,6 +24,9 @@ import { MoveRoomModal } from "@/components/modals/MoveRoomModal";
 import { FacadeSegmentsEditor } from "@/components/measurements/FacadeSegmentsEditor";
 import { PlicellCamListEditor } from "@/components/measurements/PlicellCamListEditor";
 
+const measurementOpeningId = (measurement: { openingId?: string; windowId?: string }) =>
+  measurement.openingId || measurement.windowId || "";
+
 export default function CariDetayPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
   const id = unwrappedParams.id;
@@ -183,39 +186,94 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
   const executeDelete = async () => {
     if (!deleteConfirm) return;
-    const { type, data } = deleteConfirm;
 
-    if (type === 'room') {
-      deleteRoom(data.customerId, data.roomId);
-    } else if (type === 'window') {
-      deleteWindow(data.customerId, data.roomId, data.windowId);
-    } else if (type === 'measurement') {
-      deleteProductMeasurement(data.customerId, data.roomId, data.windowId, data.measurementId);
-    } else if (type === 'photo') {
-      if (data.type === 'measurement') {
-        const roomObj = customer?.rooms.find(r => r.id === data.roomId);
-        const winObj = roomObj?.windows.find(w => w.id === data.windowId);
-        const measObj = measurementStore.measurements.find(p => p.id === data.measurementId);
-        if (measObj) {
-          const updatedPhotos = (measObj.photos || []).filter(u => u !== data.url);
-          const updatedVideos = (measObj.videos || []).filter(u => u !== data.url);
-          updateProductMeasurement(data.customerId, data.roomId, data.windowId, data.measurementId, {
-            photos: updatedPhotos,
-            videos: updatedVideos
+    const { type, data } = deleteConfirm;
+    const username =
+      currentUser?.name ||
+      currentUser?.username ||
+      currentUser?.email ||
+      "SYSTEM";
+
+    try {
+      if (type === "room") {
+        await measurementStore.cascadeDeleteRoom(
+          data.customerId,
+          data.roomId,
+          username,
+        );
+        await deleteRoom(data.customerId, data.roomId);
+      } else if (type === "window") {
+        await measurementStore.cascadeDeleteOpening(
+          data.customerId,
+          data.roomId,
+          data.windowId,
+          username,
+        );
+        await deleteWindow(
+          data.customerId,
+          data.roomId,
+          data.windowId,
+        );
+      } else if (type === "measurement") {
+        await deleteProductMeasurement(
+          data.customerId,
+          data.roomId,
+          data.windowId,
+          data.measurementId,
+        );
+      } else if (type === "photo") {
+        if (data.type === "measurement") {
+          const measObj = measurementStore.measurements.find(
+            (measurement) => measurement.id === data.measurementId,
+          );
+
+          if (measObj) {
+            const updatedPhotos = (measObj.photos || []).filter(
+              (url) => url !== data.url,
+            );
+            const updatedVideos = (measObj.videos || []).filter(
+              (url) => url !== data.url,
+            );
+
+            await updateProductMeasurement(
+              data.customerId,
+              data.roomId,
+              data.windowId,
+              data.measurementId,
+              {
+                photos: updatedPhotos,
+                videos: updatedVideos,
+              },
+            );
+          }
+        } else {
+          const addressPhotos = customer?.addressPhotos || [];
+          const updated = addressPhotos.filter(
+            (_, index) => index !== data.index,
+          );
+
+          await updateCustomer(data.customerId, {
+            addressPhotos: updated,
           });
         }
-      } else {
-        const addressPhotos = customer?.addressPhotos || [];
-        const updated = addressPhotos.filter((_, idx) => idx !== data.index);
-        updateCustomer(data.customerId, { addressPhotos: updated });
       }
-    }
 
-    setDeleteConfirm(null);
-    try {
-      await syncNow();
-    } catch (err) {
-      console.error(err);
+      setDeleteConfirm(null);
+      await measurementStore.loadMeasurements();
+
+      try {
+        await syncNow();
+      } catch (syncError) {
+        console.error(syncError);
+      }
+    } catch (error) {
+      console.error(
+        "[CascadeDelete] Silme işlemi tamamlanamadı:",
+        error,
+      );
+      showToast(
+        "Silme işlemi tamamlanamadı. Bağlı kayıtlar korunuyor.",
+      );
     }
   };
 
@@ -278,7 +336,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     // 2. Measurements
     customer.rooms.forEach(room => {
       room.windows?.forEach(win => {
-        measurementStore.measurements.filter(m => m.windowId === win.id && !m.isDeleted).forEach(p => {
+        measurementStore.measurements.filter(m => measurementOpeningId(m) === win.id && !m.isDeleted).forEach(p => {
           const date = p.measuredDate || p.createdAt || customer.createdAt || "";
           if (date) {
             events.push({
@@ -308,7 +366,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
   const buildWhatsAppReport = () => {
     const lines: string[] = [
-      `*ÖLÇÜ ERP V1 - SAHA ÖLÇÜ RAPORU*`,
+      `*CEYLİN ERP - SAHA ÖLÇÜ RAPORU*`,
       `Müşteri: ${customer.name}`,
       `Telefon: ${customer.phone || '-'}`,
       `Adres: ${customer.address || customer.mapLocation || '-'}`,
@@ -330,7 +388,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       room.windows.forEach((opening, openingIndex) => {
         lines.push(`${openingIndex + 1}.${roomIndex + 1} Açıklık: ${opening.name}`);
 
-        const mProds = measurementStore.measurements.filter(m => m.windowId === opening.id && !m.isDeleted);
+        const mProds = measurementStore.measurements.filter(m => measurementOpeningId(m) === opening.id && !m.isDeleted);
         if (mProds.length === 0) {
           lines.push('  - Ölçü alınmamış');
         }
@@ -362,7 +420,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
     const mapsUrl = getGoogleMapsUrl(customer);
     if (mapsUrl) lines.push(`Konum: ${mapsUrl}`);
-    lines.push('Ölçü ERP V1.0 - Saha Pilot');
+    lines.push('CEYLİN ERP.0 - Saha Pilot');
 
     return lines.join('\n');
   };
@@ -720,10 +778,22 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   };
 
   const handleMoveToTrash = async () => {
-    if (confirm("Bu cari ve bağlı tüm kayıtlar çöp kutusuna taşınacaktır. Emin misiniz?")) {
-      await store.moveCustomerToTrash(id, currentUser);
-      await syncNow();
-    }
+    const linkedMeasurementCount = measurementStore.measurements.filter(
+      (measurement) =>
+        measurement.customerId === id &&
+        !measurement.isDeleted,
+    ).length;
+
+    const confirmed = confirm(
+      `Bu cari, tüm odaları, açıklıkları ve bağlı ${linkedMeasurementCount} ölçü çöp kutusuna taşınacaktır.\n\n` +
+        "Cari silindiğinde bağlı ölçüler yetim bırakılmayacaktır. Devam edilsin mi?",
+    );
+
+    if (!confirmed) return;
+
+    await store.moveCustomerToTrash(id, currentUser);
+    await measurementStore.loadMeasurements();
+    await syncNow();
   };
 
   const handleRestoreFromTrash = async () => {
@@ -1437,7 +1507,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                             setIsPrepModalOpen(true);
                           }}
                           className="cursor-pointer hover:underline text-blue-600 dark:text-blue-400"
-                          title="SatÄ±ÅŸa HazÄ±rlÄ±k ve ÃœrÃ¼n SeÃ§imi"
+                          title="Satışa Hazırlık ve Ürün Seçimi"
                         >
                           {room.name}
                         </span>
@@ -1451,9 +1521,9 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                           setIsPrepModalOpen(true);
                         }}
                         className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 cursor-pointer font-bold text-xs border border-emerald-250 bg-emerald-50 dark:bg-emerald-950/30 dark:border-emerald-800/50 px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1"
-                        title="Oda ÃœrÃ¼n SeÃ§imleri ve SatÄ±ÅŸa HazÄ±rlÄ±k"
+                        title="Oda Ürün Seçimleri ve Satışa Hazırlık"
                       >
-                        SatÄ±ÅŸa HazÄ±rlÄ±k
+                        Satışa Hazırlık
                       </button>
                       {canMoveRoom && (
                         <button
@@ -1622,7 +1692,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                         {/* MEASUREMENTS LIST */}
                         <div className={measurementViewMode === "GRID" ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3" : "space-y-3"}>
                             {measurementStore.measurements
-                              .filter(m => m.windowId === window.id && !m.isDeleted)
+                              .filter(m => measurementOpeningId(m) === window.id && !m.isDeleted)
                               .sort((a, b) => {
                                 const timeA = new Date(a.createdAt || a.measuredDate || 0).getTime();
                                 const timeB = new Date(b.createdAt || b.measuredDate || 0).getTime();

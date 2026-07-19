@@ -1,9 +1,9 @@
 import React from 'react';
 import { X, Printer, Share2, Loader2 } from 'lucide-react';
+import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { Customer, MEASUREMENT_TEMPLATES, WindowItem, ProductMeasurement } from '@/store/useStore';
 import { getTemplateLabel, getMeasurementDimensions, resolveMeasurementProductLabel, resolveMeasurementProductGroup } from '@/lib/measurementAdapter';
-import { generateMeasurementPdfBlob } from '@/lib/measurementPdfGenerator';
 import { calculatePlicellM2, calculateMechanicalCurtainM2, getValidNote } from '@/lib/reportFormatters';
 import { renderSimpleWidthHeightDiagram, renderCurtainDetailDiagram } from '@/lib/measurementDiagram';
 import { TechnicalMeasurementSketch } from './TechnicalMeasurementSketch';
@@ -11,6 +11,154 @@ import { PlicellMeasurementSketch } from './PlicellMeasurementSketch';
 import { formatFacadeForReport } from '@/lib/facadeHelper';
 import { useMeasurementStore, MeasurementRecord } from '@/store/measurementStore';
 
+function buildCalculationReportDetails(
+  productType: string,
+  calculation: any
+): string[] {
+  const calc = calculation || {};
+  const details: string[] = [];
+  const type = String(productType || '').toUpperCase();
+
+  const systemType =
+    calc.systemType === 'DOUBLE'
+      ? 'Çiftli Sistem'
+      : calc.systemType === 'SINGLE'
+        ? 'Tekli Sistem'
+        : '';
+
+  if (systemType) {
+    details.push(systemType);
+  }
+
+  if (
+    calc.billingWidth !== undefined &&
+    calc.billingHeight !== undefined
+  ) {
+    details.push(
+      `Hesap Ölçüsü: ${calc.billingWidth} × ${calc.billingHeight} cm`
+    );
+  } else if (
+    calc.billingWidthCm !== undefined &&
+    calc.billingHeightCm !== undefined
+  ) {
+    details.push(
+      `Hesap Ölçüsü: ${calc.billingWidthCm} × ${calc.billingHeightCm} cm`
+    );
+  }
+
+  if (calc.totalM2 !== undefined) {
+    details.push(
+      `Alan: ${Number(calc.totalM2).toFixed(2)} m²`
+    );
+  }
+
+  if (
+    calc.chainDirection === 'LEFT' ||
+    calc.chainDirection === 'RIGHT'
+  ) {
+    details.push(
+      `Zincir: ${
+        calc.chainDirection === 'LEFT'
+          ? 'Sol'
+          : 'Sağ'
+      }`
+    );
+  }
+
+  if (
+    type === 'DIKEY_STOR' ||
+    type === 'DIKEY_TUL'
+  ) {
+    if (
+      calc.productionWidth !== undefined &&
+      calc.productionHeight !== undefined
+    ) {
+      details.push(
+        `Üretim: ${calc.productionWidth} × ${calc.productionHeight} cm`
+      );
+    }
+
+    if (calc.openingType === 'DOUBLE') {
+      details.push('Açılım: Ortadan İki Yana');
+    } else if (calc.openingType === 'SINGLE') {
+      details.push('Açılım: Tek Açılır');
+    }
+  }
+
+  if (type === 'TUL') {
+    if (calc.tulleStyle === 'REGISTER') {
+      details.push('Model: Register');
+    } else if (calc.tulleStyle === 'CROSSOVER') {
+      details.push('Model: Kruvaze');
+    } else if (calc.tulleStyle === 'PLEATED') {
+      details.push('Model: Pileli');
+    }
+
+    if (calc.pleatFactor !== undefined) {
+      details.push(`Pile: ${calc.pleatFactor} Kat`);
+    }
+
+    if (calc.fabricUsageMeters !== undefined) {
+      details.push(
+        `Kumaş: ${Number(calc.fabricUsageMeters).toFixed(2)} m`
+      );
+    }
+
+    if (calc.cutHeightCm !== undefined) {
+      details.push(`Kesim Boyu: ${calc.cutHeightCm} cm`);
+    }
+  }
+
+  if (type === 'GUNESLIK') {
+    if (calc.fabricUsageMeters !== undefined) {
+      details.push(
+        `Kumaş: ${Number(calc.fabricUsageMeters).toFixed(2)} m`
+      );
+    }
+
+    if (calc.cutHeightCm !== undefined) {
+      details.push(`Kesim Boyu: ${calc.cutHeightCm} cm`);
+    }
+  }
+
+  if (type === 'FON') {
+    if (calc.fabricUsageMeters !== undefined) {
+      details.push(
+        `Kumaş: ${Number(calc.fabricUsageMeters).toFixed(2)} m`
+      );
+    }
+
+    if (calc.wings !== undefined) {
+      details.push(`Kanat: ${calc.wings}`);
+    }
+
+    if (
+      calc.cutHeightCm !== undefined ||
+      calc.billingHeight !== undefined
+    ) {
+      details.push(
+        `Kesim Boyu: ${
+          calc.cutHeightCm ??
+          calc.billingHeight
+        } cm`
+      );
+    }
+  }
+
+  if (
+    Array.isArray(calc.salesItems) &&
+    calc.salesItems.length > 1
+  ) {
+    details.push(
+      `Satış Kalemleri: ${calc.salesItems
+        .map((item: any) => item.label)
+        .filter(Boolean)
+        .join(' + ')}`
+    );
+  }
+
+  return Array.from(new Set(details));
+}
 interface MeasurementVisualReportProps {
   isOpen: boolean;
   onClose: () => void;
@@ -81,44 +229,43 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
             const label = resolveMeasurementProductLabel({ productType: item.productType });
             const desc = item.calculation?.description || 'Otomatik hesaplanıyor';
 
-            const detailsList: string[] = [];
             const calc = item.calculation || {};
 
-            if (item.productType === 'TUL' && calc.fabricUsageMeters) {
-              detailsList.push(`Kumaş Eni: ${calc.fabricUsageMeters} metre`);
-            }
-            if (item.productType === 'GUNESLIK' && calc.fabricUsageMeters) {
-              detailsList.push(`Güneşlik Eni: ${calc.billingWidth} cm (${calc.fabricUsageMeters} m)`);
-            }
-            if (item.productType === 'FON' && calc.fabricUsageMeters) {
-              detailsList.push(`Fon Boyu: ${calc.billingHeight} cm (${calc.fabricUsageMeters} m, ${calc.wings} Kanat)`);
-            }
+            const detailsList: string[] =
+              buildCalculationReportDetails(
+                item.productType,
+                calc
+              );
+
+
+
+
             if (item.productType === 'RUSTIK' && calc.billingWidth) {
               detailsList.push(`Rustik Boru Eni: ${calc.billingWidth} cm, Boy: ${calc.billingHeight} cm`);
             }
             if (item.productType === 'TAVAN_RUSTIK' && calc.legLengthCm) {
               detailsList.push(`Miktar: 1 m, Ayak Boyu: ${calc.legLengthCm} cm`);
             }
-            if ((item.productType === 'STOR' || item.productType === 'ZEBRA') && calc.totalM2) {
-              detailsList.push(`Alan: ${calc.totalM2} m²`);
-              if (calc.hemModel && calc.hemModel !== 'Düz') {
-                detailsList.push(`Etek: ${calc.hemModel}`);
-              }
-              if (calc.laserHem) {
-                detailsList.push(`Lazer Etek: Aktif`);
-              }
+
+
+
+
+
+            if (
+              (item.productType === 'STOR' ||
+               item.productType === 'ZEBRA') &&
+              calc.hemModel &&
+              calc.hemModel !== 'Düz'
+            ) {
+              detailsList.push(`Etek: ${calc.hemModel}`);
             }
-            if (item.productType === 'DIKEY_STOR' && calc.totalM2) {
-              detailsList.push(`Alan: ${calc.totalM2} m² (Dikey Stor)`);
-            }
-            if (item.productType === 'DIKEY_TUL' && calc.totalM2) {
-              detailsList.push(`Alan: ${calc.totalM2} m² (Dikey Tül)`);
-            }
-            if (item.productType === 'PLICELL' && calc.totalM2) {
-              detailsList.push(`Hesaplanan Ölçü: ${calc.billingWidth} × ${calc.billingHeight} cm (${calc.totalM2} m²)`);
-            }
-            if ((item.productType === 'AHSAP_JALUZI' || item.productType === 'JALUZI' || item.productType === 'PICASSO') && calc.totalM2) {
-              detailsList.push(`Alan: ${calc.totalM2} m²`);
+
+            if (
+              (item.productType === 'STOR' ||
+               item.productType === 'ZEBRA') &&
+              calc.laserHem
+            ) {
+              detailsList.push('Lazer Etek: Aktif');
             }
             if (item.productType === 'BIRIZ' && calc.birizTulMeters) {
               detailsList.push(`Biriz Tül: ${calc.birizTulMeters} m, Demir: ${calc.rodLengthMeters} m (2 çubuk), Başlık: ${calc.capsCount} adet`);
@@ -135,6 +282,257 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                     {detailsList.join(' | ')}
                   </div>
                 )}
+
+                {Array.isArray(calc.groups) &&
+                  calc.groups.length > 0 && (
+                    <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {calc.groups.map(
+                        (group: any, groupIndex: number) => {
+                          const realWidth =
+                            Number(
+                              group.realWidthCm || 0
+                            );
+
+                          const realHeight =
+                            Number(
+                              group.realHeightCm || 0
+                            );
+
+                          const calculatedWidth =
+                            Number(
+                              group.calculatedWidthCm || 0
+                            );
+
+                          const calculatedHeight =
+                            Number(
+                              group.calculatedHeightCm || 0
+                            );
+
+                          const partM2 =
+                            Number(
+                              group.totalM2 || 0
+                            );
+
+                          const chainLabel =
+                            group.chainDirection === 'LEFT'
+                              ? 'Sol'
+                              : 'Sağ';
+
+                          return (
+                            <div
+                              key={
+                                group.generatedItemId ||
+                                `${item.productType}-${groupIndex}`
+                              }
+                              className="pdf-keep-together rounded-lg border border-slate-700 bg-slate-950/40 p-2.5 print:border-slate-300 print:bg-white"
+                            >
+                              <div className="flex items-center justify-between gap-2 mb-1.5">
+                                <span className="font-black text-white print:text-black">
+                                  Parça {groupIndex + 1}
+                                </span>
+
+                                {group.requiresJumbo && (
+                                  <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[9px] font-black text-amber-400 print:border print:border-amber-500 print:bg-white print:text-black">
+                                    JUMBO
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="mb-2 rounded border border-slate-700 bg-white p-1.5 print:border-slate-300">
+                                <svg
+                                  viewBox="0 0 260 130"
+                                  className="h-auto w-full"
+                                  role="img"
+                                  aria-label={`Parça ${groupIndex + 1} teknik krokisi`}
+                                >
+                                  <rect
+                                    x="45"
+                                    y="18"
+                                    width="165"
+                                    height="82"
+                                    fill="#ffffff"
+                                    stroke="#0f172a"
+                                    strokeWidth="2"
+                                  />
+
+                                  <line
+                                    x1="45"
+                                    y1="10"
+                                    x2="210"
+                                    y2="10"
+                                    stroke="#0f172a"
+                                    strokeWidth="1"
+                                  />
+
+                                  <line
+                                    x1="45"
+                                    y1="5"
+                                    x2="45"
+                                    y2="15"
+                                    stroke="#0f172a"
+                                  />
+
+                                  <line
+                                    x1="210"
+                                    y1="5"
+                                    x2="210"
+                                    y2="15"
+                                    stroke="#0f172a"
+                                  />
+
+                                  <text
+                                    x="127.5"
+                                    y="8"
+                                    textAnchor="middle"
+                                    fontSize="10"
+                                    fontWeight="700"
+                                    fill="#0f172a"
+                                  >
+                                    {realWidth} cm
+                                  </text>
+
+                                  <line
+                                    x1="220"
+                                    y1="18"
+                                    x2="220"
+                                    y2="100"
+                                    stroke="#0f172a"
+                                    strokeWidth="1"
+                                  />
+
+                                  <line
+                                    x1="215"
+                                    y1="18"
+                                    x2="225"
+                                    y2="18"
+                                    stroke="#0f172a"
+                                  />
+
+                                  <line
+                                    x1="215"
+                                    y1="100"
+                                    x2="225"
+                                    y2="100"
+                                    stroke="#0f172a"
+                                  />
+
+                                  <text
+                                    x="232"
+                                    y="62"
+                                    fontSize="10"
+                                    fontWeight="700"
+                                    fill="#0f172a"
+                                    transform="rotate(90 232 62)"
+                                    textAnchor="middle"
+                                  >
+                                    {realHeight} cm
+                                  </text>
+
+                                  <line
+                                    x1={
+                                      group.chainDirection === 'LEFT'
+                                        ? 115
+                                        : 140
+                                    }
+                                    y1="59"
+                                    x2={
+                                      group.chainDirection === 'LEFT'
+                                        ? 70
+                                        : 185
+                                    }
+                                    y2="59"
+                                    stroke="#2563eb"
+                                    strokeWidth="4"
+                                    strokeLinecap="round"
+                                  />
+
+                                  <polyline
+                                    points={
+                                      group.chainDirection === 'LEFT'
+                                        ? '78,51 70,59 78,67'
+                                        : '177,51 185,59 177,67'
+                                    }
+                                    fill="none"
+                                    stroke="#2563eb"
+                                    strokeWidth="4"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+
+                                  <text
+                                    x="127.5"
+                                    y="116"
+                                    textAnchor="middle"
+                                    fontSize="10"
+                                    fontWeight="700"
+                                    fill="#0f172a"
+                                  >
+                                    Hesap: {calculatedWidth} × {calculatedHeight} cm
+                                  </text>
+
+                                  {group.requiresJumbo && (
+                                    <text
+                                      x="127.5"
+                                      y="34"
+                                      textAnchor="middle"
+                                      fontSize="11"
+                                      fontWeight="900"
+                                      fill="#b45309"
+                                    >
+                                      JUMBO
+                                    </text>
+                                  )}
+                                </svg>
+                              </div>
+
+                              <div className="space-y-0.5 text-[10px] text-slate-300 print:text-black">
+                                <div>
+                                  <span className="font-bold">
+                                    Gerçek:
+                                  </span>{' '}
+                                  {realWidth} × {realHeight} cm
+                                </div>
+
+                                <div>
+                                  <span className="font-bold">
+                                    Hesap:
+                                  </span>{' '}
+                                  {calculatedWidth} × {calculatedHeight} cm
+                                </div>
+
+                                <div>
+                                  <span className="font-bold">
+                                    Alan:
+                                  </span>{' '}
+                                  {partM2.toLocaleString(
+                                    'tr-TR',
+                                    {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2
+                                    }
+                                  )}{' '}
+                                  m²
+                                </div>
+
+                                <div>
+                                  <span className="font-bold">
+                                    Zincir:
+                                  </span>{' '}
+                                  {chainLabel}
+                                </div>
+
+                                {group.warning && (
+                                  <div className="mt-1 font-bold text-amber-400 print:text-black">
+                                    {group.warning}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        }
+                      )}
+                    </div>
+                  )}
               </div>
             );
           })}
@@ -143,31 +541,355 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
     );
   };
 
-  const handlePrint = async () => {
-    try {
-      setIsGeneratingPdf(true);
-      const pdfFile = await generateMeasurementPdfBlob(customer, sameMeasuredBy, activeMeasurements);
-      const url = URL.createObjectURL(pdfFile);
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (error) {
-      console.error('PDF generation error', error);
-      alert('PDF oluşturulurken bir hata meydana geldi.');
-    } finally {
-      setIsGeneratingPdf(false);
+  const generateVisualReportPdfFile = async (): Promise<File> => {
+    const reportElement =
+      document.getElementById('visual-report-print-area');
+
+    if (!reportElement) {
+      throw new Error('Görsel rapor alanı bulunamadı.');
     }
+
+    /*
+     * Ekrandaki SVG krokileri birebir kullanılır.
+     * Klon üzerinde koyu ekran teması beyaz PDF temasına çevrilir.
+     * Orijinal ekrana müdahale edilmez.
+     */
+    const canvas = await html2canvas(reportElement, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+      windowWidth: reportElement.scrollWidth,
+      windowHeight: reportElement.scrollHeight,
+      onclone: clonedDocument => {
+        const clonedReport =
+          clonedDocument.getElementById(
+            'visual-report-print-area'
+          );
+
+        if (!clonedReport) {
+          return;
+        }
+
+        clonedReport.style.background = '#ffffff';
+        clonedReport.style.color = '#0f172a';
+        clonedReport.style.border = 'none';
+        clonedReport.style.boxShadow = 'none';
+
+        const pdfStyle =
+          clonedDocument.createElement('style');
+
+        pdfStyle.textContent = `
+          #visual-report-print-area {
+            width: 100% !important;
+            max-width: none !important;
+            background: #ffffff !important;
+            color: #0f172a !important;
+            border: none !important;
+            box-shadow: none !important;
+          }
+
+          #visual-report-print-area .measurement-card {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+            background: #ffffff !important;
+            color: #0f172a !important;
+            border: 1px solid #cbd5e1 !important;
+            box-shadow: none !important;
+          }
+
+          #visual-report-print-area h1,
+          #visual-report-print-area h2,
+          #visual-report-print-area h3,
+          #visual-report-print-area h4,
+          #visual-report-print-area p,
+          #visual-report-print-area span,
+          #visual-report-print-area div {
+            text-shadow: none !important;
+          }
+
+          #visual-report-print-area .text-white {
+            color: #0f172a !important;
+          }
+
+          #visual-report-print-area .bg-slate-900,
+          #visual-report-print-area .bg-slate-950,
+          #visual-report-print-area .bg-slate-900\\/50,
+          #visual-report-print-area .bg-slate-950\\/20,
+          #visual-report-print-area .bg-slate-950\\/40 {
+            background-color: #ffffff !important;
+          }
+
+          #visual-report-print-area svg {
+            background: #ffffff !important;
+          }
+
+          #visual-report-print-area .no-print {
+            display: none !important;
+          }
+        `;
+
+        clonedDocument.head.appendChild(pdfStyle);
+      }
+    });
+
+    const pdf =
+      new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+        compress: true
+      });
+
+    const pageWidth = 210;
+    const pageHeight = 297;
+    const margin = 8;
+    const usableWidth = pageWidth - margin * 2;
+    const usableHeight = pageHeight - margin * 2;
+
+    /*
+     * Tek uzun görseli her sayfada tekrar basmak yerine,
+     * canvas gerçek A4 dilimlerine ayrılır.
+     */
+    const pagePixelHeight =
+      Math.floor(
+        canvas.width *
+          (usableHeight / usableWidth)
+      );
+
+    /*
+     * DOM kart sınırlarını canvas piksel koordinatlarına çevir.
+     * Böylece bir kart A4 sınırına denk gelirse kesmek yerine
+     * kartın başlangıcından yeni sayfa açılır.
+     */
+    const reportRect =
+      reportElement.getBoundingClientRect();
+
+    const canvasScaleY =
+      canvas.height /
+      Math.max(
+        reportElement.scrollHeight,
+        reportRect.height,
+        1
+      );
+
+    const keepTogetherBlocks =
+      Array.from(
+        reportElement.querySelectorAll<HTMLElement>(
+          '.measurement-card, .pdf-keep-together'
+        )
+      )
+        .map(element => {
+          const rect =
+            element.getBoundingClientRect();
+
+          const top =
+            Math.max(
+              0,
+              Math.round(
+                (
+                  rect.top -
+                  reportRect.top +
+                  reportElement.scrollTop
+                ) *
+                  canvasScaleY
+              )
+            );
+
+          const bottom =
+            Math.min(
+              canvas.height,
+              Math.round(
+                (
+                  rect.bottom -
+                  reportRect.top +
+                  reportElement.scrollTop
+                ) *
+                  canvasScaleY
+              )
+            );
+
+          return {
+            top,
+            bottom,
+            height: bottom - top
+          };
+        })
+        .filter(
+          block =>
+            block.height > 0
+        )
+        .sort(
+          (a, b) =>
+            a.top - b.top
+        );
+
+    let sourceY = 0;
+    let pageIndex = 0;
+
+    while (sourceY < canvas.height) {
+      const naturalPageBottom =
+        Math.min(
+          sourceY + pagePixelHeight,
+          canvas.height
+        );
+
+      let pageBottom =
+        naturalPageBottom;
+
+      /*
+       * Sayfa sınırını geçen ve tek sayfaya sığabilecek kart varsa,
+       * sınırı kartın başlangıcına geri çek.
+       */
+      const crossingBlock =
+        keepTogetherBlocks.find(
+          block =>
+            block.top > sourceY &&
+            block.top < naturalPageBottom &&
+            block.bottom > naturalPageBottom &&
+            block.height <= pagePixelHeight
+        );
+
+      if (crossingBlock) {
+        const minimumUsefulPageHeight =
+          Math.floor(
+            pagePixelHeight * 0.2
+          );
+
+        if (
+          crossingBlock.top - sourceY >=
+          minimumUsefulPageHeight
+        ) {
+          pageBottom =
+            crossingBlock.top;
+        }
+      }
+
+      let sliceHeight =
+        pageBottom - sourceY;
+
+      /*
+       * Güvenlik: hesaplanan dilim boş veya aşırı küçükse
+       * normal A4 dilimine dön.
+       */
+      if (sliceHeight <= 0) {
+        sliceHeight =
+          Math.min(
+            pagePixelHeight,
+            canvas.height - sourceY
+          );
+      }
+
+      const pageCanvas =
+        document.createElement('canvas');
+
+      pageCanvas.width =
+        canvas.width;
+
+      pageCanvas.height =
+        sliceHeight;
+
+      const pageContext =
+        pageCanvas.getContext('2d');
+
+      if (!pageContext) {
+        throw new Error(
+          'PDF sayfa kırpma alanı oluşturulamadı.'
+        );
+      }
+
+      pageContext.fillStyle =
+        '#ffffff';
+
+      pageContext.fillRect(
+        0,
+        0,
+        pageCanvas.width,
+        pageCanvas.height
+      );
+
+      pageContext.drawImage(
+        canvas,
+        0,
+        sourceY,
+        canvas.width,
+        sliceHeight,
+        0,
+        0,
+        canvas.width,
+        sliceHeight
+      );
+
+      if (pageIndex > 0) {
+        pdf.addPage();
+      }
+
+      const pageImageData =
+        pageCanvas.toDataURL(
+          'image/jpeg',
+          0.94
+        );
+
+      const renderedHeight =
+        (sliceHeight * usableWidth) /
+        canvas.width;
+
+      pdf.addImage(
+        pageImageData,
+        'JPEG',
+        margin,
+        margin,
+        usableWidth,
+        renderedHeight,
+        undefined,
+        'FAST'
+      );
+
+      sourceY +=
+        sliceHeight;
+
+      pageIndex += 1;
+    }
+
+    const safeCustomerName =
+      String(customer.name || 'musteri')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .toLowerCase();
+
+    const fileName =
+      `ceylin-olcu-raporu-${safeCustomerName || 'musteri'}.pdf`;
+
+    const pdfBlob =
+      pdf.output('blob');
+
+    return new File(
+      [pdfBlob],
+      fileName,
+      { type: 'application/pdf' }
+    );
+  };
+
+  const handlePrint = () => {
+    /*
+     * Renkli SVG krokileri, ürün lejantını ve Türkçe karakterleri
+     * doğrudan tarayıcının yazdırma/PDF motoruna gönderir.
+     */
+    window.print();
   };
 
   const handleWhatsAppShare = async () => {
     try {
       setIsGeneratingPdf(true);
-      const pdfFile = await generateMeasurementPdfBlob(customer, sameMeasuredBy, activeMeasurements);
+      const pdfFile = await generateVisualReportPdfFile();
 
       // Web Share API with files support
       if (pdfFile && navigator.share && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
         try {
           await navigator.share({
-            title: 'CEYLİN ÖLÇÜ ERP',
+            title: 'CEYLİN ERP',
             files: [pdfFile]
           });
         } catch (err) {
@@ -188,7 +910,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
   const fallbackWhatsApp = (file: File) => {
     if (typeof window === 'undefined') return;
     const wpUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(
-      `CEYLİN ÖLÇÜ ERP - ${customer.name} ölçü raporu hazır.`
+      `CEYLİN ERP - ${customer.name} ölçü raporu hazır.`
     )}`;
     window.open(wpUrl, '_blank');
 
@@ -320,7 +1042,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
 
             {/* Report Header Title */}
             <div className="text-center pb-6 border-b border-slate-800 print:border-slate-300">
-              <h1 className="text-2xl font-black tracking-wider text-blue-500 print:text-blue-700">CEYLİN ÖLÇÜ ERP</h1>
+              <h1 className="text-2xl font-black tracking-wider text-blue-500 print:text-blue-700">CEYLİN ERP</h1>
               <h2 className="text-xs font-bold uppercase tracking-widest text-slate-400 print:text-slate-600 mt-1">Saha Ölçü Raporu</h2>
             </div>
 
@@ -412,7 +1134,8 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                     ...ap.calculation,
                                     billingWidth: g.calculatedWidthCm,
                                     billingHeight: g.calculatedHeightCm,
-                                    totalM2: g.totalM2
+                                    totalM2: g.totalM2,
+                                    chainDirection: g.chainDirection
                                   }
                                 };
                                 mechanicalCurtainProducts.push({ p: gObj, index: ++mechanicalCurtainCounter, winName: `${win.name} - Parça ${gIdx + 1}` });
@@ -469,6 +1192,180 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                   </h4>
                                 )}
 
+                                {(() => {
+                                  const firstMeasurement = products[0];
+
+                                  if (!firstMeasurement) {
+                                    return null;
+                                  }
+
+                                  const isGeneralSimple =
+                                    firstMeasurement.templateType ===
+                                    'SIMPLE_WIDTH_HEIGHT';
+
+                                  const isGeneralCurtain =
+                                    firstMeasurement.templateType ===
+                                      'CURTAIN_DETAIL' ||
+                                    firstMeasurement.templateType ===
+                                      'CURTAIN';
+
+                                  if (
+                                    !isGeneralSimple &&
+                                    !isGeneralCurtain
+                                  ) {
+                                    return null;
+                                  }
+
+                                  const generalSegments =
+                                    Array.isArray(
+                                      firstMeasurement.rawValues
+                                        ?.facadeSegments
+                                    )
+                                      ? firstMeasurement.rawValues
+                                          .facadeSegments
+                                      : [];
+
+                                  const generalWidth =
+                                    isGeneralSimple
+                                      ? Number(
+                                          firstMeasurement.rawValues
+                                            ?.width || 0
+                                        )
+                                      : Number(
+                                          firstMeasurement.rawValues
+                                            ?.windowWidth || 0
+                                        );
+
+                                  const generalHeight =
+                                    isGeneralSimple
+                                      ? Number(
+                                          firstMeasurement.rawValues
+                                            ?.height || 0
+                                        )
+                                      : Number(
+                                          firstMeasurement.rawValues
+                                            ?.windowHeight || 0
+                                        );
+
+                                  const generalTotalWidth =
+                                    generalSegments.length > 0
+                                      ? generalSegments.reduce(
+                                          (
+                                            total: number,
+                                            segment: any
+                                          ) =>
+                                            total +
+                                            Math.max(
+                                              0,
+                                              Number(
+                                                segment.widthCm ||
+                                                  0
+                                              )
+                                            ),
+                                          0
+                                        )
+                                      : generalWidth;
+
+                                  const generalProductTypes =
+                                    Array.from(
+                                      new Set(
+                                        products.flatMap(
+                                          measurement =>
+                                            (
+                                              measurement.selectedProducts ||
+                                              []
+                                            )
+                                              .filter(
+                                                product =>
+                                                  product.isActive
+                                              )
+                                              .map(product =>
+                                                String(
+                                                  product.productType ||
+                                                    ''
+                                                )
+                                              )
+                                        )
+                                      )
+                                    ).filter(Boolean);
+
+                                  if (
+                                    generalProductTypes.length === 0
+                                  ) {
+                                    return null;
+                                  }
+
+                                  return (
+                                    <div className="pdf-keep-together mb-6 rounded-xl border-2 border-blue-200 bg-blue-50/40 p-5 print:border-slate-400 print:bg-white">
+                                      <div className="mb-3">
+                                        <h4 className="text-sm font-black text-blue-900 print:text-black">
+                                          {winName} — Genel Ürün Görseli
+                                        </h4>
+                                        <p className="text-[10px] text-blue-700 print:text-slate-600">
+                                          Açıklıktaki tüm aktif ürünler tek
+                                          cephe üzerinde gösterilir.
+                                        </p>
+                                      </div>
+
+                                      <TechnicalMeasurementSketch
+                                        facadeSegments={
+                                          generalSegments
+                                        }
+                                        width={generalWidth}
+                                        height={generalHeight}
+                                        totalFacadeWidthCm={
+                                          generalTotalWidth
+                                        }
+                                        kartonpiyerBoslukCm={Number(
+                                          firstMeasurement.rawValues
+                                            ?.kartonpiyerBoslukCm ||
+                                            firstMeasurement.rawValues
+                                              ?.ceilingGap ||
+                                            0
+                                        )}
+                                        camUstuCm={Number(
+                                          firstMeasurement.rawValues
+                                            ?.camUstuCm || 0
+                                        )}
+                                        camIciCm={Number(
+                                          firstMeasurement.rawValues
+                                            ?.camIciCm ||
+                                            firstMeasurement.rawValues
+                                              ?.windowHeight ||
+                                            0
+                                        )}
+                                        kaloriferMermerBoyuCm={Number(
+                                          firstMeasurement.rawValues
+                                            ?.kaloriferMermerBoyuCm ||
+                                            0
+                                        )}
+                                        camAltiCm={Number(
+                                          firstMeasurement.rawValues
+                                            ?.camAltiCm ||
+                                            firstMeasurement.rawValues
+                                              ?.floorGap ||
+                                            0
+                                        )}
+                                        solYukseklikCm={Number(
+                                          firstMeasurement.rawValues
+                                            ?.solYukseklikCm || 0
+                                        )}
+                                        ortaYukseklikCm={Number(
+                                          firstMeasurement.rawValues
+                                            ?.ortaYukseklikCm || 0
+                                        )}
+                                        sagYukseklikCm={Number(
+                                          firstMeasurement.rawValues
+                                            ?.sagYukseklikCm || 0
+                                        )}
+                                        productTypes={
+                                          generalProductTypes
+                                        }
+                                      />
+                                    </div>
+                                  );
+                                })()}
+
                                 <div className="flex flex-wrap gap-6 print:block">
                                   {products.map((p, pIdx) => {
                                     const isSimple = p.templateType === 'SIMPLE_WIDTH_HEIGHT';
@@ -478,6 +1375,41 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                     let widthToDraw = 0;
                                     let heightToDraw = 0;
                                     let totalWidth = 0;
+
+                                    /*
+                                     * Aynı açıklıktaki tüm aktif ürünler
+                                     * tek görsel üzerinde renk katmanı olarak gösterilir.
+                                     */
+                                    const selectedProductTypes =
+                                      Array.from(
+                                        new Set(
+                                          activeMeasurements
+                                            .filter(
+                                              measurement =>
+                                                measurement.windowId ===
+                                                p.windowId
+                                            )
+                                            .flatMap(
+                                              measurement =>
+                                                (
+                                                  measurement.selectedProducts ||
+                                                  []
+                                                )
+                                                  .filter(
+                                                    product =>
+                                                      product.isActive
+                                                  )
+                                                  .map(
+                                                    product =>
+                                                      String(
+                                                        product.productType ||
+                                                        ''
+                                                      )
+                                                  )
+                                            )
+                                            .filter(Boolean)
+                                        )
+                                      );
 
                                     if (isSimple) {
                                       widthToDraw = Number(p.rawValues?.width || 0);
@@ -546,6 +1478,11 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                                     solYukseklikCm={Number(p.rawValues?.solYukseklikCm || 0)}
                                                     ortaYukseklikCm={Number(p.rawValues?.ortaYukseklikCm || 0)}
                                                     sagYukseklikCm={Number(p.rawValues?.sagYukseklikCm || 0)}
+                                                    productTypes={
+                                                      p.productType
+                                                        ? [String(p.productType)]
+                                                        : []
+                                                    }
                                                   />
                                                 </div>
                                               )}
@@ -563,6 +1500,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                                 solYukseklikCm={Number(p.rawValues?.solYukseklikCm || 0)}
                                                 ortaYukseklikCm={Number(p.rawValues?.ortaYukseklikCm || 0)}
                                                 sagYukseklikCm={Number(p.rawValues?.sagYukseklikCm || 0)}
+                                                productTypes={selectedProductTypes}
                                               />
                                             </div>
                                           ) : (
@@ -712,6 +1650,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                       <th className="p-2.5 text-right">Hesap En</th>
                                       <th className="p-2.5 text-right">Hesap Boy</th>
                                       <th className="p-2.5 text-center w-16">Adet</th>
+                                      <th className="p-2.5 text-center w-20">Zincir</th>
                                       <th className="p-2.5 text-right w-20">Birim m²</th>
                                       <th className="p-2.5 text-right w-24">Toplam m²</th>
                                     </tr>
@@ -732,6 +1671,13 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                         const totalM2 = p.details?.totalM2 !== undefined ? Number(p.details.totalM2) : calculateMechanicalCurtainM2(w, h, q).totalM2;
                                         const unitM2 = totalM2 / q;
 
+                                        const chainDirection =
+                                          p.details?.chainDirection ||
+                                          p.selectedProducts?.[0]
+                                            ?.calculation
+                                            ?.chainDirection ||
+                                          'RIGHT';
+
                                         roomMechanicalM2 += totalM2;
                                         globalMechanicalCount += q;
                                         globalMechanicalM2 += totalM2;
@@ -751,6 +1697,9 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                             <td className="p-2.5 text-right font-bold text-blue-400 print:text-blue-700">{calcWidth} cm</td>
                                             <td className="p-2.5 text-right font-bold text-blue-400 print:text-blue-700">{calcHeight} cm</td>
                                             <td className="p-2.5 text-center font-semibold">{q} Adet</td>
+                                            <td className="p-2.5 text-center font-bold text-amber-400 print:text-black">
+                                              {chainDirection === 'LEFT' ? 'Sol' : 'Sağ'}
+                                            </td>
                                             <td className="p-2.5 text-right font-bold text-blue-400 print:text-blue-750">{unitM2.toFixed(2)} m²</td>
                                             <td className="p-2.5 text-right font-bold text-green-400 print:text-green-700">{totalM2.toFixed(2)} m²</td>
                                           </tr>
@@ -762,12 +1711,12 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                           {rows}
                                           <tr className="bg-slate-950/40 print:bg-slate-50 font-bold border-t-2 border-slate-850 print:border-slate-300">
                                             <td colSpan={3} className="p-3 text-slate-300 print:text-slate-700">Toplam Mekanik Adedi: {mechanicalCurtainProducts.reduce((acc, curr) => acc + Number(curr.p.rawValues?.quantity || 1), 0)}</td>
-                                            <td colSpan={6} className="p-3 text-right text-slate-400 print:text-slate-600">Toplam Oda m²:</td>
+                                            <td colSpan={7} className="p-3 text-right text-slate-400 print:text-slate-600">Toplam Oda m²:</td>
                                             <td className="p-3 text-right text-green-400 print:text-green-700 text-sm">{roomMechanicalM2.toFixed(2)} m²</td>
                                           </tr>
                                           {notesList.length > 0 && (
                                             <tr>
-                                              <td colSpan={10} className="p-3 bg-slate-950/20 border-t border-slate-900 print:border-slate-200">
+                                              <td colSpan={11} className="p-3 bg-slate-950/20 border-t border-slate-900 print:border-slate-200">
                                                 <div className="space-y-1 text-slate-300 print:text-slate-700">
                                                   <span className="font-bold uppercase text-[9.5px] text-amber-500 print:text-amber-700 block">Notlar:</span>
                                                   {notesList.map(n => (
@@ -823,7 +1772,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
 
             {/* Document footer signature */}
             <div className="text-center text-[10px] text-slate-500 print:text-slate-600 mt-6 pt-4 border-t border-slate-850/50 print:border-slate-200">
-              <p>Ölçü ERP V1.0.1 - Saha Pilot Uygulaması</p>
+              <p>CEYLİN ERP - Saha Pilot Uygulaması</p>
             </div>
 
           </div>

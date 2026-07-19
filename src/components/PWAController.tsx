@@ -223,7 +223,7 @@ export function PWAController() {
             </div>
             <div className="flex-1">
               <h4 className="font-semibold text-sm text-slate-100">Telefona Yükle</h4>
-              <p className="text-xs text-slate-400 mt-1">Ölçü ERP uygulamasını ana ekranınıza ekleyip tam ekran kullanabilirsiniz.</p>
+              <p className="text-xs text-slate-400 mt-1">CEYLİN ERP uygulamasını ana ekranınıza ekleyip tam ekran kullanabilirsiniz.</p>
               <div className="flex gap-2 mt-3 justify-end">
                 <button
                   onClick={() => setShowInstallPrompt(false)}

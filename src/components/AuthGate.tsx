@@ -13,6 +13,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState("");
   const [needsBootstrap, setNeedsBootstrap] = useState(false);
   const [bootstrapLoading, setBootstrapLoading] = useState(false);
@@ -70,13 +71,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     }
   }, [mounted, currentUser, pathname, router]);
 
-  // Force logout if currentUser is logged in but has no password credential stored
-  useEffect(() => {
-    if (mounted && currentUser && !currentUser.password) {
-      console.warn("User has no password credential stored. Forcing logout to restore sync credential.");
-      useAuthStore.getState().logout();
-    }
-  }, [mounted, currentUser]);
+  // Session expiry is handled by the auth store. Plain passwords are never stored.
+
 
   if (!mounted) {
     return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">Yükleniyor...</div>;
@@ -88,7 +84,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       e.preventDefault();
       setError("");
       
-      const success = await login(username, password);
+      const success = await login(username, password, rememberMe);
       if (!success) {
         setError("Kullanıcı adı veya şifre hatalı, ya da hesap aktif değil.");
         // If login failed, check if database needs bootstrap
@@ -134,7 +130,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             <div className="w-12 h-12 bg-indigo-600/20 text-indigo-400 rounded-2xl flex items-center justify-center mx-auto border border-indigo-500/20">
               <Lock className="w-6 h-6" />
             </div>
-            <h2 className="text-2xl font-bold text-white">Ölçü ERP Giriş</h2>
+            <h2 className="text-2xl font-bold text-white">CEYLİN ERP Giriş</h2>
             <p className="text-xs text-slate-400">Saha pilot sürümüne erişmek için kimliğinizi doğrulayın.</p>
           </div>
 
@@ -175,6 +171,16 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
                 />
               </div>
             </div>
+
+            <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500"
+              />
+              <span>Beni hatırla</span>
+            </label>
 
             <button
               type="submit"

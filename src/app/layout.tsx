@@ -18,13 +18,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Ölçü ERP V1.0.1",
+  title: "CEYLİN ERP",
   description: "Ceylin saha cari ve perde ölçü uygulaması",
   manifest: "/manifest.json",
-  applicationName: "Ölçü ERP V1.0.1",
+  applicationName: "CEYLİN ERP",
   appleWebApp: {
     capable: true,
-    title: "Ölçü ERP",
+    title: "CEYLİN ERP",
     statusBarStyle: "default",
   },
   icons: {

@@ -12,7 +12,9 @@ import {
 export interface MeasurementRecord extends ProductMeasurement {
   customerId: string;
   roomId: string;
-  windowId: string;
+  openingId: string;
+  /** Legacy compatibility only. New code must use openingId. */
+  windowId?: string;
   isDeleted?: boolean;
   deletedAt?: string;
   deletedBy?: string;
@@ -32,6 +34,17 @@ interface MeasurementState {
   updateMeasurement: (measurement: MeasurementRecord, username: string) => Promise<void>;
   deleteMeasurement: (id: string, username: string) => Promise<void>;
   batchUpsertMeasurements: (measurements: MeasurementRecord[]) => Promise<void>;
+  cascadeDeleteOpening: (
+    customerId: string,
+    roomId: string,
+    openingId: string,
+    username: string
+  ) => Promise<number>;
+  cascadeDeleteRoom: (
+    customerId: string,
+    roomId: string,
+    username: string
+  ) => Promise<number>;
   // Cascade methods for when customer is archived/trashed
   cascadeArchiveCustomer: (customerId: string, batchId: string, username: string) => Promise<void>;
   cascadeRestoreArchivedCustomer: (customerId: string, batchId: string) => Promise<void>;
@@ -40,7 +53,7 @@ interface MeasurementState {
 }
 
 function enrichMeasurement(m: MeasurementRecord): MeasurementRecord {
-  const copy = { ...m };
+  const copy = normalizeMeasurementIdentity(m);
 
   // 1. Initialize selectedProducts if missing
   if (!copy.selectedProducts || copy.selectedProducts.length === 0) {
@@ -62,11 +75,16 @@ function enrichMeasurement(m: MeasurementRecord): MeasurementRecord {
   const height = dims.structuralHeight || 0;
 
   copy.selectedProducts = copy.selectedProducts.map(item => {
+    const productRawValues = {
+      ...(copy.rawValues || {}),
+      ...(item.userOverrides || {})
+    };
+
     const calc = calculateSelectedProduct(
       item.productType,
       width,
       height,
-      copy.rawValues || {},
+      productRawValues,
       copy.selectedProducts || []
     );
     return {
@@ -92,7 +110,34 @@ function enrichMeasurement(m: MeasurementRecord): MeasurementRecord {
 
     if (productGroup === 'Mekanik Perde') {
       // Keep only mechanical fields
-      const allowed = ['width', 'height', 'quantity', 'productType'];
+      const allowed = [
+        'width',
+        'height',
+        'quantity',
+        'productType',
+
+        // Sistem ve kullanım seçenekleri
+        'systemType',
+        'chainDirection',
+        'openingType',
+
+        // Detay cephe mekanik hesabı
+        'facadeSegments',
+        'kaloriferMermerBoyuCm',
+        'camUstuCm',
+        'camIciCm',
+        'camAltiCm',
+        'solYukseklikCm',
+        'ortaYukseklikCm',
+        'sagYukseklikCm',
+
+        // Stor ek seçenekleri
+        'hemModel',
+        'etekStockId',
+        'etekUnitPrice',
+        'laserHem',
+        'laserHemPrice'
+      ];
       Object.keys(raw).forEach(key => {
         if (!allowed.includes(key)) {
           delete raw[key];
@@ -111,7 +156,18 @@ function enrichMeasurement(m: MeasurementRecord): MeasurementRecord {
       }
     } else if (productGroup === 'Plicell') {
       // Keep only plicell fields
-      const allowed = ['plicellCamListesi', 'camAdedi', 'ortakCamBoyuCm', 'profilRengi', 'glassWidth', 'glassHeight'];
+      const allowed = [
+        'plicellCamListesi',
+        'camAdedi',
+        'ortakCamBoyuCm',
+        'profilRengi',
+        'glassWidth',
+        'glassHeight',
+        'quantity',
+
+        // Tekli / çiftli sistem
+        'systemType'
+      ];
       Object.keys(raw).forEach(key => {
         if (!allowed.includes(key)) {
           delete raw[key];
@@ -143,6 +199,17 @@ function enrichMeasurement(m: MeasurementRecord): MeasurementRecord {
   return copy;
 }
 
+function normalizeMeasurementIdentity(
+  m: MeasurementRecord,
+  requireOpeningId = true
+): MeasurementRecord {
+  const openingId = m.openingId || m.windowId || '';
+  if (!openingId && requireOpeningId) {
+    throw new Error(`Ölçü ${m.id || '(kimliksiz)'} için openingId eksik.`);
+  }
+  return { ...m, openingId, windowId: m.windowId || openingId };
+}
+
 export const useMeasurementStore = create<MeasurementState>((set, get) => ({
   measurements: [],
   isLoading: false,
@@ -152,7 +219,7 @@ export const useMeasurementStore = create<MeasurementState>((set, get) => ({
     set({ isLoading: true });
     try {
       const data = await loadLocalMeasurements();
-      set({ measurements: data || [], isLoading: false });
+      set({ measurements: (data || []).map((measurement) => normalizeMeasurementIdentity(measurement, false)), isLoading: false });
     } catch (error) {
       console.error("Ölçüler yüklenirken hata:", error);
       set({ isLoading: false });
@@ -190,6 +257,78 @@ export const useMeasurementStore = create<MeasurementState>((set, get) => ({
       enrichedList.forEach(nm => existingMap.set(nm.id, nm));
       return { measurements: Array.from(existingMap.values()) };
     });
+  },
+
+
+  cascadeDeleteOpening: async (customerId, roomId, openingId, username) => {
+    const now = new Date().toISOString();
+    const { measurements } = get();
+
+    const changed = measurements
+      .filter((measurement) =>
+        measurement.customerId === customerId &&
+        measurement.roomId === roomId &&
+        (measurement.openingId || measurement.windowId) === openingId &&
+        !measurement.isDeleted
+      )
+      .map((measurement) => ({
+        ...measurement,
+        isDeleted: true,
+        deletedAt: now,
+        deletedBy: username,
+        deleteSource: 'OPENING_CASCADE'
+      }));
+
+    if (changed.length === 0) return 0;
+
+    await batchSaveLocalMeasurements(changed);
+
+    const changedById = new Map(
+      changed.map((measurement) => [measurement.id, measurement])
+    );
+
+    set((state) => ({
+      measurements: state.measurements.map(
+        (measurement) => changedById.get(measurement.id) || measurement
+      )
+    }));
+
+    return changed.length;
+  },
+
+  cascadeDeleteRoom: async (customerId, roomId, username) => {
+    const now = new Date().toISOString();
+    const { measurements } = get();
+
+    const changed = measurements
+      .filter((measurement) =>
+        measurement.customerId === customerId &&
+        measurement.roomId === roomId &&
+        !measurement.isDeleted
+      )
+      .map((measurement) => ({
+        ...measurement,
+        isDeleted: true,
+        deletedAt: now,
+        deletedBy: username,
+        deleteSource: 'ROOM_CASCADE'
+      }));
+
+    if (changed.length === 0) return 0;
+
+    await batchSaveLocalMeasurements(changed);
+
+    const changedById = new Map(
+      changed.map((measurement) => [measurement.id, measurement])
+    );
+
+    set((state) => ({
+      measurements: state.measurements.map(
+        (measurement) => changedById.get(measurement.id) || measurement
+      )
+    }));
+
+    return changed.length;
   },
 
   cascadeArchiveCustomer: async (customerId, batchId, username) => {

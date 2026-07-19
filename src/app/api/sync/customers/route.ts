@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { hashPassword } from "@/lib/authHelper";
-import crypto from "crypto";
+import { verifyAuth } from "@/lib/authHelper";
 
 // Helper to identify if a string is a base64 / data URL
 function isDataUrl(val: any): boolean {
@@ -74,86 +73,7 @@ function getSupabaseServer() {
   });
 }
 
-// Helper to verify auth using Supabase users table
-async function verifySupabaseAuth(req: NextRequest) {
-  let reason = "";
-  try {
-    const authHeader = req.headers.get("Authorization");
-    const authHeaderExists = !!authHeader;
-    console.log("[Server Sync Diagnostic] Authorization header exists:", authHeaderExists);
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      reason = `Auth header missing or invalid format (startsWith Bearer: ${authHeader?.startsWith("Bearer ")})`;
-      return { user: null, reason };
-    }
-
-    const token = authHeader.substring(7);
-    const decoded = Buffer.from(token, "base64").toString("utf-8");
-    const [username, credential] = decoded.split(":");
-    const decodedUsername = username || "";
-    const credentialPresent = !!credential;
-
-    console.log("[Server Sync Diagnostic] Basic Auth decoded username:", decodedUsername);
-    console.log("[Server Sync Diagnostic] Basic Auth password exists:", credentialPresent);
-
-    if (!username || !credential) {
-      reason = `Decoded username or credential missing (username: ${!!username}, credential: ${!!credential})`;
-      return { user: null, reason };
-    }
-
-    const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    console.log("[Server Sync Diagnostic] Supabase URL exists:", !!supabaseUrl);
-    console.log("[Server Sync Diagnostic] Supabase service role key exists:", !!supabaseServiceKey);
-
-    const supabaseServer = getSupabaseServer();
-    // Fetch user from Supabase using the server client
-    const { data: user, error } = await supabaseServer
-      .from("users")
-      .select("*")
-      .eq("username", username.toLowerCase().trim())
-      .single();
-
-    const dbUserFound = !!user;
-    console.log("[Server Sync Diagnostic] users query success:", !error);
-    if (error) {
-      console.log("[Server Sync Diagnostic] users query error if any:", error.message);
-      reason = `Database query error: ${error.message}`;
-      return { user: null, reason };
-    } else {
-      console.log("[Server Sync Diagnostic] users query error if any:", null);
-    }
-    console.log("[Server Sync Diagnostic] matched user found:", dbUserFound);
-
-    if (!user) {
-      reason = `User ${username} not found in database`;
-      return { user: null, reason };
-    }
-
-    if (!user.isActive) {
-      reason = `User ${username} is not active`;
-      return { user: null, reason };
-    }
-
-    const isHashed = credential.length === 128;
-    const hashedPassword = isHashed ? credential : hashPassword(credential);
-
-    const passwordMatches = user.password === hashedPassword;
-    console.log("[Server Sync Diagnostic] password verification success:", passwordMatches);
-
-    if (!passwordMatches) {
-      reason = "Password mismatch";
-      return { user: null, reason };
-    }
-
-    return { user, reason: "Authenticated successfully" };
-  } catch (e: any) {
-    console.error("verifySupabaseAuth failed:", e);
-    return { user: null, reason: `Exception: ${e.message}` };
-  }
-}
-
 export async function POST(req: NextRequest) {
-  console.log("[Server Sync Diagnostic] request received");
   const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -214,20 +134,18 @@ export async function POST(req: NextRequest) {
 
   const supabaseServer = getSupabaseServer();
 
-  const authResult = await verifySupabaseAuth(req);
-  if (!authResult.user) {
-    console.log("[Server Sync Diagnostic] final response status and reason:", 401, authResult.reason);
+  const user = await verifyAuth(req);
+  if (!user) {
     return NextResponse.json(
-      { success: false, error: "Unauthorized", reason: authResult.reason },
+      { success: false, error: "Unauthorized" },
       { status: 401 }
     );
   }
-  const user = authResult.user;
   try {
     const body = await req.json();
     const rawLocalCustomers = body.customers || [];
     const pendingDeletes = body.pendingDeletes || [];
-    const localUsers = body.users || [];
+    // The legacy users payload is intentionally ignored.
     
     const localCustomers = sanitizeMediaValue(rawLocalCustomers);
     
@@ -301,83 +219,9 @@ export async function POST(req: NextRequest) {
     console.log("[Sync API POST - Step 5] fetched openings count:", remoteOpenings?.length || 0);
     console.log("[Sync API POST - Step 5] fetched measurements count:", remoteMeasurements?.length || 0);
 
-    // 3. Sync Users list if user is ADMIN or OFFICE and localUsers is provided
-    let finalUsers = remoteUsers || [];
-    const isAdminOrOffice = ["admin", "office", "sales"].includes(user.role?.toLowerCase());
-    if (isAdminOrOffice && Array.isArray(localUsers)) {
-      const mergedUsersMap = new Map<string, any>();
-      (remoteUsers || []).forEach(ru => mergedUsersMap.set(ru.id, ru));
-      localUsers.forEach(lu => {
-        const ru = mergedUsersMap.get(lu.id);
-
-        let email = lu.email || (ru ? ru.email : null);
-        let phone = lu.phone || (ru ? ru.phone : null);
-        let tcNo = lu.tcNo || (ru ? ru.tcNo : null);
-        let address = lu.address || (ru ? ru.address : null);
-        let profileCompletedAt = lu.profileCompletedAt || (ru ? ru.profileCompletedAt : null);
-
-        // Merge logic: local is populated, remote is empty -> local is preserved.
-        // If both are populated, prefer the one with the newer updatedAt timestamp.
-        if (ru) {
-          const localUpdate = lu.updatedAt ? new Date(lu.updatedAt).getTime() : 0;
-          const remoteUpdate = ru.updatedAt ? new Date(ru.updatedAt).getTime() : 0;
-          
-          if (ru.email && lu.email && remoteUpdate > localUpdate) email = ru.email;
-          if (ru.phone && lu.phone && remoteUpdate > localUpdate) phone = ru.phone;
-          if (ru.tcNo && lu.tcNo && remoteUpdate > localUpdate) tcNo = ru.tcNo;
-          if (ru.address && lu.address && remoteUpdate > localUpdate) address = ru.address;
-          if (ru.profileCompletedAt && lu.profileCompletedAt && remoteUpdate > localUpdate) profileCompletedAt = ru.profileCompletedAt;
-        }
-
-        if (!ru || new Date(lu.updatedAt) > new Date(ru.updatedAt)) {
-          // Determine final password: if a new local password is provided, use it (hash it if it's plaintext).
-          // Otherwise, if the remote user already exists, preserve their password.
-          let finalPassword = ru ? ru.password : hashPassword(crypto.randomUUID());
-          if (lu.password && lu.password.trim() !== "" && lu.password.trim() !== "••••") {
-            finalPassword = lu.password.length === 128 ? lu.password : hashPassword(lu.password);
-          }
-          mergedUsersMap.set(lu.id, {
-            id: lu.id,
-            name: lu.name,
-            username: lu.username,
-            password: finalPassword,
-            role: lu.role,
-            isActive: lu.isActive,
-            permissions: lu.permissions || [],
-            createdAt: lu.createdAt || new Date().toISOString(),
-            updatedAt: lu.updatedAt || new Date().toISOString(),
-            email,
-            phone,
-            tcNo,
-            address,
-            profileCompletedAt
-          });
-        } else {
-          // If remote is newer, keep remote record but make sure to merge in any local values if remote has nulls
-          mergedUsersMap.set(ru.id, {
-            ...ru,
-            email,
-            phone,
-            tcNo,
-            address,
-            profileCompletedAt
-          });
-        }
-      });
-
-      finalUsers = Array.from(mergedUsersMap.values());
-      // Push any newer local users to Supabase
-      for (const u of finalUsers) {
-        const ru = remoteUsers?.find(r => r.id === u.id);
-        if (!ru || new Date(u.updatedAt) > new Date(ru.updatedAt)) {
-          const { error: upsertError } = await supabaseServer.from("users").upsert(u);
-          if (upsertError) {
-            console.error(`[Sync DB Error] User upsert failed for ${u.username} (${u.id}):`, upsertError.message);
-            throw new Error(`User upsert failed: ${upsertError.message}`);
-          }
-        }
-      }
-    }
+    // 3. User accounts are managed only through dedicated admin APIs.
+    // Full-data sync must never create users, change passwords, roles or account state.
+    const finalUsers = remoteUsers || [];
 
     // Sanitize users list (exclude password field, include hasPassword) before sending to client
     const sanitizedUsers = finalUsers.map(({ password, ...u }) => ({ ...u, hasPassword: !!password }));
@@ -855,10 +699,9 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (error: any) {
-    console.error("POST sync failed:", error);
-    console.log("[Server Sync Diagnostic] final response status and reason:", 500, error.message || "Internal server error");
+    console.error("[Sync Customers API] Internal error.");
     return NextResponse.json(
-      { success: false, error: error.message || "Internal server error" },
+      { success: false, error: "Internal server error" },
       { status: 500 }
     );
   }

@@ -48,6 +48,7 @@ export async function runMeasurementMigration() {
               id: stableId,
               customerId: customer.id,
               roomId: room.id,
+              openingId: window.id,
               windowId: window.id,
               // Inherit lifecycle states from customer if not already present on product
               isArchived: product.isArchived || customer.isArchived,
