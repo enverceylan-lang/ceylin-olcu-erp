@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   BellRing,
   CalendarClock,
@@ -22,12 +23,33 @@ import {
   listAllFieldTasks,
   listFieldTasksForUser,
   markFieldTaskSeen,
-  updateFieldTaskStatus
+  putFieldTask,
+  updateFieldTaskStatus,
+  upsertRemoteFieldTasks
 } from "@/lib/localFieldTaskDb";
+import {
+  fetchRemoteFieldTasks,
+  updateRemoteFieldTask
+} from "@/lib/fieldTaskSyncClient";
 import {
   normalizeRole,
   useAuthStore
 } from "@/store/useAuthStore";
+import {
+  ensureFieldTaskCustomer
+} from "@/lib/fieldTaskCustomerBridge";
+
+import {
+  pushDeltaSyncEvents
+} from "@/lib/deltaSyncClient";
+
+import {
+  useMeasurementStore
+} from "@/store/measurementStore";
+
+import {
+  saveLocalMeasurementWithSync
+} from "@/lib/localMeasurementDb";
 
 const STATUS_LABELS:
 Record<FieldTaskStatus, string> = {
@@ -56,9 +78,17 @@ function formatDate(
 }
 
 export default function FieldTasksPage() {
+  const router =
+    useRouter();
+
   const currentUser =
     useAuthStore(
       state => state.currentUser
+    );
+
+  const sessionToken =
+    useAuthStore(
+      state => state.sessionToken
     );
 
   const [tasks, setTasks] =
@@ -88,6 +118,26 @@ export default function FieldTasksPage() {
         return;
       }
 
+      if (sessionToken) {
+        try {
+          const remote =
+            await fetchRemoteFieldTasks(
+              sessionToken
+            );
+
+          await upsertRemoteFieldTasks(
+            remote.tasks
+          );
+        } catch (error) {
+          console.warn(
+            "[Field Tasks Page] Remote load skipped:",
+            error instanceof Error
+              ? error.message
+              : "Unknown error"
+          );
+        }
+      }
+
       const rows =
         isAdminView
           ? await listAllFieldTasks()
@@ -99,7 +149,8 @@ export default function FieldTasksPage() {
       setLoading(false);
     }, [
       currentUser,
-      isAdminView
+      isAdminView,
+      sessionToken
     ]);
 
   useEffect(() => {
@@ -136,6 +187,42 @@ export default function FieldTasksPage() {
       [tasks]
     );
 
+  const handleOpenCustomer =
+    async (
+      task: FieldTask,
+    ) => {
+      try {
+        await markFieldTaskSeen(
+          task.id,
+        );
+
+        if (!sessionToken) {
+          throw new Error(
+            "Oturum anahtarı bulunamadı."
+          );
+        }
+
+        await ensureFieldTaskCustomer(
+          task,
+          sessionToken,
+        );
+
+        router.push(
+          `/cariler/${task.customerId}?fieldTaskId=${task.id}&mode=measurement`,
+        );
+      } catch (error) {
+        console.error(
+          "[Field Tasks] Customer preparation failed:",
+          error,
+        );
+
+        alert(
+          error instanceof Error
+            ? `Görev carisi hazırlanamadı: ${error.message}`
+            : "Görev carisi saha cihazında hazırlanamadı."
+        );
+      }
+    };
   const handleStatus =
     async (
       task: FieldTask,
@@ -150,7 +237,161 @@ export default function FieldTasksPage() {
         task.id
       );
 
+      if (sessionToken) {
+        try {
+          const remoteTask =
+            await updateRemoteFieldTask(
+              task.id,
+              status,
+              sessionToken,
+              true
+            );
+
+          await putFieldTask(
+            remoteTask
+          );
+        } catch (error) {
+          console.warn(
+            "[Field Tasks Page] Remote status update failed:",
+            error instanceof Error
+              ? error.message
+              : "Unknown error"
+          );
+
+          alert(
+            "Durum telefona kaydedildi fakat sunucuya henüz gönderilemedi."
+          );
+        }
+      }
+
       await loadTasks();
+    };
+
+  const handleSendMeasurement =
+    async (
+      task: FieldTask
+    ) => {
+      try {
+        const taskMeasurements =
+          useMeasurementStore
+            .getState()
+            .measurements
+            .filter(
+              measurement =>
+                measurement.customerId ===
+                  task.customerId &&
+                !measurement.isDeleted &&
+                !measurement.isArchived
+            );
+
+        if (
+          taskMeasurements.length === 0
+        ) {
+          alert(
+            "Bu görev için kayıtlı ölçü bulunamadı. Önce ölçüyü kaydedin."
+          );
+          return;
+        }
+
+        /*
+         * Görev ölçüleri snapshot veya eski cari ağacından gelmiş olsa bile
+         * gönderim öncesinde bağımsız MEASUREMENT olayına dönüştürülür.
+         */
+        for (const measurement of taskMeasurements) {
+          await saveLocalMeasurementWithSync(
+            {
+              ...measurement,
+              customerId: task.customerId,
+              openingId:
+                measurement.openingId ||
+                measurement.windowId ||
+                "",
+              windowId:
+                measurement.windowId ||
+                measurement.openingId ||
+                "",
+              updatedAt:
+                new Date().toISOString()
+            },
+            currentUser?.name ||
+              currentUser?.username ||
+              "FIELD"
+          );
+        }
+
+        const result =
+          await pushDeltaSyncEvents();
+
+        if (!result.success) {
+          const message =
+            result.errors?.length
+              ? result.errors.join(", ")
+              : "Ölçüler sunucuya gönderilemedi.";
+
+          alert(
+            `Gönderme başarısız: ${message}`
+          );
+          return;
+        }
+
+        if (
+          result.pushedCount === 0
+        ) {
+          /*
+           * Ölçü daha önce başarıyla gönderilmiş olabilir.
+           * Yerel ölçü bulunduğu için görev durumuna devam edilir.
+           */
+          console.info(
+            "[Field Task] Bekleyen yeni ölçü kuyruğu bulunmadı."
+          );
+        }
+
+        await handleStatus(
+          task,
+          "MEASUREMENT_TAKEN"
+        );
+
+        alert(
+          result.pushedCount > 0
+            ? `${result.pushedCount} kayıt mağazaya gönderildi.`
+            : "Ölçü daha önce gönderilmiş. Görev güncellendi."
+        );
+      } catch (error) {
+        console.error(
+          "[Field Task] Measurement send failed:",
+          error
+        );
+
+        alert(
+          error instanceof Error
+            ? `Ölçü gönderilemedi: ${error.message}`
+            : "Ölçü gönderilemedi."
+        );
+      }
+    };
+  const handleStartMeasurement =
+    async (
+      task: FieldTask,
+    ) => {
+      await handleStatus(
+        task,
+        "MEASUREMENT_STARTED",
+      );
+
+      if (!sessionToken) {
+        throw new Error(
+          "Oturum anahtarı bulunamadı."
+        );
+      }
+
+      await ensureFieldTaskCustomer(
+        task,
+        sessionToken,
+      );
+
+      router.push(
+        `/cariler/${task.customerId}?fieldTaskId=${task.id}&mode=measurement`,
+      );
     };
 
   if (!currentUser) {
@@ -270,18 +511,18 @@ export default function FieldTasksPage() {
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-5">
-                <Link
-                  href={`/cariler/${task.customerId}?fieldTaskId=${task.id}`}
+                <button
+                  type="button"
                   onClick={() =>
-                    void markFieldTaskSeen(
-                      task.id
+                    void handleOpenCustomer(
+                      task
                     )
                   }
                   className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-bold"
                 >
                   <Ruler className="w-4 h-4" />
                   Cariyi Aç
-                </Link>
+                </button>
 
                 {task.mapLocation && (
                   <a
@@ -324,9 +565,8 @@ export default function FieldTasksPage() {
                     <button
                       type="button"
                       onClick={() =>
-                        void handleStatus(
-                          task,
-                          "MEASUREMENT_STARTED"
+                        void handleStartMeasurement(
+                          task
                         )
                       }
                       className="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm font-bold"
@@ -341,9 +581,8 @@ export default function FieldTasksPage() {
                     <button
                       type="button"
                       onClick={() =>
-                        void handleStatus(
-                          task,
-                          "MEASUREMENT_TAKEN"
+                        void handleSendMeasurement(
+                          task
                         )
                       }
                       className="px-3 py-2 rounded-xl bg-purple-600 text-white text-sm font-bold"
@@ -377,3 +616,10 @@ export default function FieldTasksPage() {
     </div>
   );
 }
+
+
+
+
+
+
+

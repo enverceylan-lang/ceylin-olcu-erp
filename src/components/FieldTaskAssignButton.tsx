@@ -1,5 +1,7 @@
 ﻿"use client";
 
+import { useMeasurementStore } from "@/store/measurementStore";
+
 import {
   BellRing,
   CalendarClock,
@@ -12,8 +14,15 @@ import {
   useState
 } from "react";
 import {
-  createFieldTask
+  createFieldTask,
+  putFieldTask
 } from "@/lib/localFieldTaskDb";
+import {
+  createRemoteFieldTask
+} from "@/lib/fieldTaskSyncClient";
+import {
+  useAuthStore
+} from "@/store/useAuthStore";
 import {
   normalizeRole,
   type MockUser
@@ -46,12 +55,81 @@ function defaultDateTime(): string {
     .slice(0, 16);
 }
 
+function cleanTaskSnapshot(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(cleanTaskSnapshot);
+  }
+
+  if (value && typeof value === "object") {
+    const result: Record<string, unknown> = {};
+
+    for (const [key, item] of Object.entries(
+      value as Record<string, unknown>
+    )) {
+      if (
+        key === "photos" ||
+        key === "videos" ||
+        key === "addressPhotos"
+      ) {
+        result[key] = [];
+        continue;
+      }
+
+      result[key] = cleanTaskSnapshot(item);
+    }
+
+    return result;
+  }
+
+  if (
+    typeof value === "string" &&
+    (
+      value.startsWith("data:") ||
+      value.includes(";base64,") ||
+      value.length > 5000
+    )
+  ) {
+    return "";
+  }
+
+  return value;
+}
+
+function buildTaskCustomerSnapshot(
+  customer: any
+): Record<string, unknown> {
+  const measurements =
+    useMeasurementStore
+      .getState()
+      .measurements
+      .filter(
+        measurement =>
+          measurement.customerId === customer.id &&
+          !measurement.isDeleted &&
+          !measurement.isArchived
+      )
+      .map(measurement =>
+        cleanTaskSnapshot(measurement)
+      );
+
+  return {
+    version: 1,
+    createdAt: new Date().toISOString(),
+    customer: cleanTaskSnapshot(customer),
+    measurements
+  };
+}
 export function FieldTaskAssignButton({
   customer,
   currentUser,
   users,
   onAssigned
 }: FieldTaskAssignButtonProps) {
+  const sessionToken =
+    useAuthStore(
+      state => state.sessionToken
+    );
+
   const [open, setOpen] =
     useState(false);
 
@@ -141,44 +219,66 @@ export function FieldTaskAssignButton({
       setSaving(true);
 
       try {
-        await createFieldTask({
-          customerId:
-            customer.id,
-          customerName:
-            customer.name ||
-            "İsimsiz Cari",
-          customerPhone:
-            customer.phone || "",
-          customerAddress:
-            customer.address || "",
-          mapLocation:
-            customer.mapLocation || "",
+        const localTask =
+          await createFieldTask({
+            customerId:
+              customer.id,
+            customerName:
+              customer.name ||
+              "İsimsiz Cari",
+            customerPhone:
+              customer.phone || "",
+            customerAddress:
+              customer.address || "",
+            mapLocation:
+              customer.mapLocation || "",
 
-          assignedUserId:
-            fieldUser.id,
-          assignedUserName:
-            fieldUser.name,
+            customerSnapshot:
+              buildTaskCustomerSnapshot(
+                customer
+              ),
 
-          assignedById:
-            currentUser.id,
-          assignedByName:
-            currentUser.name,
+            assignedUserId:
+              fieldUser.id,
+            assignedUserName:
+              fieldUser.name,
 
-          scheduledAt:
-            scheduledAt
-              ? new Date(
-                  scheduledAt
-                ).toISOString()
-              : undefined,
+            assignedById:
+              currentUser.id,
+            assignedByName:
+              currentUser.name,
 
-          note:
-            note.trim()
-        });
+            scheduledAt:
+              scheduledAt
+                ? new Date(
+                    scheduledAt
+                  ).toISOString()
+                : undefined,
+
+            note:
+              note.trim()
+          });
+
+        if (!sessionToken) {
+          throw new Error(
+            "Oturum anahtarı bulunamadı."
+          );
+        }
+
+        const remoteTask =
+          await createRemoteFieldTask(
+            localTask,
+            sessionToken
+          );
+
+        await putFieldTask(
+          remoteTask
+        );
 
         setOpen(false);
 
         onAssigned?.(
-          `Ölçü görevi ${fieldUser.name} personeline atandı.`
+          `Ölçü görevi ${fieldUser.name} personeline gönderildi.`
         );
       } catch (error) {
         console.error(
@@ -358,3 +458,7 @@ export function FieldTaskAssignButton({
     </>
   );
 }
+
+
+
+

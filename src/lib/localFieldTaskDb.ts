@@ -17,6 +17,12 @@ export interface FieldTask {
   customerAddress?: string;
   mapLocation?: string;
 
+  /*
+   * Görev anındaki fotoğrafsız cari/oda/açıklık/ölçü çalışma paketi.
+   * Ana cari kaydı değildir.
+   */
+  customerSnapshot?: Record<string, unknown>;
+
   assignedUserId: string;
   assignedUserName: string;
 
@@ -174,3 +180,32 @@ export async function markFieldTaskSeen(
     );
   }
 }
+
+export async function upsertRemoteFieldTasks(
+  tasks: FieldTask[],
+): Promise<void> {
+  if (!Array.isArray(tasks) || tasks.length === 0) {
+    return;
+  }
+
+  await localFieldTaskDb.fieldTasks.bulkPut(tasks);
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new Event("field-tasks-updated"),
+    );
+  }
+}
+
+export async function putFieldTask(
+  task: FieldTask,
+): Promise<void> {
+  await localFieldTaskDb.fieldTasks.put(task);
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new Event("field-tasks-updated"),
+    );
+  }
+}
+

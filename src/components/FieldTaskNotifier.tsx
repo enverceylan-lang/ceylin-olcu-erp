@@ -2,8 +2,12 @@
 
 import { useEffect } from "react";
 import {
-  listFieldTasksForUser
+  listFieldTasksForUser,
+  upsertRemoteFieldTasks
 } from "@/lib/localFieldTaskDb";
+import {
+  fetchRemoteFieldTasks
+} from "@/lib/fieldTaskSyncClient";
 import {
   normalizeRole,
   useAuthStore
@@ -11,6 +15,9 @@ import {
 
 const STORAGE_PREFIX =
   "ceylin-field-task-notified:";
+
+const LAST_SYNC_PREFIX =
+  "ceylin-field-task-last-sync:";
 
 function playTaskSound(): void {
   try {
@@ -59,7 +66,7 @@ function playTaskSound(): void {
       context.currentTime + 0.45
     );
   } catch {
-    // Cihaz ses üretimini desteklemiyorsa sessiz devam et.
+    // Sessiz devam et.
   }
 }
 
@@ -69,9 +76,7 @@ function notifyTask(
 ): void {
   playTaskSound();
 
-  if (
-    "vibrate" in navigator
-  ) {
+  if ("vibrate" in navigator) {
     navigator.vibrate([
       180,
       100,
@@ -81,8 +86,7 @@ function notifyTask(
 
   if (
     "Notification" in window &&
-    Notification.permission ===
-      "granted"
+    Notification.permission === "granted"
   ) {
     new Notification(
       "CEYLİN Ölçü – Yeni İş Emri",
@@ -108,9 +112,15 @@ export function FieldTaskNotifier() {
       state => state.currentUser
     );
 
+  const sessionToken =
+    useAuthStore(
+      state => state.sessionToken
+    );
+
   useEffect(() => {
     if (
       !currentUser ||
+      !sessionToken ||
       normalizeRole(
         currentUser.role
       ) !== "FIELD"
@@ -119,59 +129,98 @@ export function FieldTaskNotifier() {
     }
 
     let cancelled = false;
+    let syncing = false;
+
+    const syncKey =
+      `${LAST_SYNC_PREFIX}${currentUser.id}`;
 
     const checkTasks =
       async () => {
-        const tasks =
-          await listFieldTasksForUser(
-            currentUser.id
-          );
+        if (syncing || cancelled) return;
 
-        if (cancelled) return;
+        syncing = true;
 
-        const pending =
-          tasks.filter(
-            task =>
-              task.status !==
-                "COMPLETED" &&
-              task.status !==
-                "CANCELLED"
-          );
-
-        for (
-          const task of pending
-        ) {
-          const storageKey =
-            `${STORAGE_PREFIX}${currentUser.id}:${task.id}`;
-
-          if (
+        try {
+          const since =
             localStorage.getItem(
-              storageKey
-            )
-          ) {
-            continue;
+              syncKey
+            ) || undefined;
+
+          const result =
+            await fetchRemoteFieldTasks(
+              sessionToken,
+              since
+            );
+
+          if (cancelled) return;
+
+          if (result.tasks.length > 0) {
+            await upsertRemoteFieldTasks(
+              result.tasks
+            );
           }
 
           localStorage.setItem(
-            storageKey,
-            "1"
+            syncKey,
+            result.serverTime
           );
 
-          notifyTask(
-            task.customerName,
-            task.note
-          );
+          const tasks =
+            await listFieldTasksForUser(
+              currentUser.id
+            );
 
-          window.dispatchEvent(
-            new CustomEvent(
-              "field-task-alert",
-              {
-                detail: task
-              }
-            )
-          );
+          const pending =
+            tasks.filter(
+              task =>
+                task.status !==
+                  "COMPLETED" &&
+                task.status !==
+                  "CANCELLED"
+            );
 
-          break;
+          for (const task of pending) {
+            const storageKey =
+              `${STORAGE_PREFIX}${currentUser.id}:${task.id}`;
+
+            if (
+              localStorage.getItem(
+                storageKey
+              )
+            ) {
+              continue;
+            }
+
+            localStorage.setItem(
+              storageKey,
+              "1"
+            );
+
+            notifyTask(
+              task.customerName,
+              task.note
+            );
+
+            window.dispatchEvent(
+              new CustomEvent(
+                "field-task-alert",
+                {
+                  detail: task
+                }
+              )
+            );
+
+            break;
+          }
+        } catch (error) {
+          console.warn(
+            "[Field Task Sync] Remote sync skipped:",
+            error instanceof Error
+              ? error.message
+              : "Unknown error"
+          );
+        } finally {
+          syncing = false;
         }
       };
 
@@ -180,10 +229,25 @@ export function FieldTaskNotifier() {
     const intervalId =
       window.setInterval(
         () => {
-          void checkTasks();
+          if (
+            document.visibilityState ===
+              "visible"
+          ) {
+            void checkTasks();
+          }
         },
-        5000
+        20000
       );
+
+    const handleVisibility =
+      () => {
+        if (
+          document.visibilityState ===
+            "visible"
+        ) {
+          void checkTasks();
+        }
+      };
 
     const handleUpdate =
       () => {
@@ -193,6 +257,11 @@ export function FieldTaskNotifier() {
     window.addEventListener(
       "field-tasks-updated",
       handleUpdate
+    );
+
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibility
     );
 
     return () => {
@@ -206,8 +275,16 @@ export function FieldTaskNotifier() {
         "field-tasks-updated",
         handleUpdate
       );
+
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibility
+      );
     };
-  }, [currentUser]);
+  }, [
+    currentUser,
+    sessionToken
+  ]);
 
   return null;
 }
