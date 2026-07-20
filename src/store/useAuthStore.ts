@@ -212,7 +212,7 @@ export function canViewModule(role: UserRole | undefined, modulePath: string): b
   }
   if (normRole === 'FIELD') {
     // Allowed: dashboard, cariler, olculer
-    return clean === '' || clean.startsWith('cariler') || clean.startsWith('olculer');
+    return clean === '' || clean.startsWith('cariler') || clean.startsWith('olculer') || clean.startsWith('gorevler');
   }
   if (normRole === 'TAILOR') {
     // Allowed: uretim
@@ -242,7 +242,7 @@ export function canEditModule(role: UserRole | undefined, modulePath: string): b
     return true;
   }
   if (normRole === 'FIELD') {
-    return clean.startsWith('cariler') || clean.startsWith('olculer');
+    return clean.startsWith('cariler') || clean.startsWith('olculer') || clean.startsWith('gorevler');
   }
   if (normRole === 'TAILOR') {
     return clean.startsWith('uretim');

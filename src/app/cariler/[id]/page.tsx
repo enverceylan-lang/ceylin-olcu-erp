@@ -23,6 +23,7 @@ import { MergeCustomerModal } from "@/components/modals/MergeCustomerModal";
 import { MoveRoomModal } from "@/components/modals/MoveRoomModal";
 import { FacadeSegmentsEditor } from "@/components/measurements/FacadeSegmentsEditor";
 import { PlicellCamListEditor } from "@/components/measurements/PlicellCamListEditor";
+import { FieldTaskAssignButton } from "@/components/FieldTaskAssignButton";
 
 const measurementOpeningId = (measurement: { openingId?: string; windowId?: string }) =>
   measurement.openingId || measurement.windowId || "";
@@ -1061,6 +1062,12 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       </button>
     </div>
   )}
+          <FieldTaskAssignButton
+            customer={customer}
+            currentUser={currentUser}
+            users={users}
+            onAssigned={showToast}
+          />
           <button
             onClick={handleShareWhatsAppReport}
             className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-green-650 hover:bg-green-700 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer"

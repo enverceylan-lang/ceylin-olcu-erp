@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { Topbar } from "@/components/Topbar";
 import { PWAController } from "@/components/PWAController";
 import { AuthGate } from "@/components/AuthGate";
+import { FieldTaskNotifier } from "@/components/FieldTaskNotifier";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -52,6 +53,7 @@ export default function RootLayout({
   return (
     <html lang="tr" suppressHydrationWarning>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-background text-foreground flex`}>
+        <FieldTaskNotifier />
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <PWAController />
           <AuthGate>

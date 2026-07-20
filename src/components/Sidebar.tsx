@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { 
-  LayoutDashboard, 
+import { LayoutDashboard, 
   Users, 
   Ruler, 
   Package, 
@@ -14,8 +13,7 @@ import {
   Settings,
   ChevronDown,
   X,
-  LogOut
-} from "lucide-react";
+  LogOut, ClipboardList } from "lucide-react";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { useAuthStore, ROLE_PERMISSIONS, canViewModule, normalizeUser, normalizeRole } from "@/store/useAuthStore";
@@ -26,6 +24,7 @@ const menuItems = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "Cariler", href: "/cariler", icon: Users },
   { name: "Ölçüler", href: "/olculer", icon: Ruler },
+  { name: "Görevler", href: "/gorevler", icon: ClipboardList },
   { name: "Stok", href: "/stok", icon: Package },
   { name: "Satış", href: "/satis", icon: ShoppingCart },
   { name: "Üretim", href: "/uretim", icon: Factory },
