@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -298,6 +298,41 @@ export default function FieldTasksPage() {
          * gönderim öncesinde bağımsız MEASUREMENT olayına dönüştürülür.
          */
         for (const measurement of taskMeasurements) {
+          const taskSnapshot =
+            task.customerSnapshot as any;
+
+          const snapshotCustomer =
+            taskSnapshot?.customer ||
+            taskSnapshot;
+
+          const snapshotRooms =
+            Array.isArray(snapshotCustomer?.rooms)
+              ? snapshotCustomer.rooms
+              : [];
+
+          const snapshotRoom =
+            snapshotRooms.find(
+              (candidate: any) =>
+                candidate?.id === measurement.roomId
+            );
+
+          const snapshotOpenings =
+            Array.isArray(snapshotRoom?.windows)
+              ? snapshotRoom.windows
+              : Array.isArray(snapshotRoom?.openings)
+                ? snapshotRoom.openings
+                : [];
+
+          const measurementOpeningId =
+            measurement.openingId ||
+            measurement.windowId ||
+            "";
+
+          const snapshotOpening =
+            snapshotOpenings.find(
+              (candidate: any) =>
+                candidate?.id === measurementOpeningId
+            );
           await saveLocalMeasurementWithSync(
             {
               ...measurement,
@@ -310,6 +345,40 @@ export default function FieldTasksPage() {
                 measurement.windowId ||
                 measurement.openingId ||
                 "",
+
+              roomName:
+                snapshotRoom?.name ||
+                measurement.roomName ||
+                measurement.roomLabel ||
+                "İsimsiz Oda",
+
+              roomLabel:
+                snapshotRoom?.name ||
+                measurement.roomLabel ||
+                measurement.roomName ||
+                "İsimsiz Oda",
+
+              openingName:
+                snapshotOpening?.name ||
+                measurement.openingName ||
+                measurement.windowName ||
+                measurement.openingLabel ||
+                "İsimsiz Açıklık",
+
+              openingLabel:
+                snapshotOpening?.name ||
+                measurement.openingLabel ||
+                measurement.openingName ||
+                measurement.windowName ||
+                "İsimsiz Açıklık",
+
+              windowName:
+                snapshotOpening?.name ||
+                measurement.windowName ||
+                measurement.openingName ||
+                measurement.openingLabel ||
+                "İsimsiz Açıklık",
+
               updatedAt:
                 new Date().toISOString()
             },

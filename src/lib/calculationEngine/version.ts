@@ -1,0 +1,2 @@
+export const CALCULATION_ENGINE_VERSION =
+  'CEYLIN-CALC-V1';

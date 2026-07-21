@@ -1,5 +1,7 @@
 import React from 'react';
-import { calculatePlicellM2 } from '@/lib/reportFormatters';
+import {
+  calculatePlicellReport
+} from '@/lib/calculationEngine';
 
 export interface PlicellCamItem {
   id?: string;
@@ -25,15 +27,27 @@ export function PlicellMeasurementSketch({
   
   if (plicellCamListesi.length === 0) return null;
 
-  let totalM2 = 0;
-  
-  const blocks = plicellCamListesi.map((cam, i) => {
-    const w = Number(cam.widthCm) || 0;
-    const h = Number(cam.heightCm) || ortakCamBoyuCm || 0;
-    const calc = calculatePlicellM2(w, h);
-    totalM2 += calc.chargeableM2;
+  const reportCalculation =
+    calculatePlicellReport(
+      plicellCamListesi,
+      ortakCamBoyuCm,
+      1,
+      'SINGLE'
+    );
 
-    return (
+  const totalM2 =
+    reportCalculation.totalM2;
+
+  const blocks =
+    reportCalculation.cams.map(
+      (cam, i) => {
+        const w =
+          cam.realWidthCm;
+
+        const h =
+          cam.realHeightCm;
+
+        return (
       <div key={i} className="flex flex-col items-center justify-center p-3 border border-gray-300 bg-white shadow-sm" style={{ width: '120px', height: '140px' }}>
         <span className="text-sm font-bold text-gray-800 mb-2 border-b border-gray-200 pb-1 w-full text-center">{i + 1}</span>
         <span className="text-sm font-semibold text-gray-700">{w} × {h}</span>
@@ -42,9 +56,10 @@ export function PlicellMeasurementSketch({
             {cam.note}
           </span>
         )}
-      </div>
+          </div>
+        );
+      }
     );
-  });
 
   return (
     <div className="w-full bg-slate-50 print:bg-white rounded border border-slate-200 print:border-slate-300 p-4">

@@ -4,6 +4,9 @@ import { getTemplateLabel, getMeasurementDimensions, resolveMeasurementProductLa
 import { formatFacadeForReport } from '@/lib/facadeHelper';
 import { getValidNote } from '@/lib/reportFormatters';
 import { useMeasurementStore, MeasurementRecord } from '@/store/measurementStore';
+import {
+  getStoredProductCalculation
+} from '@/lib/calculationEngine';
 
 // A4 Dimensions in mm
 const PAGE_WIDTH = 210;
@@ -1109,14 +1112,70 @@ export async function generateMeasurementPdfBlob(
         y += 4;
 
          const tableData = mechanicalProducts.map((item, idx) => {
-            const w = Number(item.p.rawValues?.width || 0);
-            const h = Number(item.p.rawValues?.height || 0);
-            const q = Number(item.p.rawValues?.quantity || 1);
-            const pLabel = resolveMeasurementProductLabel(item.p);
-            const calcWidth = item.p.details?.billingWidth || Math.ceil(w / 10) * 10 || w;
-            const calcHeight = item.p.details?.billingHeight || h;
-            const totalM2 = item.p.details?.totalM2 !== undefined ? Number(item.p.details.totalM2) : (calcWidth * calcHeight * q) / 10000;
-            const unitM2 = totalM2 / q;
+            const storedCalculation =
+              getStoredProductCalculation(
+                item.p,
+                item.p.productType
+              );
+
+            const w =
+              Number(
+                storedCalculation.realWidthCm ??
+                storedCalculation.actualWidthCm ??
+                item.p.rawValues?.width ??
+                0
+              );
+
+            const h =
+              Number(
+                storedCalculation.realHeightCm ??
+                storedCalculation.actualHeightCm ??
+                item.p.rawValues?.height ??
+                0
+              );
+
+            const q =
+              Math.max(
+                1,
+                Number(
+                  storedCalculation.quantity ??
+                  item.p.rawValues?.quantity ??
+                  1
+                )
+              );
+
+            const pLabel =
+              resolveMeasurementProductLabel(
+                item.p
+              );
+
+            const calcWidth =
+              Number(
+                storedCalculation.billingWidthCm ??
+                storedCalculation.billingWidth ??
+                0
+              );
+
+            const calcHeight =
+              Number(
+                storedCalculation.billingHeightCm ??
+                storedCalculation.billingHeight ??
+                0
+              );
+
+            const totalM2 =
+              Number(
+                storedCalculation.totalSystemM2 ??
+                storedCalculation.totalM2 ??
+                0
+              );
+
+            const unitM2 =
+              Number(
+                totalM2 > 0
+                  ? totalM2 / q
+                  : 0
+              );
 
             const chainDirection =
               item.p.details?.chainDirection ||

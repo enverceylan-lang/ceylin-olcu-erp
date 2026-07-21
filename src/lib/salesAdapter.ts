@@ -3,27 +3,11 @@ import { useMeasurementStore, MeasurementRecord } from '@/store/measurementStore
 import { Sale, SaleItem } from '@/store/salesStore';
 import { getMeasurementDimensions, resolveMeasurementProductGroup, resolveMeasurementProductLabel } from '@/lib/measurementAdapter';
 
-/**
- * Metrik birimi ve boyutu hesaplar.
- */
-function calculateMetricSize(p: ProductMeasurement, group: string, width: number, height: number): { size: number, unit: 'm2' | 'mt' | 'adet' } {
-  // Plicell, Mekanik, Jaluzi, vb = M2
-  if (group === 'Plicell' || group === 'Mekanik Perde') {
-    const calcW = Math.max(width, 100);
-    const calcH = Math.max(height, 200);
-    return { size: (calcW * calcH) / 10000, unit: 'm2' };
-  }
-
-  // Tül, Güneşlik = MT (genelde pile katsayısı gerekir ama varsayılan olarak pile x2.5 dersek,
-  // ya da basitçe genişlik üzerinden MT hesaplarız. İlk sürümde sadece genişlik MT baz alınır).
-  if (group === 'Kumaş/Tül/Fon') {
-    return { size: width / 100, unit: 'mt' };
-  }
-
-  // Standart
-  return { size: (width * height) / 10000, unit: 'm2' };
-}
-
+import {
+  CALCULATION_ENGINE_VERSION,
+  buildSaleCalculationLines,
+  validateCalculationForSale
+} from '@/lib/calculationEngine';
 /**
  * Ölçüden tek bir satış satırı oluşturur.
  */
@@ -38,6 +22,10 @@ function createSaleItemFromMeasurement(
     totalM2?: number;
     metricSize?: number;
     metricUnit?: 'm2' | 'mt' | 'adet';
+    productionWidthCm?: number;
+    productionHeightCm?: number;
+    fabricMeters?: number;
+    calculationVersion?: string;
   }
 ): SaleItem {
   const dims = getMeasurementDimensions(p);
@@ -143,15 +131,22 @@ function createSaleItemFromMeasurement(
 
     unit = 'mt';
   } else {
-    const metric = calculateMetricSize(
-      p,
-      group,
-      w,
-      h
+    const calculationLines =
+      buildSaleCalculationLines(
+        calculation,
+        selectedProductType,
+        label
+      );
+
+    const calculationLine =
+      calculationLines[0];
+
+    size = Number(
+      calculationLine?.quantity || 0
     );
 
-    size = metric.size;
-    unit = metric.unit;
+    unit =
+      calculationLine?.unit || 'adet';
   }
 
   const quantity =
@@ -218,6 +213,32 @@ function createSaleItemFromMeasurement(
     ),
 
     metricUnit: unit,
+
+    productionWidthCm: Number(
+      salesItemOverride?.productionWidthCm ??
+      calculation.productionWidthCm ??
+      calculation.productionWidth ??
+      w
+    ),
+
+    productionHeightCm: Number(
+      salesItemOverride?.productionHeightCm ??
+      calculation.productionHeightCm ??
+      calculation.productionHeight ??
+      h
+    ),
+
+    fabricMeters: Number(
+      salesItemOverride?.fabricMeters ??
+      calculation.fabricMeters ??
+      calculation.fabricUsageMeters ??
+      (unit === 'mt' ? size : 0)
+    ),
+
+    calculationVersion:
+      salesItemOverride?.calculationVersion ||
+      calculation.calculationVersion ||
+      CALCULATION_ENGINE_VERSION,
 
     pleatDetails: pleatLabel,
 
@@ -317,6 +338,32 @@ export function createDraftSaleFromCustomer(customer: Customer): Sale {
     } else {
       activeProducts.forEach(ap => {
         const calc = ap.calculation || {};
+
+        const calculationValidation =
+          validateCalculationForSale(calc);
+
+        if (!calculationValidation.valid) {
+          console.error(
+            '[KASA AŞ.] Satış satırı engellendi.',
+            {
+              measurementId: m.id,
+              productType: ap.productType,
+              errors:
+                calculationValidation.errors
+            }
+          );
+
+          return;
+        }
+
+        const bridgeLines =
+          buildSaleCalculationLines(
+            calc,
+            ap.productType,
+            resolveMeasurementProductLabel({
+              productType: ap.productType
+            })
+          );
         if (
           calc.isSegmented &&
           Array.isArray(calc.groups) &&
@@ -432,39 +479,51 @@ export function createDraftSaleFromCustomer(customer: Customer): Sale {
             }
           };
 
-          const mainItem =
-            createSaleItemFromMeasurement(
-              pObj,
-              room?.name || 'Oda',
-              win?.name || 'Pencere',
-              ap.productType,
-              {
-                productType:
-                  ap.productType,
+          let firstMainItemId = '';
 
-                totalM2:
-                  totalSegmentM2,
+          bridgeLines.forEach(
+            (bridgeLine, bridgeIndex) => {
+              const mainItem =
+                createSaleItemFromMeasurement(
+                  pObj,
+                  room?.name || 'Oda',
+                  win?.name || 'Pencere',
+                  bridgeLine.productType,
+                  {
+                    productType:
+                      bridgeLine.productType,
 
-                metricSize:
-                  totalSegmentM2,
+                    label:
+                      bridgeLine.label,
 
-                metricUnit:
-                  'm2'
+                    totalM2:
+                      bridgeLine.totalM2,
+
+                    metricSize:
+                      bridgeLine.quantity,
+
+                    metricUnit:
+                      bridgeLine.unit
+                  }
+                );
+
+              mainItem.id =
+                `${m.id}-${ap.productType}-sale-${bridgeIndex}`;
+
+              mainItem.quantity = 1;
+              mainItem.metricSize =
+                bridgeLine.quantity;
+              mainItem.metricUnit =
+                bridgeLine.unit;
+
+              if (!firstMainItemId) {
+                firstMainItemId =
+                  mainItem.id;
               }
-            );
 
-          /*
-           * Kimlik oda/pencere içindeki ürün için sabit kalır.
-           * Parça sayısı değişse bile satış satırı çoğalmaz.
-           */
-          mainItem.id =
-            `${m.id}-${ap.productType}-g0`;
-
-          mainItem.quantity = 1;
-          mainItem.metricSize = totalSegmentM2;
-          mainItem.metricUnit = 'm2';
-
-          items.push(mainItem);
+              items.push(mainItem);
+            }
+          );
 
           /*
            * Jumbo gereken birden fazla parça varsa,
@@ -513,7 +572,7 @@ export function createDraftSaleFromCustomer(customer: Customer): Sale {
                 m,
                 aggregateJumboGroup,
                 0,
-                mainItem.id,
+                firstMainItemId,
                 room?.name || 'Oda',
                 win?.name || 'Pencere',
                 ap.productType
@@ -540,9 +599,8 @@ export function createDraftSaleFromCustomer(customer: Customer): Sale {
           };
 
           const salesItems =
-            Array.isArray(calc.salesItems) &&
-            calc.salesItems.length > 0
-              ? calc.salesItems
+            bridgeLines.length > 0
+              ? bridgeLines
               : null;
 
           if (salesItems) {
@@ -563,9 +621,9 @@ export function createDraftSaleFromCustomer(customer: Customer): Sale {
                       totalM2:
                         saleCalc.totalM2,
                       metricSize:
-                        saleCalc.metricSize,
+                        saleCalc.quantity,
                       metricUnit:
-                        saleCalc.metricUnit
+                        saleCalc.unit
                     }
                   );
 

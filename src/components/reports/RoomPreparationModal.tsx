@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { normalizeRole, useAuthStore } from "@/store/useAuthStore";
 import { X, Save, AlertCircle, Sparkles } from 'lucide-react';
 import { Room, SelectedProductItem } from '@/store/useStore';
 import { MeasurementRecord } from '@/store/measurementStore';
@@ -19,14 +20,37 @@ interface RoomPreparationModalProps {
   ) => Promise<void>;
 }
 
+type HeightMode = 'AUTO' | 'MEASUREMENT' | 'CUSTOM';
+
+type ProductPartHeightOverride = {
+  mode?: HeightMode;
+  source?: string;
+  customHeightCm?: number;
+};
+
 type ProductOptions = {
   systemType?: 'SINGLE' | 'DOUBLE';
   tulleStyle?: 'PLEATED' | 'CROSSOVER' | 'REGISTER';
   pleatType?: 'TIGHT' | 'NORMAL' | 'SPARSE' | 'AMERICAN' | 'CUSTOM';
   customPleatFactor?: number;
   openingType?: 'SINGLE' | 'DOUBLE';
-};
 
+  heightMode?: HeightMode;
+  heightSource?: string;
+  customHeightCm?: number;
+
+  partHeightOverrides?: Record<
+    string,
+    ProductPartHeightOverride
+  >;
+
+  groups?: Array<{
+    generatedItemId?: string;
+    groupType?: string;
+    realWidthCm?: number;
+    realHeightCm?: number;
+  }>;
+};
 const PRODUCT_TYPES_OPTIONS = [
   { type: 'TUL', label: 'Tül' },
   { type: 'GUNESLIK', label: 'Güneşlik' },
@@ -77,6 +101,12 @@ export function RoomPreparationModal({
   measurements,
   onSave
 }: RoomPreparationModalProps) {
+  const currentUser = useAuthStore(state => state.currentUser);
+  const normalizedRole = normalizeRole(currentUser?.role);
+  const canTransferToSale =
+    normalizedRole === 'ADMIN' ||
+    normalizedRole === 'OFFICE' ||
+    normalizedRole === 'MODERATOR';
   const [localSelections, setLocalSelections] =
     useState<Record<string, string[]>>({});
 
@@ -84,6 +114,9 @@ export function RoomPreparationModal({
     useState<Record<string, ProductOptions>>({});
 
   const [isSaving, setIsSaving] = useState(false);
+
+  const [activeTabs, setActiveTabs] =
+    useState<Record<string, 'PRODUCTS' | 'HEIGHTS'>>({});
 
   useEffect(() => {
     if (!isOpen) return;
@@ -199,6 +232,361 @@ export function RoomPreparationModal({
         }
       }));
     }
+  };
+
+  const getHeightSources = (measurement: MeasurementRecord) => {
+    const raw = measurement.rawValues || {};
+
+    const candidates = [
+      {
+        key: 'solYukseklikCm',
+        label: 'Sol Boy',
+        value: Number(raw.solYukseklikCm || 0)
+      },
+      {
+        key: 'ortaYukseklikCm',
+        label: 'Orta Boy',
+        value: Number(raw.ortaYukseklikCm || 0)
+      },
+      {
+        key: 'sagYukseklikCm',
+        label: 'Sağ Boy',
+        value: Number(raw.sagYukseklikCm || 0)
+      },
+      {
+        key: 'kaloriferMermerBoyuCm',
+        label: 'Kalorifer / Mermer Boyu',
+        value: Number(raw.kaloriferMermerBoyuCm || 0)
+      },
+      {
+        key: 'camIciCm',
+        label: 'Cam İçi Boyu',
+        value: Number(raw.camIciCm || 0)
+      },
+      {
+        key: 'windowHeight',
+        label: 'Cam Boyu',
+        value: Number(raw.windowHeight || 0)
+      },
+      {
+        key: 'height',
+        label: 'Kayıtlı Boy',
+        value: Number(raw.height || 0)
+      },
+      {
+        key: 'boy',
+        label: 'Ölçü Boyu',
+        value: Number(raw.boy || 0)
+      }
+    ];
+
+    const unique = new Map<string, {
+      key: string;
+      label: string;
+      value: number;
+    }>();
+
+    candidates.forEach(candidate => {
+      if (
+        Number.isFinite(candidate.value) &&
+        candidate.value > 0
+      ) {
+        unique.set(
+          `${candidate.key}:${candidate.value}`,
+          candidate
+        );
+      }
+    });
+
+    return Array.from(unique.values());
+  };
+
+  const updatePartHeightOverride = (
+    measurementId: string,
+    productType: string,
+    partKey: string,
+    patch: Partial<ProductPartHeightOverride>
+  ) => {
+    const key = optionKey(measurementId, productType);
+
+    setLocalOptions(previous => {
+      const current = {
+        ...defaultOptions(productType),
+        ...(previous[key] || {})
+      };
+
+      return {
+        ...previous,
+        [key]: {
+          ...current,
+          partHeightOverrides: {
+            ...(current.partHeightOverrides || {}),
+            [partKey]: {
+              ...(current.partHeightOverrides?.[partKey] || {}),
+              ...patch
+            }
+          }
+        }
+      };
+    });
+  };
+
+  const renderHeightEditor = (
+    measurement: MeasurementRecord,
+    productType: string
+  ) => {
+    const key = optionKey(measurement.id, productType);
+
+    const options =
+      localOptions[key] ||
+      defaultOptions(productType);
+
+    const heightSources =
+      getHeightSources(measurement);
+
+    const existingProduct =
+      measurement.selectedProducts?.find(
+        product =>
+          product.productType === productType
+      );
+
+    const calculationGroups =
+      Array.isArray(existingProduct?.calculation?.groups)
+        ? existingProduct?.calculation?.groups
+        : Array.isArray(options.groups)
+          ? options.groups
+          : [];
+
+    const parts: Array<{
+      key: string;
+      label: string;
+      width: number;
+      normalHeight: number;
+    }> =
+      calculationGroups.length > 0
+        ? calculationGroups.map(
+            (group: any, index: number) => ({
+              key:
+                String(
+                  group.generatedItemId ||
+                  `${productType}-${index}`
+                ),
+              label: `Parça ${index + 1}`,
+              width: Number(
+                group.realWidthCm || 0
+              ),
+              normalHeight: Number(
+                group.realHeightCm || 0
+              )
+            })
+          )
+        : [];
+
+    const renderModeFields = (
+      mode: HeightMode,
+      source: string | undefined,
+      customHeightCm: number | undefined,
+      onPatch: (
+        patch: Partial<ProductPartHeightOverride>
+      ) => void,
+      namePrefix: string
+    ) => (
+      <div className="mt-2 grid gap-2 sm:grid-cols-3">
+        <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-[11px]">
+          <input
+            type="radio"
+            name={`${namePrefix}-height-mode`}
+            checked={mode === 'AUTO'}
+            onChange={() =>
+              onPatch({
+                mode: 'AUTO',
+                source: undefined,
+                customHeightCm: undefined
+              })
+            }
+          />
+          Normal Boy
+        </label>
+
+        <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-[11px]">
+          <input
+            type="radio"
+            name={`${namePrefix}-height-mode`}
+            checked={mode === 'MEASUREMENT'}
+            onChange={() =>
+              onPatch({
+                mode: 'MEASUREMENT'
+              })
+            }
+          />
+          Ölçüden Ata
+        </label>
+
+        <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-[11px]">
+          <input
+            type="radio"
+            name={`${namePrefix}-height-mode`}
+            checked={mode === 'CUSTOM'}
+            onChange={() =>
+              onPatch({
+                mode: 'CUSTOM'
+              })
+            }
+          />
+          Özel Boy
+        </label>
+
+        {mode === 'MEASUREMENT' && (
+          <select
+            value={source || ''}
+            onChange={event =>
+              onPatch({
+                source: event.target.value
+              })
+            }
+            className="sm:col-span-3 w-full rounded-lg border border-slate-700 bg-slate-900 p-2 text-xs text-white"
+          >
+            <option value="">
+              Boy ölçüsü seç
+            </option>
+
+            {heightSources.map(item => (
+              <option
+                key={`${item.key}-${item.value}`}
+                value={item.key}
+              >
+                {item.label}: {item.value} cm
+              </option>
+            ))}
+          </select>
+        )}
+
+        {mode === 'CUSTOM' && (
+          <div className="sm:col-span-3">
+            <label className="mb-1 block text-[10px] font-bold uppercase text-slate-400">
+              Özel Boy (cm)
+            </label>
+
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={customHeightCm || ''}
+              onChange={event =>
+                onPatch({
+                  customHeightCm:
+                    Number(event.target.value || 0)
+                })
+              }
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 p-2 text-xs text-white"
+            />
+          </div>
+        )}
+      </div>
+    );
+
+    return (
+      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h5 className="text-sm font-black text-white">
+              {
+                PRODUCT_TYPES_OPTIONS.find(
+                  option =>
+                    option.type === productType
+                )?.label || productType
+              }
+            </h5>
+
+            <p className="text-[10px] text-slate-400">
+              Boş bırakılırsa normal otomatik boy kullanılır.
+            </p>
+          </div>
+
+          <span className="rounded bg-blue-500/10 px-2 py-1 text-[10px] font-bold text-blue-300">
+            Ürün Boyu
+          </span>
+        </div>
+
+        {renderModeFields(
+          options.heightMode || 'AUTO',
+          options.heightSource,
+          options.customHeightCm,
+          patch =>
+            updateOptions(
+              measurement.id,
+              productType,
+              {
+                heightMode:
+                  patch.mode ||
+                  options.heightMode ||
+                  'AUTO',
+                heightSource:
+                  patch.source,
+                customHeightCm:
+                  patch.customHeightCm
+              }
+            ),
+          `${measurement.id}-${productType}-product`
+        )}
+
+        {parts.length > 0 && (
+          <div className="mt-4 space-y-3 border-t border-slate-800 pt-3">
+            <div>
+              <h6 className="text-[11px] font-black uppercase text-amber-300">
+                Parça Bazlı Boylar
+              </h6>
+              <p className="text-[10px] text-slate-500">
+                Parçada seçim yapılmazsa ürün boyu kullanılır.
+              </p>
+            </div>
+
+            {parts.map(part => {
+              const partOverride =
+                options.partHeightOverrides?.[
+                  part.key
+                ] || {};
+
+              return (
+                <div
+                  key={part.key}
+                  className="rounded-lg border border-slate-800 bg-slate-950/60 p-3"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-white">
+                      {part.label}
+                    </span>
+
+                    <span className="text-[10px] text-slate-400">
+                      {part.width > 0
+                        ? `${part.width} cm en`
+                        : ''}
+                      {part.normalHeight > 0
+                        ? ` · Normal ${part.normalHeight} cm`
+                        : ''}
+                    </span>
+                  </div>
+
+                  {renderModeFields(
+                    partOverride.mode || 'AUTO',
+                    partOverride.source,
+                    partOverride.customHeightCm,
+                    patch =>
+                      updatePartHeightOverride(
+                        measurement.id,
+                        productType,
+                        part.key,
+                        patch
+                      ),
+                    `${measurement.id}-${productType}-${part.key}`
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
   };
 
   const renderProductOptions = (
@@ -387,6 +775,13 @@ export function RoomPreparationModal({
   const handleSaveClick = async (
     transferToSale: boolean
   ) => {
+    if (transferToSale && !canTransferToSale) {
+      alert(
+        'Bu kullanıcı rolünün satışa aktarma yetkisi bulunmuyor.'
+      );
+      return;
+    }
+
     try {
       setIsSaving(true);
 
@@ -530,16 +925,48 @@ export function RoomPreparationModal({
                       {opening?.name || 'Açıklık'}
                     </span>
 
-                    <h4 className="font-bold text-white">
-                      Ham Ölçü:{' '}
-                      <span className="font-normal text-slate-300">
-                        {getTemplateLabel(
-                          measurement.templateType
-                        )}
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveTabs(previous => ({
+                            ...previous,
+                            [measurement.id]: 'PRODUCTS'
+                          }))
+                        }
+                        className={
+                          (activeTabs[measurement.id] || 'PRODUCTS') === 'PRODUCTS'
+                            ? 'rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-black text-white'
+                            : 'rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-400'
+                        }
+                      >
+                        Ham Ölçü / Ürünler
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveTabs(previous => ({
+                            ...previous,
+                            [measurement.id]: 'HEIGHTS'
+                          }))
+                        }
+                        className={
+                          activeTabs[measurement.id] === 'HEIGHTS'
+                            ? 'rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-black text-white'
+                            : 'rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-400'
+                        }
+                      >
+                        Ürün Boyları
+                      </button>
+
+                      <span className="text-xs text-slate-400">
+                        {getTemplateLabel(measurement.templateType)}
                       </span>
-                    </h4>
+                    </div>
                   </div>
 
+                  {(activeTabs[measurement.id] || 'PRODUCTS') === 'PRODUCTS' ? (
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
                     {PRODUCT_TYPES_OPTIONS
                       .filter(option =>
@@ -584,6 +1011,26 @@ export function RoomPreparationModal({
                       );
                     })}
                   </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {selectedTypes.length === 0 ? (
+                        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-amber-300">
+                          Önce Ham Ölçü / Ürünler sekmesinden ürün seçin.
+                        </div>
+                      ) : (
+                        selectedTypes.map(productType => (
+                          <React.Fragment
+                            key={`${measurement.id}-${productType}`}
+                          >
+                            {renderHeightEditor(
+                              measurement,
+                              productType
+                            )}
+                          </React.Fragment>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })
@@ -610,14 +1057,34 @@ export function RoomPreparationModal({
             {isSaving ? 'Kaydediliyor...' : 'Kaydet'}
           </button>
 
-          <button
-            type="button"
-            onClick={() => handleSaveClick(true)}
-            disabled={isSaving}
-            className="cursor-pointer rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-black text-white hover:bg-emerald-500 disabled:opacity-50"
-          >
-            Kaydet ve Satışa Aktar
-          </button>
+          {canTransferToSale && (
+
+
+            <button
+
+
+              type="button"
+
+
+              onClick={() => handleSaveClick(true)}
+
+
+              disabled={isSaving}
+
+
+              className="cursor-pointer rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-black text-white hover:bg-emerald-500 disabled:opacity-50"
+
+
+            >
+
+
+              Kaydet ve Satışa Aktar
+
+
+            </button>
+
+
+          )}
         </div>
       </div>
     </div>

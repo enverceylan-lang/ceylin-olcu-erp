@@ -3,6 +3,8 @@ import { normalizeCariName } from '@/lib/stringUtils';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { useAuthStore, normalizeRole } from './useAuthStore';
 import { saveLocalCustomer, saveLocalCustomers, softDeleteLocalCustomer, loadLocalCustomers } from '@/lib/localCustomerDb';
+import { shouldCreateTailorProductionItem } from '@/lib/productionRouting';
+
 
 // ─── Store Change Notification for Sync ───
 type StoreChangeListener = () => void;
@@ -1270,9 +1272,14 @@ export const useStore = create<AppState>()(
         const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toLocaleDateString('tr-TR');
         const montageDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toLocaleDateString('tr-TR');
 
-        const itemsString = saleData.items.map(i => `${i.roomName} (${i.windowName}): ${i.productType}`).join(', ');
+        const filteredItemsForProduction = saleData.items.filter(item => {
+          const prod = state.products.find(p => p.id === item.productId);
+          return shouldCreateTailorProductionItem(item, prod);
+        });
 
-        const newProductionItems: ProductionItem[] = saleData.items.map(item => {
+        const itemsString = filteredItemsForProduction.map(i => `${i.roomName} (${i.windowName}): ${i.productType}`).join(', ');
+
+        const newProductionItems: ProductionItem[] = filteredItemsForProduction.map(item => {
           const prod = state.products.find(p => p.id === item.productId);
           const productName = prod ? prod.name : item.productType || 'Bilinmeyen Ürün';
 
@@ -1308,13 +1315,17 @@ export const useStore = create<AppState>()(
           };
         });
 
+        const newProductionTasks = newProductionItems.length > 0 ? [
+          { id: generateUUID(), saleId, customerId: saleData.customerId, items: itemsString, status: 'Kesim Bekliyor', deadline }
+        ] : [];
+
         return {
           sales: [
             { id: saleId, customerId: saleData.customerId, totalAmount: saleData.amount, status: 'Üretimde', date, items: saleData.items },
             ...state.sales
           ],
           productionTasks: [
-            { id: generateUUID(), saleId, customerId: saleData.customerId, items: itemsString, status: 'Kesim Bekliyor', deadline },
+            ...newProductionTasks,
             ...state.productionTasks
           ],
           montageTasks: [

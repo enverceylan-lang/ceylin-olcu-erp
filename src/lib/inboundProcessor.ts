@@ -77,7 +77,7 @@ export async function cleanMediaFromRoom(room: any): Promise<Room> {
   return {
     ...room,
     id: roomId,
-    name: room.name ? `${room.name} - Gelen Ã–lÃ§Ã¼` : "Gelen Ã–lÃ§Ã¼",
+    name: room.name ? `${room.name} - Gelen Ölçü` : "Gelen Ölçü",
     photos: sanitizeMediaArray(room.photos || []),
     videos: sanitizeMediaArray(room.videos || []),
     windows: cleanWindows,
@@ -210,7 +210,7 @@ function roomNameFromMeasurement(
 
       measurement.room?.name,
     ],
-    `Gelen Oda ${index + 1}`,
+    "İsimsiz Oda",
   ).toLocaleUpperCase("tr-TR");
 }
 
@@ -243,7 +243,7 @@ function openingNameFromMeasurement(
       measurement.opening?.name,
       measurement.window?.name,
     ],
-    `AÃ§Ä±klÄ±k ${index + 1}`,
+    `Açıklık ${index + 1}`,
   );
 }
 
@@ -349,7 +349,7 @@ async function persistAndVerifyMeasurements(
 ): Promise<void> {
   if (measurements.length === 0) {
     throw new Error(
-      "Bu gelen kayda ait geÃ§erli Ã¶lÃ§Ã¼ bulunamadÄ±. Cari iÅŸlemi durduruldu.",
+      "Bu gelen kayda ait geÃ§erli ölçü bulunamadı. Cari iÅŸlemi durduruldu.",
     );
   }
 
@@ -358,7 +358,7 @@ async function persistAndVerifyMeasurements(
     const openingId = measurement.openingId || measurement.windowId;
     if (!measurement.id || !measurement.customerId || !measurement.roomId || !openingId) {
       throw new Error(
-        `GeÃ§ersiz Ã¶lÃ§Ã¼ baÄŸlantÄ±sÄ±: ${measurement.id || "kimliksiz Ã¶lÃ§Ã¼"}`,
+        `GeÃ§ersiz ölçü bağlantısı: ${measurement.id || "kimliksiz ölçü"}`,
       );
     }
 
@@ -371,8 +371,8 @@ async function persistAndVerifyMeasurements(
   });
 
   // Kimlik mutabakatÄ± (geÃ§ici cari -> gerÃ§ek cari) normal senkron sÃ¼rÃ¼m
-  // karÅŸÄ±laÅŸtÄ±rmasÄ±na takÄ±lmamalÄ±. AynÄ± Ã¶lÃ§Ã¼ kimliÄŸiyle doÄŸrudan IndexedDB Ã¼zerinde
-  // atomik olarak gÃ¼ncellenir; bu iÅŸlem yeni/kopya Ã¶lÃ§Ã¼ Ã¼retmez.
+  // karÅŸÄ±laÅŸtÄ±rmasÄ±na takÄ±lmamalÄ±. AynÄ± ölçü kimliÄŸiyle doÄŸrudan IndexedDB Ã¼zerinde
+  // atomik olarak gÃ¼ncellenir; bu iÅŸlem yeni/kopya ölçü Ã¼retmez.
   await localMeasurementDb.transaction(
     "rw",
     localMeasurementDb.measurements,
@@ -406,7 +406,7 @@ async function persistAndVerifyMeasurements(
 
   if (invalid.length > 0) {
     throw new Error(
-      `Ã–lÃ§Ã¼ baÄŸlantÄ± doÄŸrulamasÄ± baÅŸarÄ±sÄ±z: ${invalid.map((m) => m.id).join(", ")}`,
+      `Ölçü baÄŸlantÄ± doÄŸrulamasÄ± baÅŸarÄ±sÄ±z: ${invalid.map((m) => m.id).join(", ")}`,
     );
   }
 }
@@ -478,7 +478,7 @@ export async function processAsNewCustomer(
 
   if (sourceMeasurements.length === 0) {
     throw new Error(
-      "Bu gelen cari kaydÄ±na baÄŸlÄ± Ã¶lÃ§Ã¼ bulunamadÄ±. Cari oluÅŸturulmadÄ±; kayÄ±t havuzda korunuyor.",
+      "Bu gelen cari kaydÄ±na baÄŸlÄ± ölçü bulunamadı. Cari oluÅŸturulmadÄ±; kayÄ±t havuzda korunuyor.",
     );
   }
 
@@ -486,7 +486,7 @@ export async function processAsNewCustomer(
   const structuralRooms = mergeRoomStructures(patchRooms, derivedRooms);
   if (structuralRooms.length === 0) {
     throw new Error(
-      "Ã–lÃ§Ã¼ler bulundu ancak oda/aÃ§Ä±klÄ±k baÄŸlantÄ±sÄ± oluÅŸturulamadÄ±. Cari oluÅŸturulmadÄ±.",
+      "Ölçüler bulundu ancak oda/aÃ§Ä±klÄ±k bağlantısı oluÅŸturulamadÄ±. Cari oluÅŸturulmadÄ±.",
     );
   }
 
@@ -576,7 +576,7 @@ export async function processAsMerge(
   const customers = await loadLocalCustomers();
   const targetCustomer = customers.find((c) => c.id === customerId);
   if (!targetCustomer) {
-    throw new Error("Hedef mÃ¼ÅŸteri bulunamadÄ±.");
+    throw new Error("Hedef mÃ¼ÅŸteri bulunamadı.");
   }
 
   const patch = inbound.patch || {};
@@ -593,7 +593,7 @@ export async function processAsMerge(
 
   if (sourceMeasurements.length === 0) {
     throw new Error(
-      "Bu gelen kayda baÄŸlÄ± Ã¶lÃ§Ã¼ bulunamadÄ±. Cari baÄŸlantÄ±sÄ± yapÄ±lmadÄ±; kayÄ±t havuzda korunuyor.",
+      "Bu gelen kayda baÄŸlÄ± ölçü bulunamadı. Cari bağlantısı yapÄ±lmadÄ±; kayÄ±t havuzda korunuyor.",
     );
   }
 
@@ -601,7 +601,7 @@ export async function processAsMerge(
   const incomingStructures = mergeRoomStructures(patchRooms, derivedRooms);
   if (incomingStructures.length === 0) {
     throw new Error(
-      "Ã–lÃ§Ã¼ler bulundu ancak oda/aÃ§Ä±klÄ±k baÄŸlantÄ±sÄ± oluÅŸturulamadÄ±. Cari baÄŸlantÄ±sÄ± yapÄ±lmadÄ±.",
+      "Ölçüler bulundu ancak oda/aÃ§Ä±klÄ±k bağlantısı oluÅŸturulamadÄ±. Cari bağlantısı yapÄ±lmadÄ±.",
     );
   }
 

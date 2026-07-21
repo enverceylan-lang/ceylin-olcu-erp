@@ -106,7 +106,7 @@ async function ensureCustomerStructureForMeasurement(
     measurement.openingName ||
     measurement.windowName ||
     measurement.openingLabel ||
-    "Gelen AÃ§Ä±klÄ±k";
+    "Gelen Açıklık";
 
   if (roomIndex === -1) {
     rooms.push({
@@ -293,7 +293,7 @@ export async function pushDeltaSyncEvents(): Promise<{
       return {
         success: false,
         pushedCount: 0,
-        errors: ["Oturum anahtarÄ± bulunamadÄ±. Ã‡Ä±kÄ±ÅŸ yapÄ±p yeniden giriÅŸ yapÄ±n."],
+        errors: ["Oturum anahtarÄ± bulunamadı. Ã‡Ä±kÄ±ÅŸ yapÄ±p yeniden giriÅŸ yapÄ±n."],
         debug: {
           pendingCount: pendingEvents.length,
           apiStatus: 401,
@@ -421,7 +421,7 @@ export async function pullInboundMeasurements(
       return {
         success: false,
         fetchedCount: 0,
-        errors: ["Oturum anahtarÄ± bulunamadÄ±. Ã‡Ä±kÄ±ÅŸ yapÄ±p yeniden giriÅŸ yapÄ±n."],
+        errors: ["Oturum anahtarÄ± bulunamadı. Ã‡Ä±kÄ±ÅŸ yapÄ±p yeniden giriÅŸ yapÄ±n."],
       };
     }
 

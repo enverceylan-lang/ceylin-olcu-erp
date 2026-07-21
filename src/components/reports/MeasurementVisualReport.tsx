@@ -4,12 +4,522 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { Customer, MEASUREMENT_TEMPLATES, WindowItem, ProductMeasurement } from '@/store/useStore';
 import { getTemplateLabel, getMeasurementDimensions, resolveMeasurementProductLabel, resolveMeasurementProductGroup } from '@/lib/measurementAdapter';
-import { calculatePlicellM2, calculateMechanicalCurtainM2, getValidNote } from '@/lib/reportFormatters';
+import { getValidNote } from '@/lib/reportFormatters';
+import {
+  calculatePlicellReport,
+  getStoredProductCalculation
+} from '@/lib/calculationEngine';
 import { renderSimpleWidthHeightDiagram, renderCurtainDetailDiagram } from '@/lib/measurementDiagram';
 import { TechnicalMeasurementSketch } from './TechnicalMeasurementSketch';
 import { PlicellMeasurementSketch } from './PlicellMeasurementSketch';
 import { formatFacadeForReport } from '@/lib/facadeHelper';
 import { useMeasurementStore, MeasurementRecord } from '@/store/measurementStore';
+
+const MECHANICAL_VISUAL_PRODUCT_TYPES =
+  new Set([
+    'STOR',
+    'ZEBRA',
+    'AHSAP_JALUZI',
+    'JALUZI',
+    'PICASSO'
+  ]);
+
+function getSameOpeningMeasurements(
+  products: any[],
+  current: any
+) {
+  const currentRoomId =
+    String(current?.roomId || '');
+
+  const currentOpeningId =
+    String(
+      current?.openingId ||
+      current?.windowId ||
+      ''
+    );
+
+  const matches = products.filter(item => {
+    const itemRoomId =
+      String(item?.roomId || '');
+
+    const itemOpeningId =
+      String(
+        item?.openingId ||
+        item?.windowId ||
+        ''
+      );
+
+    if (
+      currentOpeningId &&
+      itemOpeningId
+    ) {
+      return (
+        itemOpeningId === currentOpeningId &&
+        (
+          !currentRoomId ||
+          !itemRoomId ||
+          itemRoomId === currentRoomId
+        )
+      );
+    }
+
+    return item?.id === current?.id;
+  });
+
+  return matches.length > 0
+    ? matches
+    : [current];
+}
+
+function getSketchProductTypes(
+  products: any[],
+  current: any
+): string[] {
+  const sameOpening =
+    getSameOpeningMeasurements(products, current);
+
+  const rawTypes: string[] = [];
+
+  sameOpening.forEach(item => {
+    if (item?.productType) {
+      rawTypes.push(String(item.productType));
+    }
+
+    if (Array.isArray(item?.selectedProducts)) {
+      item.selectedProducts.forEach((sp: any) => {
+        if (sp?.isActive !== false && sp?.productType) {
+          rawTypes.push(String(sp.productType));
+        }
+      });
+    }
+  });
+
+  return Array.from(new Set(rawTypes));
+}
+function getSketchProductHeights(
+  products: any[],
+  current: any
+): Array<{
+  productType: string;
+  label: string;
+  heightCm: number;
+}> {
+  const sameOpening =
+    getSameOpeningMeasurements(products, current);
+
+  const result =
+    new Map<
+      string,
+      {
+        productType: string;
+        label: string;
+        heightCm: number;
+      }
+    >();
+
+  const labels: Record<string, string> = {
+    TUL: 'Tül Boy',
+    GUNESLIK: 'Güneşlik Boy',
+    FON: 'Fon Boy',
+    STOR: 'Stor Boy',
+    ZEBRA: 'Zebra Boy',
+    DIKEY_STOR: 'Dikey Stor Boy',
+    DIKEY_TUL: 'Dikey Tül Boy',
+    AHSAP_JALUZI: 'Ahşap Jaluzi Boy',
+    JALUZI: 'Jaluzi Boy',
+    PICASSO: 'Picasso Boy',
+    PLICELL: 'Plicell Boy'
+  };
+
+  sameOpening.forEach(item => {
+    const rawValues =
+      item?.rawValues || {};
+
+    const fullHeight =
+      Math.max(
+        Number(rawValues.solYukseklikCm || 0),
+        Number(rawValues.ortaYukseklikCm || 0),
+        Number(rawValues.sagYukseklikCm || 0),
+        Number(rawValues.height || 0),
+        Number(rawValues.windowHeight || 0)
+      );
+
+    const activeProducts =
+      Array.isArray(item?.selectedProducts)
+        ? item.selectedProducts.filter(
+            (product: any) =>
+              product?.isActive !== false
+          )
+        : [];
+
+    activeProducts.forEach((product: any) => {
+      const productType =
+        String(
+          product?.productType || ''
+        ).toUpperCase();
+
+      if (!productType) {
+        return;
+      }
+
+      const calculation =
+        product?.calculation || {};
+
+      const mechanicalProductTypes =
+        new Set([
+          'STOR',
+          'ZEBRA',
+          'DIKEY_STOR',
+          'DIKEY_TUL',
+          'AHSAP_JALUZI',
+          'JALUZI',
+          'PICASSO',
+          'PLICELL'
+        ]);
+
+      const groupHeights =
+        Array.isArray(calculation.groups)
+          ? calculation.groups
+              .map((group: any) =>
+                Number(
+                  group?.realHeightCm ||
+                  group?.calculatedHeightCm ||
+                  group?.billingHeight ||
+                  0
+                )
+              )
+              .filter(
+                (value: number) =>
+                  value > 0
+              )
+          : [];
+
+      const mechanicalHeight =
+        Math.max(
+          Number(
+            calculation.realHeightCm ||
+            calculation.calculatedHeightCm ||
+            calculation.billingHeight ||
+            calculation.heightCm ||
+            calculation.height ||
+            0
+          ),
+          ...groupHeights,
+          0
+        );
+
+      const overrides =
+        product?.userOverrides || {};
+
+      const customHeight =
+        Number(
+          overrides.customHeightCm ||
+          calculation.customHeightCm ||
+          0
+        );
+
+      const heightSource =
+        String(
+          overrides.heightSource ||
+          calculation.heightSource ||
+          ''
+        ).toUpperCase();
+
+      let resolvedHeight = 0;
+
+      if (customHeight > 0) {
+        resolvedHeight = customHeight;
+      } else if (
+        heightSource.includes('KALORIFER') ||
+        heightSource.includes('MERMER')
+      ) {
+        resolvedHeight =
+          Number(
+            rawValues.kaloriferMermerBoyuCm || 0
+          );
+      } else if (heightSource.includes('SOL')) {
+        resolvedHeight =
+          Number(rawValues.solYukseklikCm || 0);
+      } else if (heightSource.includes('ORTA')) {
+        resolvedHeight =
+          Number(rawValues.ortaYukseklikCm || 0);
+      } else if (heightSource.includes('SAG')) {
+        resolvedHeight =
+          Number(rawValues.sagYukseklikCm || 0);
+      } else if (
+        heightSource.includes('CAM') &&
+        heightSource.includes('ICI')
+      ) {
+        resolvedHeight =
+          Number(rawValues.camIciCm || 0);
+      } else if (
+        mechanicalProductTypes.has(productType) &&
+        mechanicalHeight > 0
+      ) {
+        resolvedHeight = mechanicalHeight;
+      } else if (
+        productType === 'GUNESLIK' &&
+        Number(
+          rawValues.kaloriferMermerBoyuCm || 0
+        ) > 0
+      ) {
+        resolvedHeight =
+          Number(
+            rawValues.kaloriferMermerBoyuCm || 0
+          );
+      } else {
+        resolvedHeight = fullHeight;
+      }
+
+      if (resolvedHeight <= 0) {
+        return;
+      }
+
+      result.set(productType, {
+        productType,
+        label:
+          labels[productType] ||
+          productType + ' Boy',
+        heightCm: resolvedHeight
+      });
+    });
+  });
+
+  return Array.from(result.values());
+}
+
+function shouldSuppressSunshadeFacadeHeight(
+  measurement: any
+): boolean {
+  const activeProducts =
+    Array.isArray(measurement?.selectedProducts)
+      ? measurement.selectedProducts.filter(
+          (product: any) =>
+            product?.isActive !== false
+        )
+      : [];
+
+  const sunshade =
+    activeProducts.find(
+      (product: any) =>
+        String(
+          product?.productType || ''
+        ).toUpperCase() === 'GUNESLIK'
+    );
+
+  if (!sunshade) {
+    return false;
+  }
+
+  const calculation =
+    sunshade?.calculation || {};
+
+  const overrides =
+    sunshade?.userOverrides || {};
+
+  const customHeight =
+    Number(
+      overrides.customHeightCm ||
+      calculation.customHeightCm ||
+      0
+    );
+
+  const mermerHeight =
+    Number(
+      measurement?.rawValues
+        ?.kaloriferMermerBoyuCm ||
+      0
+    );
+
+  return (
+    customHeight > 0 ||
+    mermerHeight > 0
+  );
+}
+
+function getGeneralSketchProductHeights(
+  products: any[],
+  current: any
+): Array<{
+  productType: string;
+  label: string;
+  heightCm: number;
+}> {
+  const allowedProductTypes =
+    new Set([
+      'TUL',
+      'FON',
+      'GUNESLIK'
+    ]);
+
+  return getSketchProductHeights(
+    products,
+    current
+  ).filter(item =>
+    allowedProductTypes.has(
+      String(
+        item.productType || ''
+      ).toUpperCase()
+    )
+  );
+}
+
+function buildMechanicalVisualPanels(
+  measurements: any[]
+): Array<{
+  id?: string;
+  productType: string;
+  groupType?: string;
+  widthCm: number;
+  heightCm: number;
+  chainDirection?: 'LEFT' | 'RIGHT';
+
+  startCm?: number;
+  endCm?: number;
+
+  firstSegmentIndex?: number;
+  lastSegmentIndex?: number;
+}> {
+  const panels: Array<{
+    id?: string;
+    productType: string;
+    groupType?: string;
+    widthCm: number;
+    heightCm: number;
+    chainDirection?: 'LEFT' | 'RIGHT';
+
+    startCm?: number;
+    endCm?: number;
+
+    firstSegmentIndex?: number;
+    lastSegmentIndex?: number;
+  }> = [];
+
+  measurements.forEach(measurement => {
+    if (!measurement) return;
+
+    const candidates: any[] = [];
+
+    if (
+      MECHANICAL_VISUAL_PRODUCT_TYPES.has(
+        String(
+          measurement.productType || ''
+        ).toUpperCase()
+      )
+    ) {
+      candidates.push({
+        productType:
+          measurement.productType,
+        calculation:
+          measurement.calculation ||
+          measurement.details
+      });
+    }
+
+    if (
+      Array.isArray(
+        measurement.selectedProducts
+      )
+    ) {
+      measurement.selectedProducts
+        .filter(
+          (product: any) =>
+            product?.isActive !== false &&
+            MECHANICAL_VISUAL_PRODUCT_TYPES.has(
+              String(
+                product?.productType || ''
+              ).toUpperCase()
+            )
+        )
+        .forEach((product: any) => {
+          candidates.push(product);
+        });
+    }
+
+    candidates.forEach(candidate => {
+      const productType =
+        String(
+          candidate.productType || ''
+        ).toUpperCase();
+
+      const calculation =
+        candidate.calculation ||
+        candidate.details ||
+        {};
+
+      const groups =
+        Array.isArray(calculation.groups)
+          ? calculation.groups
+          : [];
+
+      groups.forEach(
+        (group: any, index: number) => {
+          panels.push({
+            id:
+              group.generatedItemId ||
+              `${measurement.id || 'measurement'}-${productType}-${index}`,
+            productType,
+            groupType:
+              group.groupType,
+            widthCm:
+              Number(
+                group.realWidthCm ||
+                group.actualWidthCm ||
+                group.billingWidthCm ||
+                0
+              ),
+            heightCm:
+              Number(
+                group.realHeightCm ||
+                group.actualHeightCm ||
+                group.calculatedHeightCm ||
+                group.billingHeightCm ||
+                0
+              ),
+            chainDirection:
+              group.chainDirection === 'LEFT'
+                ? 'LEFT'
+                : 'RIGHT',
+
+            startCm:
+              Number(
+                group.startCm || 0
+              ),
+
+            endCm:
+              Number(
+                group.endCm || 0
+              ),
+
+            firstSegmentIndex:
+              Number.isFinite(
+                Number(
+                  group.firstSegmentIndex
+                )
+              )
+                ? Number(
+                    group.firstSegmentIndex
+                  )
+                : undefined,
+
+            lastSegmentIndex:
+              Number.isFinite(
+                Number(
+                  group.lastSegmentIndex
+                )
+              )
+                ? Number(
+                    group.lastSegmentIndex
+                  )
+                : undefined
+          });
+        }
+      );
+    });
+  });
+
+  return panels;
+}
 
 function buildCalculationReportDetails(
   productType: string,
@@ -723,78 +1233,85 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
           (a, b) =>
             a.top - b.top
         );
-
+    /*
+     * PDF sayfalarını canvas piksel verisinden doğrudan kes.
+     * drawImage / data URL önbellek tekrarına girmez.
+     */
     let sourceY = 0;
     let pageIndex = 0;
 
-    while (sourceY < canvas.height) {
-      const naturalPageBottom =
-        Math.min(
-          sourceY + pagePixelHeight,
-          canvas.height
+    while (
+      sourceY <
+      canvas.height
+    ) {
+      const remainingHeight =
+        canvas.height -
+        sourceY;
+
+      let sliceHeight =
+        Math.max(
+          1,
+          Math.min(
+            pagePixelHeight,
+            remainingHeight
+          )
         );
 
-      let pageBottom =
-        naturalPageBottom;
-
       /*
-       * Sayfa sınırını geçen ve tek sayfaya sığabilecek kart varsa,
-       * sınırı kartın başlangıcına geri çek.
+       * Kart sayfa sınırında bölünüyorsa dilimi kartın
+       * başlangıcında bitir. Böylece ölçü kartı iki sayfaya
+       * parçalanmaz.
        */
+      const proposedBottom =
+        sourceY +
+        sliceHeight;
+
       const crossingBlock =
         keepTogetherBlocks.find(
           block =>
-            block.top > sourceY &&
-            block.top < naturalPageBottom &&
-            block.bottom > naturalPageBottom &&
-            block.height <= pagePixelHeight
+            block.top >
+              sourceY + 20 &&
+            block.top <
+              proposedBottom &&
+            block.bottom >
+              proposedBottom
         );
 
       if (crossingBlock) {
-        const minimumUsefulPageHeight =
-          Math.floor(
-            pagePixelHeight * 0.2
-          );
-
-        if (
-          crossingBlock.top - sourceY >=
-          minimumUsefulPageHeight
-        ) {
-          pageBottom =
-            crossingBlock.top;
-        }
-      }
-
-      let sliceHeight =
-        pageBottom - sourceY;
-
-      /*
-       * Güvenlik: hesaplanan dilim boş veya aşırı küçükse
-       * normal A4 dilimine dön.
-       */
-      if (sliceHeight <= 0) {
         sliceHeight =
-          Math.min(
-            pagePixelHeight,
-            canvas.height - sourceY
+          Math.max(
+            1,
+            crossingBlock.top -
+              sourceY
           );
       }
+
+      const safeSourceY =
+        Math.floor(sourceY);
+
+      const safeSliceHeight =
+        Math.max(
+          1,
+          Math.floor(sliceHeight)
+        );
 
       const pageCanvas =
-        document.createElement('canvas');
+        document.createElement(
+          'canvas'
+        );
 
       pageCanvas.width =
         canvas.width;
 
       pageCanvas.height =
-        sliceHeight;
+        safeSliceHeight;
 
       const pageContext =
         pageCanvas.getContext('2d');
 
       if (!pageContext) {
         throw new Error(
-          'PDF sayfa kırpma alanı oluşturulamadı.'
+          'PDF sayfa canvas alanı oluşturulamadı.'
         );
       }
 
@@ -808,35 +1325,38 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
         pageCanvas.height
       );
 
+      /*
+       * Her sayfa için kaynak canvasın farklı dikey bölümünü
+       * doğrudan çiz. getImageData/toDataURL önbellek tekrarını
+       * kullanma; böylece ilk sayfanın bütün sayfalarda yeniden
+       * görünmesi engellenir.
+       */
       pageContext.drawImage(
         canvas,
         0,
-        sourceY,
+        safeSourceY,
         canvas.width,
-        sliceHeight,
+        safeSliceHeight,
         0,
         0,
-        canvas.width,
-        sliceHeight
+        pageCanvas.width,
+        pageCanvas.height
       );
 
       if (pageIndex > 0) {
         pdf.addPage();
       }
 
-      const pageImageData =
-        pageCanvas.toDataURL(
-          'image/jpeg',
-          0.94
-        );
-
       const renderedHeight =
-        (sliceHeight * usableWidth) /
+        (
+          safeSliceHeight *
+          usableWidth
+        ) /
         canvas.width;
 
       pdf.addImage(
-        pageImageData,
-        'JPEG',
+        pageCanvas,
+        'PNG',
         margin,
         margin,
         usableWidth,
@@ -846,10 +1366,11 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
       );
 
       sourceY +=
-        sliceHeight;
+        safeSliceHeight;
 
       pageIndex += 1;
     }
+
 
     const safeCustomerName =
       String(customer.name || 'musteri')
@@ -873,11 +1394,218 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
   };
 
   const handlePrint = () => {
-    /*
-     * Renkli SVG krokileri, ürün lejantını ve Türkçe karakterleri
-     * doğrudan tarayıcının yazdırma/PDF motoruna gönderir.
-     */
-    window.print();
+    const printArea =
+      document.getElementById(
+        'visual-report-print-area'
+      );
+
+    if (!printArea) {
+      window.alert(
+        'Yazdırılacak rapor alanı bulunamadı.'
+      );
+      return;
+    }
+
+    const existingFrame =
+      document.getElementById(
+        'ceylin-print-frame'
+      );
+
+    if (existingFrame) {
+      existingFrame.remove();
+    }
+
+    const printFrame =
+      document.createElement('iframe');
+
+    printFrame.id = 'ceylin-print-frame';
+    printFrame.setAttribute(
+      'aria-hidden',
+      'true'
+    );
+
+    printFrame.style.position = 'fixed';
+    printFrame.style.right = '0';
+    printFrame.style.bottom = '0';
+    printFrame.style.width = '0';
+    printFrame.style.height = '0';
+    printFrame.style.border = '0';
+    printFrame.style.visibility = 'hidden';
+
+    document.body.appendChild(printFrame);
+
+    const frameWindow =
+      printFrame.contentWindow;
+
+    const frameDocument =
+      printFrame.contentDocument ||
+      frameWindow?.document;
+
+    if (!frameWindow || !frameDocument) {
+      printFrame.remove();
+
+      window.alert(
+        'Yazdırma alanı hazırlanamadı.'
+      );
+      return;
+    }
+
+    const documentTitle =
+      'CEYLİN ERP - Saha Ölçü Raporu';
+
+    frameDocument.open();
+    frameDocument.write(
+      '<!doctype html>' +
+      '<html lang="tr">' +
+      '<head>' +
+      '<meta charset="utf-8" />' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1" />' +
+      '<title>' +
+      documentTitle +
+      '</title>' +
+      document.head.innerHTML +
+      '<style>' +
+      'html,body{' +
+      'margin:0!important;' +
+      'padding:0!important;' +
+      'width:100%!important;' +
+      'height:auto!important;' +
+      'min-height:0!important;' +
+      'overflow:visible!important;' +
+      'background:#fff!important;' +
+      '}' +
+      'body{' +
+      'position:static!important;' +
+      '}' +
+      '#visual-report-print-area{' +
+      'position:static!important;' +
+      'display:block!important;' +
+      'margin:0!important;' +
+      'padding:0!important;' +
+      'width:100%!important;' +
+      'max-width:none!important;' +
+      'height:auto!important;' +
+      'min-height:0!important;' +
+      'max-height:none!important;' +
+      'overflow:visible!important;' +
+      'transform:none!important;' +
+      '}' +
+      '/* CEYLIN_PRINT_TABLE_PAGE_FLOW_V1 */' +
+      '#visual-report-print-area table{' +
+      'page-break-inside:auto!important;' +
+      'break-inside:auto!important;' +
+      '}' +
+      '#visual-report-print-area thead{' +
+      'display:table-header-group!important;' +
+      '}' +
+      '#visual-report-print-area tfoot{' +
+      'display:table-footer-group!important;' +
+      '}' +
+      '#visual-report-print-area tr{' +
+      'page-break-inside:avoid!important;' +
+      'break-inside:avoid-page!important;' +
+      'page-break-after:auto!important;' +
+      '}' +
+      '#visual-report-print-area th,' +
+      '#visual-report-print-area td{' +
+      'page-break-inside:avoid!important;' +
+      'break-inside:avoid-page!important;' +
+      '}' +
+      '@page{' +
+      'size:A4 portrait;' +
+      'margin:10mm;' +
+      '}' +
+      '/* CEYLIN_PRINT_TABLE_COLUMN_WIDTH_V2 */' +
+      '#visual-report-print-area table{' +
+      'width:100%!important;' +
+      'table-layout:fixed!important;' +
+      'border-collapse:collapse!important;' +
+      '}' +
+      '#visual-report-print-area table th,' +
+      '#visual-report-print-area table td{' +
+      'padding:2px 2px!important;' +
+      'font-size:7.2px!important;' +
+      'line-height:1.15!important;' +
+      'word-break:normal!important;' +
+      'overflow-wrap:break-word!important;' +
+      'white-space:normal!important;' +
+      'hyphens:none!important;' +
+      'vertical-align:middle!important;' +
+      '}' +
+      '#visual-report-print-area table th:nth-child(1),' +
+      '#visual-report-print-area table td:nth-child(1){width:4%!important;}' +
+      '#visual-report-print-area table th:nth-child(2),' +
+      '#visual-report-print-area table td:nth-child(2){width:12%!important;}' +
+      '#visual-report-print-area table th:nth-child(3),' +
+      '#visual-report-print-area table td:nth-child(3){width:12%!important;}' +
+      '#visual-report-print-area table th:nth-child(4),' +
+      '#visual-report-print-area table td:nth-child(4){width:9%!important;}' +
+      '#visual-report-print-area table th:nth-child(5),' +
+      '#visual-report-print-area table td:nth-child(5){width:9%!important;}' +
+      '#visual-report-print-area table th:nth-child(6),' +
+      '#visual-report-print-area table td:nth-child(6){width:8%!important;}' +
+      '#visual-report-print-area table th:nth-child(7),' +
+      '#visual-report-print-area table td:nth-child(7){width:8%!important;}' +
+      '#visual-report-print-area table th:nth-child(8),' +
+      '#visual-report-print-area table td:nth-child(8){width:7%!important;}' +
+      '#visual-report-print-area table th:nth-child(9),' +
+      '#visual-report-print-area table td:nth-child(9){width:7%!important;}' +
+      '#visual-report-print-area table th:nth-child(10),' +
+      '#visual-report-print-area table td:nth-child(10){width:10%!important;}' +
+      '#visual-report-print-area table th:nth-child(11),' +
+      '#visual-report-print-area table td:nth-child(11){width:14%!important;}' +
+      '/* CEYLIN_MEASUREMENT_CARD_PRINT_KEEP_V1 */' +
+      '#visual-report-print-area .measurement-card{' +
+      'page-break-inside:avoid!important;' +
+      'break-inside:avoid-page!important;' +
+      'display:block!important;' +
+      '}' +
+      '#visual-report-print-area .measurement-card h4{' +
+      'page-break-after:avoid!important;' +
+      'break-after:avoid-page!important;' +
+      '}' +
+      '#visual-report-print-area .measurement-card .print-svg{' +
+      'page-break-before:avoid!important;' +
+      'break-before:avoid-page!important;' +
+      '}' +
+      '</style>' +
+      '</head>' +
+      '<body>' +
+      printArea.outerHTML +
+      '</body>' +
+      '</html>'
+    );
+    frameDocument.close();
+
+    const cleanup = () => {
+      window.setTimeout(
+        () => {
+          printFrame.remove();
+        },
+        1000
+      );
+    };
+
+    const runPrint = () => {
+      frameWindow.focus();
+      frameWindow.print();
+      cleanup();
+    };
+
+    if (
+      frameDocument.readyState ===
+      'complete'
+    ) {
+      window.setTimeout(runPrint, 300);
+    } else {
+      printFrame.addEventListener(
+        'load',
+        () => {
+          window.setTimeout(runPrint, 300);
+        },
+        { once: true }
+      );
+    }
   };
 
   const handleWhatsAppShare = async () => {
@@ -931,10 +1659,124 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto print:bg-white print:p-0 print:block">
+    <div data-visual-report-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto print:bg-white print:p-0 print:block">
       {/* Injecting print-specific CSS directly via style tag to isolate print layout */}
       <style>{`
         @media print {
+          /* CEYLIN_PRINT_TABLE_READABILITY_V1 */
+          #visual-report-print-area table {
+            width: 100% !important;
+            table-layout: auto !important;
+            border-collapse: collapse !important;
+          }
+
+          #visual-report-print-area table th,
+          #visual-report-print-area table td {
+            padding: 3px 4px !important;
+            font-size: 8px !important;
+            line-height: 1.2 !important;
+            word-break: normal !important;
+            overflow-wrap: normal !important;
+            white-space: normal !important;
+            hyphens: none !important;
+            vertical-align: middle !important;
+          }
+
+          #visual-report-print-area table th {
+            font-weight: 800 !important;
+            text-align: center !important;
+          }
+
+          #visual-report-print-area table td {
+            text-align: center !important;
+          }
+
+          #visual-report-print-area table th:first-child,
+          #visual-report-print-area table td:first-child {
+            width: 24px !important;
+            min-width: 24px !important;
+          }
+
+          #visual-report-print-area table th:nth-child(2),
+          #visual-report-print-area table td:nth-child(2) {
+            min-width: 52px !important;
+          }
+
+          #visual-report-print-area table th:nth-child(3),
+          #visual-report-print-area table td:nth-child(3) {
+            min-width: 58px !important;
+          }
+
+          #visual-report-print-area table th:nth-child(n+4),
+          #visual-report-print-area table td:nth-child(n+4) {
+            min-width: 42px !important;
+          }
+
+          /* CEYLIN_VISUAL_REPORT_PRINT_FLOW_V1 */
+          html,
+          body {
+            width: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: visible !important;
+            background: #ffffff !important;
+          }
+
+          [data-visual-report-modal="true"] {
+            position: static !important;
+            inset: auto !important;
+            display: block !important;
+            width: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            backdrop-filter: none !important;
+          }
+
+          [data-visual-report-modal="true"] > div {
+            position: static !important;
+            display: block !important;
+            width: 100% !important;
+            max-width: none !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+            border: none !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+          }
+
+          [data-visual-report-modal="true"] > div > div {
+            position: static !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+          }
+
+          #visual-report-print-area {
+            position: static !important;
+            display: block !important;
+            width: 100% !important;
+            max-width: none !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+            transform: none !important;
+            contain: none !important;
+          }
+
+          #visual-report-print-area .measurement-card,
+          #visual-report-print-area .pdf-keep-together {
+            break-inside: avoid-page !important;
+            page-break-inside: avoid !important;
+          }
+
           @page {
             size: A4 portrait;
             margin: 10mm;
@@ -1361,6 +2203,8 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                         productTypes={
                                           generalProductTypes
                                         }
+                                        productHeights={getGeneralSketchProductHeights(                                           products,                                           firstMeasurement                                         )}
+                                        mechanicalPanels={buildMechanicalVisualPanels(getSameOpeningMeasurements(activeMeasurements, firstMeasurement))}
                                       />
                                     </div>
                                   );
@@ -1432,7 +2276,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                     }
 
                                     return (
-                                      <div key={p.id} className="measurement-card w-full xl:w-[calc(50%-12px)] print:w-full mb-6 print:mb-8 bg-white print:bg-white rounded-lg p-5 shadow-sm border border-slate-200 print:border-none">
+                                      <div key={`${p.id}-${p.productType || p.productGroup || pIdx}`} className="measurement-card pdf-keep-together w-full xl:w-[calc(50%-12px)] print:w-full mb-6 print:mb-8 bg-white print:bg-white rounded-lg p-5 shadow-sm border border-slate-200 print:border-none">
                                         <div className="flex justify-between items-start mb-3">
                                           <div>
                                             <h4 className="text-sm font-bold text-slate-800 print:text-black">
@@ -1478,12 +2322,11 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                                     solYukseklikCm={Number(p.rawValues?.solYukseklikCm || 0)}
                                                     ortaYukseklikCm={Number(p.rawValues?.ortaYukseklikCm || 0)}
                                                     sagYukseklikCm={Number(p.rawValues?.sagYukseklikCm || 0)}
-                                                    productTypes={
-                                                      p.productType
-                                                        ? [String(p.productType)]
-                                                        : []
-                                                    }
-                                                  />
+                                                    productTypes={getSketchProductTypes([p], p)}
+                                                    productHeights={getSketchProductHeights([p], p)}
+                                                    suppressFacadeHeight={shouldSuppressSunshadeFacadeHeight(p)}
+                                        mechanicalPanels={buildMechanicalVisualPanels([p])}
+                                      />
                                                 </div>
                                               )}
                                             >
@@ -1500,8 +2343,11 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                                 solYukseklikCm={Number(p.rawValues?.solYukseklikCm || 0)}
                                                 ortaYukseklikCm={Number(p.rawValues?.ortaYukseklikCm || 0)}
                                                 sagYukseklikCm={Number(p.rawValues?.sagYukseklikCm || 0)}
-                                                productTypes={selectedProductTypes}
-                                              />
+                                                productTypes={getSketchProductTypes([p], p)}
+                                                productHeights={getSketchProductHeights([p], p)}
+                                                suppressFacadeHeight={shouldSuppressSunshadeFacadeHeight(p)}
+                                        mechanicalPanels={buildMechanicalVisualPanels([p])}
+                                      />
                                             </div>
                                           ) : (
                                             <div className="w-full grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
@@ -1537,7 +2383,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
 
                                   if (validCamListesi.length === 0) {
                                     return (
-                                      <div key={p.id} className="measurement-card bg-slate-900 border border-slate-800 rounded-xl p-5 mb-6 print:mb-8 print:border-slate-200 print:bg-white">
+                                      <div key={`${p.id}-plicell-empty-${index}`} className="measurement-card bg-slate-900 border border-slate-800 rounded-xl p-5 mb-6 print:mb-8 print:border-slate-200 print:bg-white">
                                         <h4 className="text-sm font-bold text-slate-800 print:text-black mb-2">
                                           {winName} - Ölçü {index}: {resolveMeasurementProductLabel(p)} (Plicell Cam İçi)
                                         </h4>
@@ -1551,16 +2397,35 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                   const ortakBoy = Number(p.rawValues?.ortakCamBoyuCm || 0);
                                   const profilRengi = p.rawValues?.profilRengi || '';
                                   const camAdedi = validCamListesi.length;
+                                  const storedPlicellCalculation =
+                                    getStoredProductCalculation(
+                                      p,
+                                      'PLICELL'
+                                    );
 
-                                  validCamListesi.forEach((cam: any) => {
-                                    const w = Number(cam.widthCm) || 0;
-                                    const h = Number(cam.heightCm) || 0;
-                                    globalPlicellCount++;
-                                    globalPlicellM2 += calculatePlicellM2(w, h).chargeableM2;
-                                  });
+                                  const plicellReportCalculation =
+                                    calculatePlicellReport(
+                                      validCamListesi,
+                                      ortakBoy,
+                                      Number(
+                                        storedPlicellCalculation.quantity ||
+                                        p.rawValues?.quantity ||
+                                        1
+                                      ),
+                                      storedPlicellCalculation.systemType === 'DOUBLE'
+                                        ? 'DOUBLE'
+                                        : 'SINGLE'
+                                    );
+
+                                  globalPlicellCount +=
+                                    plicellReportCalculation.cams.length *
+                                    plicellReportCalculation.quantity;
+
+                                  globalPlicellM2 +=
+                                    plicellReportCalculation.totalM2;
 
                                   return (
-                                    <div key={p.id} className="measurement-card bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5 mb-6 print:mb-8 shadow-sm">
+                                    <div key={`${p.id}-plicell-${index}`} className="measurement-card bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5 mb-6 print:mb-8 shadow-sm">
                                       <h4 className="text-sm font-bold text-slate-800 print:text-black mb-2">
                                         {winName} - Ölçü {index}: {resolveMeasurementProductLabel(p)} (Plicell Cam İçi)
                                       </h4>
@@ -1590,10 +2455,38 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                   // Eski format: Tek cam
                                   const w = Number(p.rawValues?.glassWidth || 0);
                                   const h = Number(p.rawValues?.glassHeight || 0);
-                                  const calc = calculatePlicellM2(w, h);
+                                  const storedPlicellCalculation =
+                                    getStoredProductCalculation(
+                                      p,
+                                      'PLICELL'
+                                    );
 
-                                  globalPlicellCount++;
-                                  globalPlicellM2 += calc.chargeableM2;
+                                  const plicellReportCalculation =
+                                    calculatePlicellReport(
+                                      [
+                                        {
+                                          widthCm: w,
+                                          heightCm: h,
+                                          note: p.notes
+                                        }
+                                      ],
+                                      h,
+                                      Number(
+                                        storedPlicellCalculation.quantity ||
+                                        p.rawValues?.quantity ||
+                                        1
+                                      ),
+                                      storedPlicellCalculation.systemType === 'DOUBLE'
+                                        ? 'DOUBLE'
+                                        : 'SINGLE'
+                                    );
+
+                                  globalPlicellCount +=
+                                    plicellReportCalculation.cams.length *
+                                    plicellReportCalculation.quantity;
+
+                                  globalPlicellM2 +=
+                                    plicellReportCalculation.totalM2;
 
                                   const singleCamItem = {
                                     widthCm: w,
@@ -1602,7 +2495,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                   };
 
                                   return (
-                                    <div key={p.id} className="measurement-card bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5 mb-6 print:mb-8 shadow-sm">
+                                    <div key={`${p.id}-plicell-${index}`} className="measurement-card bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5 mb-6 print:mb-8 shadow-sm">
                                       <h4 className="text-sm font-bold text-slate-800 print:text-black mb-2">
                                         {winName} - Ölçü {index}: {resolveMeasurementProductLabel(p)} (Plicell Cam İçi)
                                       </h4>
@@ -1661,15 +2554,71 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                       const notesList: { idx: number; note: string }[] = [];
 
                                       const rows = mechanicalCurtainProducts.map(({ p, index, winName }) => {
-                                        const w = Number(p.rawValues?.width || 0);
-                                        const h = Number(p.rawValues?.height || 0);
-                                        const q = Number(p.rawValues?.quantity || 1);
-                                        const productType = resolveMeasurementProductLabel(p);
+                                        const storedCalculation =
+                                          getStoredProductCalculation(
+                                            p,
+                                            p.productType
+                                          );
 
-                                        const calcWidth = p.details?.billingWidth || Math.ceil(w / 10) * 10 || w;
-                                        const calcHeight = p.details?.billingHeight || h;
-                                        const totalM2 = p.details?.totalM2 !== undefined ? Number(p.details.totalM2) : calculateMechanicalCurtainM2(w, h, q).totalM2;
-                                        const unitM2 = totalM2 / q;
+                                        const w =
+                                          Number(
+                                            storedCalculation.realWidthCm ??
+                                            storedCalculation.actualWidthCm ??
+                                            p.rawValues?.width ??
+                                            0
+                                          );
+
+                                        const h =
+                                          Number(
+                                            storedCalculation.realHeightCm ??
+                                            storedCalculation.actualHeightCm ??
+                                            p.rawValues?.height ??
+                                            0
+                                          );
+
+                                        const q =
+                                          Math.max(
+                                            1,
+                                            Number(
+                                              storedCalculation.quantity ??
+                                              p.rawValues?.quantity ??
+                                              1
+                                            )
+                                          );
+
+                                        const productType =
+                                          resolveMeasurementProductLabel(p);
+
+                                        const calcWidth =
+                                          Number(
+                                            storedCalculation.billingWidthCm ??
+                                            storedCalculation.billingWidth ??
+                                            0
+                                          );
+
+                                        const calcHeight =
+                                          Number(
+                                            storedCalculation.billingHeightCm ??
+                                            storedCalculation.billingHeight ??
+                                            0
+                                          );
+
+                                        const totalM2 =
+                                          Number(
+                                            storedCalculation.totalM2 ??
+                                            storedCalculation.totalSystemM2 ??
+                                            0
+                                          );
+
+                                        const unitM2 =
+                                          Number(
+                                            storedCalculation.unitM2 ??
+                                            (
+                                              totalM2 > 0
+                                                ? totalM2 / q
+                                                : 0
+                                            )
+                                          );
 
                                         const chainDirection =
                                           p.details?.chainDirection ||
@@ -1688,7 +2637,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                         }
 
                                         return (
-                                          <tr key={p.id} className="border-b border-slate-900 last:border-0 print:border-slate-200 hover:bg-slate-900/30 print:hover:bg-transparent">
+                                          <tr key={`${p.id}-${p.productType || "mechanical"}-${index}`} className="border-b border-slate-900 last:border-0 print:border-slate-200 hover:bg-slate-900/30 print:hover:bg-transparent">
                                             <td className="p-2.5 text-center font-semibold text-slate-400 print:text-slate-500">{index}</td>
                                             <td className="p-2.5 font-medium text-slate-200 print:text-black">{winName}</td>
                                             <td className="p-2.5 font-medium text-blue-400 print:text-blue-700">{productType}</td>

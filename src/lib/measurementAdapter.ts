@@ -476,6 +476,111 @@ export function getMechanicalEffectiveHeight(
     fallbackHeight
   );
 }
+type ConfiguredHeightMode =
+  | 'AUTO'
+  | 'MEASUREMENT'
+  | 'CUSTOM';
+
+function resolveConfiguredProductHeight(
+  rawValues: any,
+  fallbackHeightCm: number,
+  partKey?: string
+): number {
+  const safeFallback =
+    Number(fallbackHeightCm || 0);
+
+  const productMode =
+    String(
+      rawValues?.heightMode || 'AUTO'
+    ).toUpperCase() as ConfiguredHeightMode;
+
+  const productSource =
+    String(
+      rawValues?.heightSource || ''
+    );
+
+  const productCustomHeight =
+    Number(
+      rawValues?.customHeightCm || 0
+    );
+
+  const partOverride =
+    partKey
+      ? rawValues?.partHeightOverrides?.[
+          partKey
+        ]
+      : undefined;
+
+  const partMode =
+    String(
+      partOverride?.mode || 'AUTO'
+    ).toUpperCase() as ConfiguredHeightMode;
+
+  const partSource =
+    String(
+      partOverride?.source || ''
+    );
+
+  const partCustomHeight =
+    Number(
+      partOverride?.customHeightCm || 0
+    );
+
+  const resolveMeasurementSource = (
+    sourceKey: string
+  ): number => {
+    if (!sourceKey) return 0;
+
+    const value =
+      Number(rawValues?.[sourceKey] || 0);
+
+    return Number.isFinite(value) &&
+      value > 0
+      ? value
+      : 0;
+  };
+
+  /*
+   * Öncelik:
+   * 1. Parça özel/seçili boy
+   * 2. Ürün özel/seçili boy
+   * 3. Normal otomatik hesap
+   */
+  if (
+    partMode === 'CUSTOM' &&
+    partCustomHeight > 0
+  ) {
+    return partCustomHeight;
+  }
+
+  if (partMode === 'MEASUREMENT') {
+    const selectedPartHeight =
+      resolveMeasurementSource(partSource);
+
+    if (selectedPartHeight > 0) {
+      return selectedPartHeight;
+    }
+  }
+
+  if (
+    productMode === 'CUSTOM' &&
+    productCustomHeight > 0
+  ) {
+    return productCustomHeight;
+  }
+
+  if (productMode === 'MEASUREMENT') {
+    const selectedProductHeight =
+      resolveMeasurementSource(productSource);
+
+    if (selectedProductHeight > 0) {
+      return selectedProductHeight;
+    }
+  }
+
+  return safeFallback;
+}
+
 export function roundMechanicalWidth(
   realWidthCm: number
 ): number {
@@ -530,7 +635,25 @@ export function groupFacadeSegmentsForMechanical(
     calculatedHeightCm: part.billingHeightCm,
     unitM2: part.unitM2,
     totalM2: part.totalM2,
-    chainDirection: part.chainDirection
+    chainDirection: part.chainDirection,
+
+    firstSegmentIndex:
+      part.firstSegmentIndex,
+
+    lastSegmentIndex:
+      part.lastSegmentIndex,
+
+    startCm:
+      part.startCm,
+
+    endCm:
+      part.endCm,
+
+    leftAllowanceCm:
+      part.leftAllowanceCm,
+
+    rightAllowanceCm:
+      part.rightAllowanceCm
   }));
 }
 function resolveVerticalOpeningType(

@@ -5,6 +5,8 @@ import { Factory, Search, ChevronDown, ChevronUp, Check, AlertTriangle, AlertCir
 import { useStore, ProductionItem, ProductionIssue, Sale, generateUUID } from "@/store/useStore";
 import { getTemplateLabel } from "@/lib/measurementAdapter";
 import { useAuthStore, normalizeRole } from "@/store/useAuthStore";
+import { shouldCreateTailorProductionItem } from "@/lib/productionRouting";
+
 
 const STATUS_LABELS: Record<string, string> = {
   WAITING_MATERIAL: "Malzeme Bekliyor",
@@ -92,43 +94,50 @@ export default function UretimPage() {
     sales.forEach(sale => {
       const hasItems = productionItems.some(pi => pi.orderId === sale.id);
       if (!hasItems && sale.items && sale.items.length > 0) {
-        needsMigration = true;
-        sale.items.forEach(item => {
+        const tailorItems = sale.items.filter(item => {
           const prod = products.find(p => p.id === item.productId);
-          const productName = prod ? prod.name : item.productType || 'Bilinmeyen Ürün';
-          const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toLocaleDateString('tr-TR');
-
-          migratedItems.push({
-            id: generateUUID(),
-            orderId: sale.id,
-            saleLineId: item.id,
-            customerId: sale.customerId,
-            roomName: item.roomName,
-            openingName: item.windowName,
-            productName: productName,
-            productType: item.productType || item.productGroup || 'Ürün',
-            width: item.width,
-            height: item.height,
-            quantity: item.quantity,
-            pleatType: item.pleatType,
-            productionStatus: 'READY_FOR_CUTTING',
-            cutCompleted: false,
-            sewingCompleted: false,
-            ironingCompleted: false,
-            packagingCompleted: false,
-            dueDate: deadline,
-            history: [
-              {
-                date: new Date().toISOString(),
-                status: 'READY_FOR_CUTTING',
-                employeeId: 'system',
-                notes: 'Göç işlemiyle üretim kaydı oluşturuldu.'
-              }
-            ],
-            sewingFee: 150,
-            approvedExtraWorkFee: 0
-          });
+          return shouldCreateTailorProductionItem(item, prod);
         });
+
+        if (tailorItems.length > 0) {
+          needsMigration = true;
+          tailorItems.forEach(item => {
+            const prod = products.find(p => p.id === item.productId);
+            const productName = prod ? prod.name : item.productType || 'Bilinmeyen Ürün';
+            const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toLocaleDateString('tr-TR');
+
+            migratedItems.push({
+              id: generateUUID(),
+              orderId: sale.id,
+              saleLineId: item.id,
+              customerId: sale.customerId,
+              roomName: item.roomName,
+              openingName: item.windowName,
+              productName: productName,
+              productType: item.productType || item.productGroup || 'Ürün',
+              width: item.width,
+              height: item.height,
+              quantity: item.quantity,
+              pleatType: item.pleatType,
+              productionStatus: 'READY_FOR_CUTTING',
+              cutCompleted: false,
+              sewingCompleted: false,
+              ironingCompleted: false,
+              packagingCompleted: false,
+              dueDate: deadline,
+              history: [
+                {
+                  date: new Date().toISOString(),
+                  status: 'READY_FOR_CUTTING',
+                  employeeId: 'system',
+                  notes: 'Göç işlemiyle üretim kaydı oluşturuldu.'
+                }
+              ],
+              sewingFee: 150,
+              approvedExtraWorkFee: 0
+            });
+          });
+        }
       }
     });
     

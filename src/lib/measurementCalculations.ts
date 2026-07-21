@@ -40,13 +40,26 @@ export interface PlicellCalculation extends AreaCalculation {
 export interface MechanicalPart {
   id: string;
   groupType: "CAM_PENCERE" | "KAPI";
+
   actualWidthCm: number;
   actualHeightCm: number;
+
   billingWidthCm: number;
   billingHeightCm: number;
+
   unitM2: number;
   totalM2: number;
+
   chainDirection: ChainDirection;
+
+  firstSegmentIndex?: number;
+  lastSegmentIndex?: number;
+
+  startCm?: number;
+  endCm?: number;
+
+  leftAllowanceCm?: number;
+  rightAllowanceCm?: number;
 }
 
 export interface VerticalCurtainCalculation {
@@ -255,23 +268,57 @@ export function createMechanicalPartsFromFacade(
     baseWidthCm: number;
   }
 
-  const rawParts: RawPart[] = [];
+  const normalizedSegments =
+    segments.map(segment => ({
+      ...segment,
+      widthCm: Math.max(
+        0,
+        Number(segment.widthCm || 0)
+      ),
+      normalizedType:
+        normalizeSegmentType(segment.type)
+    }));
 
-  function getAdjacentWallAllowance(index: number): number {
-    const segment = segments[index];
+  const segmentStarts: number[] = [];
+
+  let facadeCursorCm = 0;
+
+  normalizedSegments.forEach(
+    (segment, index) => {
+      segmentStarts[index] =
+        facadeCursorCm;
+
+      facadeCursorCm +=
+        segment.widthCm;
+    }
+  );
+
+  const getAdjacentWallAllowance = (
+    index: number
+  ): number => {
+    const segment =
+      normalizedSegments[index];
 
     if (
       !segment ||
-      normalizeSegmentType(segment.type) !== "WALL"
+      segment.normalizedType !== "WALL"
     ) {
       return 0;
     }
 
-    return getWallAllowance(Number(segment.widthCm || 0));
-  }
+    return getWallAllowance(
+      segment.widthCm
+    );
+  };
 
-  function addDoorPart(index: number): void {
-    const widthCm = Number(segments[index]?.widthCm || 0);
+  const rawParts: RawPart[] = [];
+
+  const addDoorPart = (
+    index: number
+  ): void => {
+    const widthCm =
+      normalizedSegments[index]
+        ?.widthCm || 0;
 
     if (widthCm <= 0) return;
 
@@ -281,279 +328,346 @@ export function createMechanicalPartsFromFacade(
       lastIndex: index,
       baseWidthCm: widthCm
     });
-  }
+  };
 
-  function splitWindowRun(
+  const addWindowRun = (
     runStartIndex: number,
     runEndIndex: number
-  ): void {
-    /*
-     * Doğal eşleşme kuralı:
-     *
-     * C + P veya P + C yan yana ise öncelikle bir mekanik
-     * ürün parçası olarak değerlendirilir.
-     *
-     * Örnek:
-     * C90 + P75 + P75 + C90
-     * =>
-     * C90 + P75 | P75 + C90
-     *
-     * İki ürün parçasının orta birleşiminde pay verilmez.
-     * Yalnız koşunun dışındaki gerçek duvarlardan,
-     * duvar kadar ve en fazla 10 cm pay alınır.
-     */
-    const naturalGroups: Array<{
-      firstIndex: number;
-      lastIndex: number;
-      baseWidthCm: number;
-    }> = [];
+  ): void => {
+    const leftOuterAllowance =
+      getAdjacentWallAllowance(
+        runStartIndex - 1
+      );
 
-    let cursor = runStartIndex;
+    const rightOuterAllowance =
+      getAdjacentWallAllowance(
+        runEndIndex + 1
+      );
 
-    while (cursor <= runEndIndex) {
-      const currentType =
-        normalizeSegmentType(segments[cursor]?.type);
-
-      const nextType =
-        cursor + 1 <= runEndIndex
-          ? normalizeSegmentType(
-              segments[cursor + 1]?.type
-            )
-          : "OTHER";
-
-      const currentWidth =
-        Number(segments[cursor]?.widthCm || 0);
-
-      const nextWidth =
-        cursor + 1 <= runEndIndex
-          ? Number(
-              segments[cursor + 1]?.widthCm || 0
-            )
-          : 0;
-
-      const isNaturalPair =
-        (
-          currentType === "GLASS" &&
-          nextType === "WINDOW"
-        ) ||
-        (
-          currentType === "WINDOW" &&
-          nextType === "GLASS"
+    const completeRunWidth =
+      normalizedSegments
+        .slice(
+          runStartIndex,
+          runEndIndex + 1
+        )
+        .reduce(
+          (sum, segment) =>
+            sum + segment.widthCm,
+          0
         );
 
-      if (
-        isNaturalPair &&
-        currentWidth > 0 &&
-        nextWidth > 0
-      ) {
-        naturalGroups.push({
-          firstIndex: cursor,
-          lastIndex: cursor + 1,
-          baseWidthCm:
-            currentWidth + nextWidth
-        });
+    const completeActualWidth =
+      completeRunWidth +
+      leftOuterAllowance +
+      rightOuterAllowance;
 
-        cursor += 2;
+    /*
+     * Ana kural:
+     *
+     * Kesintisiz CAM/PENCERE bloğunun tamamı,
+     * dış duvar paylarıyla beraber 270 cm veya altındaysa
+     * TEK PARÇADIR.
+     *
+     * 55 C + 65 P + 55 C
+     * = 175
+     * + 10 sol duvar
+     * + 10 sağ duvar
+     * = 195 cm
+     * → tek mekanik parça.
+     */
+    if (
+      completeActualWidth <=
+      MAX_MECHANICAL_WIDTH_CM
+    ) {
+      rawParts.push({
+        groupType: "CAM_PENCERE",
+        firstIndex: runStartIndex,
+        lastIndex: runEndIndex,
+        baseWidthCm:
+          completeRunWidth
+      });
+
+      return;
+    }
+
+    /*
+     * 270 cm aşılırsa segmentleri bozmadan,
+     * mümkün olan en büyük parçaları oluştur.
+     * İç bölünme noktasında ek 10 cm pay verilmez.
+     */
+    let partStartIndex =
+      runStartIndex;
+
+    let partBaseWidth = 0;
+
+    for (
+      let index = runStartIndex;
+      index <= runEndIndex;
+      index++
+    ) {
+      const segmentWidth =
+        normalizedSegments[index]
+          .widthCm;
+
+      if (segmentWidth <= 0) {
         continue;
       }
 
-      if (currentWidth > 0) {
-        naturalGroups.push({
-          firstIndex: cursor,
-          lastIndex: cursor,
-          baseWidthCm: currentWidth
-        });
-      }
+      const isFirstPart =
+        partStartIndex ===
+        runStartIndex;
 
-      cursor++;
+      const wouldEndAtRunEnd =
+        index === runEndIndex;
+
+      const projectedWidth =
+        partBaseWidth +
+        segmentWidth +
+        (
+          isFirstPart
+            ? leftOuterAllowance
+            : 0
+        ) +
+        (
+          wouldEndAtRunEnd
+            ? rightOuterAllowance
+            : 0
+        );
+
+      if (
+        partBaseWidth > 0 &&
+        projectedWidth >
+          MAX_MECHANICAL_WIDTH_CM
+      ) {
+        rawParts.push({
+          groupType:
+            "CAM_PENCERE",
+          firstIndex:
+            partStartIndex,
+          lastIndex:
+            index - 1,
+          baseWidthCm:
+            partBaseWidth
+        });
+
+        partStartIndex =
+          index;
+
+        partBaseWidth =
+          segmentWidth;
+      } else {
+        partBaseWidth +=
+          segmentWidth;
+      }
     }
 
-    naturalGroups.forEach(group => {
-      const leftAllowance =
-        group.firstIndex === runStartIndex
-          ? getAdjacentWallAllowance(
-              runStartIndex - 1
-            )
-          : 0;
+    if (partBaseWidth > 0) {
+      rawParts.push({
+        groupType:
+          "CAM_PENCERE",
+        firstIndex:
+          partStartIndex,
+        lastIndex:
+          runEndIndex,
+        baseWidthCm:
+          partBaseWidth
+      });
+    }
+  };
 
-      const rightAllowance =
-        group.lastIndex === runEndIndex
-          ? getAdjacentWallAllowance(
-              runEndIndex + 1
-            )
-          : 0;
-
-      const actualWidthCm =
-        group.baseWidthCm +
-        leftAllowance +
-        rightAllowance;
-
-      /*
-       * Doğal çift 270 cm'yi geçmiyorsa aynen korunur.
-       * Geçerse yalnız segment sınırından ayrılır.
-       */
-      if (
-        actualWidthCm <=
-          MAX_MECHANICAL_WIDTH_CM ||
-        group.firstIndex === group.lastIndex
-      ) {
-        rawParts.push({
-          groupType: "CAM_PENCERE",
-          firstIndex: group.firstIndex,
-          lastIndex: group.lastIndex,
-          baseWidthCm: group.baseWidthCm
-        });
-
-        return;
-      }
-
-      for (
-        let segmentIndex = group.firstIndex;
-        segmentIndex <= group.lastIndex;
-        segmentIndex++
-      ) {
-        const segmentWidth =
-          Number(
-            segments[segmentIndex]?.widthCm || 0
-          );
-
-        if (segmentWidth <= 0) continue;
-
-        rawParts.push({
-          groupType: "CAM_PENCERE",
-          firstIndex: segmentIndex,
-          lastIndex: segmentIndex,
-          baseWidthCm: segmentWidth
-        });
-      }
-    });
-  }
   let index = 0;
 
-  while (index < segments.length) {
+  while (
+    index <
+    normalizedSegments.length
+  ) {
     const segmentType =
-      normalizeSegmentType(segments[index]?.type);
+      normalizedSegments[index]
+        .normalizedType;
 
     if (
       segmentType === "GLASS" ||
       segmentType === "WINDOW"
     ) {
-      const runStartIndex = index;
+      const runStartIndex =
+        index;
 
       while (
-        index + 1 < segments.length &&
+        index + 1 <
+          normalizedSegments.length &&
         (
-          normalizeSegmentType(
-            segments[index + 1]?.type
-          ) === "GLASS" ||
-          normalizeSegmentType(
-            segments[index + 1]?.type
-          ) === "WINDOW"
+          normalizedSegments[
+            index + 1
+          ].normalizedType ===
+            "GLASS" ||
+          normalizedSegments[
+            index + 1
+          ].normalizedType ===
+            "WINDOW"
         )
       ) {
         index++;
       }
 
-      splitWindowRun(runStartIndex, index);
-    } else if (segmentType === "DOOR") {
-      /*
-       * Her kapı ayrı mekanik perde parçasıdır.
-       * Kapı, pencere grubuyla birleştirilmez.
-       */
+      addWindowRun(
+        runStartIndex,
+        index
+      );
+    } else if (
+      segmentType === "DOOR"
+    ) {
       addDoorPart(index);
     }
 
     index++;
   }
 
-  const parts = rawParts.map((part, partIndex) => {
-    const leftSegment = segments[part.firstIndex - 1];
-    const rightSegment = segments[part.lastIndex + 1];
+  const parts =
+    rawParts.map(
+      (part, partIndex) => {
+        const leftSegment =
+          normalizedSegments[
+            part.firstIndex - 1
+          ];
 
-    const leftType = leftSegment
-      ? normalizeSegmentType(leftSegment.type)
-      : "OTHER";
+        const rightSegment =
+          normalizedSegments[
+            part.lastIndex + 1
+          ];
 
-    const rightType = rightSegment
-      ? normalizeSegmentType(rightSegment.type)
-      : "OTHER";
+        const leftAllowance =
+          leftSegment
+            ?.normalizedType ===
+            "WALL"
+            ? getWallAllowance(
+                leftSegment.widthCm
+              )
+            : 0;
 
-    /*
-     * Yalnız gerçek duvar bulunan tarafa pay verilir.
-     *
-     * Cam-kapı birleşiminde pay verilmez.
-     * İki mekanik perde parçasının birleşiminde de
-     * orta tarafa pay verilmez.
-     */
-    const leftAllowance =
-      leftType === "WALL"
-        ? getWallAllowance(
-            Number(leftSegment.widthCm || 0)
-          )
-        : 0;
+        const rightAllowance =
+          rightSegment
+            ?.normalizedType ===
+            "WALL"
+            ? getWallAllowance(
+                rightSegment.widthCm
+              )
+            : 0;
 
-    const rightAllowance =
-      rightType === "WALL"
-        ? getWallAllowance(
-            Number(rightSegment.widthCm || 0)
-          )
-        : 0;
+        const actualWidthCm =
+          part.baseWidthCm +
+          leftAllowance +
+          rightAllowance;
 
-    const actualWidthCm =
-      part.baseWidthCm +
-      leftAllowance +
-      rightAllowance;
+        const startCm =
+          Math.max(
+            0,
+            segmentStarts[
+              part.firstIndex
+            ] -
+            leftAllowance
+          );
 
-    const calculation = calculateMechanicalCurtain(
-      actualWidthCm,
-      heightCm,
-      1
+        const segmentEndCm =
+          segmentStarts[
+            part.lastIndex
+          ] +
+          normalizedSegments[
+            part.lastIndex
+          ].widthCm;
+
+        const endCm =
+          segmentEndCm +
+          rightAllowance;
+
+        const calculation =
+          calculateMechanicalCurtain(
+            actualWidthCm,
+            heightCm,
+            1
+          );
+
+        return {
+          id:
+            `mechanical-part-${partIndex + 1}`,
+
+          groupType:
+            part.groupType,
+
+          actualWidthCm,
+          actualHeightCm:
+            heightCm,
+
+          billingWidthCm:
+            calculation.billingWidthCm,
+
+          billingHeightCm:
+            calculation.billingHeightCm,
+
+          unitM2:
+            calculation.unitM2,
+
+          totalM2:
+            calculation.totalM2,
+
+          chainDirection:
+            "RIGHT" as ChainDirection,
+
+          firstSegmentIndex:
+            part.firstIndex,
+
+          lastSegmentIndex:
+            part.lastIndex,
+
+          startCm,
+          endCm,
+
+          leftAllowanceCm:
+            leftAllowance,
+
+          rightAllowanceCm:
+            rightAllowance
+        };
+      }
     );
 
-    return {
-      id: `mechanical-part-${partIndex + 1}`,
-      groupType: part.groupType,
-      actualWidthCm,
-      actualHeightCm: heightCm,
-      billingWidthCm: calculation.billingWidthCm,
-      billingHeightCm: calculation.billingHeightCm,
-      unitM2: calculation.unitM2,
-      totalM2: calculation.totalM2,
-      chainDirection: "RIGHT" as ChainDirection
-    };
-  });
+  return parts.map(
+    (part, partIndex) => {
+      if (parts.length === 1) {
+        return {
+          ...part,
+          chainDirection:
+            "RIGHT" as ChainDirection
+        };
+      }
 
-  return parts.map((part, partIndex) => {
-    if (parts.length === 1) {
+      if (partIndex === 0) {
+        return {
+          ...part,
+          chainDirection:
+            "LEFT" as ChainDirection
+        };
+      }
+
+      if (
+        partIndex ===
+        parts.length - 1
+      ) {
+        return {
+          ...part,
+          chainDirection:
+            "RIGHT" as ChainDirection
+        };
+      }
+
       return {
         ...part,
-        chainDirection: "RIGHT" as ChainDirection
+        chainDirection:
+          partIndex % 2 === 0
+            ? "LEFT" as ChainDirection
+            : "RIGHT" as ChainDirection
       };
     }
-
-    /*
-     * Yan yana iki mekanik perdede zincirler
-     * orta birleşime değil dış kenarlara gelir.
-     */
-    if (partIndex === 0) {
-      return {
-        ...part,
-        chainDirection: "LEFT" as ChainDirection
-      };
-    }
-
-    if (partIndex === parts.length - 1) {
-      return {
-        ...part,
-        chainDirection: "RIGHT" as ChainDirection
-      };
-    }
-
-    return {
-      ...part,
-      chainDirection: "RIGHT" as ChainDirection
-    };
-  });
+  );
 }
 export function getPleatFactor(
   pleatType: PleatType,

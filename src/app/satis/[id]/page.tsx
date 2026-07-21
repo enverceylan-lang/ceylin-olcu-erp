@@ -2,10 +2,16 @@
 
 import React, { useState, useEffect } from "react";
 import { ArrowLeft, Save, Trash2, Edit2, CheckCircle, Calculator } from "lucide-react";
+import { FileDown } from "lucide-react";
+import { MessageCircle } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useStore } from "@/store/useStore";
 import { useSalesStore, Sale, SaleStatus, SaleItem } from "@/store/salesStore";
+import InstallmentPlanPanel from "@/components/sales/InstallmentPlanPanel";
+import PaymentTrackingPanel from "@/components/sales/PaymentTrackingPanel";
+import { downloadSalesPdfFile, generateSalesPdfFile } from "@/lib/salesPdfGenerator";
+import { prepareSaleForApproval } from "@/lib/salesApproval";
 
 export default function SaleDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
@@ -68,6 +74,13 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
     return finalTotal - downPayment;
   };
 
+  const saleForFinance: Sale = {
+    ...sale,
+    discount: globalDiscount,
+    downPayment,
+    remainingBalance: getRemainingBalance()
+  };
+
   const handleSave = async () => {
     try {
       const updatedSale: Sale = {
@@ -84,6 +97,61 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
     } catch (err) {
       console.error(err);
       alert("Hata oluştu.");
+    }
+  };
+
+  const handleSendApprovalWhatsApp = async () => {
+    try {
+      if (!customer?.phone) {
+        alert("Müşteri telefon numarası bulunamadı.");
+        return;
+      }
+
+      const prepared = prepareSaleForApproval({
+        sale: saleForFinance,
+        origin: window.location.origin,
+        customerName: customer.name || "Müşteri",
+        customerPhone: customer.phone
+      });
+
+      await updateSale(prepared.sale);
+      setSale(JSON.parse(JSON.stringify(prepared.sale)));
+      window.open(
+        prepared.whatsappUrl,
+        "_blank",
+        "noopener,noreferrer"
+      );
+    } catch (error) {
+      console.error(
+        "[Sales Approval] WhatsApp onay bağlantısı hazırlanamadı.",
+        error
+      );
+      alert("WhatsApp müşteri onayı hazırlanamadı.");
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    try {
+      const currentSale: Sale = {
+        ...saleForFinance,
+        updatedAt: new Date().toISOString(),
+        pdfGeneratedAt: new Date().toISOString()
+      };
+
+      const file = await generateSalesPdfFile(
+        currentSale,
+        customer
+      );
+
+      downloadSalesPdfFile(file);
+
+      setSale({
+        ...currentSale,
+        pdfFileName: file.name
+      });
+    } catch (error) {
+      console.error("[Sales PDF] PDF oluşturulamadı.", error);
+      alert("Satış PDF'si oluşturulamadı.");
     }
   };
 
@@ -109,6 +177,22 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
         </div>
         
         <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={handleSendApprovalWhatsApp}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-green-50 hover:bg-green-100 text-green-700 font-bold shadow-sm transition-colors"
+          >
+            <MessageCircle className="w-4 h-4" />
+            WhatsApp Onay
+          </button>
+          <button
+            type="button"
+            onClick={handleDownloadPdf}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold shadow-sm transition-colors"
+          >
+            <FileDown className="w-4 h-4" />
+            Satış PDF
+          </button>
           <button
             onClick={handleDelete}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 font-bold shadow-sm transition-colors"
@@ -244,6 +328,24 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
               </div>
             </div>
           </div>
+
+          <InstallmentPlanPanel
+            sale={saleForFinance}
+            onChange={updatedSale => {
+              setSale(updatedSale);
+              setDownPayment(updatedSale.downPayment);
+              setGlobalDiscount(updatedSale.discount);
+            }}
+          />
+
+          <PaymentTrackingPanel
+            sale={saleForFinance}
+            onChange={updatedSale => {
+              setSale(updatedSale);
+              setDownPayment(updatedSale.downPayment);
+              setGlobalDiscount(updatedSale.discount);
+            }}
+          />
 
           <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 shadow-sm">
              <h2 className="font-semibold text-gray-900 dark:text-white mb-4">Durum</h2>

@@ -6,15 +6,26 @@ import {
   resolveMeasurementProductType,
   resolveMeasurementProductLabel,
   resolveMeasurementProductGroup,
-  calculateSelectedProduct
 } from '@/lib/measurementAdapter';
 
+import {
+  calculateSelectedProduct
+} from '@/lib/calculationEngine';
 export interface MeasurementRecord extends ProductMeasurement {
   customerId: string;
   roomId: string;
   openingId: string;
   /** Legacy compatibility only. New code must use openingId. */
   windowId?: string;
+
+  /**
+   * Saha cihazından senkronlanan yapısal oda/açıklık adları.
+   */
+  roomName?: string;
+  roomLabel?: string;
+  openingName?: string;
+  openingLabel?: string;
+  windowName?: string;
   isDeleted?: boolean;
   deletedAt?: string;
   deletedBy?: string;

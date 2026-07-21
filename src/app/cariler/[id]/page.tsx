@@ -1888,39 +1888,89 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                   })()}
                                 </div>
                               ) : (
-                                <div className="bg-gray-50 dark:bg-gray-900 p-3 rounded grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3 border border-gray-200 dark:border-gray-700">
-                                  {Object.entries(p.rawValues || {})
-                                    .filter(([key, val]) => {
-                                      if (key === 'facadeSegments' || key === 'totalFacadeWidthCm') return false;
-                                      if (p.templateType === 'PLICELL' && (key === 'plicellCamListesi' || key === 'camAdedi' || key === 'ortakCamBoyuCm' || key === 'profilRengi')) return false;
-                                      const template = MEASUREMENT_TEMPLATES[p.templateType] || (p.templateType === 'CURTAIN' ? MEASUREMENT_TEMPLATES['CURTAIN_DETAIL'] : undefined);
-                                      const fieldDef = template?.fields.find(f => f.key === key);
-                                      return !fieldDef?.hidden;
-                                    })
-                                    .map(([key, val]) => {
-                                    const template = MEASUREMENT_TEMPLATES[p.templateType] || (p.templateType === 'CURTAIN' ? MEASUREMENT_TEMPLATES['CURTAIN_DETAIL'] : undefined);
-                                    const label = template?.fields.find(f => f.key === key)?.label || key;
-
-                                    // Hide old 0x0 values for PLICELL if needed
-                                    if (p.templateType === 'PLICELL' && (key === 'glassWidth' || key === 'glassHeight') && Number(val) === 0) return null;
-
-                                    return (
-                                      <div key={key} className="flex flex-col">
-                                        <span className="text-[10px] text-gray-500 uppercase">{label}</span>
-                                        <span className="font-semibold text-gray-900 dark:text-white text-sm">{String(val)}</span>
+                                <div className="bg-gray-50 dark:bg-gray-900 p-3 rounded mb-3 border border-gray-200 dark:border-gray-700">
+                                  {(p.templateType === 'CURTAIN_DETAIL' || p.templateType === 'CURTAIN') ? (
+                                    <>
+                                      <div className="text-[10px] font-bold uppercase tracking-wide text-blue-600 dark:text-blue-400 mb-2">
+                                        AÇIKLIK EN ÖLÇÜLERİ
                                       </div>
-                                    );
-                                  })}
-                                  {(() => {
-                                    const validNote = getValidNote(p.notes);
-                                    if (!validNote) return null;
-                                    return (
-                                      <div className="col-span-full mt-1 pt-1 border-t border-gray-200 dark:border-gray-700">
-                                        <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase">Saha Notu:</span>
-                                        <span className="text-sm text-gray-800 dark:text-gray-200 block">{validNote}</span>
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        {(Array.isArray(p.rawValues?.facadeSegments) ? p.rawValues.facadeSegments : [])
+                                          .filter((segment: any) => Number(segment?.widthCm || 0) > 0)
+                                          .map((segment: any, segmentIndex: number) => {
+                                            const normalizedSegmentType = String(segment?.type || segment?.label || '').toUpperCase();
+                                            const segmentShortLabel =
+                                              normalizedSegmentType === 'WALL' || normalizedSegmentType === 'DUVAR'
+                                                ? 'D'
+                                                : normalizedSegmentType.includes('CAM')
+                                                  ? 'C'
+                                                  : normalizedSegmentType.includes('PENCERE')
+                                                    ? 'P'
+                                                    : normalizedSegmentType.includes('KAPI')
+                                                      ? 'K'
+                                                      : String(segment?.label || normalizedSegmentType || '?').charAt(0).toUpperCase();
+
+                                            return (
+                                              <div key={segment?.id || segmentIndex} className="flex items-center gap-2">
+                                                {segmentIndex > 0 && <span className="font-bold text-gray-400 dark:text-gray-600">+</span>}
+                                                <div className="min-w-[76px] rounded-lg border border-blue-200 dark:border-blue-900/60 bg-white dark:bg-gray-950 px-3 py-2 text-center">
+                                                  <div className="text-lg font-black leading-none text-gray-900 dark:text-white">
+                                                    {Number(segment.widthCm)}
+                                                  </div>
+                                                  <div className="mt-1 text-xs font-bold text-blue-600 dark:text-blue-400">
+                                                    {segmentShortLabel}
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
                                       </div>
-                                    );
-                                  })()}
+                                      {(() => {
+                                        const validNote = getValidNote(p.notes);
+                                        if (!validNote) return null;
+                                        return (
+                                          <div className="mt-3 pt-2 border-t border-gray-200 dark:border-gray-700">
+                                            <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase">Saha Notu:</span>
+                                            <span className="text-sm text-gray-800 dark:text-gray-200 block">{validNote}</span>
+                                          </div>
+                                        );
+                                      })()}
+                                    </>
+                                  ) : (
+                                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                                      {Object.entries(p.rawValues || {})
+                                        .filter(([key, val]) => {
+                                          if (key === 'facadeSegments' || key === 'totalFacadeWidthCm') return false;
+                                          if (p.templateType === 'PLICELL' && (key === 'plicellCamListesi' || key === 'camAdedi' || key === 'ortakCamBoyuCm' || key === 'profilRengi')) return false;
+                                          const template = MEASUREMENT_TEMPLATES[p.templateType] || (p.templateType === 'CURTAIN' ? MEASUREMENT_TEMPLATES['CURTAIN_DETAIL'] : undefined);
+                                          const fieldDef = template?.fields.find(f => f.key === key);
+                                          return !fieldDef?.hidden;
+                                        })
+                                        .map(([key, val]) => {
+                                          const template = MEASUREMENT_TEMPLATES[p.templateType] || (p.templateType === 'CURTAIN' ? MEASUREMENT_TEMPLATES['CURTAIN_DETAIL'] : undefined);
+                                          const label = template?.fields.find(f => f.key === key)?.label || key;
+
+                                          if (p.templateType === 'PLICELL' && (key === 'glassWidth' || key === 'glassHeight') && Number(val) === 0) return null;
+
+                                          return (
+                                            <div key={key} className="flex flex-col">
+                                              <span className="text-[10px] text-gray-500 uppercase">{label}</span>
+                                              <span className="font-semibold text-gray-900 dark:text-white text-sm">{String(val)}</span>
+                                            </div>
+                                          );
+                                        })}
+                                      {(() => {
+                                        const validNote = getValidNote(p.notes);
+                                        if (!validNote) return null;
+                                        return (
+                                          <div className="col-span-full mt-1 pt-1 border-t border-gray-200 dark:border-gray-700">
+                                            <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase">Saha Notu:</span>
+                                            <span className="text-sm text-gray-800 dark:text-gray-200 block">{validNote}</span>
+                                          </div>
+                                        );
+                                      })()}
+                                    </div>
+                                  )}
                                 </div>
                               )}
 

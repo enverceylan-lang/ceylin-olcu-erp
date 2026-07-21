@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useMeasurementStore } from "@/store/measurementStore";
 
@@ -414,7 +414,7 @@ export function FieldTaskAssignButton({
                     )
                   }
                   rows={3}
-                  placeholder="Trinity B Blok, müşteri saat 14.00'te evde..."
+                  placeholder="Örn: Müşterinin uygun olduğu saat, ulaşım bilgisi veya ölçüyle ilgili özel notlar"
                   className="w-full rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 p-3 resize-y"
                 />
               </div>

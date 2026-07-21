@@ -11,6 +11,68 @@ export type SaleStatus =
   | 'TAMAMLANDI' 
   | 'İPTAL';
 
+export type CustomerApprovalStatus =
+  | 'BEKLIYOR'
+  | 'ONAYLANDI'
+  | 'DUZELTME_ISTENDI'
+  | 'IPTAL_EDILDI';
+
+export type InstallmentStatus =
+  | 'BEKLIYOR'
+  | 'KISMI_ODENDI'
+  | 'ODENDI'
+  | 'GECIKTI'
+  | 'IPTAL';
+
+export type PaymentMethod =
+  | 'NAKIT'
+  | 'KART'
+  | 'HAVALE'
+  | 'EFT'
+  | 'DIGER';
+
+export interface SalePayment {
+  id: string;
+  amount: number;
+  paidAt: string;
+  method: PaymentMethod;
+  installmentId?: string;
+  note?: string;
+  receivedBy?: string;
+}
+
+export interface SaleInstallment {
+  id: string;
+  sequence: number;
+  dueDate: string;
+  amount: number;
+  paidAmount: number;
+  status: InstallmentStatus;
+  lastPaymentAt?: string;
+  note?: string;
+}
+
+export interface SaleInstallmentPlan {
+  id: string;
+  createdAt: string;
+  firstDueDate: string;
+  installmentCount: number;
+  frequency: 'MONTHLY' | 'CUSTOM';
+  totalPlannedAmount: number;
+  installments: SaleInstallment[];
+}
+
+export interface SaleCustomerApproval {
+  status: CustomerApprovalStatus;
+  token?: string;
+  tokenCreatedAt?: string;
+  tokenExpiresAt?: string;
+  sentAt?: string;
+  respondedAt?: string;
+  customerNote?: string;
+  approvedName?: string;
+  approvedPhone?: string;
+}
 export interface SaleItem {
   id: string; 
   measurementId?: string;
@@ -25,6 +87,10 @@ export interface SaleItem {
   quantity: number;
   metricSize: number;
   metricUnit: 'm2' | 'mt' | 'adet';
+  productionWidthCm?: number;
+  productionHeightCm?: number;
+  fabricMeters?: number;
+  calculationVersion?: string;
   pleatDetails?: string;
   unitPrice: number;
   discount: number;
@@ -48,6 +114,12 @@ export interface Sale {
   discount: number; // Genel iskonto
   downPayment: number; // Kapora
   remainingBalance: number; // Kalan bakiye
+  installmentPlan?: SaleInstallmentPlan;
+  payments?: SalePayment[];
+  customerApproval?: SaleCustomerApproval;
+  pdfGeneratedAt?: string;
+  pdfFileName?: string;
+  whatsappApprovalSentAt?: string;
   
   createdAt: string;
   updatedAt: string;
@@ -99,6 +171,14 @@ export const useSalesStore = create<SalesState>((set, get) => ({
 
   updateSale: async (sale: Sale) => {
     await saveLocalSale(sale);
+
+    if (sale.status === 'ÜRETİME_GÖNDERİLDİ') {
+      const { syncCentralSaleToTailorProduction } =
+        await import('@/lib/productionBridge');
+
+      await syncCentralSaleToTailorProduction(sale);
+    }
+
     set(state => ({
       sales: state.sales.map(s => (s.id === sale.id ? sale : s))
     }));

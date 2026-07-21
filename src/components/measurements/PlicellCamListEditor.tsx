@@ -21,7 +21,7 @@ export function PlicellCamListEditor({
   camAdedi = 0,
   ortakCamBoyuCm = 0,
   profilRengi = '',
-  plicellCamListesi = [],
+  plicellCamListesi,
   onChange
 }: PlicellCamListEditorProps) {
   const [localAdet, setLocalAdet] = useState<string>(camAdedi ? String(camAdedi) : '');
@@ -29,13 +29,37 @@ export function PlicellCamListEditor({
   const [localRenk, setLocalRenk] = useState<string>(profilRengi || '');
 
   // Keep internal copy of rows for quick edits
-  const [rows, setRows] = useState<PlicellCamItem[]>(plicellCamListesi || []);
+  const [rows, setRows] = useState<PlicellCamItem[]>(
+    () => plicellCamListesi || []
+  );
 
   useEffect(() => {
-    setRows(plicellCamListesi || []);
-    if (camAdedi) setLocalAdet(String(camAdedi));
-    if (ortakCamBoyuCm) setLocalBoy(String(ortakCamBoyuCm));
-    if (profilRengi) setLocalRenk(profilRengi);
+    const incomingRows = plicellCamListesi || [];
+
+    setRows((currentRows) => {
+      const currentJson = JSON.stringify(currentRows);
+      const incomingJson = JSON.stringify(incomingRows);
+
+      return currentJson === incomingJson
+        ? currentRows
+        : incomingRows;
+    });
+
+    const nextAdet = camAdedi ? String(camAdedi) : "";
+    const nextBoy = ortakCamBoyuCm ? String(ortakCamBoyuCm) : "";
+    const nextRenk = profilRengi || "";
+
+    setLocalAdet((current) =>
+      current === nextAdet ? current : nextAdet
+    );
+
+    setLocalBoy((current) =>
+      current === nextBoy ? current : nextBoy
+    );
+
+    setLocalRenk((current) =>
+      current === nextRenk ? current : nextRenk
+    );
   }, [plicellCamListesi, camAdedi, ortakCamBoyuCm, profilRengi]);
 
   const normalizeNumber = (val: string) => {
