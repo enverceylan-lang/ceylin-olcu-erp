@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Printer, Share2, Loader2 } from 'lucide-react';
+import { X, Printer, Share2, Loader2, ZoomIn, ZoomOut, RotateCcw, Move } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { Customer, MEASUREMENT_TEMPLATES, WindowItem, ProductMeasurement } from '@/store/useStore';
@@ -718,16 +718,184 @@ interface MeasurementVisualReportProps {
 export function MeasurementVisualReport({ isOpen, onClose, customer, users, measurements: propMeasurements }: MeasurementVisualReportProps) {
   const [isGeneratingPdf, setIsGeneratingPdf] = React.useState(false);
   const [previewNode, setPreviewNode] = React.useState<React.ReactNode | null>(null);
+  const [previewZoom, setPreviewZoom] = React.useState(1);
+  const [previewOffset, setPreviewOffset] = React.useState({ x: 0, y: 0 });
+  const [isPreviewDragging, setIsPreviewDragging] = React.useState(false);
+  const previewDragStartRef = React.useRef({
+    pointerX: 0,
+    pointerY: 0,
+    offsetX: 0,
+    offsetY: 0
+  });
 
   const { measurements: storeMeasurements } = useMeasurementStore();
 
+  const clampPreviewZoom = React.useCallback(
+    (value: number) =>
+      Math.min(4, Math.max(1, value)),
+    []
+  );
+
+  const resetPreviewTransform = React.useCallback(() => {
+    setPreviewZoom(1);
+    setPreviewOffset({ x: 0, y: 0 });
+    setIsPreviewDragging(false);
+  }, []);
+
+  const closePreview = React.useCallback(() => {
+    setPreviewNode(null);
+    resetPreviewTransform();
+  }, [resetPreviewTransform]);
+
+  const changePreviewZoom = React.useCallback(
+    (nextZoom: number) => {
+      const clampedZoom =
+        clampPreviewZoom(nextZoom);
+
+      setPreviewZoom(clampedZoom);
+
+      if (clampedZoom === 1) {
+        setPreviewOffset({ x: 0, y: 0 });
+      }
+    },
+    [clampPreviewZoom]
+  );
+
+  const handlePreviewWheel = React.useCallback(
+    (event: React.WheelEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const zoomStep =
+        event.deltaY < 0 ? 0.25 : -0.25;
+
+      setPreviewZoom(currentZoom => {
+        const nextZoom =
+          clampPreviewZoom(
+            currentZoom + zoomStep
+          );
+
+        if (nextZoom === 1) {
+          setPreviewOffset({
+            x: 0,
+            y: 0
+          });
+        }
+
+        return nextZoom;
+      });
+    },
+    [clampPreviewZoom]
+  );
+
+  const handlePreviewPointerDown = React.useCallback(
+    (
+      event:
+        React.PointerEvent<HTMLDivElement>
+    ) => {
+      if (previewZoom <= 1) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      event.currentTarget.setPointerCapture(
+        event.pointerId
+      );
+
+      previewDragStartRef.current = {
+        pointerX: event.clientX,
+        pointerY: event.clientY,
+        offsetX: previewOffset.x,
+        offsetY: previewOffset.y
+      };
+
+      setIsPreviewDragging(true);
+    },
+    [
+      previewOffset.x,
+      previewOffset.y,
+      previewZoom
+    ]
+  );
+
+  const handlePreviewPointerMove = React.useCallback(
+    (
+      event:
+        React.PointerEvent<HTMLDivElement>
+    ) => {
+      if (!isPreviewDragging) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const dragStart =
+        previewDragStartRef.current;
+
+      setPreviewOffset({
+        x:
+          dragStart.offsetX +
+          event.clientX -
+          dragStart.pointerX,
+        y:
+          dragStart.offsetY +
+          event.clientY -
+          dragStart.pointerY
+      });
+    },
+    [isPreviewDragging]
+  );
+
+  const finishPreviewDrag = React.useCallback(
+    (
+      event:
+        React.PointerEvent<HTMLDivElement>
+    ) => {
+      if (
+        event.currentTarget.hasPointerCapture(
+          event.pointerId
+        )
+      ) {
+        event.currentTarget.releasePointerCapture(
+          event.pointerId
+        );
+      }
+
+      setIsPreviewDragging(false);
+    },
+    []
+  );
+
   React.useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setPreviewNode(null);
+      if (e.key === 'Escape') {
+        closePreview();
+      }
     };
-    window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
-  }, []);
+
+    window.addEventListener(
+      'keydown',
+      handleEsc
+    );
+
+    return () =>
+      window.removeEventListener(
+        'keydown',
+        handleEsc
+      );
+  }, [closePreview]);
+
+  React.useEffect(() => {
+    if (previewNode) {
+      resetPreviewTransform();
+    }
+  }, [
+    previewNode,
+    resetPreviewTransform
+  ]);
 
   if (!isOpen) return null;
 
@@ -2828,22 +2996,123 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
       {/* Zoom/Preview Modal */}
       {previewNode && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4 sm:p-8 no-print animate-fade-in"
-          onClick={() => setPreviewNode(null)}
+          className="fixed inset-0 z-[60] flex flex-col bg-black/95 no-print animate-fade-in"
+          onClick={closePreview}
         >
-          <div className="absolute top-4 right-4 z-[70]">
-            <button
-              onClick={(e) => { e.stopPropagation(); setPreviewNode(null); }}
-              className="p-2 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors"
-            >
-              <X className="w-6 h-6" />
-            </button>
-          </div>
           <div
-            className="bg-white rounded-xl shadow-2xl overflow-y-auto max-h-full w-full max-w-5xl animate-scale-in"
-            onClick={(e) => e.stopPropagation()}
+            className="relative z-[70] flex items-center justify-between gap-3 border-b border-white/10 bg-black/70 px-3 py-2 sm:px-5"
+            onClick={(event) =>
+              event.stopPropagation()
+            }
           >
-            {previewNode}
+            <div className="flex items-center gap-2 text-xs font-semibold text-white/80">
+              <Move className="h-4 w-4" />
+              <span className="hidden sm:inline">
+                Yakınlaştırınca sürükleyerek gezinin
+              </span>
+              <span className="rounded-md bg-white/10 px-2 py-1 tabular-nums text-white">
+                %{Math.round(previewZoom * 100)}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() =>
+                  changePreviewZoom(
+                    previewZoom - 0.25
+                  )
+                }
+                disabled={previewZoom <= 1}
+                className="rounded-lg bg-white/10 p-2 text-white transition-colors hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-35"
+                title="Uzaklaştır"
+              >
+                <ZoomOut className="h-5 w-5" />
+              </button>
+
+              <button
+                type="button"
+                onClick={resetPreviewTransform}
+                className="rounded-lg bg-white/10 p-2 text-white transition-colors hover:bg-white/20"
+                title="Yakınlaştırmayı sıfırla"
+              >
+                <RotateCcw className="h-5 w-5" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  changePreviewZoom(
+                    previewZoom + 0.25
+                  )
+                }
+                disabled={previewZoom >= 4}
+                className="rounded-lg bg-white/10 p-2 text-white transition-colors hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-35"
+                title="Yakınlaştır"
+              >
+                <ZoomIn className="h-5 w-5" />
+              </button>
+
+              <button
+                type="button"
+                onClick={closePreview}
+                className="ml-1 rounded-lg bg-red-500/80 p-2 text-white transition-colors hover:bg-red-500"
+                title="Kapat"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+
+          <div
+            className="relative flex-1 overflow-hidden p-2 sm:p-5"
+            onClick={(event) =>
+              event.stopPropagation()
+            }
+            onWheel={handlePreviewWheel}
+            onDoubleClick={() =>
+              changePreviewZoom(
+                previewZoom >= 2
+                  ? 1
+                  : previewZoom + 0.5
+              )
+            }
+            onPointerDown={
+              handlePreviewPointerDown
+            }
+            onPointerMove={
+              handlePreviewPointerMove
+            }
+            onPointerUp={finishPreviewDrag}
+            onPointerCancel={
+              finishPreviewDrag
+            }
+            style={{
+              touchAction: 'none',
+              cursor:
+                previewZoom > 1
+                  ? isPreviewDragging
+                    ? 'grabbing'
+                    : 'grab'
+                  : 'zoom-in'
+            }}
+          >
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div
+                className="w-full max-w-5xl rounded-xl bg-white shadow-2xl will-change-transform"
+                style={{
+                  transform:
+                    `translate3d(${previewOffset.x}px, ${previewOffset.y}px, 0) scale(${previewZoom})`,
+                  transformOrigin: 'center center',
+                  transition:
+                    isPreviewDragging
+                      ? 'none'
+                      : 'transform 160ms ease-out'
+                }}
+              >
+                {previewNode}
+              </div>
+            </div>
           </div>
         </div>
       )}
