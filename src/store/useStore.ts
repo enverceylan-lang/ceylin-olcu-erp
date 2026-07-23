@@ -1,3 +1,4 @@
+import { formatDefaultDeliveryPromiseDate } from "@/lib/deliveryPromise";
 import { create } from 'zustand';
 import { normalizeCariName } from '@/lib/stringUtils';
 import { persist, createJSONStorage } from 'zustand/middleware';
@@ -1271,8 +1272,8 @@ export const useStore = create<AppState>()(
       addSale: (saleData) => set((state) => {
         const saleId = Math.floor(1000 + Math.random() * 9000).toString();
         const date = new Date().toLocaleDateString('tr-TR');
-        const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toLocaleDateString('tr-TR');
-        const montageDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toLocaleDateString('tr-TR');
+        const deadline = formatDefaultDeliveryPromiseDate();
+        const montageDate = deadline;
 
         const filteredItemsForProduction = saleData.items.filter(item => {
           const prod = state.products.find(p => p.id === item.productId);

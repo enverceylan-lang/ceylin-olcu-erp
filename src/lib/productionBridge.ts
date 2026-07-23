@@ -1,3 +1,4 @@
+import { formatDefaultDeliveryPromiseDate } from "@/lib/deliveryPromise";
 import type {
   Sale as CentralSale,
   SaleItem as CentralSaleItem
@@ -91,9 +92,7 @@ function toProductionItem(
     sewingCompleted: false,
     ironingCompleted: false,
     packagingCompleted: false,
-    dueDate: new Date(
-      Date.now() + 3 * 24 * 60 * 60 * 1000
-    ).toLocaleDateString('tr-TR'),
+    dueDate: formatDefaultDeliveryPromiseDate(),
     history: [
       {
         date: new Date().toISOString(),
@@ -198,9 +197,7 @@ export async function syncCentralSaleToTailorProduction(
               customerId: sale.customerId,
               items: taskText,
               status: 'Kesim Bekliyor',
-              deadline: new Date(
-                Date.now() + 3 * 24 * 60 * 60 * 1000
-              ).toLocaleDateString('tr-TR')
+              deadline: formatDefaultDeliveryPromiseDate()
             },
             ...state.productionTasks
           ]

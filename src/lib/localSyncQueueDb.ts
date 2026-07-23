@@ -67,6 +67,40 @@ function sanitizePatch(patch: any): any {
   return sanitized;
 }
 
+const SYNC_COMPARISON_IGNORED_KEYS = new Set([
+  'updatedAt',
+  'syncStatus',
+  'retryCount',
+  'lastSyncedAt',
+  'lastReceivedAt'
+]);
+
+function normalizePatchForComparison(value: any): any {
+  if (Array.isArray(value)) {
+    return value.map(normalizePatchForComparison);
+  }
+
+  if (value && typeof value === 'object') {
+    const normalized: Record<string, any> = {};
+
+    for (const key of Object.keys(value).sort()) {
+      if (SYNC_COMPARISON_IGNORED_KEYS.has(key)) continue;
+      normalized[key] = normalizePatchForComparison(value[key]);
+    }
+
+    return normalized;
+  }
+
+  return value;
+}
+
+function getComparablePatchSignature(patch: any): string {
+  return JSON.stringify(
+    normalizePatchForComparison(
+      sanitizePatch(patch)
+    )
+  );
+}
 export interface EnqueueSyncResult {
   success: boolean;
   changeId?: string;
@@ -83,14 +117,58 @@ export async function enqueueSyncEventDetailed(
 ): Promise<EnqueueSyncResult> {
   try {
     const now = new Date().toISOString();
+    const deviceId = getDeviceId();
+    const sanitizedPatch = sanitizePatch(patch);
+
+    if (entityType === 'MEASUREMENT') {
+      const comparableSignature =
+        getComparablePatchSignature(sanitizedPatch);
+
+      const priorEvents = await localSyncQueueDb.pendingSyncEvents
+        .where('entityId')
+        .equals(entityId)
+        .filter((event) =>
+          event.entityType === entityType &&
+          event.operation === operation &&
+          event.deviceId === deviceId
+        )
+        .toArray();
+
+      const equivalentEvent = priorEvents
+        .sort((a, b) =>
+          String(b.updatedAt || b.createdAt).localeCompare(
+            String(a.updatedAt || a.createdAt)
+          )
+        )
+        .find((event) =>
+          getComparablePatchSignature(event.patch) === comparableSignature
+        );
+
+      if (equivalentEvent) {
+        if (equivalentEvent.syncStatus === 'ERROR') {
+          await localSyncQueueDb.pendingSyncEvents.update(
+            equivalentEvent.changeId,
+            {
+              syncStatus: 'PENDING',
+              updatedAt: now
+            }
+          );
+        }
+
+        return {
+          success: true,
+          changeId: equivalentEvent.changeId,
+          deviceId: equivalentEvent.deviceId,
+          userId: equivalentEvent.userId,
+          createdAt: equivalentEvent.createdAt
+        };
+      }
+    }
 
     const changeId =
       typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
         : `chg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-
-    const deviceId = getDeviceId();
-
     const currentUser = useAuthStore.getState().currentUser;
     const userId = currentUser?.id || 'unknown';
 
@@ -99,7 +177,7 @@ export async function enqueueSyncEventDetailed(
       entityType,
       entityId,
       operation,
-      patch: sanitizePatch(patch),
+      patch: sanitizedPatch,
       deviceId,
       userId,
       createdAt: now,
@@ -154,11 +232,41 @@ export async function enqueueSyncEvent(
 
 export async function getPendingSyncEvents(limit: number = 50): Promise<SyncEvent[]> {
   try {
-    return await localSyncQueueDb.pendingSyncEvents
+    const retryableEvents = await localSyncQueueDb.pendingSyncEvents
       .where('syncStatus')
-      .equals('PENDING')
-      .limit(limit)
-      .toArray();
+      .anyOf(['PENDING', 'ERROR'])
+      .sortBy('createdAt');
+
+    const selectedEvents = retryableEvents.slice(0, limit);
+    const errorEvents = selectedEvents.filter(
+      (event) => event.syncStatus === 'ERROR',
+    );
+
+    if (errorEvents.length > 0) {
+      const now = new Date().toISOString();
+
+      await localSyncQueueDb.pendingSyncEvents.bulkUpdate(
+        errorEvents.map((event) => ({
+          key: event.changeId,
+          changes: {
+            syncStatus: 'PENDING',
+            updatedAt: now,
+          },
+        })),
+      );
+
+      return selectedEvents.map((event) =>
+        event.syncStatus === 'ERROR'
+          ? {
+              ...event,
+              syncStatus: 'PENDING' as const,
+              updatedAt: now,
+            }
+          : event,
+      );
+    }
+
+    return selectedEvents;
   } catch (err: any) {
     if (typeof window !== 'undefined') {
       alert(`[DEBUG] getPendingSyncEvents failed: ${err.message}`);
