@@ -6,7 +6,6 @@ import { Customer, MEASUREMENT_TEMPLATES, WindowItem, ProductMeasurement } from 
 import { getTemplateLabel, getMeasurementDimensions, resolveMeasurementProductLabel, resolveMeasurementProductGroup } from '@/lib/measurementAdapter';
 import { getValidNote } from '@/lib/reportFormatters';
 import {
-  calculatePlicellReport,
   getStoredProductCalculation
 } from '@/lib/calculationEngine';
 import { renderSimpleWidthHeightDiagram, renderCurtainDetailDiagram } from '@/lib/measurementDiagram';
@@ -25,8 +24,8 @@ const MECHANICAL_VISUAL_PRODUCT_TYPES =
   ]);
 
 function getSameOpeningMeasurements(
-  products: any[],
-  current: any
+  products: MeasurementRecord[],
+  current: MeasurementRecord
 ) {
   const currentRoomId =
     String(current?.roomId || '');
@@ -337,6 +336,33 @@ function shouldSuppressSunshadeFacadeHeight(
   );
 }
 
+function getSketchFonPlacement(
+  measurements: any[]
+): 'LEFT' | 'BOTH' | undefined {
+  for (const measurement of measurements) {
+    const fonProduct =
+      measurement?.selectedProducts?.find(
+        (product: any) =>
+          product?.isActive !== false &&
+          String(
+            product?.productType || ''
+          ).toUpperCase() === 'FON'
+      );
+
+    const placement =
+      fonProduct?.calculation?.fonPlacement;
+
+    if (
+      placement === 'LEFT' ||
+      placement === 'BOTH'
+    ) {
+      return placement;
+    }
+  }
+
+  return undefined;
+}
+
 function getGeneralSketchProductHeights(
   products: any[],
   current: any
@@ -575,6 +601,18 @@ function buildCalculationReportDetails(
     );
   }
 
+  if (type === 'FON') {
+    if (calc.fonPlacement === 'LEFT') {
+      details.push('Fon Yerleşimi: Sol Kanat');
+    } else if (calc.fonPlacement === 'BOTH') {
+      details.push('Fon Yerleşimi: Sol ve Sağ Kanat');
+    }
+
+    if (calc.wings !== undefined) {
+      details.push(`Fon Kanat Adedi: ${calc.wings}`);
+    }
+  }
+
   if (
     type === 'DIKEY_STOR' ||
     type === 'DIKEY_TUL'
@@ -753,8 +791,22 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
             if (item.productType === 'RUSTIK' && calc.billingWidth) {
               detailsList.push(`Rustik Boru Eni: ${calc.billingWidth} cm, Boy: ${calc.billingHeight} cm`);
             }
-            if (item.productType === 'TAVAN_RUSTIK' && calc.legLengthCm) {
-              detailsList.push(`Miktar: 1 m, Ayak Boyu: ${calc.legLengthCm} cm`);
+            if (item.productType === 'TAVAN_RUSTIK') {
+              if (
+                calc.quantity !== undefined &&
+                calc.pieceLengthMeters !== undefined &&
+                calc.totalLengthMeters !== undefined
+              ) {
+                detailsList.push(
+                  `Tavan Rustik: ${calc.quantity} adet × ${calc.pieceLengthMeters} mt | Toplam: ${calc.totalLengthMeters} mt`
+                );
+              }
+
+              if (calc.legLengthCm !== undefined) {
+                detailsList.push(
+                  `Ayak Boyu: ${calc.legLengthCm} cm`
+                );
+              }
             }
 
 
@@ -1964,7 +2016,27 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                   id: `${m.id}-group-${gIdx}`,
                                   productType: pType,
                                   productGroup: pGroup,
-                                  selectedProducts: [ap],
+                                  selectedProducts: [
+                                    {
+                                      ...ap,
+                                      calculation: {
+                                        ...ap.calculation,
+                                        realWidthCm: Number(g.realWidthCm || 0),
+                                        realHeightCm: Number(g.realHeightCm || 0),
+                                        actualWidthCm: Number(g.realWidthCm || 0),
+                                        actualHeightCm: Number(g.realHeightCm || 0),
+                                        billingWidthCm: Number(g.calculatedWidthCm || 0),
+                                        billingHeightCm: Number(g.calculatedHeightCm || 0),
+                                        calculatedWidthCm: Number(g.calculatedWidthCm || 0),
+                                        calculatedHeightCm: Number(g.calculatedHeightCm || 0),
+                                        quantity: Number(g.quantity || 1),
+                                        unitM2: Number(g.unitM2 || 0),
+                                        totalM2: Number(g.totalM2 || 0),
+                                        totalSystemM2: Number(g.totalM2 || 0),
+                                        chainDirection: g.chainDirection
+                                      }
+                                    }
+                                  ],
                                   rawValues: {
                                     ...m.rawValues,
                                     width: g.realWidthCm,
@@ -2203,6 +2275,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                         productTypes={
                                           generalProductTypes
                                         }
+                                        fonPlacement={                                           getSketchFonPlacement(                                             products                                           )                                         }
                                         productHeights={getGeneralSketchProductHeights(                                           products,                                           firstMeasurement                                         )}
                                         mechanicalPanels={buildMechanicalVisualPanels(getSameOpeningMeasurements(activeMeasurements, firstMeasurement))}
                                       />
@@ -2323,6 +2396,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                                     ortaYukseklikCm={Number(p.rawValues?.ortaYukseklikCm || 0)}
                                                     sagYukseklikCm={Number(p.rawValues?.sagYukseklikCm || 0)}
                                                     productTypes={getSketchProductTypes([p], p)}
+                                                    fonPlacement={getSketchFonPlacement([p])}
                                                     productHeights={getSketchProductHeights([p], p)}
                                                     suppressFacadeHeight={shouldSuppressSunshadeFacadeHeight(p)}
                                         mechanicalPanels={buildMechanicalVisualPanels([p])}
@@ -2344,6 +2418,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                                 ortaYukseklikCm={Number(p.rawValues?.ortaYukseklikCm || 0)}
                                                 sagYukseklikCm={Number(p.rawValues?.sagYukseklikCm || 0)}
                                                 productTypes={getSketchProductTypes([p], p)}
+                                                fonPlacement={getSketchFonPlacement([p])}
                                                 productHeights={getSketchProductHeights([p], p)}
                                                 suppressFacadeHeight={shouldSuppressSunshadeFacadeHeight(p)}
                                         mechanicalPanels={buildMechanicalVisualPanels([p])}
@@ -2403,26 +2478,37 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                       'PLICELL'
                                     );
 
-                                  const plicellReportCalculation =
-                                    calculatePlicellReport(
-                                      validCamListesi,
-                                      ortakBoy,
-                                      Number(
-                                        storedPlicellCalculation.quantity ||
-                                        p.rawValues?.quantity ||
-                                        1
-                                      ),
-                                      storedPlicellCalculation.systemType === 'DOUBLE'
-                                        ? 'DOUBLE'
-                                        : 'SINGLE'
-                                    );
+                                  const storedPlicellCams = Array.isArray(
+                                    storedPlicellCalculation.cams
+                                  )
+                                    ? storedPlicellCalculation.cams
+                                    : Array.isArray(
+                                        storedPlicellCalculation.groups
+                                      )
+                                      ? storedPlicellCalculation.groups
+                                      : [];
+
+                                  const storedPlicellQuantity = Math.max(
+                                    1,
+                                    Number(
+                                      storedPlicellCalculation.quantity ??
+                                      p.rawValues?.quantity ??
+                                      1
+                                    )
+                                  );
+
+                                  const storedPlicellTotalM2 = Number(
+                                    storedPlicellCalculation.totalSystemM2 ??
+                                    storedPlicellCalculation.totalM2 ??
+                                    0
+                                  );
 
                                   globalPlicellCount +=
-                                    plicellReportCalculation.cams.length *
-                                    plicellReportCalculation.quantity;
+                                    storedPlicellCams.length *
+                                    storedPlicellQuantity;
 
                                   globalPlicellM2 +=
-                                    plicellReportCalculation.totalM2;
+                                    storedPlicellTotalM2;
 
                                   return (
                                     <div key={`${p.id}-plicell-${index}`} className="measurement-card bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5 mb-6 print:mb-8 shadow-sm">
@@ -2438,6 +2524,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                               ortakCamBoyuCm={ortakBoy}
                                               profilRengi={profilRengi}
                                               plicellCamListesi={validCamListesi}
+                                              calculation={storedPlicellCalculation}
                                             />
                                           </div>
                                         )}
@@ -2447,6 +2534,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                           ortakCamBoyuCm={ortakBoy}
                                           profilRengi={profilRengi}
                                           plicellCamListesi={validCamListesi}
+                                          calculation={storedPlicellCalculation}
                                         />
                                       </div>
                                     </div>
@@ -2461,32 +2549,37 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                       'PLICELL'
                                     );
 
-                                  const plicellReportCalculation =
-                                    calculatePlicellReport(
-                                      [
-                                        {
-                                          widthCm: w,
-                                          heightCm: h,
-                                          note: p.notes
-                                        }
-                                      ],
-                                      h,
-                                      Number(
-                                        storedPlicellCalculation.quantity ||
-                                        p.rawValues?.quantity ||
-                                        1
-                                      ),
-                                      storedPlicellCalculation.systemType === 'DOUBLE'
-                                        ? 'DOUBLE'
-                                        : 'SINGLE'
-                                    );
+                                  const storedPlicellCams = Array.isArray(
+                                    storedPlicellCalculation.cams
+                                  )
+                                    ? storedPlicellCalculation.cams
+                                    : Array.isArray(
+                                        storedPlicellCalculation.groups
+                                      )
+                                      ? storedPlicellCalculation.groups
+                                      : [];
+
+                                  const storedPlicellQuantity = Math.max(
+                                    1,
+                                    Number(
+                                      storedPlicellCalculation.quantity ??
+                                      p.rawValues?.quantity ??
+                                      1
+                                    )
+                                  );
+
+                                  const storedPlicellTotalM2 = Number(
+                                    storedPlicellCalculation.totalSystemM2 ??
+                                    storedPlicellCalculation.totalM2 ??
+                                    0
+                                  );
 
                                   globalPlicellCount +=
-                                    plicellReportCalculation.cams.length *
-                                    plicellReportCalculation.quantity;
+                                    storedPlicellCams.length *
+                                    storedPlicellQuantity;
 
                                   globalPlicellM2 +=
-                                    plicellReportCalculation.totalM2;
+                                    storedPlicellTotalM2;
 
                                   const singleCamItem = {
                                     widthCm: w,
@@ -2507,6 +2600,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                               camAdedi={1}
                                               ortakCamBoyuCm={h}
                                               plicellCamListesi={[singleCamItem]}
+                                              calculation={storedPlicellCalculation}
                                             />
                                           </div>
                                         )}
@@ -2515,6 +2609,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                           camAdedi={1}
                                           ortakCamBoyuCm={h}
                                           plicellCamListesi={[singleCamItem]}
+                                          calculation={storedPlicellCalculation}
                                         />
                                       </div>
                                     </div>
@@ -2610,15 +2705,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                             0
                                           );
 
-                                        const unitM2 =
-                                          Number(
-                                            storedCalculation.unitM2 ??
-                                            (
-                                              totalM2 > 0
-                                                ? totalM2 / q
-                                                : 0
-                                            )
-                                          );
+                                        const unitM2 = Number(                                           storedCalculation.unitM2 ??                                           0                                         );
 
                                         const chainDirection =
                                           p.details?.chainDirection ||

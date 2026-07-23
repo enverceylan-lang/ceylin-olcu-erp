@@ -51,7 +51,6 @@ export type {
   SaleCalculationValidation
 } from './salesBridge';
 export {
-  calculatePlicellReport,
   getStoredProductCalculation
 } from './reportBridge';
 

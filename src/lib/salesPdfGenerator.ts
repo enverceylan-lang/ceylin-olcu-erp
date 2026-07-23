@@ -23,6 +23,16 @@ const money = (value: number): string =>
     maximumFractionDigits: 2
   })} TL`;
 
+const paymentMethodText = (
+  method?: Sale['downPaymentMethod']
+): string => {
+  if (method === 'NAKIT') return 'Nakit';
+  if (method === 'KART') return 'Kredi Karti';
+  if (method === 'HAVALE') return 'Banka Havalesi';
+  if (method === 'EFT') return 'EFT';
+  if (method === 'DIGER') return 'Diger';
+  return '-';
+};
 const dateText = (value?: string): string => {
   if (!value) return '-';
   const date = new Date(value.includes('T') ? value : `${value}T12:00:00`);
@@ -126,9 +136,13 @@ export async function generateSalesPdfFile(
   row('Ara Toplam', money(sale.totalAmount));
   row('Iskonto', money(sale.discount));
   row('Net Toplam', money(getSaleNetTotal(sale)));
-  row('Tahsil Edilen', money(getSalePaidTotal(sale)));
+  row('Pesinat', money(sale.downPayment));
+  row(
+    'Pesinat Yontemi',
+    paymentMethodText(sale.downPaymentMethod)
+  );
+  row('Toplam Tahsilat', money(getSalePaidTotal(sale)));
   row('Kalan Bakiye', money(getSaleRemainingBalance(sale)));
-
   const plan = refreshInstallmentPlan(sale.installmentPlan);
   if (plan?.installments.length) {
     title('Taksit Plani');
@@ -182,6 +196,36 @@ export async function generateSalesPdfFile(
   });
 }
 
+export function openSalesPdfPreview(
+  file: File,
+  previewWindow?: Window | null
+): void {
+  const url = URL.createObjectURL(file);
+
+  const targetWindow =
+    previewWindow && !previewWindow.closed
+      ? previewWindow
+      : window.open(
+          '',
+          '_blank',
+          'noopener,noreferrer'
+        );
+
+  if (!targetWindow) {
+    URL.revokeObjectURL(url);
+
+    throw new Error(
+      'PDF önizleme penceresi açılamadı. Tarayıcı açılır pencere iznini kontrol edin.'
+    );
+  }
+
+  targetWindow.location.href = url;
+
+  window.setTimeout(
+    () => URL.revokeObjectURL(url),
+    60000
+  );
+}
 export function downloadSalesPdfFile(file: File): void {
   const url = URL.createObjectURL(file);
   const anchor = document.createElement('a');

@@ -7,10 +7,9 @@ import { MessageCircle } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useStore } from "@/store/useStore";
-import { useSalesStore, Sale, SaleStatus, SaleItem } from "@/store/salesStore";
+import { useSalesStore, Sale, SaleStatus, SaleItem, PaymentMethod } from "@/store/salesStore";
 import InstallmentPlanPanel from "@/components/sales/InstallmentPlanPanel";
-import PaymentTrackingPanel from "@/components/sales/PaymentTrackingPanel";
-import { downloadSalesPdfFile, generateSalesPdfFile } from "@/lib/salesPdfGenerator";
+import { generateSalesPdfFile, openSalesPdfPreview } from "@/lib/salesPdfGenerator";
 import { prepareSaleForApproval } from "@/lib/salesApproval";
 
 export default function SaleDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -23,13 +22,17 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
 
   const [mounted, setMounted] = useState(false);
   const [sale, setSale] = useState<Sale | null>(null);
-  
+
   // Local form state
   const [cashPrice, setCashPrice] = useState(0);
   const [installmentPrice, setInstallmentPrice] = useState(0);
   const [downPayment, setDownPayment] = useState(0);
+  const [downPaymentMethod, setDownPaymentMethod] =
+    useState<PaymentMethod | "">("");
+  const [generalDueDate, setGeneralDueDate] =
+    useState("");
   const [globalDiscount, setGlobalDiscount] = useState(0);
-  
+
   useEffect(() => {
     loadSales().then(() => setMounted(true));
   }, [loadSales]);
@@ -42,6 +45,10 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
         setCashPrice(found.cashPrice);
         setInstallmentPrice(found.installmentPrice);
         setDownPayment(found.downPayment);
+        setDownPaymentMethod(found.downPaymentMethod || "");
+        setGeneralDueDate(
+          found.generalDueDate || ""
+        );
         setGlobalDiscount(found.discount);
       }
     }
@@ -62,7 +69,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
     const item = { ...newItems[index], [field]: value };
     item.rowTotal = calculateRowTotal(item);
     newItems[index] = item;
-    
+
     // Recalculate global total
     const totalAmount = newItems.reduce((acc, curr) => acc + curr.rowTotal, 0);
     setSale({ ...sale, items: newItems, totalAmount });
@@ -78,28 +85,65 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
     ...sale,
     discount: globalDiscount,
     downPayment,
+    downPaymentMethod: downPaymentMethod || undefined,
+    generalDueDate:
+      generalDueDate || undefined,
     remainingBalance: getRemainingBalance()
   };
 
   const handleSave = async () => {
+    if (
+      Number(downPayment || 0) > 0 &&
+      !downPaymentMethod
+    ) {
+      alert("Peşinat ödeme yöntemini seçiniz.");
+      return;
+    }
+
+    const openBalance =
+      getRemainingBalance();
+
+    if (
+      openBalance > 0 &&
+      Number(downPayment || 0) <= 0 &&
+      !generalDueDate
+    ) {
+      alert(
+        "Peşinat yoksa genel vade tarihi zorunludur."
+      );
+      return;
+    }
+
     try {
       const updatedSale: Sale = {
         ...sale,
         cashPrice,
         installmentPrice,
         downPayment,
+        downPaymentMethod:
+          Number(downPayment || 0) > 0
+            ? downPaymentMethod || undefined
+            : undefined,
+        generalDueDate:
+          generalDueDate || undefined,
         discount: globalDiscount,
         remainingBalance: getRemainingBalance(),
         updatedAt: new Date().toISOString()
       };
+
       await updateSale(updatedSale);
-      alert("Satış kaydedildi!");
-    } catch (err) {
-      console.error(err);
-      alert("Hata oluştu.");
+      router.replace("/satis");
+    } catch (error) {
+      console.error(
+        "[Sales] Satış kaydedilemedi.",
+        error
+      );
+
+      alert(
+        "Satış kaydedilemedi. Kayıt ekranı açık bırakıldı."
+      );
     }
   };
-
   const handleSendApprovalWhatsApp = async () => {
     try {
       if (!customer?.phone) {
@@ -130,7 +174,37 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
     }
   };
 
-  const handleDownloadPdf = async () => {
+  const handlePreviewPdf = async () => {
+    const previewWindow =
+      window.open(
+        '',
+        '_blank',
+        'noopener,noreferrer'
+      );
+
+    if (!previewWindow) {
+      alert(
+        "PDF önizleme açılamadı. Tarayıcı açılır pencere iznini etkinleştirin."
+      );
+      return;
+    }
+
+    previewWindow.document.write(
+      '<!doctype html>' +
+      '<html lang="tr">' +
+      '<head>' +
+      '<meta charset="utf-8" />' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1" />' +
+      '<title>Satış PDF hazırlanıyor</title>' +
+      '</head>' +
+      '<body style="font-family:Arial,sans-serif;padding:24px;text-align:center">' +
+      '<p>Satış PDF hazırlanıyor...</p>' +
+      '</body>' +
+      '</html>'
+    );
+
+    previewWindow.document.close();
+
     try {
       const currentSale: Sale = {
         ...saleForFinance,
@@ -143,18 +217,35 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
         customer
       );
 
-      downloadSalesPdfFile(file);
+      openSalesPdfPreview(
+        file,
+        previewWindow
+      );
 
-      setSale({
+      const saleWithPdf: Sale = {
         ...currentSale,
         pdfFileName: file.name
-      });
+      };
+
+      setSale(saleWithPdf);
+      await updateSale(saleWithPdf);
     } catch (error) {
-      console.error("[Sales PDF] PDF oluşturulamadı.", error);
-      alert("Satış PDF'si oluşturulamadı.");
+      if (!previewWindow.closed) {
+        previewWindow.close();
+      }
+
+      console.error(
+        "[Sales PDF] PDF önizlemesi oluşturulamadı.",
+        error
+      );
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Satış PDF'si oluşturulamadı."
+      );
     }
   };
-
   const handleDelete = async () => {
     if (confirm("Bu satış kaydını silmek istediğinize emin misiniz?")) {
       await removeSale(sale.id);
@@ -175,7 +266,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
             <p className="text-sm heading-subtitle">{customer?.name || "Bilinmiyor"}</p>
           </div>
         </div>
-        
+
         <div className="flex gap-2">
           <button
             type="button"
@@ -187,11 +278,11 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
           </button>
           <button
             type="button"
-            onClick={handleDownloadPdf}
+            onClick={handlePreviewPdf}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold shadow-sm transition-colors"
           >
             <FileDown className="w-4 h-4" />
-            Satış PDF
+            PDF Görüntüle
           </button>
           <button
             onClick={handleDelete}
@@ -205,7 +296,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-sm transition-colors"
           >
             <Save className="w-4 h-4" />
-            Kaydet
+            Kaydet ve Çık
           </button>
         </div>
       </div>
@@ -221,7 +312,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
                   <tr>
                     <th className="px-4 py-3">Oda / Pencere</th>
                     <th className="px-4 py-3">Ürün</th>
-                    <th className="px-4 py-3 text-right">Ölçü ({sale.items[0]?.metricUnit || 'br'})</th>
+                    <th className="px-4 py-3 text-right">Birim</th>
                     <th className="px-4 py-3 text-right">Miktar</th>
                     <th className="px-4 py-3 text-right">Birim Fiyat</th>
                     <th className="px-4 py-3 text-right">İskonto</th>
@@ -241,15 +332,16 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <input 
+                        <input
                           type="number"
-                          value={item.metricSize}
+                          step="0.01"
+                          value={Number(Number(item.metricSize || 0).toFixed(2))}
                           onChange={e => handleRowChange(idx, 'metricSize', parseFloat(e.target.value) || 0)}
                           className="w-16 text-right border border-gray-300 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-800"
                         />
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <input 
+                        <input
                           type="number"
                           value={item.quantity}
                           onChange={e => handleRowChange(idx, 'quantity', parseInt(e.target.value) || 1)}
@@ -257,7 +349,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
                         />
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <input 
+                        <input
                           type="number"
                           value={item.unitPrice}
                           onChange={e => handleRowChange(idx, 'unitPrice', parseFloat(e.target.value) || 0)}
@@ -265,7 +357,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
                         />
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <input 
+                        <input
                           type="number"
                           value={item.discount}
                           onChange={e => handleRowChange(idx, 'discount', parseFloat(e.target.value) || 0)}
@@ -290,16 +382,16 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
         <div className="lg:col-span-1 space-y-6">
           <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 shadow-sm">
             <h2 className="font-semibold text-gray-900 dark:text-white mb-4">Genel Toplam</h2>
-            
+
             <div className="space-y-4 text-sm">
               <div className="flex justify-between text-gray-600 dark:text-gray-400">
                 <span>Ara Toplam</span>
                 <span>{sale.totalAmount.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' })}</span>
               </div>
-              
+
               <div className="flex justify-between items-center text-red-600">
                 <span>Genel İskonto</span>
-                <input 
+                <input
                   type="number"
                   value={globalDiscount}
                   onChange={e => setGlobalDiscount(parseFloat(e.target.value) || 0)}
@@ -312,15 +404,91 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
                 <span>{(sale.totalAmount - globalDiscount).toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' })}</span>
               </div>
 
-              <div className="flex justify-between items-center text-green-600 pt-2 border-t border-gray-200 dark:border-gray-700">
-                <span>Kapora (Alınan)</span>
-                <input 
-                  type="number"
-                  value={downPayment}
-                  onChange={e => setDownPayment(parseFloat(e.target.value) || 0)}
-                  className="w-24 text-right border border-gray-300 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-800"
-                />
+              <div className="space-y-3 pt-2 border-t border-gray-200 dark:border-gray-700">
+                <div className="flex justify-between items-center text-green-600">
+                  <span>Peşinat</span>
+
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={downPayment}
+                    onChange={event => {
+                      const value = Math.max(
+                        0,
+                        parseFloat(event.target.value) || 0
+                      );
+
+                      setDownPayment(value);
+
+                      if (value === 0) {
+                        setDownPaymentMethod("");
+                      }
+                    }}
+                    className="w-28 text-right border border-gray-300 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-800"
+                  />
+                </div>
+
+                {downPayment > 0 && (
+                  <label className="block space-y-1">
+                    <span className="block text-xs font-semibold text-gray-600 dark:text-gray-300">
+                      Peşinat Ödeme Yöntemi
+                    </span>
+
+                    <select
+                      value={downPaymentMethod}
+                      onChange={event =>
+                        setDownPaymentMethod(
+                          event.target.value as PaymentMethod
+                        )
+                      }
+                      className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded-lg p-2"
+                    >
+                      <option value="">
+                        Ödeme yöntemi seçiniz
+                      </option>
+
+                      <option value="NAKIT">
+                        Nakit
+                      </option>
+
+                      <option value="KART">
+                        Kredi Kartı
+                      </option>
+
+                      <option value="HAVALE">
+                        Banka Havalesi
+                      </option>
+                    </select>
+                  </label>
+                )}
               </div>
+              <label className="block space-y-1 pt-2 border-t border-gray-200 dark:border-gray-700">
+                <span className="block text-xs font-semibold text-gray-600 dark:text-gray-300">
+                  Genel Ödeme Vadesi
+                </span>
+
+                <input
+                  type="date"
+                  value={generalDueDate}
+                  onChange={event =>
+                    setGeneralDueDate(
+                      event.target.value
+                    )
+                  }
+                  className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded-lg p-2"
+                />
+
+                {
+                  getRemainingBalance() > 0 &&
+                  downPayment <= 0 &&
+                  !generalDueDate && (
+                    <span className="block text-xs text-red-600">
+                      Peşinat yoksa zorunludur.
+                    </span>
+                  )
+                }
+              </label>
 
               <div className="flex justify-between font-bold text-orange-600 text-lg pt-2 border-t border-gray-200 dark:border-gray-700">
                 <span>Kalan Bakiye</span>
@@ -330,15 +498,6 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
           </div>
 
           <InstallmentPlanPanel
-            sale={saleForFinance}
-            onChange={updatedSale => {
-              setSale(updatedSale);
-              setDownPayment(updatedSale.downPayment);
-              setGlobalDiscount(updatedSale.discount);
-            }}
-          />
-
-          <PaymentTrackingPanel
             sale={saleForFinance}
             onChange={updatedSale => {
               setSale(updatedSale);

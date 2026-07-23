@@ -1,14 +1,14 @@
 import { create } from 'zustand';
 import { loadLocalSales, saveLocalSale, deleteLocalSale } from '@/lib/localSalesDb';
 
-export type SaleStatus = 
-  | 'TASLAK' 
-  | 'TEKLİF' 
-  | 'ONAYLANDI' 
-  | 'SİPARİŞ' 
-  | 'ÜRETİME_GÖNDERİLDİ' 
-  | 'MONTAJA_GÖNDERİLDİ' 
-  | 'TAMAMLANDI' 
+export type SaleStatus =
+  | 'TASLAK'
+  | 'TEKLİF'
+  | 'ONAYLANDI'
+  | 'SİPARİŞ'
+  | 'ÜRETİME_GÖNDERİLDİ'
+  | 'MONTAJA_GÖNDERİLDİ'
+  | 'TAMAMLANDI'
   | 'İPTAL';
 
 export type CustomerApprovalStatus =
@@ -74,7 +74,7 @@ export interface SaleCustomerApproval {
   approvedPhone?: string;
 }
 export interface SaleItem {
-  id: string; 
+  id: string;
   measurementId?: string;
   roomName: string;
   windowName: string;
@@ -92,6 +92,7 @@ export interface SaleItem {
   fabricMeters?: number;
   calculationVersion?: string;
   pleatDetails?: string;
+  wingQuantity?: number;   fonPlacement?: 'LEFT' | 'BOTH';    /*    * Satış satırı oda bazında gruplanabilir.    * Üretim açıklık ve ölçü bazındaki merkezi satırları korur.    */   productionBreakdown?: SaleItem[];
   unitPrice: number;
   discount: number;
   rowTotal: number;
@@ -104,15 +105,20 @@ export interface Sale {
   id: string;
   saleNo: string;
   customerId: string;
+  createdByUserId?: string;
+  createdByUsername?: string;
+  createdByName?: string;
   status: SaleStatus;
   items: SaleItem[];
-  
+
   priceSource: 'STOCK' | 'MANUAL' | 'CAMPAIGN' | 'SERVICE';
   totalAmount: number; // Sum of rowTotal
   cashPrice: number; // Peşin fiyat
   installmentPrice: number; // Taksitli fiyat
   discount: number; // Genel iskonto
   downPayment: number; // Kapora
+  downPaymentMethod?: PaymentMethod;
+  generalDueDate?: string;
   remainingBalance: number; // Kalan bakiye
   installmentPlan?: SaleInstallmentPlan;
   payments?: SalePayment[];
@@ -120,7 +126,7 @@ export interface Sale {
   pdfGeneratedAt?: string;
   pdfFileName?: string;
   whatsappApprovalSentAt?: string;
-  
+
   createdAt: string;
   updatedAt: string;
   isDeleted?: boolean;
@@ -191,7 +197,7 @@ export const useSalesStore = create<SalesState>((set, get) => ({
     }));
   },
 
-  
+
   cascadeArchiveCustomer: async (customerId, batchId, username) => {
     const state = get();
     const now = new Date().toISOString();
@@ -295,7 +301,7 @@ export const useSalesStore = create<SalesState>((set, get) => ({
       const sales = get().sales;
       const updatedSales = [...sales];
       let hasChanges = false;
-      
+
       for (let i = 0; i < updatedSales.length; i++) {
         if (updatedSales[i].customerId === sourceCustomerId) {
           updatedSales[i] = {
@@ -307,7 +313,7 @@ export const useSalesStore = create<SalesState>((set, get) => ({
           hasChanges = true;
         }
       }
-      
+
       if (hasChanges) {
         set({ sales: updatedSales });
       }

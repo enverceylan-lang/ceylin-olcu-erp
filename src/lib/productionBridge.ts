@@ -54,7 +54,7 @@ function toLegacySaleItem(item: CentralSaleItem): LegacySaleItem {
     unitPrice: item.unitPrice,
     totalPrice: item.rowTotal,
     pleatType: item.pleatDetails,
-    wingQuantity: undefined
+    wingQuantity: item.wingQuantity,     fonPlacement: item.fonPlacement
   };
 }
 
@@ -85,6 +85,7 @@ function toProductionItem(
     ),
     quantity: resolveProductionQuantity(item),
     pleatType: item.pleatDetails,
+    wingQuantity: item.wingQuantity,     fonPlacement: item.fonPlacement,
     productionStatus: 'READY_FOR_CUTTING',
     cutCompleted: false,
     sewingCompleted: false,
@@ -117,10 +118,23 @@ export async function syncCentralSaleToTailorProduction(
     return;
   }
 
-  const tailorItems = sale.items.filter(item =>
-    !item.isJumboComponent &&
-    shouldCreateTailorProductionItem(item)
-  );
+  /*
+   * Satış satırları oda bazında gruplanmış olabilir.
+   * Terzi üretimi açıklık ve ölçü bazındaki merkezi kaynakları kullanır.
+   */
+  const productionSourceItems =
+    sale.items.flatMap(item =>
+      Array.isArray(item.productionBreakdown) &&
+      item.productionBreakdown.length > 0
+        ? item.productionBreakdown
+        : [item]
+    );
+
+  const tailorItems =
+    productionSourceItems.filter(item =>
+      !item.isJumboComponent &&
+      shouldCreateTailorProductionItem(item)
+    );
 
   if (tailorItems.length === 0) {
     return;
@@ -141,7 +155,7 @@ export async function syncCentralSaleToTailorProduction(
       )
       .map(item => toProductionItem(sale, item));
 
-    const legacyItems = sale.items.map(toLegacySaleItem);
+    const legacyItems = productionSourceItems.map(toLegacySaleItem);
 
     const mirroredSale: LegacySale = {
       id: sale.id,

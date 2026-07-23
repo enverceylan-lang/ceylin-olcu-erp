@@ -418,6 +418,7 @@ export interface SaleItem {
   totalPrice: number;
   pleatType?: string;
   wingQuantity?: number;
+  fonPlacement?: 'LEFT' | 'BOTH';
 }
 
 export interface Sale {
@@ -481,6 +482,7 @@ export interface ProductionItem {
   height: number;
   quantity: number;
   pleatType?: string;
+  wingQuantity?: number;   fonPlacement?: 'LEFT' | 'BOTH';
   productionStatus: string;
   cutCompleted: boolean;
   sewingCompleted: boolean;

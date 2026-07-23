@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useStore } from "@/store/useStore";
 import { useSalesStore } from "@/store/salesStore";
 import { syncOrCreateDraftSale } from "@/lib/salesAdapter";
+import { useAuthStore } from "@/store/useAuthStore";
 
 export default function YeniSatisPage() {
   const router = useRouter();
@@ -18,6 +19,10 @@ export default function YeniSatisPage() {
   const loadSales = useSalesStore(state => state.loadSales);
   const addSale = useSalesStore(state => state.addSale);
   const updateSale = useSalesStore(state => state.updateSale);
+
+  const currentUser = useAuthStore(
+    state => state.currentUser
+  );
 
   const preselectedCustomerId =
     searchParams.get("customerId") || "";
@@ -64,6 +69,13 @@ export default function YeniSatisPage() {
       return;
     }
 
+    if (!currentUser) {
+      setMessage(
+        "Satışı yapan kullanıcı oturumu bulunamadı."
+      );
+      return;
+    }
+
     setIsSaving(true);
     setMessage(null);
 
@@ -74,7 +86,8 @@ export default function YeniSatisPage() {
           sales,
           addSale,
           updateSale
-        }
+        },
+        currentUser
       );
 
       router.push(`/satis/${saleId}`);

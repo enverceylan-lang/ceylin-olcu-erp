@@ -32,6 +32,7 @@ export interface TechnicalMeasurementSketchProps {
   ortaYukseklikCm?: number;
   sagYukseklikCm?: number;
   productTypes?: string[];
+  fonPlacement?: 'LEFT' | 'BOTH';
   productHeights?: Array<{
     productType: string;
     label: string;
@@ -55,6 +56,7 @@ export function TechnicalMeasurementSketch(props: TechnicalMeasurementSketchProp
     ortaYukseklikCm = 0,
     sagYukseklikCm = 0,
     productTypes = [],
+    fonPlacement,
     productHeights = [],
     suppressFacadeHeight = false,
     mechanicalPanels = [],
@@ -830,12 +832,7 @@ if (productLegendItems.length > 0) {
                 y2={segStartY + totalSegH - 8}
               />
 
-              <line
-                x1={endX - 10}
-                y1={lineY}
-                x2={endX - 10}
-                y2={segStartY + totalSegH - 8}
-              />
+              {fonPlacement !== 'LEFT' && (                 <line                   x1={endX - 10}                   y1={lineY}                   x2={endX - 10}                   y2={segStartY + totalSegH - 8}                 />               )}
             </g>
           );
 

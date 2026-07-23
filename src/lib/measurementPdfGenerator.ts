@@ -1172,9 +1172,8 @@ export async function generateMeasurementPdfBlob(
 
             const unitM2 =
               Number(
-                totalM2 > 0
-                  ? totalM2 / q
-                  : 0
+                storedCalculation.unitM2 ??
+                0
               );
 
             const chainDirection =

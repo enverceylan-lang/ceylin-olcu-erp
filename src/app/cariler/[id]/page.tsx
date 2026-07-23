@@ -11,7 +11,7 @@ import { getMeasurementDimensions, getTemplateLabel, getGoogleMapsUrl, getWorkfl
 import { fileToDataUrl } from "@/lib/fileStorage";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
 import { syncNow } from "@/lib/syncService";
-import { buildWhatsAppShortReport, calculateMechanicalCurtainM2, calculatePlicellM2, getValidNote } from "@/lib/reportFormatters";
+import { buildWhatsAppShortReport, getValidNote } from "@/lib/reportFormatters";
 import { MeasurementVisualReport } from "@/components/reports/MeasurementVisualReport";
 import { RoomPreparationModal } from "@/components/reports/RoomPreparationModal";
 import { localDraftDb, FieldMeasurementDraft, forceRequeueCustomerMeasurementTree } from "@/lib/localDraftDb";
@@ -738,7 +738,11 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     if (!customer) return;
     try {
       setIsSaving(true);
-      const draftId = await syncOrCreateDraftSale(customer, useSalesStore.getState());
+      const draftId = await syncOrCreateDraftSale(
+        customer,
+        useSalesStore.getState(),
+        currentUser
+      );
       router.push(`/satis/${draftId}`);
     } catch (err) {
       console.error(err);
@@ -1807,10 +1811,31 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                       <span className="text-[9px] text-gray-500 uppercase block font-medium">Hesap Ölçüsü</span>
                                       <span className="font-semibold text-gray-900 dark:text-white text-[13px]">
                                         {(() => {
-                                          const w = Number(p.rawValues?.width || 0);
-                                          const h = Number(p.rawValues?.height || 0);
-                                          const calc = calculateMechanicalCurtainM2(w, h, 1);
-                                          return `${calc.billingWidth} × ${calc.billingHeight} cm`;
+                                          const storedCalculation = {
+                                            ...(p.details || {}),
+                                            ...(
+                                              p.selectedProducts?.find(
+                                                (selectedProduct: any) =>
+                                                  selectedProduct?.isActive
+                                              )?.calculation || {}
+                                            )
+                                          } as any;
+
+                                          const billingWidth = Number(
+                                            storedCalculation.billingWidthCm ??
+                                            storedCalculation.billingWidth ??
+                                            0
+                                          );
+
+                                          const billingHeight = Number(
+                                            storedCalculation.billingHeightCm ??
+                                            storedCalculation.billingHeight ??
+                                            0
+                                          );
+
+                                          return billingWidth > 0 && billingHeight > 0
+                                            ? `${billingWidth} × ${billingHeight} cm`
+                                            : '-';
                                         })()}
                                       </span>
                                     </div>
@@ -1820,11 +1845,25 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                       </span>
                                       <span className="font-bold text-green-700 dark:text-green-400 text-[13px]">
                                         {(() => {
-                                          const w = Number(p.rawValues?.width || 0);
-                                          const h = Number(p.rawValues?.height || 0);
-                                          const q = Number(p.rawValues?.quantity || 1);
-                                          const calc = calculateMechanicalCurtainM2(w, h, q);
-                                          return `${calc.totalM2.toFixed(2)} m²`;
+                                          const storedCalculation = {
+                                            ...(p.details || {}),
+                                            ...(
+                                              p.selectedProducts?.find(
+                                                (selectedProduct: any) =>
+                                                  selectedProduct?.isActive
+                                              )?.calculation || {}
+                                            )
+                                          } as any;
+
+                                          const totalM2 = Number(
+                                            storedCalculation.totalSystemM2 ??
+                                            storedCalculation.totalM2 ??
+                                            0
+                                          );
+
+                                          return totalM2 > 0
+                                            ? `${totalM2.toFixed(2)} m²`
+                                            : '-';
                                         })()}
                                       </span>
                                     </div>
@@ -1853,24 +1892,118 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                   </div>
                                   <div className="space-y-1.5 border-t border-gray-200 dark:border-gray-700 pt-2">
                                     {(() => {
-                                      let totalM2 = 0;
-                                      const validCams = p.rawValues.plicellCamListesi.filter((cam: any) => Number(cam.widthCm) > 0 && Number(cam.heightCm) > 0);
+                                      const storedCalculation = {
+                                        ...(p.details || {}),
+                                        ...(
+                                          p.selectedProducts?.find(
+                                            (selectedProduct: any) =>
+                                              selectedProduct?.isActive
+                                          )?.calculation || {}
+                                        )
+                                      } as any;
+
+                                      const storedGroups = Array.isArray(
+                                        storedCalculation.groups
+                                      )
+                                        ? storedCalculation.groups
+                                        : Array.isArray(
+                                            storedCalculation.cams
+                                          )
+                                          ? storedCalculation.cams
+                                          : [];
+
+                                      const totalM2 = Number(
+                                        storedCalculation.totalSystemM2 ??
+                                        storedCalculation.totalM2 ??
+                                        storedGroups.reduce(
+                                          (sum: number, group: any) =>
+                                            sum + Number(
+                                              group?.totalM2 ??
+                                              group?.chargeableM2 ??
+                                              group?.unitM2 ??
+                                              0
+                                            ),
+                                          0
+                                        )
+                                      );
+
                                       return (
                                         <>
-                                          {validCams.map((cam: any, i: number) => {
-                                            const w = Number(cam.widthCm) || 0;
-                                            const h = Number(cam.heightCm) || 0;
-                                            const { chargeableM2, roundedWidth, roundedHeight } = calculatePlicellM2(w, h);
-                                            totalM2 += chargeableM2;
-                                            return (
-                                              <div key={i} className="text-sm text-gray-700 dark:text-gray-300 flex items-center justify-between">
-                                                <span>{i + 1}. Cam: <span className="font-semibold">{w} × {h} cm</span></span>
-                                                <span className="text-xs text-gray-500">{roundedWidth} × {roundedHeight} = <span className="font-semibold text-green-600 dark:text-green-500">{chargeableM2.toFixed(2)} m²</span></span>
-                                              </div>
-                                            );
-                                          })}
+                                          {storedGroups.length > 0 ? (
+                                            storedGroups.map(
+                                              (group: any, i: number) => {
+                                                const realWidth = Number(
+                                                  group.realWidthCm ??
+                                                  group.actualWidthCm ??
+                                                  group.widthCm ??
+                                                  0
+                                                );
+
+                                                const realHeight = Number(
+                                                  group.realHeightCm ??
+                                                  group.actualHeightCm ??
+                                                  group.heightCm ??
+                                                  0
+                                                );
+
+                                                const billingWidth = Number(
+                                                  group.billingWidthCm ??
+                                                  group.calculatedWidthCm ??
+                                                  group.roundedWidth ??
+                                                  0
+                                                );
+
+                                                const billingHeight = Number(
+                                                  group.billingHeightCm ??
+                                                  group.calculatedHeightCm ??
+                                                  group.roundedHeight ??
+                                                  0
+                                                );
+
+                                                const groupM2 = Number(
+                                                  group.totalM2 ??
+                                                  group.chargeableM2 ??
+                                                  group.unitM2 ??
+                                                  0
+                                                );
+
+                                                return (
+                                                  <div
+                                                    key={
+                                                      group.generatedItemId ||
+                                                      group.id ||
+                                                      i
+                                                    }
+                                                    className="text-sm text-gray-700 dark:text-gray-300 flex items-center justify-between"
+                                                  >
+                                                    <span>
+                                                      {i + 1}. Cam:{' '}
+                                                      <span className="font-semibold">
+                                                        {realWidth} × {realHeight} cm
+                                                      </span>
+                                                    </span>
+
+                                                    <span className="text-xs text-gray-500">
+                                                      {billingWidth} × {billingHeight} ={' '}
+                                                      <span className="font-semibold text-green-600 dark:text-green-500">
+                                                        {groupM2.toFixed(2)} m²
+                                                      </span>
+                                                    </span>
+                                                  </div>
+                                                );
+                                              }
+                                            )
+                                          ) : (
+                                            <div className="text-sm text-amber-600 dark:text-amber-400">
+                                              Merkezi hesap sonucu bulunamadı.
+                                            </div>
+                                          )}
+
                                           <div className="pt-2 mt-2 border-t border-dashed border-gray-300 dark:border-gray-700 text-right text-sm font-bold text-gray-900 dark:text-white">
-                                            Toplam: <span className="text-green-600 dark:text-green-500">{totalM2.toFixed(2)} m²</span>
+                                            Toplam:{' '}
+                                            <span className="text-green-600 dark:text-green-500">
+                                              {totalM2.toFixed(2)} m²
+                                            </span>
                                           </div>
                                         </>
                                       );
@@ -2470,7 +2603,11 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
               if (transferToSale) {
                 try {
-                  const draftId = await syncOrCreateDraftSale(customer, useSalesStore.getState());
+                  const draftId = await syncOrCreateDraftSale(
+                    customer,
+                    useSalesStore.getState(),
+                    currentUser
+                  );
                   showToast("Satış taslağı oluşturuldu / güncellendi.");
                   router.push(`/satis/${draftId}`);
                 } catch (err) {

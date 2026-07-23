@@ -242,6 +242,17 @@ function createSaleItemFromMeasurement(
 
     pleatDetails: pleatLabel,
 
+    wingQuantity:
+      calculation.wings !== undefined
+        ? Number(calculation.wings)
+        : undefined,
+
+    fonPlacement:
+      calculation.fonPlacement === 'LEFT' ||
+      calculation.fonPlacement === 'BOTH'
+        ? calculation.fonPlacement
+        : undefined,
+
     unitPrice: 0,
     discount: 0,
     rowTotal: 0,
@@ -322,7 +333,16 @@ export function createJumboSaleItem(
   } as any;
 }
 
-export function createDraftSaleFromCustomer(customer: Customer): Sale {
+interface SalesActor {
+  id: string;
+  username: string;
+  name: string;
+}
+
+export function createDraftSaleFromCustomer(
+  customer: Customer,
+  actor: SalesActor
+): Sale {
   const items: any[] = [];
 
   const measurements = useMeasurementStore.getState().measurements.filter(m => m.customerId === customer.id && !m.isDeleted && !m.isArchived);
@@ -710,14 +730,154 @@ export function createDraftSaleFromCustomer(customer: Customer): Sale {
     });
   }
 
+  /*
+   * SATIŞ SUNUM GRUPLAMASI
+   *
+   * KASA A.Ş. tarafından üretilmiş metricSize değerleri değiştirilmez.
+   * Aynı oda + aynı ürün + aynı birim kalemleri yalnız satış sunumu için
+   * bir araya getirilir. Açıklık ayrımı ölçü/üretim/terzi raporlarında korunur.
+   */
+  const normalizeSaleGroupKeyPart = (
+    value: unknown
+  ): string =>
+    String(value || '')
+      .trim()
+      .toLocaleUpperCase('tr-TR');
+
+  const groupedSaleItemMap =
+    new Map<string, SaleItem>();
+
+  items.forEach((item: SaleItem) => {
+    const groupKey = [
+      normalizeSaleGroupKeyPart(item.roomName),
+      normalizeSaleGroupKeyPart(item.productType),
+      normalizeSaleGroupKeyPart(item.metricUnit),
+      item.isJumboComponent ? 'JUMBO' : 'NORMAL',
+      normalizeSaleGroupKeyPart(
+        item.parentProductRelation || ''
+      )
+    ].join('|');
+
+    const existing =
+      groupedSaleItemMap.get(groupKey);
+
+    if (!existing) {
+      groupedSaleItemMap.set(
+        groupKey,
+        {
+          ...item,
+          windowName: 'Oda Toplamı',
+          quantity: 1,
+
+          productionBreakdown: [
+            {
+              ...item,
+              productionBreakdown: undefined
+            }
+          ],
+          metricSize: Number(
+            Number(item.metricSize || 0).toFixed(2)
+          )
+        }
+      );
+
+      return;
+    }
+
+    /*
+     * Burada formül veya yeniden hesap yoktur.
+     * Yalnız KASA A.Ş.'den gelen hazır satış miktarları toplanır.
+     */
+    existing.metricSize = Number(
+      (
+        Number(existing.metricSize || 0) +
+        Number(item.metricSize || 0)
+      ).toFixed(2)
+    );
+
+    existing.width = 0;
+    existing.height = 0;
+    existing.calcWidth = 0;
+    existing.calcHeight = 0;
+    existing.windowName = 'Oda Toplamı';
+
+    const productionBreakdown =
+      Array.isArray(existing.productionBreakdown)
+        ? existing.productionBreakdown
+        : [];
+
+    productionBreakdown.push({
+      ...item,
+      productionBreakdown: undefined
+    });
+
+    existing.productionBreakdown =
+      productionBreakdown;
+
+    const measurementIds = new Set(
+      [
+        existing.measurementId,
+        item.measurementId
+      ].filter(Boolean)
+    );
+
+    existing.measurementId =
+      Array.from(measurementIds).join(',');
+
+    const notes = new Set(
+      [
+        existing.note,
+        item.note
+      ]
+        .filter(Boolean)
+        .map(note => String(note))
+    );
+
+    existing.note =
+      notes.size > 0
+        ? Array.from(notes).join(' | ')
+        : undefined;
+  });
+
+  const groupedItems =
+    Array.from(groupedSaleItemMap.values())
+      .sort((left, right) => {
+        const roomCompare =
+          String(left.roomName || '').localeCompare(
+            String(right.roomName || ''),
+            'tr'
+          );
+
+        if (roomCompare !== 0) {
+          return roomCompare;
+        }
+
+        const productCompare =
+          String(left.productType || '').localeCompare(
+            String(right.productType || ''),
+            'tr'
+          );
+
+        if (productCompare !== 0) {
+          return productCompare;
+        }
+
+        return String(left.metricUnit || '').localeCompare(
+          String(right.metricUnit || ''),
+          'tr'
+        );
+      });
   const saleNo = `TEK-${new Date().getFullYear()}${(new Date().getMonth()+1).toString().padStart(2,'0')}-${Math.floor(Math.random()*10000).toString().padStart(4,'0')}`;
 
   return {
     id: crypto.randomUUID(),
     saleNo,
     customerId: customer.id,
+    createdByUserId: actor.id,
+    createdByUsername: actor.username,
+    createdByName: actor.name,
     status: 'TASLAK',
-    items,
+    items: groupedItems,
     priceSource: 'MANUAL',
     totalAmount: 0,
     cashPrice: 0,
@@ -732,8 +892,18 @@ export function createDraftSaleFromCustomer(customer: Customer): Sale {
 
 export async function syncOrCreateDraftSale(
   customer: Customer,
-  salesStore: any
+  salesStore: any,
+  actor: SalesActor | null
 ): Promise<string> {
+  if (
+    !actor?.id ||
+    !actor.username ||
+    !actor.name
+  ) {
+    throw new Error(
+      'Satışı yapan kullanıcı bilgisi bulunamadı.'
+    );
+  }
   const existingDraft = salesStore.sales.find(
     (sale: any) =>
       sale.customerId === customer.id &&
@@ -742,7 +912,10 @@ export async function syncOrCreateDraftSale(
   );
 
   const newSaleObj =
-    createDraftSaleFromCustomer(customer);
+    createDraftSaleFromCustomer(
+      customer,
+      actor
+    );
 
   /*
    * Ölçüden üretilen otomatik satış satırlarında
@@ -903,6 +1076,18 @@ export async function syncOrCreateDraftSale(
 
   const updatedSale = {
     ...existingDraft,
+
+    createdByUserId:
+      existingDraft.createdByUserId ||
+      actor.id,
+
+    createdByUsername:
+      existingDraft.createdByUsername ||
+      actor.username,
+
+    createdByName:
+      existingDraft.createdByName ||
+      actor.name,
 
     items: [
       ...manualItems,

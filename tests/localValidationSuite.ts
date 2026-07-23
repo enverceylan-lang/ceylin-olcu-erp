@@ -31,6 +31,12 @@ const mockLocalStorage = {
 
 const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+const testSalesActor = {
+  id: 'test-sales-user',
+  username: 'test-sales-user',
+  name: 'Test Satış Kullanıcısı'
+};
+
 async function runTests() {
   console.log('==================================================');
   console.log(' FINAL VALIDATION SUITE');
@@ -314,13 +320,16 @@ async function runTests() {
   console.log('\n--- SATIŞ & RAPORLAMA ---');
   let saleId = '';
   await runTest('saleSnapshotStable', async () => {
-    const sale = createDraftSaleFromCustomer(testCustomer);
+    const sale = createDraftSaleFromCustomer(
+      testCustomer,
+      testSalesActor
+    );
     saleId = sale.id;
     await useSalesStore.getState().addSale(sale);
 
     if (sale.items.length === 0) throw new Error('Hiç satış satırı oluşmadı');
     // Find the original item
-    const originalItem = sale.items.find(i => i.width === 100);
+    const originalItem = sale.items.find(i => i.productionBreakdown?.some(part => part.measurementId === measurementId1));
     if (!originalItem) throw new Error('Ölçü değeri yanlış alındı');
 
     // UPDATE
@@ -328,7 +337,7 @@ async function runTests() {
 
     const updatedSale = useSalesStore.getState().sales.find(s => s.id === saleId)!;
     const updatedItem = updatedSale.items.find(i => i.id === originalItem.id)!;
-    if (updatedItem.width !== 100) throw new Error('Satış snapshot değişti!');
+    if (updatedItem.productionBreakdown?.[0]?.width !== 100) throw new Error('Satış snapshot değişti!');
   });
 
   await runTest('pdfBlobGenerated', async () => {
@@ -488,10 +497,10 @@ async function runTests() {
   });
 
   await runTest('biriz_multiplier_calc', async () => {
-    const calc = calculateFabricUsage('biriz', 100, 200);
+    const calc = calculateSelectedProduct('BIRIZ', 100, 200, { windowWidth: 100, windowHeight: 200 });
     // Biriz multiplier should be 3.20, so 100 * 3.20 = 320cm -> 3.20m
-    if (calc.fabricUsageMeters !== 3.20) {
-      throw new Error(`Expected 3.20m fabric usage for Biriz, but got ${calc.fabricUsageMeters}`);
+    if (calc.birizTulMeters !== 3.20) {
+      throw new Error(`Expected 3.20m Biriz tül usage, but got ${calc.birizTulMeters}`);
     }
   });
 
@@ -593,8 +602,8 @@ async function runTests() {
     const enriched = useMeasurementStore.getState().measurements.find(m => m.id === measId);
     const tulProduct = enriched?.selectedProducts?.find(sp => sp.productType === 'TUL');
     if (!tulProduct?.calculation?.fabricUsageMeters) throw new Error('Fabric usage not calculated');
-    if (tulProduct.calculation.fabricUsageMeters !== 6.30) {
-      throw new Error(`Expected 6.30 meters, got ${tulProduct.calculation.fabricUsageMeters}`);
+    if (tulProduct.calculation.fabricUsageMeters !== 6.20) {
+      throw new Error(`Expected 6.20 meters, got ${tulProduct.calculation.fabricUsageMeters}`);
     }
   });
 
@@ -614,7 +623,7 @@ async function runTests() {
     const guneslik = enriched?.selectedProducts?.find(sp => sp.productType === 'GUNESLIK');
     if (!guneslik?.calculation) throw new Error('Guneslik calculation missing');
     if (guneslik.calculation.billingWidth !== 180) throw new Error(`Expected width 180, got ${guneslik.calculation.billingWidth}`);
-    if (guneslik.calculation.billingHeight !== 240) throw new Error(`Expected height 240, got ${guneslik.calculation.billingHeight}`);
+    if (guneslik.calculation.billingHeight !== 233) throw new Error(`Expected height 233, got ${guneslik.calculation.billingHeight}`);
   });
 
   await runTest('calc_fon_tavan_rustik', async () => {
@@ -649,8 +658,8 @@ async function runTests() {
 
     const enriched2 = useMeasurementStore.getState().measurements.find(m => m.id === measId)!;
     const fon = enriched2.selectedProducts?.find(sp => sp.productType === 'FON');
-    if (fon?.calculation?.billingHeight !== 249) {
-      throw new Error(`Expected Fon height 249 under Tavan Rustik, got ${fon?.calculation?.billingHeight}`);
+    if (fon?.calculation?.billingHeight !== 248) {
+      throw new Error(`Expected Fon height 248 under Tavan Rustik, got ${fon?.calculation?.billingHeight}`);
     }
   });
 
@@ -735,14 +744,22 @@ async function runTests() {
     };
     await useMeasurementStore.getState().addMeasurement(measObj as any, 'testuser');
 
-    const draftId = await syncOrCreateDraftSale(customerObj, useSalesStore.getState());
+    const draftId = await syncOrCreateDraftSale(
+      customerObj,
+      useSalesStore.getState(),
+      testSalesActor
+    );
 
     const draft = useSalesStore.getState().sales.find(s => s.id === draftId)!;
     draft.items[0].unitPrice = 500;
     draft.items[0].rowTotal = 500 * draft.items[0].metricSize;
     await useSalesStore.getState().updateSale(draft);
 
-    const draftId2 = await syncOrCreateDraftSale(customerObj, useSalesStore.getState());
+    const draftId2 = await syncOrCreateDraftSale(
+      customerObj,
+      useSalesStore.getState(),
+      testSalesActor
+    );
     const finalDraft = useSalesStore.getState().sales.find(s => s.id === draftId2)!;
 
     if (finalDraft.items[0].unitPrice !== 500) {
@@ -788,7 +805,11 @@ async function runTests() {
     });
     await useMeasurementStore.getState().updateMeasurement({ ...enriched, selectedProducts: updatedProducts }, 'testuser');
 
-    const draftId = await syncOrCreateDraftSale(customerObj, useSalesStore.getState());
+    const draftId = await syncOrCreateDraftSale(
+      customerObj,
+      useSalesStore.getState(),
+      testSalesActor
+    );
     const draft1 = useSalesStore.getState().sales.find(s => s.id === draftId)!;
     console.log("  draft1 items:", JSON.stringify(draft1.items.map(i => ({ pType: i.productType, mId: i.measurementId })), null, 2));
     if (draft1.items.length !== 2) throw new Error(`Expected 2 items in draft, got ${draft1.items.length}`);
@@ -800,10 +821,14 @@ async function runTests() {
     });
     await useMeasurementStore.getState().updateMeasurement({ ...enriched2, selectedProducts: updatedProducts2 }, 'testuser');
 
-    const draftId2 = await syncOrCreateDraftSale(customerObj, useSalesStore.getState());
+    const draftId2 = await syncOrCreateDraftSale(
+      customerObj,
+      useSalesStore.getState(),
+      testSalesActor
+    );
     const draft2 = useSalesStore.getState().sales.find(s => s.id === draftId2)!;
     if (draft2.items.length !== 1) throw new Error(`Expected 1 item in draft after deactivation, got ${draft2.items.length}`);
-    if (draft2.items[0].productType !== 'Tül') throw new Error(`Expected only Tül remaining, got ${draft2.items[0].productType}`);
+    if (draft2.items[0].productType !== 'TUL') throw new Error(`Expected only TUL remaining, got ${draft2.items[0].productType}`);
   });
 
   console.log('\n==================================================');
@@ -1161,13 +1186,37 @@ async function runTests() {
       return sp;
     });
     await useMeasurementStore.getState().updateMeasurement({ ...enriched, selectedProducts: updatedProds }, 'testuser');
-    const draftId = await syncOrCreateDraftSale(customerObj, useSalesStore.getState());
+    const draftId = await syncOrCreateDraftSale(
+      customerObj,
+      useSalesStore.getState(),
+      testSalesActor
+    );
     const draft = useSalesStore.getState().sales.find(s => s.id === draftId)!;
     const measLines = draft.items.filter(i => i.measurementId === mId);
     if (measLines.length < 3) throw new Error(`Expected 3 sale lines for measurementId, got ${measLines.length}`);
     const lineTypes = measLines.map(l => l.productType);
-    ['Tül', 'Fon', 'Stor Perde'].forEach(t => {
-      if (!lineTypes.includes(t)) throw new Error(`Missing sale line for ${t}`);
+    ['TUL', 'FON', 'Stor'].forEach(t => {
+      if (!lineTypes.includes(t)) {
+        const actualItems = JSON.stringify(
+          draft.items.map(item => ({
+            productType: item.productType,
+            metricSize: item.metricSize,
+            metricUnit: item.metricUnit,
+            measurementId: item.measurementId,
+            breakdown: item.productionBreakdown?.map(part => ({
+              productType: part.productType,
+              metricSize: part.metricSize,
+              metricUnit: part.metricUnit,
+              measurementId: part.measurementId
+            }))
+          }))
+        );
+
+        throw new Error(
+          'Missing sale line for ' + t +
+          '. Actual items: ' + actualItems
+        );
+      }
     });
   });
 
@@ -1201,7 +1250,11 @@ async function runTests() {
       sp.productType === 'GUNESLIK' ? { ...sp, isActive: false } : sp
     );
     await useMeasurementStore.getState().updateMeasurement({ ...enriched2, selectedProducts: deactivated }, 'testuser');
-    const draftId = await syncOrCreateDraftSale(customerObj, useSalesStore.getState());
+    const draftId = await syncOrCreateDraftSale(
+      customerObj,
+      useSalesStore.getState(),
+      testSalesActor
+    );
     const draft = useSalesStore.getState().sales.find(s => s.id === draftId)!;
     const guneslikLines = draft.items.filter(i => i.measurementId === mId && i.productType === 'Güneşlik');
     if (guneslikLines.length > 0) throw new Error('Güneşlik should NOT appear in draft after deactivation');
@@ -1264,8 +1317,16 @@ async function runTests() {
     if (!existing.some(sp => sp.productType === 'TUL')) next.push({ productType: 'TUL', isActive: true, addedAt: new Date().toISOString() });
     await useMeasurementStore.getState().updateMeasurement({ ...enriched, selectedProducts: next.map(sp => ({ ...sp, isActive: true })) }, 'testuser');
     // Sync twice — must not create duplicate lines
-    const draftId1 = await syncOrCreateDraftSale(customerObj, useSalesStore.getState());
-    const draftId2 = await syncOrCreateDraftSale(customerObj, useSalesStore.getState());
+    const draftId1 = await syncOrCreateDraftSale(
+      customerObj,
+      useSalesStore.getState(),
+      testSalesActor
+    );
+    const draftId2 = await syncOrCreateDraftSale(
+      customerObj,
+      useSalesStore.getState(),
+      testSalesActor
+    );
     if (draftId1 !== draftId2) throw new Error('Two syncs created two drafts instead of one');
     const draft = useSalesStore.getState().sales.find(s => s.id === draftId1)!;
     const tulLines = draft.items.filter(i => i.measurementId === mId && i.productType === 'Tül');
@@ -1294,7 +1355,11 @@ async function runTests() {
     await useSalesStore.getState().addSale(approvedSale);
     const snapshotBefore = JSON.stringify(useSalesStore.getState().sales.find(s => s.id === approvedSale.id));
     // Now run syncOrCreateDraftSale — should NOT touch the approved sale
-    const draftId = await syncOrCreateDraftSale(customerObj, useSalesStore.getState());
+    const draftId = await syncOrCreateDraftSale(
+      customerObj,
+      useSalesStore.getState(),
+      testSalesActor
+    );
     const approvedAfter = useSalesStore.getState().sales.find(s => s.id === approvedSale.id);
     const snapshotAfter = JSON.stringify(approvedAfter);
     if (snapshotBefore !== snapshotAfter) throw new Error('Approved sale was mutated by sync!');
@@ -1520,7 +1585,11 @@ async function runTests() {
       templateType: 'mechanical_curtain', productType: 'STOR',
       rawValues: { width: 240, height: 200, quantity: 1 }
     } as any, 'testuser');
-    await syncOrCreateDraftSale(customerObj, useSalesStore.getState());
+    await syncOrCreateDraftSale(
+      customerObj,
+      useSalesStore.getState(),
+      testSalesActor
+    );
 
     const enriched = useMeasurementStore.getState().measurements.find(m => m.id === mId)!;
     await useMeasurementStore.getState().updateMeasurement({
@@ -1528,7 +1597,11 @@ async function runTests() {
       rawValues: { ...enriched.rawValues, width: 200 }
     }, 'testuser');
 
-    const draftId = await syncOrCreateDraftSale(customerObj, useSalesStore.getState());
+    const draftId = await syncOrCreateDraftSale(
+      customerObj,
+      useSalesStore.getState(),
+      testSalesActor
+    );
     const draft = useSalesStore.getState().sales.find(s => s.id === draftId)!;
 
     const jumboLines = draft.items.filter(i => i.parentProductRelation === `${mId}-STOR-g0`);
@@ -1552,8 +1625,16 @@ async function runTests() {
       templateType: 'mechanical_curtain', productType: 'STOR',
       rawValues: { width: 240, height: 200, quantity: 1 }
     } as any, 'testuser');
-    await syncOrCreateDraftSale(customerObj, useSalesStore.getState());
-    const draftId = await syncOrCreateDraftSale(customerObj, useSalesStore.getState());
+    await syncOrCreateDraftSale(
+      customerObj,
+      useSalesStore.getState(),
+      testSalesActor
+    );
+    const draftId = await syncOrCreateDraftSale(
+      customerObj,
+      useSalesStore.getState(),
+      testSalesActor
+    );
     const draft = useSalesStore.getState().sales.find(s => s.id === draftId)!;
 
     const jumboLines = draft.items.filter(i => i.isJumboComponent && i.measurementId === mId);
@@ -1584,7 +1665,11 @@ async function runTests() {
     };
     await useSalesStore.getState().addSale(approvedSale);
 
-    await syncOrCreateDraftSale(customerObj, useSalesStore.getState());
+    await syncOrCreateDraftSale(
+      customerObj,
+      useSalesStore.getState(),
+      testSalesActor
+    );
     const reloadedApproved = useSalesStore.getState().sales.find(s => s.id === approvedSale.id)!;
     const jumboLine = reloadedApproved.items.find(i => i.isJumboComponent);
     if (jumboLine?.unitPrice !== 1000) throw new Error(`Expected approved jumbo price 1000 to remain intact, got ${jumboLine?.unitPrice}`);

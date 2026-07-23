@@ -35,6 +35,10 @@ type ProductOptions = {
   customPleatFactor?: number;
   openingType?: 'SINGLE' | 'DOUBLE';
 
+  doorFonRequested?: boolean;
+  wingQuantity?: 1 | 2;
+  fonPlacement?: 'LEFT' | 'BOTH';
+
   heightMode?: HeightMode;
   heightSource?: string;
   customHeightCm?: number;
@@ -92,6 +96,39 @@ function defaultOptions(productType: string): ProductOptions {
   }
 
   return {};
+}
+
+function measurementContainsDoor(
+  measurement: MeasurementRecord,
+  room: Room
+): boolean {
+  /*
+   * Kapıya Fon sorusu yalnız bağımsız kapı açıklığında sorulur.
+   * Camlarla aynı cephe içinde bulunan KAPI segmenti ayrı açıklık değildir.
+   */
+  const openingId =
+    measurement.openingId ||
+    measurement.windowId ||
+    '';
+
+  const opening = room.windows?.find(
+    window => window.id === openingId
+  );
+
+  const openingIdentity = String(
+    opening?.name ||
+    measurement.openingName ||
+    measurement.openingLabel ||
+    measurement.windowName ||
+    ''
+  )
+    .trim()
+    .toLocaleUpperCase('tr-TR');
+
+  return (
+    openingIdentity.includes('KAPI') ||
+    openingIdentity.includes('DOOR')
+  );
 }
 
 export function RoomPreparationModal({
@@ -176,8 +213,14 @@ export function RoomPreparationModal({
       }
     });
 
-    setLocalSelections(initialSelections);
-    setLocalOptions(initialOptions);
+    const frameId = window.requestAnimationFrame(() => {
+      setLocalSelections(initialSelections);
+      setLocalOptions(initialOptions);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
   }, [isOpen, room.id, measurements]);
 
   if (!isOpen) return null;
@@ -590,12 +633,139 @@ export function RoomPreparationModal({
   };
 
   const renderProductOptions = (
-    measurementId: string,
+    measurement: MeasurementRecord,
     productType: string
   ) => {
+    const measurementId = measurement.id;
+
     const options =
       localOptions[optionKey(measurementId, productType)] ||
       defaultOptions(productType);
+
+    const hasDoor =
+      measurementContainsDoor(
+        measurement,
+        room
+      );
+
+    if (
+      productType === 'FON' &&
+      hasDoor
+    ) {
+      const doorFonRequested =
+        options.doorFonRequested;
+
+      const wingQuantity =
+        options.wingQuantity === 2
+          ? 2
+          : 1;
+
+      return (
+        <div className="mt-3 space-y-3 rounded-lg border border-amber-500/30 bg-amber-950/20 p-3">
+          <div>
+            <label className="mb-2 block text-[11px] font-bold uppercase tracking-wide text-amber-300">
+              Kapıya fon perde istiyor musunuz?
+            </label>
+
+            <div className="flex flex-wrap gap-4 text-xs">
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="radio"
+                  name={`${measurementId}-${productType}-door-fon`}
+                  checked={doorFonRequested === false}
+                  onChange={() =>
+                    updateOptions(
+                      measurementId,
+                      productType,
+                      {
+                        doorFonRequested: false,
+                        wingQuantity: undefined,
+                        fonPlacement: undefined
+                      }
+                    )
+                  }
+                />
+                Hayır
+              </label>
+
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="radio"
+                  name={`${measurementId}-${productType}-door-fon`}
+                  checked={doorFonRequested === true}
+                  onChange={() =>
+                    updateOptions(
+                      measurementId,
+                      productType,
+                      {
+                        doorFonRequested: true,
+                        wingQuantity: 1,
+                        fonPlacement: 'LEFT'
+                      }
+                    )
+                  }
+                />
+                Evet
+              </label>
+            </div>
+          </div>
+
+          {doorFonRequested === true && (
+            <div className="border-t border-amber-500/20 pt-3">
+              <label className="mb-2 block text-[11px] font-bold uppercase tracking-wide text-amber-300">
+                Kaç Fon Kanadı?
+              </label>
+
+              <div className="flex flex-wrap gap-4 text-xs">
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="radio"
+                    name={`${measurementId}-${productType}-wing`}
+                    checked={wingQuantity === 1}
+                    onChange={() =>
+                      updateOptions(
+                        measurementId,
+                        productType,
+                        {
+                          doorFonRequested: true,
+                          wingQuantity: 1,
+                          fonPlacement: 'LEFT'
+                        }
+                      )
+                    }
+                  />
+                  1 Kanat — Sol Taraf
+                </label>
+
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="radio"
+                    name={`${measurementId}-${productType}-wing`}
+                    checked={wingQuantity === 2}
+                    onChange={() =>
+                      updateOptions(
+                        measurementId,
+                        productType,
+                        {
+                          doorFonRequested: true,
+                          wingQuantity: 2,
+                          fonPlacement: 'BOTH'
+                        }
+                      )
+                    }
+                  />
+                  2 Kanat — Sol ve Sağ
+                </label>
+              </div>
+
+              <p className="mt-2 text-[11px] text-amber-200">
+                Kumaş miktarı yalnız KASA A.Ş. tarafından hesaplanır.
+              </p>
+            </div>
+          )}
+        </div>
+      );
+    }
 
     if (productType === 'STOR' || productType === 'PLICELL') {
       return (
@@ -782,6 +952,42 @@ export function RoomPreparationModal({
       return;
     }
 
+    const invalidDoorFonMeasurement =
+      roomMeasurements.find(measurement => {
+        const selectedTypes =
+          localSelections[measurement.id] || [];
+
+        if (
+          !selectedTypes.includes('FON') ||
+          !measurementContainsDoor(
+            measurement,
+            room
+          )
+        ) {
+          return false;
+        }
+
+        const fonOptions =
+          localOptions[
+            optionKey(
+              measurement.id,
+              'FON'
+            )
+          ] || defaultOptions('FON');
+
+        return (
+          fonOptions.doorFonRequested !== true &&
+          fonOptions.doorFonRequested !== false
+        );
+      });
+
+    if (invalidDoorFonMeasurement) {
+      alert(
+        'Kapılı açıklıkta Fon için Evet veya Hayır seçimi yapın.'
+      );
+      return;
+    }
+
     try {
       setIsSaving(true);
 
@@ -790,13 +996,37 @@ export function RoomPreparationModal({
           const requestedTypes =
             localSelections[measurement.id] || [];
 
-          const selectedTypes =
+          const baseSelectedTypes =
             measurement.templateType === 'PLICELL'
               ? requestedTypes.filter(
                   productType => productType === 'PLICELL'
                 )
               : requestedTypes.filter(
                   productType => productType !== 'PLICELL'
+                );
+
+          const fonOptions =
+            localOptions[
+              optionKey(
+                measurement.id,
+                'FON'
+              )
+            ] || defaultOptions('FON');
+
+          const doorFonAllowed =
+            !measurementContainsDoor(
+              measurement,
+              room
+            ) ||
+            fonOptions.doorFonRequested === true;
+
+          const selectedTypes =
+            doorFonAllowed
+              ? baseSelectedTypes
+              : baseSelectedTypes.filter(
+                  productType =>
+                    productType !== 'FON' &&
+                    productType !== 'TAVAN_RUSTIK'
                 );
 
           const newSelected: SelectedProductItem[] =
@@ -1004,7 +1234,7 @@ export function RoomPreparationModal({
 
                           {checked &&
                             renderProductOptions(
-                              measurement.id,
+                              measurement,
                               option.type
                             )}
                         </div>

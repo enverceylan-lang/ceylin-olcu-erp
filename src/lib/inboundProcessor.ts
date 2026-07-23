@@ -435,7 +435,7 @@ export async function processAsNewCustomer(
     existing?.status === "CREATED_CUSTOMER" ||
     existing?.status === "LINKED_TO_CUSTOMER"
   ) {
-    throw new Error("Bu kayÄ±t daha Ã¶nce iÅŸlenmiÅŸ.");
+    throw new Error("Bu kayıt daha önce işlenmiş.");
   }
 
   const patch = inbound.patch || {};
@@ -570,7 +570,7 @@ export async function processAsMerge(
     existingInbound?.status === "CREATED_CUSTOMER" ||
     existingInbound?.status === "LINKED_TO_CUSTOMER"
   ) {
-    throw new Error("Bu kayÄ±t daha Ã¶nce iÅŸlenmiÅŸ.");
+    throw new Error("Bu kayıt daha önce işlenmiş.");
   }
 
   const customers = await loadLocalCustomers();

@@ -162,106 +162,112 @@ export function calculateFabricUsage(
   pleatType?: string,
   wingQuantity?: number
 ): FabricCalculationResult {
-  const cat = (category || "").toLowerCase().trim();
+  /*
+   * GEÇİCİ UYUMLULUK KÖPRÜSÜ
+   *
+   * Bu fonksiyon artık ürün formülü çalıştırmaz.
+   * Eski çağrılar merkezi calculateSelectedProduct kasasına yönlendirilir.
+   * Yeni kod doğrudan merkezi kasayı kullanmalıdır.
+   */
+  const normalizedCategory =
+    String(category || '')
+      .trim()
+      .toUpperCase()
+      .replace(/İ/g, 'I')
+      .replace(/Ü/g, 'U')
+      .replace(/Ö/g, 'O')
+      .replace(/Ş/g, 'S')
+      .replace(/Ç/g, 'C')
+      .replace(/Ğ/g, 'G')
+      .replace(/\s+/g, '_');
 
-  if (cat === 'güneşlik' || cat === 'guneslik') {
-    const allowance = 30;
-    const cuttingWidth = width + allowance;
-    const fabricUsage = Number((cuttingWidth / 100).toFixed(2));
-    return {
-      calculationType: 'FLAT_WIDTH_ALLOWANCE',
-      pleatRequired: false,
-      widthAllowanceCm: allowance,
-      netWidth: width,
-      netHeight: height,
-      cuttingWidth,
-      fabricUsageMeters: fabricUsage,
-      sewingTypeLabel: 'Düz Dikim',
-      pleatLabel: 'Uygulanmaz'
-    };
-  }
+  const productTypeMap: Record<string, string> = {
+    TUL: 'TUL',
+    GUNESLIK: 'GUNESLIK',
+    FON: 'FON',
+    BIRIZ: 'BIRIZ',
+    STOR: 'STOR',
+    ZEBRA: 'ZEBRA',
+    JALUZI: 'JALUZI',
+    AHSAP_JALUZI: 'AHSAP_JALUZI',
+    PICASSO: 'PICASSO',
+    PLICELL: 'PLICELL',
+    DIKEY_STOR: 'DIKEY_STOR',
+    DIKEY_TUL: 'DIKEY_TUL',
+    MEKANIK_PERDE: 'STOR',
+    MECHANICAL_CURTAIN: 'STOR'
+  };
 
-  if (cat === 'tül' || cat === 'tul') {
-    const pleatMultipliers: Record<string, number> = { 'SPARSE': 2.1, 'NORMAL': 2.6, 'TIGHT': 3.1 };
-    const multiplier = pleatMultipliers[pleatType || 'NORMAL'] || 2.6;
-    const cuttingWidth = Number((width * multiplier).toFixed(2));
-    const fabricUsage = Number((cuttingWidth / 100).toFixed(2));
+  const productType =
+    productTypeMap[normalizedCategory] ||
+    normalizedCategory;
 
-    const pleatLabels: Record<string, string> = { 'SPARSE': 'Seyrek Pile (1/2.1)', 'NORMAL': 'Normal Pile (1/2.6)', 'TIGHT': 'Sık Pile (1/3.1)' };
-    return {
-      calculationType: 'PLEATED',
-      pleatRequired: true,
-      widthAllowanceCm: 0,
-      netWidth: width,
-      netHeight: height,
-      cuttingWidth,
-      fabricUsageMeters: fabricUsage,
-      sewingTypeLabel: 'Pileli Dikim',
-      pleatLabel: pleatLabels[pleatType || 'NORMAL'] || 'Normal Pile'
-    };
-  }
+  const centralCalculation =
+    calculateSelectedProduct(
+      productType,
+      Number(width || 0),
+      Number(height || 0),
+      {
+        width: Number(width || 0),
+        height: Number(height || 0),
+        pleatType,
+        wingQuantity: Number(wingQuantity || 0) || undefined
+      },
+      []
+    );
 
-  if (cat === 'fon') {
-    const multiplier = 2.5;
-    const wings = wingQuantity || 1;
-    const cuttingWidth = Number((width * multiplier * wings).toFixed(2));
-    const fabricUsage = Number((cuttingWidth / 100).toFixed(2));
-    return {
-      calculationType: 'FIXED_MULTIPLIER',
-      pleatRequired: false,
-      widthAllowanceCm: 0,
-      netWidth: width,
-      netHeight: height,
-      cuttingWidth,
-      fabricUsageMeters: fabricUsage,
-      sewingTypeLabel: `Fon Perde Dikimi (${wings} Kanat)`,
-      pleatLabel: 'Uygulanmaz'
-    };
-  }
+  const fabricUsageMeters = Number(
+    centralCalculation.fabricUsageMeters ??
+    centralCalculation.fabricMeters ??
+    centralCalculation.totalM2 ??
+    centralCalculation.quantity ??
+    0
+  );
 
-  if (cat === 'biriz') {
-    const multiplier = 3.20;
-    const cuttingWidth = Number((width * multiplier).toFixed(2));
-    const fabricUsage = Number((cuttingWidth / 100).toFixed(2));
-    return {
-      calculationType: 'PLEATED',
-      pleatRequired: true,
-      widthAllowanceCm: 0,
-      netWidth: width,
-      netHeight: height,
-      cuttingWidth,
-      fabricUsageMeters: fabricUsage,
-      sewingTypeLabel: 'Brizli Dikim (3.20 Kat)',
-      pleatLabel: 'Briz Pile (1/3.20)'
-    };
-  }
+  const cuttingWidth = Number(
+    centralCalculation.cuttingWidth ??
+    centralCalculation.billingWidth ??
+    centralCalculation.billingWidthCm ??
+    width ??
+    0
+  );
 
-  if (['zebra', 'stor', 'jaluzi', 'plicell', 'picasso', 'ahsap_jaluzi', 'ahşap jaluzi', 'dikey_stor', 'dikey stor', 'dikey_tul', 'dikey tül', 'mekanik perde', 'mechanical_curtain'].includes(cat)) {
-    const area = (width / 100) * (height / 100);
-    const fabricUsage = Number(Math.max(area, 2.0).toFixed(2));
-    return {
-      calculationType: 'AREA',
-      pleatRequired: false,
-      widthAllowanceCm: 0,
-      netWidth: width,
-      netHeight: height,
-      cuttingWidth: width,
-      fabricUsageMeters: fabricUsage,
-      sewingTypeLabel: 'Mekanik Üretim',
-      pleatLabel: 'Uygulanmaz'
-    };
-  }
+  const isAreaProduct =
+    centralCalculation.totalM2 !== undefined ||
+    centralCalculation.unitM2 !== undefined;
+
+  const isPleatedProduct =
+    productType === 'TUL' ||
+    productType === 'BIRIZ';
 
   return {
-    calculationType: 'UNIT',
-    pleatRequired: false,
-    widthAllowanceCm: 0,
-    netWidth: width,
-    netHeight: height,
-    cuttingWidth: width,
-    fabricUsageMeters: 1,
-    sewingTypeLabel: 'Dikiş Gerekmiyor',
-    pleatLabel: 'Uygulanmaz'
+    calculationType:
+      isAreaProduct
+        ? 'AREA'
+        : isPleatedProduct
+          ? 'PLEATED'
+          : centralCalculation.fabricUsageMeters !== undefined
+            ? 'FIXED_MULTIPLIER'
+            : 'UNIT',
+    pleatRequired: isPleatedProduct,
+    widthAllowanceCm: Number(
+      centralCalculation.widthAllowanceCm || 0
+    ),
+    netWidth: Number(width || 0),
+    netHeight: Number(height || 0),
+    cuttingWidth,
+    fabricUsageMeters,
+    sewingTypeLabel:
+      String(
+        centralCalculation.description ||
+        productType
+      ),
+    pleatLabel:
+      String(
+        centralCalculation.pleatType ||
+        centralCalculation.pleatFactor ||
+        'Uygulanmaz'
+      )
   };
 }
 
@@ -1028,32 +1034,78 @@ export function calculateSelectedProduct(
     };
   }
   if (norm === 'FON') {
-    const isCeilingRusticActive = siblingProducts.some(p => p.productType === 'TAVAN_RUSTIK' && p.isActive);
-    const ceilingGap = Number(rawValues.ceilingGap || 0);
-    const netHeight = Number(rawValues.ortaYukseklikCm || rawValues.sagYukseklikCm || rawValues.solYukseklikCm || rawValues.windowHeight || rawValues.height || height || 0);
+    const isCeilingRusticActive = siblingProducts.some(
+      product =>
+        String(product?.productType || '').toUpperCase() === 'TAVAN_RUSTIK' &&
+        product?.isActive
+    );
 
-    let fonHeight =
-      calculateCurtainCutHeight(
-        height,
-        'FON'
-      );
-    if (isCeilingRusticActive) {
-      fonHeight = netHeight - ceilingGap - 1;
-    }
+    const ceilingGap = Number(
+      rawValues?.ceilingGap || 0
+    );
 
-    const wings = Number(rawValues.wingQuantity || 1);
-    const multiplier = 2.5;
-    const cuttingWidth = Number((width * multiplier * wings).toFixed(2));
-    const fabricUsageMeters = Number((cuttingWidth / 100).toFixed(2));
+    const measuredHeight = Number(
+      rawValues?.ortaYukseklikCm ||
+      rawValues?.sagYukseklikCm ||
+      rawValues?.solYukseklikCm ||
+      rawValues?.windowHeight ||
+      rawValues?.height ||
+      height ||
+      0
+    );
+
+    const requestedWingQuantity = Number(
+      rawValues?.wingQuantity || 2
+    );
+
+    const wings = Math.max(
+      1,
+      Math.min(
+        2,
+        requestedWingQuantity || 2
+      )
+    );
+
+    const requestedFonPlacement = String(
+      rawValues?.fonPlacement || ''
+    )
+      .trim()
+      .toUpperCase();
+
+    const fonPlacement: 'LEFT' | 'BOTH' =
+      wings === 1
+        ? 'LEFT'
+        : 'BOTH';
+
+    const metersPerWing =
+      isCeilingRusticActive ? 3.1 : 3;
+
+    const fabricUsageMeters = Number(
+      (wings * metersPerWing).toFixed(2)
+    );
+
+    const fonHeight = Math.max(
+      0,
+      isCeilingRusticActive
+        ? measuredHeight - ceilingGap - 2
+        : measuredHeight - 2
+    );
 
     return {
       isCeilingRustic: isCeilingRusticActive,
       ceilingGap,
+      measuredHeightCm: measuredHeight,
       billingHeight: fonHeight,
+      cutHeightCm: fonHeight,
+      productionHeightCm: fonHeight,
       wings,
-      cuttingWidth,
+      fonPlacement,
+      metersPerWing,
+      cuttingWidth: Number((fabricUsageMeters * 100).toFixed(2)),
       fabricUsageMeters,
-      description: isCeilingRusticActive ? 'Tavan Rustik Boy Hesabı (-Kartonpiyer -1cm)' : 'Normal Fon Boy Hesabı'
+      description: isCeilingRusticActive
+        ? 'Tavan Rustik Fon dikim boyu hesabı'
+        : 'Normal Fon dikim boyu hesabı'
     };
   }
 
@@ -1078,17 +1130,67 @@ export function calculateSelectedProduct(
   }
 
   if (norm === 'TAVAN_RUSTIK') {
-    const qty = 1;
-    const ceilingGap = Number(rawValues.ceilingGap || 0);
-    const legLength = ceilingGap + 5;
+    const activeFon = siblingProducts.find(
+      product =>
+        String(product?.productType || '').toUpperCase() === 'FON' &&
+        product?.isActive
+    );
+
+    /*
+     * KASA A.Ş. KURALI
+     *
+     * Her aktif Fon kanadı için bir adet 1 metrelik
+     * Tavan Rustik kullanılır.
+     *
+     * 1 Fon kanadı = 1 adet × 1 mt
+     * 2 Fon kanadı = 2 adet × 1 mt
+     *
+     * Rapor, terzi iş emri, üretim fişi ve satış ekranı
+     * bu merkezi sonucu değiştirmeden kullanır.
+     */
+    const requestedWingQuantity = Number(
+      activeFon?.calculation?.wings ??
+      activeFon?.userOverrides?.wingQuantity ??
+      rawValues?.wingQuantity ??
+      2
+    );
+
+    const fonWingQuantity = activeFon
+      ? Math.max(
+          1,
+          Math.min(
+            2,
+            requestedWingQuantity || 2
+          )
+        )
+      : 1;
+
+    const pieceLengthMeters = 1;
+
+    const totalLengthMeters = Number(
+      (
+        fonWingQuantity *
+        pieceLengthMeters
+      ).toFixed(2)
+    );
+
+    const ceilingGap = Number(
+      rawValues?.ceilingGap || 0
+    );
+
+    const legLengthCm =
+      ceilingGap + 5;
 
     return {
-      quantity: qty,
-      legLengthCm: legLength,
-      description: `Tavan Rustik Standart 1m, Ayak: ${legLength} cm`
+      quantity: fonWingQuantity,
+      wingQuantity: fonWingQuantity,
+      pieceLengthMeters,
+      totalLengthMeters,
+      legLengthCm,
+      description:
+        `Tavan Rustik: ${fonWingQuantity} adet × 1 mt, Ayak: ${legLengthCm} cm`
     };
   }
-
   if (norm === 'STOR' || norm === 'ZEBRA' || norm === 'AHSAP_JALUZI' || norm === 'JALUZI' || norm === 'METAL_JALUZI' || norm === 'PICASSO') {
     const facadeSegments = rawValues.facadeSegments || [];
     const q = Number(rawValues.quantity || 1) || 1;
@@ -1109,24 +1211,22 @@ export function calculateSelectedProduct(
         const realW = g.realWidthCm;
         const realH = g.realHeightCm;
 
-        const coreCalculation =
-          calculateMechanicalCurtain(
-            realW,
-            realH,
-            q
-          );
-
+        /*
+         * Parça hesabı groupFacadeSegmentsForMechanical içinde
+         * merkezi mekanik kasa tarafından zaten yapılmıştır.
+         * Burada ikinci kez hesaplanmaz.
+         */
         const calcW =
-          coreCalculation.billingWidthCm;
+          Number(g.calculatedWidthCm || 0);
 
         const calcH =
-          coreCalculation.billingHeightCm;
+          Number(g.calculatedHeightCm || 0);
 
         const unitM2 =
-          coreCalculation.unitM2;
+          Number(g.unitM2 || 0);
 
         const totalM2 =
-          coreCalculation.totalM2;
+          Number(g.totalM2 || 0);
 
         /*
          * Picasso jumbo kararı boy üzerinden verilir.
@@ -1540,10 +1640,257 @@ export function calculateSelectedProduct(
         ? 'DOUBLE'
         : 'SINGLE';
 
+    const quantity = Math.max(
+      1,
+      Number(rawValues?.quantity || 1) || 1
+    );
+
+    const commonGlassHeightCm = Number(
+      rawValues?.ortakCamBoyuCm || 0
+    );
+
+    const sourceGlassList = Array.isArray(
+      rawValues?.plicellCamListesi
+    )
+      ? rawValues.plicellCamListesi
+      : [];
+
+    const validGlassList = sourceGlassList
+      .map((glass: any, index: number) => ({
+        id:
+          glass?.id ||
+          `plicell-glass-${index + 1}`,
+
+        label:
+          String(
+            glass?.label ||
+            glass?.name ||
+            `${index + 1}. Cam`
+          ),
+
+        widthCm:
+          Number(
+            glass?.widthCm ||
+            glass?.width ||
+            0
+          ),
+
+        heightCm:
+          Number(
+            glass?.heightCm ||
+            glass?.height ||
+            commonGlassHeightCm ||
+            0
+          ),
+
+        note:
+          String(
+            glass?.note ||
+            glass?.notes ||
+            ''
+          )
+      }))
+      .filter(
+        (glass: any) =>
+          glass.widthCm > 0 &&
+          glass.heightCm > 0
+      );
+
+    /*
+     * Çoklu Plicell camları yalnız KASA A.Ş. içinde hesaplanır.
+     * Her cam mevcut merkezi calculatePlicell kuralından geçer.
+     * Rapor, satış, PDF ve üretim katmanları bu sonucu değiştiremez.
+     */
+    if (validGlassList.length > 0) {
+      const groups = validGlassList.map(
+        (glass: any, index: number) => {
+          const glassCalculation =
+            calculatePlicell(
+              glass.widthCm,
+              glass.heightCm,
+              quantity,
+              systemType
+            );
+
+          return {
+            id: glass.id,
+            generatedItemId: glass.id,
+            label: glass.label,
+            groupType: 'PLICELL_CAM',
+            glassIndex: index + 1,
+
+            realWidthCm:
+              glass.widthCm,
+
+            realHeightCm:
+              glass.heightCm,
+
+            actualWidthCm:
+              glass.widthCm,
+
+            actualHeightCm:
+              glass.heightCm,
+
+            billingWidthCm:
+              glassCalculation.billingWidthCm,
+
+            billingHeightCm:
+              glassCalculation.billingHeightCm,
+
+            calculatedWidthCm:
+              glassCalculation.billingWidthCm,
+
+            calculatedHeightCm:
+              glassCalculation.billingHeightCm,
+
+            productionWidthCm:
+              glassCalculation.billingWidthCm,
+
+            productionHeightCm:
+              glassCalculation.billingHeightCm,
+
+            quantity:
+              glassCalculation.quantity,
+
+            unitM2:
+              glassCalculation.unitM2,
+
+            totalM2:
+              glassCalculation.totalM2,
+
+            minimumAreaApplied:
+              glassCalculation.minimumAreaApplied,
+
+            systemType:
+              glassCalculation.systemType,
+
+            layerCount:
+              glassCalculation.layerCount,
+
+            note:
+              glass.note
+          };
+        }
+      );
+
+      const totalM2 = Number(
+        groups
+          .reduce(
+            (sum: number, group: any) =>
+              sum + Number(group.totalM2 || 0),
+            0
+          )
+          .toFixed(2)
+      );
+
+      const singleLayerTotalM2 = Number(
+        groups
+          .reduce(
+            (sum: number, group: any) =>
+              sum +
+              Number(group.unitM2 || 0) *
+              Number(group.quantity || 1),
+            0
+          )
+          .toFixed(2)
+      );
+
+      return {
+        groups,
+        cams: groups,
+
+        quantity,
+        camAdedi: groups.length,
+        commonGlassHeightCm,
+        profilRengi:
+          rawValues?.profilRengi || '',
+
+        systemType,
+        layerCount:
+          systemType === 'DOUBLE'
+            ? 2
+            : 1,
+
+        totalM2,
+        totalSystemM2: totalM2,
+
+        salesItems:
+          systemType === 'DOUBLE'
+            ? [
+                {
+                  productType: 'PLICELL_TUL',
+                  label: 'Plicell Tül',
+                  totalM2: singleLayerTotalM2
+                },
+                {
+                  productType: 'PLICELL',
+                  label: 'Plicell',
+                  totalM2: singleLayerTotalM2
+                }
+              ]
+            : [
+                {
+                  productType: 'PLICELL',
+                  label: 'Plicell',
+                  totalM2
+                }
+              ],
+
+        description:
+          systemType === 'DOUBLE'
+            ? 'Çiftli Plicell Sistem'
+            : 'Plicell Perde'
+      };
+    }
+
+    /*
+     * Eski tek-cam Plicell kayıtları için merkezi kasa yolu.
+     * Bu yol yalnız geçerli en ve boy olduğunda çalışır.
+     */
+    const singleWidth = Number(
+      rawValues?.glassWidth ||
+      width ||
+      0
+    );
+
+    const singleHeight = Number(
+      rawValues?.glassHeight ||
+      commonGlassHeightCm ||
+      height ||
+      0
+    );
+
+    if (
+      singleWidth <= 0 ||
+      singleHeight <= 0
+    ) {
+      return {
+        groups: [],
+        cams: [],
+        quantity,
+        camAdedi: 0,
+        commonGlassHeightCm,
+        profilRengi:
+          rawValues?.profilRengi || '',
+        systemType,
+        layerCount:
+          systemType === 'DOUBLE'
+            ? 2
+            : 1,
+        totalM2: 0,
+        totalSystemM2: 0,
+        salesItems: [],
+        warning:
+          'Geçerli Plicell cam eni veya boyu bulunamadı.',
+        description:
+          'Plicell merkezi hesap için geçerli cam ölçüsü gerekli'
+      };
+    }
+
     const calculation = calculatePlicell(
-      width,
-      height,
-      Number(rawValues?.quantity || 1),
+      singleWidth,
+      singleHeight,
+      quantity,
       systemType
     );
 
@@ -1554,15 +1901,109 @@ export function calculateSelectedProduct(
       ).toFixed(2)
     );
 
+    const singleGroup = {
+      id: 'plicell-glass-1',
+      generatedItemId: 'plicell-glass-1',
+      label: '1. Cam',
+      groupType: 'PLICELL_CAM',
+
+      realWidthCm:
+        singleWidth,
+
+      realHeightCm:
+        singleHeight,
+
+      actualWidthCm:
+        singleWidth,
+
+      actualHeightCm:
+        singleHeight,
+
+      billingWidthCm:
+        calculation.billingWidthCm,
+
+      billingHeightCm:
+        calculation.billingHeightCm,
+
+      calculatedWidthCm:
+        calculation.billingWidthCm,
+
+      calculatedHeightCm:
+        calculation.billingHeightCm,
+
+      productionWidthCm:
+        calculation.billingWidthCm,
+
+      productionHeightCm:
+        calculation.billingHeightCm,
+
+      quantity:
+        calculation.quantity,
+
+      unitM2:
+        calculation.unitM2,
+
+      totalM2:
+        calculation.totalM2,
+
+      minimumAreaApplied:
+        calculation.minimumAreaApplied,
+
+      systemType:
+        calculation.systemType,
+
+      layerCount:
+        calculation.layerCount
+    };
+
     return {
-      billingWidth: calculation.billingWidthCm,
-      billingHeight: calculation.billingHeightCm,
-      unitM2: calculation.unitM2,
-      totalM2: calculation.totalM2,
-      quantity: calculation.quantity,
-      systemType: calculation.systemType,
-      layerCount: calculation.layerCount,
-      minimumAreaApplied: calculation.minimumAreaApplied,
+      billingWidth:
+        calculation.billingWidthCm,
+
+      billingHeight:
+        calculation.billingHeightCm,
+
+      billingWidthCm:
+        calculation.billingWidthCm,
+
+      billingHeightCm:
+        calculation.billingHeightCm,
+
+      productionWidthCm:
+        calculation.billingWidthCm,
+
+      productionHeightCm:
+        calculation.billingHeightCm,
+
+      unitM2:
+        calculation.unitM2,
+
+      totalM2:
+        calculation.totalM2,
+
+      totalSystemM2:
+        calculation.totalM2,
+
+      quantity:
+        calculation.quantity,
+
+      systemType:
+        calculation.systemType,
+
+      layerCount:
+        calculation.layerCount,
+
+      minimumAreaApplied:
+        calculation.minimumAreaApplied,
+
+      groups: [singleGroup],
+      cams: [singleGroup],
+      camAdedi: 1,
+      commonGlassHeightCm:
+        singleHeight,
+
+      profilRengi:
+        rawValues?.profilRengi || '',
 
       salesItems:
         systemType === 'DOUBLE'
@@ -1582,7 +2023,8 @@ export function calculateSelectedProduct(
               {
                 productType: 'PLICELL',
                 label: 'Plicell',
-                totalM2: calculation.totalM2
+                totalM2:
+                  calculation.totalM2
               }
             ],
 

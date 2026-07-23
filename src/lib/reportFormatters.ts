@@ -2,6 +2,7 @@ import { MeasurementRecord } from '@/store/measurementStore';
 import { Customer, Room, WindowItem, ProductMeasurement, Note, MEASUREMENT_TEMPLATES } from '@/store/useStore';
 import { getTemplateLabel, getMeasurementDimensions, resolveMeasurementProductLabel, resolveMeasurementProductGroup } from './measurementAdapter';
 import { formatFacadeForReport } from './facadeHelper';
+import { getStoredProductCalculation } from './calculationEngine';
 
 export function getValidNote(note?: string | null): string {
   if (!note) return "";
@@ -11,74 +12,6 @@ export function getValidNote(note?: string | null): string {
     return "";
   }
   return trimmed;
-}
-
-// ─── Plicell Square Meter Calculation ───
-
-/**
- * Rounds a value up to the next multiple of 10.
- * e.g., 30.60 -> 40, 47.50 -> 50, 48.00 -> 50, 50.10 -> 60, 50.00 -> 50
- */
-export function roundUpToNext10(valueCm: number): number {
-  if (valueCm <= 0) return 0;
-  return Math.ceil(Number(valueCm.toFixed(2)) / 10) * 10;
-}
-
-/**
- * Calculates square meters for Plicell Blinds.
- * Round up width and height to next 10, multiply, divide by 10000.
- * Minimum chargeable area is 1.00 m².
- */
-export function calculatePlicellM2(widthCm: number, heightCm: number) {
-  const roundedWidth = roundUpToNext10(widthCm);
-  const roundedHeight = roundUpToNext10(heightCm);
-  const rawM2 = Number(((roundedWidth * roundedHeight) / 10000).toFixed(4));
-  const chargeableM2 = Math.max(1.00, Number(rawM2.toFixed(2)));
-  return {
-    actualWidth: widthCm,
-    actualHeight: heightCm,
-    roundedWidth,
-    roundedHeight,
-    rawM2,
-    chargeableM2
-  };
-}
-
-/**
- * Calculates billing dimensions and square meters for Mechanical Curtain.
- * - If actual width < 100 cm, billing width = 100 cm.
- * - If actual width >= 100 cm, billing width is rounded up to next 10 cm.
- * - If actual height < 200 cm, billing height = 200 cm.
- * - If actual height >= 200 cm, billing height is rounded up to next 10 cm.
- * - Unit m2 = billingWidth * billingHeight / 10000
- * - Total m2 = Unit m2 * quantity
- */
-export function calculateMechanicalCurtainM2(widthCm: number, heightCm: number, quantity: number = 1) {
-  let billingWidth = 100;
-  if (widthCm < 100) {
-    billingWidth = 100;
-  } else {
-    billingWidth = roundUpToNext10(widthCm);
-  }
-
-  let billingHeight = 200;
-  if (heightCm < 200) {
-    billingHeight = 200;
-  } else {
-    billingHeight = roundUpToNext10(heightCm);
-  }
-
-  const unitM2 = Number(((billingWidth * billingHeight) / 10000).toFixed(4));
-  const totalM2 = Number((unitM2 * quantity).toFixed(4));
-
-  return {
-    actualWidth: widthCm,
-    actualHeight: heightCm,
-    billingWidth,
-    billingHeight,
-    unitM2: Number(unitM2.toFixed(2)),
-    totalM2: Number(totalM2.toFixed(2))
-  };
 }
 
 // ─── WhatsApp Short Report Builder ───
@@ -344,112 +277,265 @@ export function buildWhatsAppShortReport(customer: Customer, users: { id: string
       let roomPlicellAdet = 0;
 
       plicellProducts.forEach(({ p, indexInRoom }) => {
-        const camListesi = p.rawValues?.plicellCamListesi;
+        const storedCalculation =
+          getStoredProductCalculation(
+            p,
+            'PLICELL'
+          );
 
-        if (camListesi && Array.isArray(camListesi) && camListesi.length > 0) {
-          const validCamListesi = camListesi.filter((cam: any) => Number(cam.widthCm) > 0 && Number(cam.heightCm) > 0);
+        const storedCams = Array.isArray(
+          storedCalculation.cams
+        )
+          ? storedCalculation.cams
+          : Array.isArray(
+              storedCalculation.groups
+            )
+              ? storedCalculation.groups
+              : [];
 
-          if (validCamListesi.length > 0) {
-            const profilRengi = p.rawValues?.profilRengi;
-            if (profilRengi) {
-              lines.push(`  Profil Rengi: ${profilRengi}`);
-            }
-            const ortakBoy = p.rawValues?.ortakCamBoyuCm || 0;
-            if (ortakBoy > 0) {
-              lines.push(`  Ortak Cam Boyu: ${ortakBoy} cm`);
-            }
-            lines.push(`  Cam Adedi: ${validCamListesi.length}`);
-            lines.push('');
+        const quantity = Math.max(
+          1,
+          Number(
+            storedCalculation.quantity ??
+            p.rawValues?.quantity ??
+            1
+          )
+        );
 
-            validCamListesi.forEach((cam: any, idx: number) => {
-              const w = Number(cam.widthCm) || 0;
-              const h = Number(cam.heightCm) || 0;
-              const calc = calculatePlicellM2(w, h);
-              roomPlicellM2 += calc.chargeableM2;
-              roomPlicellAdet++;
-              globalPlicellCount++;
-              globalPlicellM2 += calc.chargeableM2;
+        const totalM2 = Number(
+          storedCalculation.totalSystemM2 ??
+          storedCalculation.totalM2 ??
+          0
+        );
 
-              lines.push(`  ${idx + 1}. Cam: ${w} × ${h} cm → Hesap: ${calc.roundedWidth} × ${calc.roundedHeight} = ${calc.chargeableM2.toFixed(2)} m²`);
+        const profilRengi =
+          p.rawValues?.profilRengi;
 
-              const validCamNote = getValidNote(cam.note);
-              if (validCamNote) {
-                notesList.push(`  - ${idx + 1}. Cam Notu: ${validCamNote}`);
-              }
-            });
-          }
-        } else {
-          // Fallback to old format
-          const w = Number(p.rawValues?.glassWidth || 0);
-          const h = Number(p.rawValues?.glassHeight || 0);
-          const calc = calculatePlicellM2(w, h);
-
-          roomPlicellM2 += calc.chargeableM2;
-          roomPlicellAdet++;
-          globalPlicellCount++;
-          globalPlicellM2 += calc.chargeableM2;
-
-          lines.push(`  ${indexInRoom}) ${w.toFixed(2)} en x ${h.toFixed(2)} boy → Hesap: ${calc.roundedWidth} x ${calc.roundedHeight} = ${calc.chargeableM2.toFixed(2)} m²`);
-
-          const validNote = getValidNote(p.notes);
-          if (validNote) {
-            notesList.push(`  - ${indexInRoom}. Cam: ${validNote}`);
-          }
+        if (profilRengi) {
+          lines.push(
+            `  Profil Rengi: ${profilRengi}`
+          );
         }
+
+        const ortakBoy = Number(
+          p.rawValues?.ortakCamBoyuCm || 0
+        );
+
+        if (ortakBoy > 0) {
+          lines.push(
+            `  Ortak Cam Boyu: ${ortakBoy} cm`
+          );
+        }
+
+        if (storedCams.length === 0) {
+          lines.push(
+            `  ${indexInRoom}) Merkezi Plicell hesap sonucu bulunamadı.`
+          );
+
+          const validNote =
+            getValidNote(p.notes);
+
+          if (validNote) {
+            notesList.push(
+              `  - ${indexInRoom}. Cam: ${validNote}`
+            );
+          }
+
+          return;
+        }
+
+        lines.push(
+          `  Cam Adedi: ${storedCams.length * quantity}`
+        );
+        lines.push('');
+
+        storedCams.forEach(
+          (cam: any, camIndex: number) => {
+            const realWidth = Number(
+              cam.realWidthCm ??
+              cam.actualWidthCm ??
+              cam.widthCm ??
+              0
+            );
+
+            const realHeight = Number(
+              cam.realHeightCm ??
+              cam.actualHeightCm ??
+              cam.heightCm ??
+              ortakBoy ??
+              0
+            );
+
+            const billingWidth = Number(
+              cam.billingWidthCm ??
+              cam.calculatedWidthCm ??
+              cam.roundedWidth ??
+              0
+            );
+
+            const billingHeight = Number(
+              cam.billingHeightCm ??
+              cam.calculatedHeightCm ??
+              cam.roundedHeight ??
+              0
+            );
+
+            const camM2 = Number(
+              cam.totalSystemM2 ??
+              cam.totalM2 ??
+              cam.chargeableM2 ??
+              cam.unitM2 ??
+              0
+            );
+
+            lines.push(
+              `  ${camIndex + 1}. Cam: ${realWidth} × ${realHeight} cm → Hesap: ${billingWidth} × ${billingHeight} = ${camM2.toFixed(2)} m²`
+            );
+
+            const validCamNote =
+              getValidNote(cam.note);
+
+            if (validCamNote) {
+              notesList.push(
+                `  - ${camIndex + 1}. Cam Notu: ${validCamNote}`
+              );
+            }
+          }
+        );
+
+        roomPlicellAdet +=
+          storedCams.length * quantity;
+
+        roomPlicellM2 += totalM2;
+        globalPlicellCount +=
+          storedCams.length * quantity;
+        globalPlicellM2 += totalM2;
       });
 
       lines.push('');
-      lines.push(`  Toplam Adet: ${roomPlicellAdet}`);
-      lines.push(`  Toplam m²: ${roomPlicellM2.toFixed(2)}`);
+      lines.push(
+        `  Toplam Adet: ${roomPlicellAdet}`
+      );
+      lines.push(
+        `  Toplam m²: ${roomPlicellM2.toFixed(2)}`
+      );
 
       if (notesList.length > 0) {
         lines.push(`  Notlar:`);
-        notesList.forEach(nl => lines.push(nl));
+        notesList.forEach(
+          noteLine => lines.push(noteLine)
+        );
       }
     }
 
     // C. Render Mechanical Curtain Group (Kompakt Liste)
     if (mechanicalCurtainProducts.length > 0) {
-      lines.push(`  Ölçü: Mekanik Perde Ölçüsü`);
+      lines.push(
+        `  Ölçü: Mekanik Perde Ölçüsü`
+      );
 
       const notesList: string[] = [];
       let roomMechanicalM2 = 0;
+      let roomMechanicalCount = 0;
 
-      mechanicalCurtainProducts.forEach(({ p, indexInRoom, openingName }) => {
-        const w = Number(p.rawValues?.width || 0);
-        const h = Number(p.rawValues?.height || 0);
-        const q = Number(p.rawValues?.quantity || 1);
-        const productType = resolveMeasurementProductLabel(p);
+      mechanicalCurtainProducts.forEach(
+        ({ p, indexInRoom, openingName }) => {
+          const storedCalculation =
+            getStoredProductCalculation(
+              p,
+              p.productType
+            );
 
-        const calcWidth = p.details?.billingWidth || Math.ceil(w / 10) * 10 || w;
-        const calcHeight = p.details?.billingHeight || h;
-        const totalM2 = p.details?.totalM2 !== undefined ? Number(p.details.totalM2) : calculateMechanicalCurtainM2(w, h, q).totalM2;
-        const unitM2 = totalM2 / q;
+          const w = Number(
+            storedCalculation.realWidthCm ??
+            storedCalculation.actualWidthCm ??
+            p.rawValues?.width ??
+            0
+          );
 
-        roomMechanicalM2 += totalM2;
-        globalMechanicalCount += q;
-        globalMechanicalM2 += totalM2;
+          const h = Number(
+            storedCalculation.realHeightCm ??
+            storedCalculation.actualHeightCm ??
+            p.rawValues?.height ??
+            0
+          );
 
-        const qtySuffix = q > 1 ? ` x ${q} adet` : '';
-        const m2Formula = q > 1
-          ? ` = ${unitM2.toFixed(2)} m² x ${q} = ${totalM2.toFixed(2)} m²`
-          : ` = ${totalM2.toFixed(2)} m²`;
+          const q = Math.max(
+            1,
+            Number(
+              storedCalculation.quantity ??
+              p.rawValues?.quantity ??
+              1
+            )
+          );
 
-        lines.push(`  ${indexInRoom}) [${openingName}] ${productType} — ${w} en x ${h} boy${qtySuffix} → Hesap: ${calcWidth} x ${calcHeight}${m2Formula}`);
+          const productType =
+            resolveMeasurementProductLabel(p);
 
-        // Collect notes if any
-        const validNote = getValidNote(p.notes);
-        if (validNote) {
-          notesList.push(`  - ${indexInRoom}. Mekanik: ${validNote}`);
+          const calcWidth = Number(
+            storedCalculation.billingWidthCm ??
+            storedCalculation.calculatedWidthCm ??
+            storedCalculation.billingWidth ??
+            0
+          );
+
+          const calcHeight = Number(
+            storedCalculation.billingHeightCm ??
+            storedCalculation.calculatedHeightCm ??
+            storedCalculation.billingHeight ??
+            0
+          );
+
+          const unitM2 = Number(
+            storedCalculation.unitM2 ??
+            0
+          );
+
+          const totalM2 = Number(
+            storedCalculation.totalSystemM2 ??
+            storedCalculation.totalM2 ??
+            0
+          );
+
+          roomMechanicalCount += q;
+          roomMechanicalM2 += totalM2;
+          globalMechanicalCount += q;
+          globalMechanicalM2 += totalM2;
+
+          const qtySuffix =
+            q > 1
+              ? ` x ${q} adet`
+              : '';
+
+          const m2Formula =
+            q > 1
+              ? ` = ${unitM2.toFixed(2)} m² x ${q} = ${totalM2.toFixed(2)} m²`
+              : ` = ${totalM2.toFixed(2)} m²`;
+
+          lines.push(
+            `  ${indexInRoom}) [${openingName}] ${productType} — ${w} en x ${h} boy${qtySuffix} → Hesap: ${calcWidth} x ${calcHeight}${m2Formula}`
+          );
+
+          const validNote =
+            getValidNote(p.notes);
+
+          if (validNote) {
+            notesList.push(
+              `  - ${indexInRoom}. Mekanik: ${validNote}`
+            );
+          }
         }
-      });
+      );
 
-      const totalQuantity = mechanicalCurtainProducts.reduce((acc, curr) => acc + Number(curr.p.rawValues?.quantity || 1), 0);
-      lines.push(`  Toplam: ${totalQuantity} Adet Mekanik Perde - ${roomMechanicalM2.toFixed(2)} m²`);
+      lines.push(
+        `  Toplam: ${roomMechanicalCount} Adet Mekanik Perde - ${roomMechanicalM2.toFixed(2)} m²`
+      );
 
       if (notesList.length > 0) {
         lines.push(`  Notlar:`);
-        notesList.forEach(nl => lines.push(nl));
+        notesList.forEach(
+          noteLine => lines.push(noteLine)
+        );
       }
     }
 
