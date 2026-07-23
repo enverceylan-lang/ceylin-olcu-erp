@@ -162,70 +162,145 @@ export function applyPaymentToSale(
     );
   }
 
-  const payments = [
-    ...(sale.payments || []),
-    normalizedPayment
-  ];
+  const saleOpenAmount =
+    getSaleRemainingBalance(sale);
 
-  let remainingPayment = normalizedPayment.amount;
+  if (
+    normalizedPayment.amount > saleOpenAmount
+  ) {
+    throw new Error(
+      'Tahsilat tutarı satışın açık bakiyesini aşamaz.'
+    );
+  }
 
-  const installmentPlan = sale.installmentPlan
-    ? {
-        ...sale.installmentPlan,
-        installments: sale.installmentPlan.installments.map(
-          installment => {
-            if (
-              remainingPayment <= 0 ||
-              (
-                normalizedPayment.installmentId &&
-                normalizedPayment.installmentId !==
-                  installment.id
-              )
-            ) {
-              return installment;
-            }
+  const originalInstallments =
+    sale.installmentPlan?.installments || [];
 
-            const openAmount = roundMoney(
-              installment.amount -
-                installment.paidAmount
-            );
+  const sortedOpenInstallments =
+    [...originalInstallments]
+      .filter(installment =>
+        installment.status !== 'IPTAL' &&
+        roundMoney(
+          installment.amount -
+            installment.paidAmount
+        ) > 0
+      )
+      .sort((left, right) => {
+        const dateCompare =
+          left.dueDate.localeCompare(
+            right.dueDate
+          );
 
-            if (openAmount <= 0) {
-              return installment;
-            }
+        if (dateCompare !== 0) {
+          return dateCompare;
+        }
 
-            const appliedAmount = Math.min(
-              openAmount,
-              remainingPayment
-            );
+        return left.sequence - right.sequence;
+      });
 
-            remainingPayment = roundMoney(
-              remainingPayment - appliedAmount
-            );
+  const selectedInstallment =
+    normalizedPayment.installmentId
+      ? sortedOpenInstallments.find(
+          installment =>
+            installment.id ===
+              normalizedPayment.installmentId
+        )
+      : undefined;
 
-            const paidAmount = roundMoney(
-              installment.paidAmount + appliedAmount
-            );
+  if (
+    normalizedPayment.installmentId &&
+    !selectedInstallment
+  ) {
+    throw new Error(
+      'Seçilen taksit bulunamadı veya kapanmış.'
+    );
+  }
 
-            const updated: SaleInstallment = {
-              ...installment,
-              paidAmount,
-              lastPaymentAt: normalizedPayment.paidAt,
-              status: installment.status
-            };
+  const allocationOrder =
+    selectedInstallment
+      ? [
+          selectedInstallment,
+          ...sortedOpenInstallments.filter(
+            installment =>
+              installment.id !==
+                selectedInstallment.id
+          )
+        ]
+      : sortedOpenInstallments;
 
-            return {
-              ...updated,
-              status: resolveInstallmentStatus(updated)
-            };
-          }
+  let remainingPayment =
+    normalizedPayment.amount;
+
+  const installmentUpdates =
+    new Map<string, SaleInstallment>();
+
+  for (const installment of allocationOrder) {
+    if (remainingPayment <= 0) break;
+
+    const openAmount = roundMoney(
+      installment.amount -
+        installment.paidAmount
+    );
+
+    if (openAmount <= 0) continue;
+
+    const appliedAmount = roundMoney(
+      Math.min(openAmount, remainingPayment)
+    );
+
+    remainingPayment = roundMoney(
+      remainingPayment - appliedAmount
+    );
+
+    const updatedInstallment: SaleInstallment = {
+      ...installment,
+      paidAmount: roundMoney(
+        installment.paidAmount + appliedAmount
+      ),
+      lastPaymentAt: normalizedPayment.paidAt,
+      status: installment.status
+    };
+
+    installmentUpdates.set(
+      installment.id,
+      {
+        ...updatedInstallment,
+        status: resolveInstallmentStatus(
+          updatedInstallment
         )
       }
-    : undefined;
+    );
+  }
+
+  if (
+    sale.installmentPlan &&
+    remainingPayment > 0
+  ) {
+    throw new Error(
+      'Tahsilatın tamamı açık taksitlere dağıtılamadı.'
+    );
+  }
+
+  const installmentPlan =
+    sale.installmentPlan
+      ? {
+          ...sale.installmentPlan,
+          installments:
+            originalInstallments.map(
+              installment =>
+                installmentUpdates.get(
+                  installment.id
+                ) || installment
+            )
+        }
+      : undefined;
 
   const updatedSale: Sale = {
     ...sale,
-    payments,
+    payments: [
+      ...(sale.payments || []),
+      normalizedPayment
+    ],
     installmentPlan,
     updatedAt: new Date().toISOString()
   };
@@ -238,13 +313,28 @@ export function applyPaymentToSale(
 }
 
 export function getOverdueInstallments(
-  sale: Sale
+  sale: Sale,
+  todayText = new Date()
+    .toISOString()
+    .slice(0, 10)
 ): SaleInstallment[] {
   return (
-    refreshInstallmentPlan(sale.installmentPlan)
-      ?.installments.filter(
-        installment =>
-          installment.status === 'GECIKTI'
-      ) || []
+    sale.installmentPlan?.installments.filter(
+      installment => {
+        if (installment.status === 'IPTAL') {
+          return false;
+        }
+
+        const openAmount = roundMoney(
+          installment.amount -
+            installment.paidAmount
+        );
+
+        return (
+          openAmount > 0 &&
+          installment.dueDate < todayText
+        );
+      }
+    ) || []
   );
 }

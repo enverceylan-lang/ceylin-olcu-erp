@@ -7,6 +7,7 @@ import { Topbar } from "@/components/Topbar";
 import { PWAController } from "@/components/PWAController";
 import { AuthGate } from "@/components/AuthGate";
 import { FieldTaskNotifier } from "@/components/FieldTaskNotifier";
+import { SaleDueNotifier } from "@/components/SaleDueNotifier";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -58,6 +59,7 @@ export default function RootLayout({
           <PWAController />
           <AuthGate>
             <Sidebar />
+            <SaleDueNotifier />
             <div className="flex-1 flex flex-col min-h-screen max-w-full overflow-hidden">
               <Topbar />
               <main className="flex-1 p-4 lg:p-8 overflow-auto">
