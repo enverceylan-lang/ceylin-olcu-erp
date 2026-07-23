@@ -37,6 +37,16 @@ global.fetch = async (url: string | URL | Request, options?: RequestInit) => {
 let hasFailure = false;
 async function runTest(name: string, fn: () => Promise<void>) {
   try {
+    const authState = useAuthStore.getState();
+
+    if (!authState.sessionToken) {
+      useAuthStore.setState({
+        sessionToken: 'test-session-token',
+        sessionExpiresAt: '2099-12-31T23:59:59.000Z',
+        rememberMe: false
+      });
+    }
+
     await fn();
     console.log(`[PASS] ${name}`);
   } catch (e: any) {
@@ -318,7 +328,7 @@ async function runProfileTests() {
     });
     if (!success) throw new Error('Update failed');
     const updated = useAuthStore.getState().users.find(u => u.id === 'staff-id');
-    if (updated?.password !== 'old-password-hash') throw new Error('Password was overwritten or cleared');
+    if (updated?.password !== undefined) throw new Error('Password must not remain in client user state');
   });
 
   // 6. adminEditPreservesUserId
@@ -1130,7 +1140,7 @@ async function runProfileTests() {
     });
     if (!success) throw new Error('Add user failed');
     const added = useAuthStore.getState().users.find(u => u.username === 'ceylin');
-    if (added?.password !== '123') throw new Error(`Password should remain plaintext locally, got: ${added?.password}`);
+    if (added?.password !== undefined) throw new Error('Password must not remain plaintext locally: ' + String(added?.password));
   });
 
   // 11. existingUserIdIsPreserved
@@ -1569,7 +1579,12 @@ async function runProfileTests() {
           status: 200,
           json: async () => ({
             success: true,
-            user: { ...createdUser, isActive: true }
+            user: { ...createdUser, isActive: true },
+            session: {
+              token: 'test-login-session-token',
+              expiresAt: '2099-12-31T23:59:59.000Z',
+              rememberMe: false
+            }
           })
         } as any;
       }
@@ -1621,7 +1636,12 @@ async function runProfileTests() {
           status: 200,
           json: async () => ({
             success: true,
-            user: { ...createdUser, isActive: true }
+            user: { ...createdUser, isActive: true },
+            session: {
+              token: 'test-login-session-token',
+              expiresAt: '2099-12-31T23:59:59.000Z',
+              rememberMe: false
+            }
           })
         } as any;
       }
@@ -1751,7 +1771,12 @@ async function runProfileTests() {
           status: 200,
           json: async () => ({
             success: true,
-            user: { id: 'field-1', username: 'field1', role: 'FIELD', isActive: true }
+            user: { id: 'field-1', username: 'field1', role: 'FIELD', isActive: true },
+            session: {
+              token: 'test-login-session-token',
+              expiresAt: '2099-12-31T23:59:59.000Z',
+              rememberMe: false
+            }
           })
         } as any;
       }
@@ -1983,7 +2008,12 @@ async function runProfileTests() {
           status: 200,
           json: async () => ({
             success: true,
-            user: { id: 'user-admin', username: 'admin', role: 'ADMIN', isActive: true }
+            user: { id: 'user-admin', username: 'admin', role: 'ADMIN', isActive: true },
+            session: {
+              token: 'test-login-session-token',
+              expiresAt: '2099-12-31T23:59:59.000Z',
+              rememberMe: false
+            }
           })
         } as any;
       }
@@ -2010,7 +2040,12 @@ async function runProfileTests() {
           status: 200,
           json: async () => ({
             success: true,
-            user: { id: 'staff-id', username: 'fielduser', role: 'FIELD', isActive: true }
+            user: { id: 'staff-id', username: 'fielduser', role: 'FIELD', isActive: true },
+            session: {
+              token: 'test-login-session-token',
+              expiresAt: '2099-12-31T23:59:59.000Z',
+              rememberMe: false
+            }
           })
         } as any;
       }
@@ -2037,7 +2072,12 @@ async function runProfileTests() {
           status: 200,
           json: async () => ({
             success: true,
-            user: { id: 'mod-id', username: 'moduser', role: 'MODERATOR', isActive: true }
+            user: { id: 'mod-id', username: 'moduser', role: 'MODERATOR', isActive: true },
+            session: {
+              token: 'test-login-session-token',
+              expiresAt: '2099-12-31T23:59:59.000Z',
+              rememberMe: false
+            }
           })
         } as any;
       }
