@@ -429,21 +429,78 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   };
 
   const handleShareWhatsAppReport = async () => {
-    const report = buildWhatsAppShortReport(customer, users, useMeasurementStore.getState().measurements);
+    const report = buildWhatsAppShortReport(
+      customer,
+      users,
+      useMeasurementStore.getState().measurements,
+    );
 
-    try {
-      if (navigator.share) {
+    if (navigator.share) {
+      try {
         await navigator.share({
           title: `${customer.name} Ölçü Raporu`,
           text: report,
         });
+
+        return;
+      } catch (error) {
+        if (
+          error instanceof DOMException &&
+          error.name === 'AbortError'
+        ) {
+          return;
+        }
+
+        console.error(
+          '[WhatsAppReport] Native share failed:',
+          error instanceof Error
+            ? error.message
+            : 'Unknown share error',
+        );
+
+        window.alert(
+          'Telefonun paylaşım ekranı açılamadı. WhatsApp bağlantısı denenecek.',
+        );
+      }
+    }
+
+    const whatsappUrl =
+      `https://wa.me/?text=${encodeURIComponent(report)}`;
+
+    const openedWindow = window.open(
+      whatsappUrl,
+      '_blank',
+      'noopener,noreferrer',
+    );
+
+    if (openedWindow) {
+      return;
+    }
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(
+          report,
+        );
+
+        window.alert(
+          'WhatsApp penceresi açılamadı. Ölçü raporu panoya kopyalandı.',
+        );
+
         return;
       }
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') return;
+      console.error(
+        '[WhatsAppReport] Clipboard fallback failed:',
+        error instanceof Error
+          ? error.message
+          : 'Unknown clipboard error',
+      );
     }
 
-    window.open(`https://wa.me/?text=${encodeURIComponent(report)}`, '_blank', 'noopener,noreferrer');
+    window.alert(
+      'WhatsApp raporu açılamadı. Tarayıcı açılır pencere iznini kontrol edin.',
+    );
   };
 
   const toggleRoom = (roomId: string) => {

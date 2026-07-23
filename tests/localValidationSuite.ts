@@ -356,6 +356,12 @@ async function runTests() {
     const measurements = useMeasurementStore.getState().measurements;
     const wpMsg = buildWhatsAppShortReport(testCustomer, [], measurements);
     if (!wpMsg.includes('FINAL TEST CAR')) throw new Error('WhatsApp metni cari adı yanlış');
+    if (wpMsg.includes('Telefon:')) throw new Error('WhatsApp kısa raporda telefon olmamalı');
+    if (wpMsg.includes('Adres:')) throw new Error('WhatsApp kısa raporda adres olmamalı');
+    if (wpMsg.includes('Konum:')) throw new Error('WhatsApp kısa raporda konum bağlantısı olmamalı');
+    if (wpMsg.includes('GENEL MEKANİK PERDE TOPLAMI')) throw new Error('WhatsApp kısa raporda genel mekanik tekrar toplamı olmamalı');
+    if (wpMsg.includes('GENEL PLİCELL TOPLAMI')) throw new Error('WhatsApp kısa raporda genel Plicell tekrar toplamı olmamalı');
+    if (wpMsg.includes('CEYLİN ERP.0 - Saha Pilot')) throw new Error('WhatsApp kısa raporda pilot imzası olmamalı');
   });
 
   console.log('\n--- EKSİK TESTLER KONTROLÜ ---');

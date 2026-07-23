@@ -16,554 +16,616 @@ export function getValidNote(note?: string | null): string {
 
 // ─── WhatsApp Short Report Builder ───
 
-export function buildWhatsAppShortReport(customer: Customer, users: { id: string; name: string }[], measurements: MeasurementRecord[] = []): string {
+export function buildWhatsAppShortReport(
+  customer: Customer,
+  users: { id: string; name: string }[],
+  measurements: MeasurementRecord[] = [],
+): string {
+  void users;
+
   const lines: string[] = [
-    `*CEYLİN ERP - SAHA ÖLÇÜ RAPORU*`,
+    '*CEYLİN PERDE — ÖLÇÜ RAPORU*',
     `Müşteri: ${customer.name}`,
-    `Telefon: ${customer.phone || '-'}`,
-    `Adres: ${customer.address || customer.mapLocation || '-'}`,
-    `Rapor Tarihi: ${new Date().toLocaleString('tr-TR')}`
+    `Tarih: ${new Date().toLocaleDateString('tr-TR')}`,
+    '',
   ];
 
-  // 1. Determine "Ölçüyü Alan" (Person who took measurements)
-  // Collect all unique names of personnel who took measurements
-  const allMeasuredBy = new Set<string>();
-  let hasMeasurements = false;
-  const allMeasurements = measurements.filter(m => m.customerId === customer.id && !m.isDeleted);
-    customer.rooms?.forEach(room => {
-      room.windows?.forEach(window => {
-        allMeasurements.filter(m => m.windowId === window.id).forEach(p => {
-        hasMeasurements = true;
-        if (p.measuredBy) allMeasuredBy.add(p.measuredBy);
-      });
-    });
-  });
+  const customerMeasurements =
+    measurements.filter(
+      (measurement) =>
+        measurement.customerId === customer.id &&
+        !measurement.isDeleted,
+    );
 
-  const sameMeasuredBy = allMeasuredBy.size === 1 ? Array.from(allMeasuredBy)[0] : null;
-  if (sameMeasuredBy) {
-    lines.push(`Ölçüyü Alan: ${sameMeasuredBy}`);
-  }
-  lines.push(''); // spacing
+  const rooms = customer.rooms || [];
 
-  if (!customer.rooms || customer.rooms.length === 0) {
-    lines.push('Henüz oda ve ölçü kaydı bulunmuyor.');
+  if (
+    rooms.length === 0 ||
+    customerMeasurements.length === 0
+  ) {
+    lines.push(
+      'Henüz kayıtlı ölçü bulunmuyor.',
+    );
+
     return lines.join('\n');
   }
 
-  // 2. Date checks: are measurements on different days?
-  const uniqueDays = new Set<string>();
-  customer.rooms.forEach(room => {
-      room.windows?.forEach(window => {
-        allMeasurements.filter(m => m.windowId === window.id).forEach(p => {
-        if (p.measuredDate) {
-          const dayStr = new Date(p.measuredDate).toLocaleDateString('tr-TR');
-          uniqueDays.add(dayStr);
-        }
-      });
-    });
-  });
-  const showDateOnMeasurements = uniqueDays.size > 1;
+  const numberText = (
+    value: unknown,
+  ): string => {
+    const number = Number(value || 0);
 
-  let globalPlicellCount = 0;
-  let globalPlicellM2 = 0;
-  let globalMechanicalCount = 0;
-  let globalMechanicalM2 = 0;
+    return Number.isFinite(number)
+      ? String(number)
+      : '0';
+  };
 
-  // 3. Process Rooms
-  customer.rooms.forEach((room, roomIndex) => {
-    lines.push(`*${roomIndex + 1}. ODA: ${room.name}*`);
+  const squareMeterText = (
+    value: unknown,
+  ): string => {
+    const number = Number(value || 0);
 
+    return number > 0
+      ? ` — ${number.toFixed(2)} m²`
+      : '';
+  };
+
+  const chainText = (
+    value: any,
+  ): string => {
+    const direction =
+      value?.chainDirection ??
+      value?.zincirYonu ??
+      value?.chainSide ??
+      value?.controlSide;
+
+    return direction
+      ? ` — Zincir ${direction}`
+      : '';
+  };
+
+  rooms.forEach((room) => {
+    const roomLines: string[] = [];
     const windows = room.windows || [];
-    if (windows.length === 0) {
-      lines.push('- Oda altında açıklık kaydı yok.');
-      lines.push('');
-      return;
-    }
+    const showOpening =
+      windows.length > 1;
 
-    // Split windows into Plicell, Mechanical Curtain and standard for specialized layout
-    // We group Plicell items and Mechanical Curtain items per room
-    const plicellProducts: { p: ProductMeasurement; indexInRoom: number; openingName: string }[] = [];
-    const mechanicalCurtainProducts: { p: ProductMeasurement; indexInRoom: number; openingName: string }[] = [];
-    const standardOpenings: { window: WindowItem; products: ProductMeasurement[] }[] = [];
+    windows.forEach((window) => {
+      const openingMeasurements =
+        customerMeasurements.filter(
+          (measurement) =>
+            measurement.windowId ===
+            window.id,
+        );
 
-    let plicellCounter = 0;
-    let mechanicalCounter = 0;
-    windows.forEach((win) => {
-      const winProds = allMeasurements.filter(m => m.windowId === win.id);
-      winProds.forEach(m => {
-        const activeProducts = m.selectedProducts?.filter(sp => sp.isActive) || [];
+      openingMeasurements.forEach(
+        (measurement) => {
+          const activeProducts =
+            measurement.selectedProducts
+              ?.filter(
+                (selectedProduct) =>
+                  selectedProduct.isActive,
+              ) || [];
 
-        if (activeProducts.length === 0) {
-          // Fallback
-          const fallbackGroup = resolveMeasurementProductGroup(m);
-          if (fallbackGroup === 'Plicell') {
-            plicellProducts.push({ p: m, indexInRoom: ++plicellCounter, openingName: win.name });
-          } else if (fallbackGroup === 'Mekanik Perde') {
-            mechanicalCurtainProducts.push({ p: m, indexInRoom: ++mechanicalCounter, openingName: win.name });
-          } else {
-            let entry = standardOpenings.find(so => so.window.id === win.id);
-            if (!entry) {
-              entry = { window: win, products: [] };
-              standardOpenings.push(entry);
-            }
-            entry.products.push(m);
-          }
-        } else {
-          activeProducts.forEach(ap => {
-            const pType = ap.productType;
-            const pGroup = resolveMeasurementProductGroup({ productType: pType });
+          const products:
+            ProductMeasurement[] =
+              activeProducts.length > 0
+                ? activeProducts.map(
+                    (selectedProduct) => ({
+                      ...measurement,
+                      productType:
+                        selectedProduct
+                          .productType,
+                      productGroup:
+                        resolveMeasurementProductGroup(
+                          {
+                            productType:
+                              selectedProduct
+                                .productType,
+                          },
+                        ),
+                      selectedProducts: [
+                        selectedProduct,
+                      ],
+                      details: {
+                        ...measurement.details,
+                        ...selectedProduct
+                          .calculation,
+                      },
+                    }),
+                  )
+                : [measurement];
 
-            const pObj: ProductMeasurement = {
-              ...m,
-              productType: pType,
-              productGroup: pGroup,
-              selectedProducts: [ap],
-              details: {
-                ...m.details,
-                ...ap.calculation
+          products.forEach((product) => {
+            const productLabel =
+              resolveMeasurementProductLabel(
+                product,
+              );
+
+            const productGroup =
+              resolveMeasurementProductGroup(
+                product,
+              );
+
+            const openingPrefix =
+              showOpening
+                ? `${window.name} — `
+                : '';
+
+            const note = getValidNote(
+              product.notes,
+            );
+
+            if (
+              product.productType ===
+              'PLICELL'
+            ) {
+              const calculation =
+                getStoredProductCalculation(
+                  product,
+                  'PLICELL',
+                );
+
+              const cams = Array.isArray(
+                calculation.cams,
+              )
+                ? calculation.cams
+                : Array.isArray(
+                    calculation.groups,
+                  )
+                  ? calculation.groups
+                  : [];
+
+              const commonHeight = Number(
+                product.rawValues
+                  ?.ortakCamBoyuCm || 0,
+              );
+
+              roomLines.push(
+                `• ${openingPrefix}Plicell`,
+              );
+
+              const profileColor =
+                product.rawValues
+                  ?.profilRengi;
+
+              if (profileColor) {
+                roomLines.push(
+                  `  Profil: ${profileColor}`,
+                );
               }
-            };
 
-            if (pType === 'PLICELL') {
-              plicellProducts.push({ p: pObj, indexInRoom: ++plicellCounter, openingName: win.name });
-            } else if (pGroup === 'Mekanik Perde') {
-              if (ap.calculation?.isSegmented && Array.isArray(ap.calculation.groups) && ap.calculation.groups.length > 0) {
-                ap.calculation.groups.forEach((g: any, gIdx: number) => {
-                  const gObj: ProductMeasurement = {
-                    ...m,
-                    id: `${m.id}-group-${gIdx}`,
-                    productType: pType,
-                    productGroup: pGroup,
-                    selectedProducts: [ap],
-                    rawValues: {
-                      ...m.rawValues,
-                      width: g.realWidthCm,
-                      height: g.realHeightCm,
-                      quantity: g.quantity
-                    },
-                    details: {
-                      ...m.details,
-                      ...ap.calculation,
-                      billingWidth: g.calculatedWidthCm,
-                      billingHeight: g.calculatedHeightCm,
-                      totalM2: g.totalM2
+              if (commonHeight > 0) {
+                roomLines.push(
+                  `  Ortak boy: ${commonHeight} cm`,
+                );
+              }
+
+              if (cams.length === 0) {
+                const width =
+                  product.rawValues?.width ??
+                  product.rawValues?.en ??
+                  0;
+
+                const height =
+                  product.rawValues?.height ??
+                  product.rawValues?.boy ??
+                  commonHeight ??
+                  0;
+
+                roomLines.push(
+                  `  Ölçü: ${numberText(width)} × ${numberText(height)} cm`,
+                );
+              }
+
+              cams.forEach(
+                (
+                  cam: any,
+                  camIndex: number,
+                ) => {
+                  const realWidth = Number(
+                    cam.realWidthCm ??
+                    cam.actualWidthCm ??
+                    cam.widthCm ??
+                    0,
+                  );
+
+                  const realHeight = Number(
+                    cam.realHeightCm ??
+                    cam.actualHeightCm ??
+                    cam.heightCm ??
+                    commonHeight ??
+                    0,
+                  );
+
+                  const billingWidth =
+                    Number(
+                      cam.billingWidthCm ??
+                      cam.calculatedWidthCm ??
+                      cam.roundedWidth ??
+                      0,
+                    );
+
+                  const billingHeight =
+                    Number(
+                      cam.billingHeightCm ??
+                      cam.calculatedHeightCm ??
+                      cam.roundedHeight ??
+                      0,
+                    );
+
+                  const camM2 = Number(
+                    cam.totalSystemM2 ??
+                    cam.totalM2 ??
+                    cam.chargeableM2 ??
+                    cam.unitM2 ??
+                    0,
+                  );
+
+                  let camLine =
+                    `  ${camIndex + 1}. Cam: ${realWidth} × ${realHeight} cm`;
+
+                  if (
+                    billingWidth > 0 &&
+                    billingHeight > 0 &&
+                    (
+                      billingWidth !==
+                        realWidth ||
+                      billingHeight !==
+                        realHeight
+                    )
+                  ) {
+                    camLine +=
+                      ` — Hesap: ${billingWidth} × ${billingHeight}`;
+                  }
+
+                  camLine +=
+                    squareMeterText(camM2);
+
+                  roomLines.push(camLine);
+
+                  const camNote =
+                    getValidNote(cam.note);
+
+                  if (camNote) {
+                    roomLines.push(
+                      `  Not: ${camNote}`,
+                    );
+                  }
+                },
+              );
+
+              if (note) {
+                roomLines.push(
+                  `  Not: ${note}`,
+                );
+              }
+
+              return;
+            }
+
+            if (
+              productGroup ===
+              'Mekanik Perde'
+            ) {
+              const calculation =
+                getStoredProductCalculation(
+                  product,
+                  product.productType,
+                );
+
+              const groups = Array.isArray(
+                calculation.groups,
+              )
+                ? calculation.groups
+                : [];
+
+              if (groups.length > 0) {
+                groups.forEach(
+                  (
+                    group: any,
+                    groupIndex: number,
+                  ) => {
+                    const partName =
+                      group.label ??
+                      group.name ??
+                      group.partName ??
+                      `Parça ${groupIndex + 1}`;
+
+                    const realWidth = Number(
+                      group.realWidthCm ??
+                      group.actualWidthCm ??
+                      group.widthCm ??
+                      0,
+                    );
+
+                    const realHeight = Number(
+                      group.realHeightCm ??
+                      group.actualHeightCm ??
+                      group.heightCm ??
+                      0,
+                    );
+
+                    const billingWidth =
+                      Number(
+                        group.billingWidthCm ??
+                        group.calculatedWidthCm ??
+                        0,
+                      );
+
+                    const billingHeight =
+                      Number(
+                        group.billingHeightCm ??
+                        group.calculatedHeightCm ??
+                        0,
+                      );
+
+                    const totalM2 = Number(
+                      group.totalSystemM2 ??
+                      group.totalM2 ??
+                      group.unitM2 ??
+                      0,
+                    );
+
+                    let groupLine =
+                      `• ${openingPrefix}${productLabel} — ${partName}: ${realWidth} × ${realHeight} cm`;
+
+                    if (
+                      billingWidth > 0 &&
+                      billingHeight > 0 &&
+                      (
+                        billingWidth !==
+                          realWidth ||
+                        billingHeight !==
+                          realHeight
+                      )
+                    ) {
+                      groupLine +=
+                        ` — Hesap: ${billingWidth} × ${billingHeight}`;
                     }
-                  };
-                  mechanicalCurtainProducts.push({ p: gObj, indexInRoom: ++mechanicalCounter, openingName: `${win.name} - Parça ${gIdx + 1}` });
-                });
+
+                    groupLine +=
+                      squareMeterText(
+                        totalM2,
+                      );
+
+                    groupLine +=
+                      chainText(group);
+
+                    roomLines.push(
+                      groupLine,
+                    );
+                  },
+                );
               } else {
-                mechanicalCurtainProducts.push({ p: pObj, indexInRoom: ++mechanicalCounter, openingName: win.name });
+                const realWidth = Number(
+                  calculation.realWidthCm ??
+                  calculation.actualWidthCm ??
+                  product.rawValues?.width ??
+                  0,
+                );
+
+                const realHeight = Number(
+                  calculation.realHeightCm ??
+                  calculation.actualHeightCm ??
+                  product.rawValues?.height ??
+                  0,
+                );
+
+                const billingWidth =
+                  Number(
+                    calculation.billingWidthCm ??
+                    calculation.calculatedWidthCm ??
+                    0,
+                  );
+
+                const billingHeight =
+                  Number(
+                    calculation.billingHeightCm ??
+                    calculation.calculatedHeightCm ??
+                    0,
+                  );
+
+                const totalM2 = Number(
+                  calculation.totalSystemM2 ??
+                  calculation.totalM2 ??
+                  0,
+                );
+
+                let mechanicalLine =
+                  `• ${openingPrefix}${productLabel}: ${realWidth} × ${realHeight} cm`;
+
+                if (
+                  billingWidth > 0 &&
+                  billingHeight > 0 &&
+                  (
+                    billingWidth !==
+                      realWidth ||
+                    billingHeight !==
+                      realHeight
+                  )
+                ) {
+                  mechanicalLine +=
+                    ` — Hesap: ${billingWidth} × ${billingHeight}`;
+                }
+
+                mechanicalLine +=
+                  squareMeterText(totalM2);
+
+                mechanicalLine +=
+                  chainText(calculation);
+
+                roomLines.push(
+                  mechanicalLine,
+                );
               }
-            } else {
-              let entry = standardOpenings.find(so => so.window.id === win.id);
-              if (!entry) {
-                entry = { window: win, products: [] };
-                standardOpenings.push(entry);
+
+              if (note) {
+                roomLines.push(
+                  `  Not: ${note}`,
+                );
               }
-              entry.products.push(pObj);
-            }
-          });
-        }
-      });
-    });
 
-    // A. Render Standard Openings
-    const showOpeningName = windows.length > 1; // only show opening names if there's more than 1 window/opening
-
-    standardOpenings.forEach(({ window, products }, openingIndex) => {
-      if (showOpeningName) {
-        lines.push(`  [Açıklık: ${window.name}]`);
-      }
-
-      products.forEach((p, pIdx) => {
-        lines.push(`  Ölçü ${pIdx + 1}: ${resolveMeasurementProductLabel(p)} (${getTemplateLabel(p.templateType)})`);
-
-        // Render fields inline
-        if (p.templateType === 'CURTAIN_DETAIL' || p.templateType === 'CURTAIN') {
-          const dims = getMeasurementDimensions(p);
-          const facadeSegments = p.rawValues?.facadeSegments;
-
-          if (facadeSegments && Array.isArray(facadeSegments) && facadeSegments.length > 0) {
-            lines.push(`  - ${formatFacadeForReport(facadeSegments).replace(/\n/g, '\n    ')}`);
-
-            const totalWidth = facadeSegments.reduce((sum: number, s: any) => sum + (s.widthCm > 0 ? s.widthCm : 0), 0);
-            lines.push(`  - Toplam En: ${totalWidth} cm`);
-
-            // Heights summary
-            const sol = p.rawValues?.solYukseklikCm;
-            const orta = p.rawValues?.ortaYukseklikCm;
-            const sag = p.rawValues?.sagYukseklikCm;
-            const hFields = [];
-            if (sol) hFields.push(`Sol ${sol}`);
-            if (orta) hFields.push(`Orta ${orta}`);
-            if (sag) hFields.push(`Sağ ${sag}`);
-            if (hFields.length > 0) {
-              lines.push(`  - Yükseklik Özeti: ${hFields.join(' / ')} cm`);
+              return;
             }
 
-            if (p.rawValues?.kartonpiyerBoslukCm && Number(p.rawValues.kartonpiyerBoslukCm) > 0) {
-              lines.push(`  - KARTONPİYER BOŞLUĞU: ${p.rawValues.kartonpiyerBoslukCm} cm`);
+            if (
+              product.templateType ===
+                'CURTAIN_DETAIL' ||
+              product.templateType ===
+                'CURTAIN'
+            ) {
+              const facadeSegments =
+                product.rawValues
+                  ?.facadeSegments;
+
+              roomLines.push(
+                `• ${openingPrefix}${productLabel}`,
+              );
+
+              if (
+                Array.isArray(
+                  facadeSegments,
+                ) &&
+                facadeSegments.length > 0
+              ) {
+                const facadeText =
+                  formatFacadeForReport(
+                    facadeSegments,
+                  )
+                    .replace(
+                      /\n+/g,
+                      ' / ',
+                    )
+                    .replace(
+                      /\s+/g,
+                      ' ',
+                    )
+                    .trim();
+
+                const totalWidth =
+                  facadeSegments.reduce(
+                    (
+                      total: number,
+                      segment: any,
+                    ) =>
+                      total +
+                      (
+                        Number(
+                          segment.widthCm,
+                        ) || 0
+                      ),
+                    0,
+                  );
+
+                roomLines.push(
+                  `  Cephe: ${facadeText}`,
+                );
+
+                if (totalWidth > 0) {
+                  roomLines.push(
+                    `  Toplam en: ${totalWidth} cm`,
+                  );
+                }
+
+                const heights:
+                  string[] = [];
+
+                if (
+                  product.rawValues
+                    ?.solYukseklikCm
+                ) {
+                  heights.push(
+                    `Sol ${product.rawValues.solYukseklikCm}`,
+                  );
+                }
+
+                if (
+                  product.rawValues
+                    ?.ortaYukseklikCm
+                ) {
+                  heights.push(
+                    `Orta ${product.rawValues.ortaYukseklikCm}`,
+                  );
+                }
+
+                if (
+                  product.rawValues
+                    ?.sagYukseklikCm
+                ) {
+                  heights.push(
+                    `Sağ ${product.rawValues.sagYukseklikCm}`,
+                  );
+                }
+
+                if (heights.length > 0) {
+                  roomLines.push(
+                    `  Boy: ${heights.join(' / ')} cm`,
+                  );
+                }
+              } else {
+                const dimensions =
+                  getMeasurementDimensions(
+                    product,
+                  );
+
+                roomLines.push(
+                  `  Ölçü: ${dimensions.structuralWidth} × ${dimensions.structuralHeight} cm`,
+                );
+              }
+
+              if (note) {
+                roomLines.push(
+                  `  Not: ${note}`,
+                );
+              }
+
+              return;
             }
-            if (p.rawValues?.camUstuCm && Number(p.rawValues.camUstuCm) > 0) {
-              lines.push(`  - Cam Üstü: ${p.rawValues.camUstuCm} cm`);
-            }
-            if (p.rawValues?.camIciCm && Number(p.rawValues.camIciCm) > 0) {
-              lines.push(`  - Cam İçi: ${p.rawValues.camIciCm} cm`);
-            }
-            if (p.rawValues?.kaloriferMermerBoyuCm && Number(p.rawValues.kaloriferMermerBoyuCm) > 0) {
-              lines.push(`  - Kalorifer / Mermer: ${p.rawValues.kaloriferMermerBoyuCm} cm`);
-            }
-            if (p.rawValues?.camAltiCm && Number(p.rawValues.camAltiCm) > 0) {
-              lines.push(`  - Cam Altı: ${p.rawValues.camAltiCm} cm`);
-            }
-            if (p.rawValues?.yukseklikNotu) {
-              lines.push(`  - Yükseklik Notu: ${p.rawValues.yukseklikNotu}`);
-            }
-          } else {
-            const leftWall = p.rawValues?.leftWall ?? '0';
-            const windowWidth = p.rawValues?.windowWidth ?? '0';
-            const rightWall = p.rawValues?.rightWall ?? '0';
-            const ceilingGap = p.rawValues?.ceilingGap ?? '0';
-            const windowHeight = p.rawValues?.windowHeight ?? '0';
-            const floorGap = p.rawValues?.floorGap ?? '0';
 
-            lines.push(`  - Sol Duvar (cm): ${leftWall}   - Pencere Eni (cm): ${windowWidth}   - Sağ Duvar (cm): ${rightWall}`);
-            lines.push(`  - Tavan Boşluğu (cm): ${ceilingGap}   - Pencere Boyu (cm): ${windowHeight}   - Zemin Boşluğu (cm): ${floorGap}`);
-            lines.push(`  - Toplam Ölçü: ${dims.structuralWidth} × ${dims.structuralHeight} cm`);
-          }
-        } else if (p.templateType === 'SIMPLE_WIDTH_HEIGHT') {
-          const width = p.rawValues?.width ?? '0';
-          const height = p.rawValues?.height ?? '0';
-          lines.push(`  - En (cm): ${width}   - Boy (cm): ${height}`);
-          lines.push(`  - Toplam Ölçü: ${width} × ${height} cm`);
-        } else {
-          // General fields fallback
-          const template = MEASUREMENT_TEMPLATES[p.templateType];
-          const fields = template?.fields || [];
-          if (fields.length > 0) {
-            const chunks: string[] = [];
-            fields.forEach(f => {
-              const val = p.rawValues?.[f.key] ?? '-';
-              chunks.push(`- ${f.label}: ${val}`);
-            });
-            // Print chunks in lines of 2 or 3
-            for (let i = 0; i < chunks.length; i += 2) {
-              const line = chunks.slice(i, i + 2).join('   ');
-              lines.push(`  ${line}`);
-            }
-          }
-        }
+            const width =
+              product.rawValues?.width ??
+              product.rawValues?.en ??
+              product.rawValues
+                ?.windowWidth ??
+              0;
 
-        // Diagnostic / metadata details (conditional)
-        if (!sameMeasuredBy && p.measuredBy) {
-          lines.push(`  - Ölçüyü Alan: ${p.measuredBy}`);
-        }
-        if (showDateOnMeasurements && p.measuredDate) {
-          lines.push(`  - Tarih: ${new Date(p.measuredDate).toLocaleDateString('tr-TR')}`);
-        }
-        const validNote = getValidNote(p.notes);
-        if (validNote) {
-          lines.push(`  - Not: ${validNote}`);
-        }
-      });
-    });
+            const height =
+              product.rawValues?.height ??
+              product.rawValues?.boy ??
+              product.rawValues
+                ?.windowHeight ??
+              0;
 
-    // B. Render Plicell Group (Kompakt Liste)
-    if (plicellProducts.length > 0) {
-      lines.push(`  Ölçü: PLICELL CAM İÇİ`);
-
-      const notesList: string[] = [];
-      let roomPlicellM2 = 0;
-      let roomPlicellAdet = 0;
-
-      plicellProducts.forEach(({ p, indexInRoom }) => {
-        const storedCalculation =
-          getStoredProductCalculation(
-            p,
-            'PLICELL'
-          );
-
-        const storedCams = Array.isArray(
-          storedCalculation.cams
-        )
-          ? storedCalculation.cams
-          : Array.isArray(
-              storedCalculation.groups
-            )
-              ? storedCalculation.groups
-              : [];
-
-        const quantity = Math.max(
-          1,
-          Number(
-            storedCalculation.quantity ??
-            p.rawValues?.quantity ??
-            1
-          )
-        );
-
-        const totalM2 = Number(
-          storedCalculation.totalSystemM2 ??
-          storedCalculation.totalM2 ??
-          0
-        );
-
-        const profilRengi =
-          p.rawValues?.profilRengi;
-
-        if (profilRengi) {
-          lines.push(
-            `  Profil Rengi: ${profilRengi}`
-          );
-        }
-
-        const ortakBoy = Number(
-          p.rawValues?.ortakCamBoyuCm || 0
-        );
-
-        if (ortakBoy > 0) {
-          lines.push(
-            `  Ortak Cam Boyu: ${ortakBoy} cm`
-          );
-        }
-
-        if (storedCams.length === 0) {
-          lines.push(
-            `  ${indexInRoom}) Merkezi Plicell hesap sonucu bulunamadı.`
-          );
-
-          const validNote =
-            getValidNote(p.notes);
-
-          if (validNote) {
-            notesList.push(
-              `  - ${indexInRoom}. Cam: ${validNote}`
-            );
-          }
-
-          return;
-        }
-
-        lines.push(
-          `  Cam Adedi: ${storedCams.length * quantity}`
-        );
-        lines.push('');
-
-        storedCams.forEach(
-          (cam: any, camIndex: number) => {
-            const realWidth = Number(
-              cam.realWidthCm ??
-              cam.actualWidthCm ??
-              cam.widthCm ??
-              0
+            roomLines.push(
+              `• ${openingPrefix}${productLabel}: ${numberText(width)} × ${numberText(height)} cm`,
             );
 
-            const realHeight = Number(
-              cam.realHeightCm ??
-              cam.actualHeightCm ??
-              cam.heightCm ??
-              ortakBoy ??
-              0
-            );
-
-            const billingWidth = Number(
-              cam.billingWidthCm ??
-              cam.calculatedWidthCm ??
-              cam.roundedWidth ??
-              0
-            );
-
-            const billingHeight = Number(
-              cam.billingHeightCm ??
-              cam.calculatedHeightCm ??
-              cam.roundedHeight ??
-              0
-            );
-
-            const camM2 = Number(
-              cam.totalSystemM2 ??
-              cam.totalM2 ??
-              cam.chargeableM2 ??
-              cam.unitM2 ??
-              0
-            );
-
-            lines.push(
-              `  ${camIndex + 1}. Cam: ${realWidth} × ${realHeight} cm → Hesap: ${billingWidth} × ${billingHeight} = ${camM2.toFixed(2)} m²`
-            );
-
-            const validCamNote =
-              getValidNote(cam.note);
-
-            if (validCamNote) {
-              notesList.push(
-                `  - ${camIndex + 1}. Cam Notu: ${validCamNote}`
+            if (note) {
+              roomLines.push(
+                `  Not: ${note}`,
               );
             }
-          }
-        );
-
-        roomPlicellAdet +=
-          storedCams.length * quantity;
-
-        roomPlicellM2 += totalM2;
-        globalPlicellCount +=
-          storedCams.length * quantity;
-        globalPlicellM2 += totalM2;
-      });
-
-      lines.push('');
-      lines.push(
-        `  Toplam Adet: ${roomPlicellAdet}`
+          });
+        },
       );
-      lines.push(
-        `  Toplam m²: ${roomPlicellM2.toFixed(2)}`
-      );
+    });
 
-      if (notesList.length > 0) {
-        lines.push(`  Notlar:`);
-        notesList.forEach(
-          noteLine => lines.push(noteLine)
-        );
-      }
+    if (roomLines.length > 0) {
+      lines.push(
+        `*${room.name.toUpperCase()}*`,
+        ...roomLines,
+        '',
+      );
     }
-
-    // C. Render Mechanical Curtain Group (Kompakt Liste)
-    if (mechanicalCurtainProducts.length > 0) {
-      lines.push(
-        `  Ölçü: Mekanik Perde Ölçüsü`
-      );
-
-      const notesList: string[] = [];
-      let roomMechanicalM2 = 0;
-      let roomMechanicalCount = 0;
-
-      mechanicalCurtainProducts.forEach(
-        ({ p, indexInRoom, openingName }) => {
-          const storedCalculation =
-            getStoredProductCalculation(
-              p,
-              p.productType
-            );
-
-          const w = Number(
-            storedCalculation.realWidthCm ??
-            storedCalculation.actualWidthCm ??
-            p.rawValues?.width ??
-            0
-          );
-
-          const h = Number(
-            storedCalculation.realHeightCm ??
-            storedCalculation.actualHeightCm ??
-            p.rawValues?.height ??
-            0
-          );
-
-          const q = Math.max(
-            1,
-            Number(
-              storedCalculation.quantity ??
-              p.rawValues?.quantity ??
-              1
-            )
-          );
-
-          const productType =
-            resolveMeasurementProductLabel(p);
-
-          const calcWidth = Number(
-            storedCalculation.billingWidthCm ??
-            storedCalculation.calculatedWidthCm ??
-            storedCalculation.billingWidth ??
-            0
-          );
-
-          const calcHeight = Number(
-            storedCalculation.billingHeightCm ??
-            storedCalculation.calculatedHeightCm ??
-            storedCalculation.billingHeight ??
-            0
-          );
-
-          const unitM2 = Number(
-            storedCalculation.unitM2 ??
-            0
-          );
-
-          const totalM2 = Number(
-            storedCalculation.totalSystemM2 ??
-            storedCalculation.totalM2 ??
-            0
-          );
-
-          roomMechanicalCount += q;
-          roomMechanicalM2 += totalM2;
-          globalMechanicalCount += q;
-          globalMechanicalM2 += totalM2;
-
-          const qtySuffix =
-            q > 1
-              ? ` x ${q} adet`
-              : '';
-
-          const m2Formula =
-            q > 1
-              ? ` = ${unitM2.toFixed(2)} m² x ${q} = ${totalM2.toFixed(2)} m²`
-              : ` = ${totalM2.toFixed(2)} m²`;
-
-          lines.push(
-            `  ${indexInRoom}) [${openingName}] ${productType} — ${w} en x ${h} boy${qtySuffix} → Hesap: ${calcWidth} x ${calcHeight}${m2Formula}`
-          );
-
-          const validNote =
-            getValidNote(p.notes);
-
-          if (validNote) {
-            notesList.push(
-              `  - ${indexInRoom}. Mekanik: ${validNote}`
-            );
-          }
-        }
-      );
-
-      lines.push(
-        `  Toplam: ${roomMechanicalCount} Adet Mekanik Perde - ${roomMechanicalM2.toFixed(2)} m²`
-      );
-
-      if (notesList.length > 0) {
-        lines.push(`  Notlar:`);
-        notesList.forEach(
-          noteLine => lines.push(noteLine)
-        );
-      }
-    }
-
-    lines.push(''); // spacing between rooms
   });
 
-  // 4. Overall Plicell Grand Total
-  if (globalPlicellCount > 0) {
-    lines.push(`*GENEL PLİCELL TOPLAMI: ${globalPlicellCount} Adet Cam - ${globalPlicellM2.toFixed(2)} m²*`);
-    lines.push('');
+  while (
+    lines.length > 0 &&
+    lines[lines.length - 1] === ''
+  ) {
+    lines.pop();
   }
-
-  // 4.1. Overall Mechanical Curtain Grand Total
-  if (globalMechanicalCount > 0) {
-    lines.push(`*GENEL MEKANİK PERDE TOPLAMI: ${globalMechanicalCount} Adet Mekanik Perde - ${globalMechanicalM2.toFixed(2)} m²*`);
-    lines.push('');
-  }
-
-  // 5. Footer with Google Maps URL and app signature
-  const query = encodeURIComponent(customer.address || customer.mapLocation || '');
-  const mapsUrl = customer.mapLocation || customer.address
-    ? `https://www.google.com/maps/search/?api=1&query=${query}`
-    : '';
-
-  if (mapsUrl) {
-    lines.push(`Konum: ${mapsUrl}`);
-  }
-  lines.push('CEYLİN ERP.0 - Saha Pilot');
 
   return lines.join('\n');
 }
