@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { normalizeRole, useAuthStore } from "@/store/useAuthStore";
+import {
+  canTransferMeasurementToSale,
+  useAuthStore
+} from "@/store/useAuthStore";
 import { X, Save, AlertCircle, Sparkles } from 'lucide-react';
 import { Room, SelectedProductItem } from '@/store/useStore';
 import { MeasurementRecord } from '@/store/measurementStore';
@@ -139,11 +142,8 @@ export function RoomPreparationModal({
   onSave
 }: RoomPreparationModalProps) {
   const currentUser = useAuthStore(state => state.currentUser);
-  const normalizedRole = normalizeRole(currentUser?.role);
   const canTransferToSale =
-    normalizedRole === 'ADMIN' ||
-    normalizedRole === 'OFFICE' ||
-    normalizedRole === 'MODERATOR';
+    canTransferMeasurementToSale(currentUser);
   const [localSelections, setLocalSelections] =
     useState<Record<string, string[]>>({});
 

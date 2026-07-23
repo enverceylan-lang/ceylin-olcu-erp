@@ -514,6 +514,23 @@ export function canViewCustomerWorkflowReport(user: any, customer: any): boolean
   return false;
 }
 
+/**
+ * Ölçü ve cari verisini satış taslağına aktarma yetkisi.
+ * UI ve işlem girişinde birlikte doğrulanmalıdır.
+ */
+export function canTransferMeasurementToSale(user: any): boolean {
+  if (!user) return false;
+
+  const safeUser = normalizeUser(user);
+  const normalizedRole = normalizeRole(safeUser.role);
+
+  return (
+    normalizedRole === 'ADMIN' ||
+    normalizedRole === 'OFFICE' ||
+    normalizedRole === 'MODERATOR'
+  );
+}
+
 export function canViewCustomerFinancialReport(user: any): boolean {
   if (!user) return false;
   const safeUser = normalizeUser(user);

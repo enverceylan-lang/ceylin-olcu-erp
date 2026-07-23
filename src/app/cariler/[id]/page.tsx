@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useStore, WindowItem, MEASUREMENT_TEMPLATES, ProductMeasurement } from "@/store/useStore";
 import { useMeasurementStore } from "@/store/measurementStore";
-import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer, canViewCustomerWorkflowReport, canViewCustomerFinancialReport, canViewCustomerContactFields, canViewFinancialAreas, canEditCustomerLocation, canViewCariCard, canEditCari, canMergeCari, canArchiveCari, canMoveMeasurementBetweenCustomers } from "@/store/useAuthStore";
+import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer, canViewCustomerWorkflowReport, canViewCustomerFinancialReport, canViewCustomerContactFields, canViewFinancialAreas, canEditCustomerLocation, canViewCariCard, canEditCari, canMergeCari, canArchiveCari, canMoveMeasurementBetweenCustomers, canTransferMeasurementToSale } from "@/store/useAuthStore";
 import { getMeasurementDimensions, getTemplateLabel, getGoogleMapsUrl, getWorkflowStatusLabel, getWorkflowStatusColorClass, WORKFLOW_STATUS_LABELS } from "@/lib/measurementAdapter";
 import { fileToDataUrl } from "@/lib/fileStorage";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
@@ -71,6 +71,8 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const canMerge = canMergeCari(user);
   const canArchive = canArchiveCari(user, cariType);
   const canMoveRoom = canMoveMeasurementBetweenCustomers(user);
+  const canTransferToSale =
+    canTransferMeasurementToSale(user);
   const canViewAddressPhoto = !!user && !!customer && (
     normRole === 'ADMIN' ||
     normRole === 'OFFICE' ||
@@ -735,7 +737,23 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   };
 
   const handleTransferToSales = async () => {
+
     if (!customer) return;
+
+
+    if (!canTransferToSale) {
+
+      showToast(
+
+        "Bu kullanıcı rolünün satışa aktarma yetkisi bulunmuyor."
+
+      );
+
+      return;
+
+    }
+
+
     try {
       setIsSaving(true);
       const draftId = await syncOrCreateDraftSale(
@@ -1090,7 +1108,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
             Görsel Ölçü Raporu
           </button>
 
-          {permissions.canAccessOfficeMode && (
+          {canTransferToSale && (
             <button
               onClick={handleTransferToSales}
               disabled={isSaving}
