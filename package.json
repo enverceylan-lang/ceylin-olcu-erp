@@ -6,7 +6,7 @@
                     "dev":  "next dev",
                     "build":  "next build",
                     "start":  "next start",
-                    "lint":  "eslint",
+                    "lint":  "eslint src tests",
                     "test:measurements":  "tsx tests/localValidationSuite.ts \u0026\u0026 tsx tests/userProfileSuite.ts",
                     "test:sales-sync-policy":  "tsx tests/salesSyncPolicySuite.ts",
                     "test:sales-sync-contract":  "tsx tests/salesSyncApiContractSuite.ts",
