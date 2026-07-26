@@ -1202,6 +1202,69 @@ export function calculateSelectedProduct(
         Number(height || 0)
       );
 
+    const ceilingOffsetCm = Math.max(
+      0,
+      Number(
+        rawValues?.kartonpiyerBoslukCm ||
+        rawValues?.ceilingGap ||
+        0
+      )
+    );
+
+    const resolveCeilingSideHeight = (
+      value: unknown
+    ): number => {
+      const parsed = Number(value || 0);
+
+      return Number.isFinite(parsed) && parsed > 0
+        ? parsed
+        : measuredHeight;
+    };
+
+    const ceilingMeasuredHeightsCm = {
+      left: resolveCeilingSideHeight(
+        rawValues?.solYukseklikCm
+      ),
+      middle: resolveCeilingSideHeight(
+        rawValues?.ortaYukseklikCm
+      ),
+      right: resolveCeilingSideHeight(
+        rawValues?.sagYukseklikCm
+      )
+    };
+
+    const productionHeightsCm = {
+      left: Math.max(
+        0,
+        ceilingMeasuredHeightsCm.left -
+          ceilingOffsetCm -
+          2
+      ),
+      middle: Math.max(
+        0,
+        ceilingMeasuredHeightsCm.middle -
+          ceilingOffsetCm -
+          2
+      ),
+      right: Math.max(
+        0,
+        ceilingMeasuredHeightsCm.right -
+          ceilingOffsetCm -
+          2
+      )
+    };
+
+    const ceilingHeightValues = [
+      productionHeightsCm.left,
+      productionHeightsCm.middle,
+      productionHeightsCm.right
+    ];
+
+    const isSlopedCeiling =
+      isCeilingRusticActive &&
+      Math.max(...ceilingHeightValues) !==
+        Math.min(...ceilingHeightValues);
+
 
     const requestedWingQuantity = Number(
       rawValues?.wingQuantity || 2
@@ -1234,9 +1297,10 @@ export function calculateSelectedProduct(
 
     const automaticFonHeight =
       isCeilingRusticActive
-        ? Math.max(
-            0,
-            measuredHeight - ceilingGap - 2
+        ? Math.min(
+            productionHeightsCm.left,
+            productionHeightsCm.middle,
+            productionHeightsCm.right
           )
         : normalRusticActive
           ? calculateNormalRusticCurtainHeight(
@@ -1263,6 +1327,14 @@ export function calculateSelectedProduct(
       billingHeight: fonHeight,
       cutHeightCm: fonHeight,
       productionHeightCm: fonHeight,
+      productionHeightsCm:
+        isCeilingRusticActive
+          ? productionHeightsCm
+          : undefined,
+      warning:
+        isSlopedCeiling
+          ? 'TAVAN YAMUK'
+          : '',
       wings,
       fonPlacement,
       metersPerWing,

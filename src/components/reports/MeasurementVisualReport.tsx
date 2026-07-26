@@ -9,6 +9,9 @@ import { resolveFacadeHeight } from '@/lib/facadeHeight';
 import {
   getStoredProductCalculation
 } from '@/lib/calculationEngine';
+import {
+  getSlopedCeilingReportPresentation
+} from '@/lib/slopedCeilingReport';
 import { TechnicalMeasurementSketch } from './TechnicalMeasurementSketch';
 import { PlicellMeasurementSketch } from './PlicellMeasurementSketch';
 import { useMeasurementStore, MeasurementRecord } from '@/store/measurementStore';
@@ -1009,6 +1012,11 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
 
             const calc = item.calculation || {};
 
+            const slopedCeilingPresentation =
+              getSlopedCeilingReportPresentation(
+                calc
+              );
+
             const detailsList: string[] =
               buildCalculationReportDetails(
                 item.productType,
@@ -1069,6 +1077,20 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
                   <span className="font-bold text-white print:text-black">{label}</span>
                   <span className="text-[10px] text-slate-400 dark:text-slate-500 italic">{desc}</span>
                 </div>
+                {slopedCeilingPresentation.isVisible && (
+                  <div
+                    data-sloped-ceiling-warning="true"
+                    className="mb-2 rounded-lg border-2 border-red-500 bg-red-50 px-3 py-2 text-red-800 print:border-red-700 print:bg-white print:text-red-800"
+                  >
+                    <div className="text-lg font-bold italic leading-tight">
+                      {slopedCeilingPresentation.warningTitle}
+                    </div>
+                    <div className="mt-1 text-sm font-bold italic leading-snug">
+                      {slopedCeilingPresentation.productionHeightText}
+                    </div>
+                  </div>
+                )}
+
                 {detailsList.length > 0 && (
                   <div className="text-[11px] text-blue-400 print:text-black font-semibold mt-1">
                     {detailsList.join(' | ')}

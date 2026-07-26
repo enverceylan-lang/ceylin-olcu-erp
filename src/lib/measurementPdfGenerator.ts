@@ -2,6 +2,9 @@ import jsPDF from 'jspdf';
 import {
   getStoredProductCalculation
 } from '@/lib/calculationEngine';
+import {
+  getSlopedCeilingReportPresentation
+} from '@/lib/slopedCeilingReport';
 import { Customer, ProductMeasurement, WindowItem, MEASUREMENT_TEMPLATES } from '@/store/useStore';
 import { getTemplateLabel, getMeasurementDimensions, resolveMeasurementProductLabel, resolveMeasurementProductGroup } from '@/lib/measurementAdapter';
 import { formatFacadeForReport } from '@/lib/facadeHelper';
@@ -947,6 +950,17 @@ export async function generateMeasurementPdfBlob(
           const validNote =
             getValidNote(p.notes);
 
+          const storedCalculation =
+            getStoredProductCalculation(
+              p,
+              String(p.productType || '')
+            );
+
+          const slopedCeilingPresentation =
+            getSlopedCeilingReportPresentation(
+              storedCalculation
+            );
+
           const hasFacadeSegments =
             Array.isArray(
               p.rawValues?.facadeSegments
@@ -957,7 +971,7 @@ export async function generateMeasurementPdfBlob(
            * Segmentli cephede çizim + yükseklikler +
            * kartonpiyer/cam bilgileri daha fazla alan ister.
            */
-          const boxHeight =
+          const baseBoxHeight =
             hasFacadeSegments
               ? validNote
                 ? 88
@@ -966,6 +980,13 @@ export async function generateMeasurementPdfBlob(
                 ? 65
                 : 55;
 
+          const boxHeight =
+            baseBoxHeight +
+            (
+              slopedCeilingPresentation.isVisible
+                ? 13
+                : 0
+            );
           doc.rect(MARGIN + 4, y, PAGE_WIDTH - MARGIN*2 - 4, boxHeight, 'FD');
 
           let innerY = y + 6;
@@ -1005,6 +1026,40 @@ export async function generateMeasurementPdfBlob(
 
             innerY +=
               calculationLines.length * 4 + 3;
+          }
+
+          if (slopedCeilingPresentation.isVisible) {
+            doc.setFontSize(11);
+            doc.setFont(
+              'helvetica',
+              'bolditalic'
+            );
+            doc.setTextColor(220, 38, 38);
+            doc.text(
+              sanitize(
+                slopedCeilingPresentation.warningTitle
+              ),
+              MARGIN + 8,
+              innerY
+            );
+
+            innerY += 5;
+
+            doc.setFontSize(8.5);
+            doc.setFont(
+              'helvetica',
+              'bolditalic'
+            );
+            doc.setTextColor(127, 29, 29);
+            doc.text(
+              sanitize(
+                slopedCeilingPresentation.productionHeightText
+              ),
+              MARGIN + 8,
+              innerY
+            );
+
+            innerY += 6;
           }
 
           doc.setFontSize(9);
