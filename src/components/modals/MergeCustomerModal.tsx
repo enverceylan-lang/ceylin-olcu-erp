@@ -41,8 +41,9 @@ export function MergeCustomerModal({ isOpen, onClose, sourceCustomer, onConfirm 
     try {
       await onConfirm(targetId);
       onClose();
-    } catch (err: any) {
-      alert("Hata: " + err.message);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Cari birleştirme işlemi tamamlanamadı.";
+      alert("Hata: " + message);
     } finally {
       setIsProcessing(false);
     }

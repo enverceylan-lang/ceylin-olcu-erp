@@ -4,24 +4,29 @@ export interface ExcelColumnMapping {
   isCustomField?: boolean;
 }
 
-export interface ParsedRow {
+export interface ExcelImportMetadata {
+  customFields?: Record<string, unknown>;
+  rawImportData?: Record<string, unknown>;
+}
+
+export interface ParsedRow<T = Record<string, unknown>> {
   index: number;
-  data: any; // Parsed DB object
-  raw: any; // Raw Excel row object
+  data: T & ExcelImportMetadata;
+  raw: Record<string, unknown>;
   status: 'NEW' | 'UPDATE' | 'ERROR' | 'MANUAL_REVIEW' | 'SKIP';
   errors: string[];
   warnings: string[];
   matchedEntityId?: string;
 }
 
-export interface PreviewResult {
+export interface PreviewResult<T = Record<string, unknown>> {
   totalRows: number;
   newCount: number;
   updateCount: number;
   errorCount: number;
   manualReviewCount: number;
   skipCount: number;
-  rows: ParsedRow[];
+  rows: ParsedRow<T>[];
   headers: string[];
   mappings: ExcelColumnMapping[];
 }
@@ -31,7 +36,7 @@ export interface KnownColumn<T> {
   aliases: string[]; // Possible excel headers e.g. ['Cari Kodu', 'Müşteri Kodu']
   type: 'string' | 'number' | 'boolean' | 'date' | 'phone';
   required?: boolean;
-  parser?: (value: any) => any;
+  parser?: (value: unknown) => unknown;
   isCustom?: boolean;
 }
 

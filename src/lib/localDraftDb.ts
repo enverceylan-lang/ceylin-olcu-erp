@@ -1,6 +1,9 @@
 import Dexie, { type Table } from 'dexie';
-import { type Customer } from '@/store/useStore';
-import { enqueueSyncEvent, localSyncQueueDb } from './localSyncQueueDb';
+import { type Customer, type Room } from '@/store/useStore';
+import {
+  enqueueSyncEvent,
+  localSyncQueueDb
+} from './localSyncQueueDb';
 import { loadLocalCustomers, saveLocalCustomer, localCustomerDb } from './localCustomerDb';
 
 export interface InboundMeasurement {
@@ -13,7 +16,7 @@ export interface InboundMeasurement {
   customerName?: string;
   customerPhone?: string;
   customerAddress?: string;
-  patch: any;
+  patch: InboundSyncPatch;
   senderId?: string;
   createdAt: string;
   status: 'NEW' | 'MATCH_PENDING' | 'LINKED_TO_CUSTOMER' | 'CREATED_CUSTOMER' | 'SKIPPED';
@@ -30,6 +33,44 @@ export interface SyncCursor {
   updatedAt: string;
 }
 
+interface InboundPatchProduct {
+  id?: string;
+  type?: string;
+  rawValues?: Record<string, unknown>;
+}
+
+interface InboundPatchOpening {
+  id?: string;
+  name?: string;
+  products?: InboundPatchProduct[];
+  measurements?: InboundPatchProduct[];
+}
+
+interface InboundPatchRoom {
+  id?: string;
+  name?: string;
+  windows?: InboundPatchOpening[];
+  openings?: InboundPatchOpening[];
+}
+
+interface InboundSyncPatch {
+  updatedAt?: string;
+  id?: string;
+  entity?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  timestamp?: string;
+  customerId?: string;
+  customerName?: string;
+  phone?: string;
+  roomId?: string;
+  windowId?: string;
+  syncIntent?: string;
+  rooms?: InboundPatchRoom[];
+  temporaryCustomerId?: string;
+  sourceMeasurementChangeId?: string;
+}
+
 export interface FieldMeasurementDraft {
   id: string;
   draftType: 'MEASUREMENT';
@@ -43,7 +84,7 @@ export interface FieldMeasurementDraft {
     accuracy?: number;
     timestamp: string;
   };
-  rooms: any[];
+  rooms: Room[];
   mediaFiles: {
     fileId: string;
     fileName: string;
@@ -334,7 +375,7 @@ export async function updateMeasurementDraft(id: string, updates: Partial<Omit<F
 }
 
 export async function listMeasurementDrafts(createdBy?: string, syncStatus?: FieldMeasurementDraft['syncStatus']): Promise<FieldMeasurementDraft[]> {
-  let query = localDraftDb.measurementDrafts.toCollection();
+  const query = localDraftDb.measurementDrafts.toCollection();
   if (createdBy && syncStatus) {
     return await localDraftDb.measurementDrafts
       .where('createdBy').equals(createdBy)
@@ -370,7 +411,7 @@ export async function updateInstallationDraft(id: string, updates: Partial<Omit<
 }
 
 export async function listInstallationDrafts(createdBy?: string, syncStatus?: FieldInstallationDraft['syncStatus']): Promise<FieldInstallationDraft[]> {
-  let query = localDraftDb.installationDrafts.toCollection();
+  const query = localDraftDb.installationDrafts.toCollection();
   if (createdBy && syncStatus) {
     return await localDraftDb.installationDrafts
       .where('createdBy').equals(createdBy)
@@ -433,13 +474,19 @@ export async function markDraftReadyToTransfer(id: string, type: 'MEASUREMENT' |
           let hasRaw = false;
           if (updated.rooms && Array.isArray(updated.rooms)) {
               rCount = updated.rooms.length;
-              updated.rooms.forEach((r: any) => {
-                  const windows = r.windows || r.openings || [];
+              updated.rooms.forEach(r => {
+                  const roomSnapshot = r as Room & {
+                    openings?: Room['windows'];
+                  };
+                  const windows = r.windows || roomSnapshot.openings || [];
                   wCount += windows.length;
-                  windows.forEach((w: any) => {
-                      const prods = w.products || w.measurements || [];
+                  windows.forEach(w => {
+                      const openingSnapshot = w as typeof w & {
+                        measurements?: typeof w.products;
+                      };
+                      const prods = w.products || openingSnapshot.measurements || [];
                       pCount += prods.length;
-                      prods.forEach((p: any) => { if (p.rawValues) hasRaw = true; });
+                      prods.forEach(p => { if (p.rawValues) hasRaw = true; });
                   });
               });
           }
@@ -463,13 +510,19 @@ export async function markDraftTransferred(id: string, type: 'MEASUREMENT' | 'IN
           let hasRaw = false;
           if (updated.rooms && Array.isArray(updated.rooms)) {
               rCount = updated.rooms.length;
-              updated.rooms.forEach((r: any) => {
-                  const windows = r.windows || r.openings || [];
+              updated.rooms.forEach(r => {
+                  const roomSnapshot = r as Room & {
+                    openings?: Room['windows'];
+                  };
+                  const windows = r.windows || roomSnapshot.openings || [];
                   wCount += windows.length;
-                  windows.forEach((w: any) => {
-                      const prods = w.products || w.measurements || [];
+                  windows.forEach(w => {
+                      const openingSnapshot = w as typeof w & {
+                        measurements?: typeof w.products;
+                      };
+                      const prods = w.products || openingSnapshot.measurements || [];
                       pCount += prods.length;
-                      prods.forEach((p: any) => { if (p.rawValues) hasRaw = true; });
+                      prods.forEach(p => { if (p.rawValues) hasRaw = true; });
                   });
               });
           }
@@ -519,7 +572,7 @@ export async function forceRequeueAllMeasurementDrafts(): Promise<{
   const customers = await loadLocalCustomers();
   const now = new Date().toISOString();
   
-  let result = {
+  const result = {
     draftsFound: drafts.length,
     draftsWithMeasurements: 0,
     draftsRequeued: 0,
@@ -549,7 +602,8 @@ export async function forceRequeueAllMeasurementDrafts(): Promise<{
     }
 
     draft.recoveryQueuedAt = now;
-      (draft as any).syncIntent = 'MEASUREMENT_TREE_RECOVERY';
+      (draft as FieldMeasurementDraft & { syncIntent?: string }).syncIntent =
+        'MEASUREMENT_TREE_RECOVERY';
       draft.updatedAt = now;
     
     await localDraftDb.measurementDrafts.put(draft);
@@ -571,14 +625,18 @@ export async function forceRequeueAllMeasurementDrafts(): Promise<{
 
     result.customersWithMeasurements++;
 
-    // Safe cast to any to check if recoveryQueuedAt exists
-    if ((customer as any).recoveryQueuedAt) {
+    const recoveryCustomer = customer as Customer & {
+      recoveryQueuedAt?: string;
+      syncIntent?: string;
+    };
+
+    if (recoveryCustomer.recoveryQueuedAt) {
       result.skipped++;
       continue;
     }
 
-    (customer as any).recoveryQueuedAt = now;
-      (customer as any).syncIntent = 'MEASUREMENT_TREE_RECOVERY';
+    recoveryCustomer.recoveryQueuedAt = now;
+      recoveryCustomer.syncIntent = 'MEASUREMENT_TREE_RECOVERY';
       customer.updatedAt = now;
 
     await saveLocalCustomer(customer);

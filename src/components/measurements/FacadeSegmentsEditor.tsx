@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { FacadeSegment, parseFacadeInput } from '@/lib/facadeHelper';
 import { generateUUID } from '@/store/useStore';
@@ -35,13 +35,27 @@ export const FacadeSegmentsEditor: React.FC<FacadeSegmentsEditorProps> = ({ segm
     onChange([...segments, newSegment]);
   };
 
-  const handleUpdateSegment = (id: string, field: keyof FacadeSegment, value: any) => {
+  const handleUpdateSegment = (
+    id: string,
+    field: keyof FacadeSegment,
+    value: FacadeSegment[keyof FacadeSegment],
+  ) => {
     const updated = segments.map(s => {
       if (s.id === id) {
-        let newVal = value;
+        const newVal = value;
         if (field === 'type') {
-           const labelMap: any = { WALL: 'Duvar', GLASS: 'Cam', WINDOW: 'Pencere', DOOR: 'Kapı' };
-           return { ...s, type: newVal, label: labelMap[newVal] || newVal };
+           const labelMap: Record<FacadeSegment['type'], string> = {
+             WALL: 'Duvar',
+             GLASS: 'Cam',
+             WINDOW: 'Pencere',
+             DOOR: 'Kapı',
+           };
+           const segmentType = newVal as FacadeSegment['type'];
+           return {
+             ...s,
+             type: segmentType,
+             label: labelMap[segmentType],
+           };
         }
         return { ...s, [field]: newVal };
       }

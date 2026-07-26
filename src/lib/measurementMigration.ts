@@ -16,7 +16,7 @@ export async function runMeasurementMigration() {
   const existingIds = new Set(existingMeasurements.map(m => m.id));
   
   let totalMeasurementsInNested = 0;
-  let newMeasurementsToMigrate: MeasurementRecord[] = [];
+  const newMeasurementsToMigrate: MeasurementRecord[] = [];
   
   // Traverse the nested structure
   for (const customer of customers) {
@@ -37,7 +37,7 @@ export async function runMeasurementMigration() {
             customerId: customer.id,
             roomKey: room.id || room.name || '',
             windowKey: window.id || window.name || '',
-            type: (product as any).templateType || (product as any).type || 'UNKNOWN',
+            type: product.templateType || product.productType || 'UNKNOWN',
             sourceIndex,
           });
           sourceIndex++;

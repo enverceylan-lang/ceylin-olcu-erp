@@ -5,6 +5,9 @@ import {
   getPendingSyncEvents,
   markSyncEventsSynced,
   markSyncEventsError,
+  type SyncPatchRoom,
+  type SyncPatchOpening,
+  type SyncPatchProduct,
 } from "./localSyncQueueDb";
 import {
   getSyncCursor,
@@ -18,16 +21,96 @@ import {
 import { useAuthStore } from "@/store/useAuthStore";
 import { getDeviceId } from "./deviceIdentity";
 
-// btoa() fails on non-Latin1 characters (e.g. Å, Ä, Ä°, Ãœ, Ã–, Ã‡).
-function utf8ToBase64(str: string): string {
-  return btoa(
-    encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (_, p1) => {
-      return String.fromCharCode(parseInt(p1, 16));
-    }),
-  );
+type LocalCustomer = Awaited<
+  ReturnType<typeof loadLocalCustomers>
+>[number];
+
+type LocalMeasurement = ReturnType<
+  typeof useMeasurementStore.getState
+>["measurements"][number];
+
+interface InboundCustomerReference {
+  name?: string;
+  phone?: string;
+  address?: string;
 }
 
-function getOpeningId(measurement: any): string {
+interface MeasurementPayload extends Partial<LocalMeasurement> {
+  customerName?: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  customer?: InboundCustomerReference;
+  entity?: string;
+  timestamp?: string;
+}
+
+type CanonicalMeasurement = LocalMeasurement & {
+  customerName?: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  customer?: InboundCustomerReference;
+};
+
+interface DeltaChangePatch extends MeasurementPayload {
+  data?: MeasurementPayload;
+  rooms?: SyncPatchRoom[];
+  name?: string;
+  phone?: string;
+  address?: string;
+  syncStatus?: string;
+}
+
+interface MeasurementChangeEnvelope {
+  change_id?: string;
+  patch?: DeltaChangePatch;
+}
+
+interface DeltaChange {
+  change_id: string;
+  revision: number;
+  entity_type: InboundMeasurement["entityType"];
+  entity_id: string;
+  operation: InboundMeasurement["operation"];
+  sourceTable: InboundMeasurement["sourceTable"];
+  user_id?: string;
+  device_id?: string;
+  patch?: DeltaChangePatch;
+}
+
+interface DeltaPullResponse {
+  success?: boolean;
+  error?: string;
+  changes?: DeltaChange[];
+}
+
+interface OpeningReference {
+  openingId?: string;
+  windowId?: string;
+}
+
+interface CustomerSuggestionInput {
+  customerName?: string;
+  customerPhone?: string;
+}
+
+interface CustomerSuggestion {
+  id: string;
+  score: number;
+}
+
+interface DeltaPushResponse {
+  success?: boolean;
+  syncedIds?: string[];
+  errorIds?: string[];
+  errors?: string[] | string;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// btoa() fails on non-Latin1 characters (e.g. Å, Ä, Ä°, Ãœ, Ã–, Ã‡).
+function getOpeningId(measurement: OpeningReference): string {
   return measurement?.openingId || measurement?.windowId || "";
 }
 
@@ -56,8 +139,8 @@ async function buildCompletedInboundCustomerMap(): Promise<Map<string, string>> 
 }
 
 function getInboundCustomerMeta(
-  change: any,
-  canonical: any,
+  change: DeltaChange,
+  canonical: CanonicalMeasurement,
 ): {
   customerName?: string;
   customerPhone?: string;
@@ -91,15 +174,22 @@ function getInboundCustomerMeta(
 }
 
 async function ensureCustomerStructureForMeasurement(
-  customer: any,
-  measurement: any,
-): Promise<any> {
+  customer: LocalCustomer,
+  measurement: LocalMeasurement,
+): Promise<LocalCustomer> {
   const roomId = measurement?.roomId;
   const openingId = getOpeningId(measurement);
   if (!roomId || !openingId) return customer;
 
-  const rooms = Array.isArray(customer.rooms) ? [...customer.rooms] : [];
-  const roomIndex = rooms.findIndex((room: any) => room.id === roomId);
+  type LocalRoom = LocalCustomer["rooms"][number];
+  type CompatibleRoom = LocalRoom & {
+    openings?: LocalRoom["windows"];
+  };
+
+  const rooms: CompatibleRoom[] = Array.isArray(customer.rooms)
+    ? [...customer.rooms]
+    : [];
+  const roomIndex = rooms.findIndex((room) => room.id === roomId);
   const incomingRoomName =
     measurement.roomName || measurement.roomLabel || "Gelen Oda";
   const incomingOpeningName =
@@ -132,7 +222,7 @@ async function ensureCustomerStructureForMeasurement(
         ? [...room.openings]
         : [];
 
-    if (!windows.some((opening: any) => opening.id === openingId)) {
+    if (!windows.some((opening) => opening.id === openingId)) {
       windows.push({
         id: openingId,
         name: incomingOpeningName,
@@ -165,7 +255,15 @@ async function ensureCustomerStructureForMeasurement(
   return updatedCustomer;
 }
 
-export function extractMeasurementFromChange(change: any): any {
+export function extractMeasurementFromChange(
+  change: { patch: { data: MeasurementPayload } },
+): CanonicalMeasurement;
+export function extractMeasurementFromChange(
+  change: MeasurementChangeEnvelope,
+): CanonicalMeasurement | null;
+export function extractMeasurementFromChange(
+  change: MeasurementChangeEnvelope,
+): CanonicalMeasurement | null {
   if (!change) return null;
   const patch = change.patch || {};
 
@@ -173,7 +271,7 @@ export function extractMeasurementFromChange(change: any): any {
   if (patch && patch.data && typeof patch.data === "object" && patch.data.id) {
     const canonical = patch.data;
     if (canonical.id && typeof canonical.id === "string") {
-      return canonical;
+      return canonical as CanonicalMeasurement;
     }
   }
 
@@ -186,14 +284,16 @@ export function extractMeasurementFromChange(change: any): any {
       patch.templateType ||
       patch.rawValues
     ) {
-      return patch;
+      return patch as CanonicalMeasurement;
     }
   }
 
   return null;
 }
 
-export function isMeasurementEmpty(m: any): boolean {
+export function isMeasurementEmpty(
+  m: Partial<LocalMeasurement> | null | undefined,
+): boolean {
   if (!m) return true;
   if (!m.id || !m.customerId || !m.roomId || !(m.openingId || m.windowId)) return true;
   if (!m.templateType) return true;
@@ -208,8 +308,8 @@ export function isMeasurementEmpty(m: any): boolean {
 }
 
 export function shouldOverwriteMeasurement(
-  existing: any,
-  incoming: any,
+  existing: Partial<LocalMeasurement> | null | undefined,
+  incoming: Partial<LocalMeasurement> | null | undefined,
 ): { shouldOverwrite: boolean; error?: string } {
   if (!existing) return { shouldOverwrite: true };
   if (!incoming)
@@ -315,12 +415,12 @@ export async function pushDeltaSyncEvents(): Promise<{
       const p = ev.patch;
       if (p && p.rooms && Array.isArray(p.rooms)) {
         rCount += p.rooms.length;
-        p.rooms.forEach((r: any) => {
+        p.rooms.forEach((r: SyncPatchRoom) => {
           const w = r.windows || r.openings || [];
-          w.forEach((wi: any) => {
+          w.forEach((wi: SyncPatchOpening) => {
             const prods = wi.products || wi.measurements || [];
             pCount += prods.length;
-            prods.forEach((pr: any) => {
+            prods.forEach((pr: SyncPatchProduct) => {
               if (pr.rawValues) hasRaw = true;
             });
           });
@@ -339,7 +439,7 @@ export async function pushDeltaSyncEvents(): Promise<{
       body: JSON.stringify({ events: pendingEvents }),
     });
 
-    let data: any = {};
+    let data: DeltaPushResponse = {};
     let errText = "";
 
     if (!response.ok) {
@@ -347,7 +447,7 @@ export async function pushDeltaSyncEvents(): Promise<{
       try {
         const json = JSON.parse(errText);
         errText = json.error || json.details || errText;
-      } catch (e) {}
+      } catch {}
 
       return {
         success: false,
@@ -380,7 +480,7 @@ export async function pushDeltaSyncEvents(): Promise<{
     }
 
     return {
-      success: success && (errorIds || []).length === 0,
+      success: Boolean(success) && (errorIds || []).length === 0,
       pushedCount: (syncedIds || []).length,
       errors: Array.isArray(errors) ? errors : errors ? [String(errors)] : [],
       debug: {
@@ -391,12 +491,12 @@ export async function pushDeltaSyncEvents(): Promise<{
         firstStatus,
       },
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("[DeltaSyncClient] Push failed:", err);
     return {
       success: false,
       pushedCount: 0,
-      errors: [err.message],
+      errors: [getErrorMessage(err)],
       debug: {
         pendingCount: -1,
         apiStatus: "EXCEPTION",
@@ -409,7 +509,7 @@ export async function pushDeltaSyncEvents(): Promise<{
 }
 
 export async function pullInboundMeasurements(
-  allLocalCustomers: any[],
+  allLocalCustomers: LocalCustomer[],
 ): Promise<{
   success: boolean;
   fetchedCount: number;
@@ -439,7 +539,7 @@ export async function pullInboundMeasurements(
     });
 
     if (!response.ok) {
-      let errText = await response.text();
+      const errText = await response.text();
       return {
         success: false,
         fetchedCount: 0,
@@ -447,7 +547,7 @@ export async function pullInboundMeasurements(
       };
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as DeltaPullResponse;
     if (!data.success) {
       return {
         success: false,
@@ -456,7 +556,7 @@ export async function pullInboundMeasurements(
       };
     }
 
-    const rawChanges = data.changes || [];
+    const rawChanges: DeltaChange[] = data.changes || [];
     let maxDraftRevision = draftCursor;
     let maxMeasurementRevision = measurementCursor;
 
@@ -465,7 +565,7 @@ export async function pullInboundMeasurements(
     const persistedCustomers = await loadLocalCustomers();
     for (const persistedCustomer of persistedCustomers) {
       const index = allLocalCustomers.findIndex(
-        (customer: any) => customer.id === persistedCustomer.id,
+        (customer) => customer.id === persistedCustomer.id,
       );
       if (index >= 0) allLocalCustomers[index] = persistedCustomer;
       else allLocalCustomers.push(persistedCustomer);
@@ -477,9 +577,9 @@ export async function pullInboundMeasurements(
       await buildCompletedInboundCustomerMap();
 
     // Deduplicate changes by entity_id, merging properties for the same entity in order of revision
-    rawChanges.sort((a: any, b: any) => a.revision - b.revision);
+    rawChanges.sort((a, b) => a.revision - b.revision);
 
-    const latestChanges = new Map<string, any>();
+    const latestChanges = new Map<string, DeltaChange>();
     for (const change of rawChanges) {
       const key = `${change.entity_type}_${change.entity_id}`;
       const existing = latestChanges.get(key);
@@ -536,12 +636,12 @@ export async function pullInboundMeasurements(
       const p = change.patch || {};
       if (p.rooms && Array.isArray(p.rooms)) {
         rCount += p.rooms.length;
-        p.rooms.forEach((r: any) => {
+        p.rooms.forEach((r: SyncPatchRoom) => {
           const w = r.windows || r.openings || [];
-          w.forEach((wi: any) => {
+          w.forEach((wi: SyncPatchOpening) => {
             const prods = wi.products || wi.measurements || [];
             pCount += prods.length;
-            prods.forEach((pr: any) => {
+            prods.forEach((pr: SyncPatchProduct) => {
               if (pr.rawValues) hasRaw = true;
             });
           });
@@ -555,7 +655,7 @@ export async function pullInboundMeasurements(
     const unmatchedMeasurementGroups = new Map<
       string,
       {
-        latestChange: any;
+        latestChange: (typeof changes)[number];
         customerName?: string;
         customerPhone?: string;
         customerAddress?: string;
@@ -612,12 +712,12 @@ export async function pullInboundMeasurements(
               sourceCustomerId;
 
             const localCustomer = allLocalCustomers.find(
-              (customer: any) =>
+              (customer) =>
                 !customer.isDeleted && customer.id === resolvedCustomerId,
             );
 
             const openingId = getOpeningId(canonical);
-            let measurementToPersist = {
+            const measurementToPersist = {
               ...canonical,
               customerId: resolvedCustomerId,
               openingId,
@@ -631,7 +731,7 @@ export async function pullInboundMeasurements(
                   measurementToPersist,
                 );
               const customerIndex = allLocalCustomers.findIndex(
-                (customer: any) => customer.id === updatedCustomer.id,
+                (customer) => customer.id === updatedCustomer.id,
               );
               if (customerIndex >= 0) {
                 allLocalCustomers[customerIndex] = updatedCustomer;
@@ -675,7 +775,7 @@ export async function pullInboundMeasurements(
               `[DeltaSyncClient] Successfully applied/upserted MEASUREMENT ${canonical.id}`,
             );
           }
-        } catch (err: any) {
+        } catch (err: unknown) {
           const failedReceipt: TransferReceipt = {
             transferId: change.change_id,
             entityType: "MEASUREMENT",
@@ -721,9 +821,9 @@ export async function pullInboundMeasurements(
           }
         }
 
-        let customerName = patch.customerName || patch.name;
-        let customerPhone = patch.customerPhone || patch.phone;
-        let customerAddress = patch.customerAddress || patch.address;
+        const customerName = patch.customerName || patch.name;
+        const customerPhone = patch.customerPhone || patch.phone;
+        const customerAddress = patch.customerAddress || patch.address;
 
         const suggested = suggestCustomers(
           { customerName, customerPhone },
@@ -798,15 +898,18 @@ export async function pullInboundMeasurements(
     }
 
     return { success: true, fetchedCount: changes.length, errors: [] };
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("[DeltaSyncClient] Pull failed:", err);
-    return { success: false, fetchedCount: 0, errors: [err.message] };
+    return { success: false, fetchedCount: 0, errors: [getErrorMessage(err)] };
   }
 }
 
 // Basic fuzzy matching
-export function suggestCustomers(patch: any, localCustomers: any[]): any[] {
-  const suggestions: any[] = [];
+export function suggestCustomers(
+  patch: CustomerSuggestionInput,
+  localCustomers: LocalCustomer[],
+): CustomerSuggestion[] {
+  const suggestions: CustomerSuggestion[] = [];
   if (!patch.customerName && !patch.customerPhone) return suggestions;
 
   const phone = (patch.customerPhone || "").replace(/\D/g, "");

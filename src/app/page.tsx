@@ -5,10 +5,13 @@ import { useStore } from "@/store/useStore";
 import { useSalesStore } from "@/store/salesStore";
 import { useEffect, useState } from "react";
 import { localDraftDb } from "@/lib/localDraftDb";
+import { useAuthStore } from "@/store/useAuthStore";
+import { getVisibleSales } from "@/lib/salesVisibility";
 
 export default function Home() {
   const { customers, products } = useStore();
   const { sales, loadSales } = useSalesStore();
+  const currentUser = useAuthStore(state => state.currentUser);
   const [inboundCount, setInboundCount] = useState(0);
 
   useEffect(() => {
@@ -22,7 +25,9 @@ export default function Home() {
   }, [loadSales]);
 
   const activeCustomersCount = customers.filter(c => !c.isDeleted && !c.isArchived).length;
-  const activeSalesCount = sales.filter(s => s.status !== 'İPTAL' && s.status !== 'TAMAMLANDI').length;
+  const activeSalesCount = getVisibleSales(currentUser, sales)
+    .filter(s => s.status !== 'İPTAL' && s.status !== 'TAMAMLANDI')
+    .length;
   // Use products if it exists, otherwise 0
   const stockCount = products ? products.length : 0;
 
@@ -36,7 +41,7 @@ export default function Home() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold heading-title">Dashboard</h1>
+        <h1 className="text-xl font-bold heading-title sm:text-2xl">Ana Sayfa</h1>
         <p className="text-sm heading-subtitle">Curtain ERP sistemine hoş geldiniz.</p>
       </div>
 

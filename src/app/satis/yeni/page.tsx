@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ArrowLeft, Loader2, Save } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -27,26 +27,33 @@ export default function YeniSatisPage() {
   const preselectedCustomerId =
     searchParams.get("customerId") || "";
 
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    () => () => undefined,
+    () => true,
+    () => false
+  );
   const [selectedCustomerId, setSelectedCustomerId] =
     useState(preselectedCustomerId);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    setMounted(true);
     void loadSales();
   }, [loadSales]);
 
   useEffect(() => {
-    if (preselectedCustomerId) {
-      setSelectedCustomerId(preselectedCustomerId);
-      return;
-    }
+    const selectionTimer = window.setTimeout(() => {
+      if (preselectedCustomerId) {
+        setSelectedCustomerId(preselectedCustomerId);
+        return;
+      }
 
-    if (!selectedCustomerId && customers.length > 0) {
-      setSelectedCustomerId(customers[0].id);
-    }
+      if (!selectedCustomerId && customers.length > 0) {
+        setSelectedCustomerId(customers[0].id);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(selectionTimer);
   }, [
     customers,
     preselectedCustomerId,

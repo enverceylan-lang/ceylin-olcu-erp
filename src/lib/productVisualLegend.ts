@@ -13,8 +13,8 @@ export const PRODUCT_VISUAL_LEGEND: Record<
   TUL: {
     productType: 'TUL',
     label: 'Tül',
-    color: '#111111',
-    lineWidth: 4,
+    color: '#0f766e',
+    lineWidth: 3,
     doubleLine: true
   },
 

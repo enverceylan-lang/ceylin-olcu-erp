@@ -125,7 +125,7 @@ export function PlicellMeasurementSketch({
     return (
       <div
         key={cam.generatedItemId || cam.id || index}
-        className="flex min-h-[150px] w-[150px] flex-col items-center justify-center border border-gray-300 bg-white p-3 shadow-sm"
+        className="flex min-h-[138px] w-full min-w-0 flex-col items-center justify-center border border-gray-300 bg-white p-3 shadow-sm"
       >
         <span className="mb-2 w-full border-b border-gray-200 pb-1 text-center text-sm font-bold text-gray-800">
           {index + 1}
@@ -170,17 +170,6 @@ export function PlicellMeasurementSketch({
             </div>
           )}
 
-          {ortakCamBoyuCm > 0 && (
-            <div className="mb-1">
-              <span className="font-medium text-slate-500 print:text-slate-600">
-                Ortak Cam Boyu:
-              </span>{' '}
-              <span className="font-bold text-slate-800 print:text-black">
-                {ortakCamBoyuCm} cm
-              </span>
-            </div>
-          )}
-
           <div>
             <span className="font-medium text-slate-500 print:text-slate-600">
               Cam Adedi:
@@ -202,7 +191,7 @@ export function PlicellMeasurementSketch({
         </div>
       </div>
 
-      <div className="mb-6 flex flex-wrap justify-start gap-4">
+      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 print:grid-cols-3">
         {blocks}
       </div>
     </div>

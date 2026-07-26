@@ -1,16 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyAuth } from "@/lib/authHelper";
+import { loadShadowErpContext } from "@/lib/serverErpContext";
+import { readRequestedErpScopeId } from "@/lib/erpActiveScopeCookie";
+type SyncRecord = Record<string, unknown> & {
+  id: string;
+  customerId?: string;
+  roomId?: string;
+  openingId?: string;
+  rooms?: SyncRecord[];
+  windows?: SyncRecord[];
+  products?: SyncRecord[];
+  photos?: unknown[];
+  videos?: unknown[];
+  addressPhotos?: unknown[];
+  notesHistory?: unknown[];
+  updatedAt?: string | number | Date;
+  createdAt?: string | number | Date;
+  measuredDate?: string | number | Date;
+};
 
 // Helper to identify if a string is a base64 / data URL
-function isDataUrl(val: any): boolean {
+function isDataUrl(val: unknown): boolean {
   if (typeof val !== 'string') return false;
   return val.startsWith('data:') || val.includes(';base64,') || val.length > 5000;
 }
 
 // Strip any raw base64 data URLs from nested objects/arrays
 // TODO Future architecture: media files should be uploaded to Supabase Storage buckets, and only their public URLs/storage paths saved in DB/media_files table.
-function sanitizeMediaValue(val: any): any {
+function sanitizeMediaValue(val: unknown): unknown {
   if (val === null || val === undefined) return val;
 
   if (typeof val === 'string') {
@@ -27,14 +45,15 @@ function sanitizeMediaValue(val: any): any {
   }
 
   if (typeof val === 'object') {
-    const res: any = {};
-    for (const key of Object.keys(val)) {
-      if (['addressPhotos', 'photos', 'videos'].includes(key) && Array.isArray(val[key])) {
-        res[key] = val[key]
-          .map((item: any) => sanitizeMediaValue(item))
-          .filter((item: any) => item !== '');
+    const source = val as Record<string, unknown>;
+    const res: Record<string, unknown> = {};
+    for (const key of Object.keys(source)) {
+      if (['addressPhotos', 'photos', 'videos'].includes(key) && Array.isArray(source[key])) {
+        res[key] = source[key]
+          .map((item: unknown) => sanitizeMediaValue(item))
+          .filter((item: unknown) => item !== '');
       } else {
-        res[key] = sanitizeMediaValue(val[key]);
+        res[key] = sanitizeMediaValue(source[key]);
       }
     }
     return res;
@@ -141,25 +160,62 @@ export async function POST(req: NextRequest) {
       { status: 401 }
     );
   }
+
+  const erpContext = await loadShadowErpContext(
+    supabaseServer,
+    user.id,
+    { requestedScopeId: readRequestedErpScopeId(req) },
+  );
+
+  if (!erpContext.ready) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "ERP scope is not ready",
+        reason: erpContext.reason,
+      },
+      { status: erpContext.reason === "READ_FAILED" ? 503 : 409 },
+    );
+  }
+
+  const scopeColumns = {
+    tenant_id: erpContext.scope.tenantId,
+    company_id: erpContext.scope.companyId,
+    branch_id: erpContext.scope.branchId,
+    accounting_period_id:
+      erpContext.scope.accountingPeriodId,
+  };
   try {
     const body = await req.json();
     const rawLocalCustomers = body.customers || [];
     const pendingDeletes = body.pendingDeletes || [];
     // The legacy users payload is intentionally ignored.
     
-    const localCustomers = sanitizeMediaValue(rawLocalCustomers);
+    const sanitizedLocalCustomers =
+      sanitizeMediaValue(rawLocalCustomers);
+
+    const localCustomers: SyncRecord[] =
+      Array.isArray(sanitizedLocalCustomers)
+        ? sanitizedLocalCustomers.filter(
+            (item): item is SyncRecord =>
+              Boolean(item) &&
+              typeof item === "object" &&
+              typeof (item as { id?: unknown }).id ===
+                "string",
+          )
+        : [];
     
     let incomingRoomsCount = 0;
     let incomingOpeningsCount = 0;
     let incomingMeasurementsCount = 0;
     if (Array.isArray(localCustomers)) {
-      localCustomers.forEach((c: any) => {
+      localCustomers.forEach((c: SyncRecord) => {
         if (Array.isArray(c.rooms)) {
           incomingRoomsCount += c.rooms.length;
-          c.rooms.forEach((r: any) => {
+          c.rooms.forEach((r: SyncRecord) => {
             if (Array.isArray(r.windows)) {
               incomingOpeningsCount += r.windows.length;
-              r.windows.forEach((w: any) => {
+              r.windows.forEach((w: SyncRecord) => {
                 if (Array.isArray(w.products)) {
                   incomingMeasurementsCount += w.products.length;
                 }
@@ -194,10 +250,10 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Pull all entities from Supabase with error checks
-    const { data: remoteCustomers, error: errCustomers } = await supabaseServer.from("customers").select("*");
-    const { data: remoteRooms, error: errRooms } = await supabaseServer.from("rooms").select("*");
-    const { data: remoteOpenings, error: errOpenings } = await supabaseServer.from("openings").select("*");
-    const { data: remoteMeasurements, error: errMeasurements } = await supabaseServer.from("measurements").select("*");
+    const { data: remoteCustomers, error: errCustomers } = await supabaseServer.from("customers").select("*").match(scopeColumns);
+    const { data: remoteRooms, error: errRooms } = await supabaseServer.from("rooms").select("*").match(scopeColumns);
+    const { data: remoteOpenings, error: errOpenings } = await supabaseServer.from("openings").select("*").match(scopeColumns);
+    const { data: remoteMeasurements, error: errMeasurements } = await supabaseServer.from("measurements").select("*").match(scopeColumns);
     const { data: remoteUsers, error: errUsers } = await supabaseServer.from("users").select("*");
 
     const fetchError = errCustomers || errRooms || errOpenings || errMeasurements || errUsers;
@@ -228,35 +284,35 @@ export async function POST(req: NextRequest) {
 
     // 4. Merge Customers, Rooms, Openings, Measurements
     // Map remote data for easy lookup
-    const roomsByCustomer = new Map<string, any[]>();
+    const roomsByCustomer = new Map<string, SyncRecord[]>();
     remoteRooms?.forEach(r => {
       const arr = roomsByCustomer.get(r.customerId) || [];
       arr.push(r);
       roomsByCustomer.set(r.customerId, arr);
     });
 
-    const openingsByRoom = new Map<string, any[]>();
+    const openingsByRoom = new Map<string, SyncRecord[]>();
     remoteOpenings?.forEach(o => {
       const arr = openingsByRoom.get(o.roomId) || [];
       arr.push(o);
       openingsByRoom.set(o.roomId, arr);
     });
 
-    const measurementsByOpening = new Map<string, any[]>();
+    const measurementsByOpening = new Map<string, SyncRecord[]>();
     remoteMeasurements?.forEach(m => {
       const arr = measurementsByOpening.get(m.openingId) || [];
       arr.push(m);
       measurementsByOpening.set(m.openingId, arr);
     });
 
-    const mergedCustomersMap = new Map<string, any>();
+    const mergedCustomersMap = new Map<string, SyncRecord>();
     if (Array.isArray(localCustomers)) {
-      localCustomers.forEach((c: any) => {
+      localCustomers.forEach((c: SyncRecord) => {
         mergedCustomersMap.set(c.id, { ...c });
       });
     }
 
-    remoteCustomers?.forEach((remote: any) => {
+    remoteCustomers?.forEach((remote: SyncRecord) => {
       const local = mergedCustomersMap.get(remote.id);
       if (!local) {
         mergedCustomersMap.set(remote.id, {
@@ -297,7 +353,7 @@ export async function POST(req: NextRequest) {
           local.addressPhotos = remote.addressPhotos || [];
         }
 
-        if (new Date(remote.updatedAt) > new Date(local.updatedAt || 0)) {
+        if (new Date(remote.updatedAt ?? 0) > new Date(local.updatedAt || 0)) {
           mergedCustomersMap.set(remote.id, {
             ...local,
             name: remote.name,
@@ -338,10 +394,10 @@ export async function POST(req: NextRequest) {
       const localRooms = c.rooms || [];
       const dbRooms = roomsByCustomer.get(c.id) || [];
 
-      const mergedRoomsMap = new Map<string, any>();
-      localRooms.forEach((lr: any) => mergedRoomsMap.set(lr.id, lr));
+      const mergedRoomsMap = new Map<string, SyncRecord>();
+      localRooms.forEach((lr: SyncRecord) => mergedRoomsMap.set(lr.id, lr));
 
-      dbRooms.forEach((dr: any) => {
+      dbRooms.forEach((dr: SyncRecord) => {
         const lr = mergedRoomsMap.get(dr.id);
         if (!lr) {
           mergedRoomsMap.set(dr.id, {
@@ -361,7 +417,7 @@ export async function POST(req: NextRequest) {
             lr.videos = dr.videos || [];
           }
 
-          if (new Date(dr.updatedAt) > new Date(lr.updatedAt || 0)) {
+          if (new Date(dr.updatedAt ?? 0) > new Date(lr.updatedAt || 0)) {
             mergedRoomsMap.set(dr.id, {
               ...lr,
               name: dr.name,
@@ -378,10 +434,10 @@ export async function POST(req: NextRequest) {
         const localOpenings = r.windows || [];
         const dbOpenings = openingsByRoom.get(r.id) || [];
 
-        const mergedOpeningsMap = new Map<string, any>();
-        localOpenings.forEach((lo: any) => mergedOpeningsMap.set(lo.id, lo));
+        const mergedOpeningsMap = new Map<string, SyncRecord>();
+        localOpenings.forEach((lo: SyncRecord) => mergedOpeningsMap.set(lo.id, lo));
 
-        dbOpenings.forEach((do_: any) => {
+        dbOpenings.forEach((do_: SyncRecord) => {
           const lo = mergedOpeningsMap.get(do_.id);
           if (!lo) {
             mergedOpeningsMap.set(do_.id, {
@@ -404,7 +460,7 @@ export async function POST(req: NextRequest) {
               lo.videos = do_.videos || [];
             }
 
-            if (new Date(do_.updatedAt) > new Date(lo.updatedAt || 0)) {
+            if (new Date(do_.updatedAt ?? 0) > new Date(lo.updatedAt || 0)) {
               mergedOpeningsMap.set(do_.id, {
                 ...lo,
                 name: do_.name,
@@ -424,10 +480,10 @@ export async function POST(req: NextRequest) {
           const localMeasurements = o.products || [];
           const dbMeasurements = measurementsByOpening.get(o.id) || [];
 
-          const mergedMeasurementsMap = new Map<string, any>();
-          localMeasurements.forEach((lm: any) => mergedMeasurementsMap.set(lm.id, lm));
+          const mergedMeasurementsMap = new Map<string, SyncRecord>();
+          localMeasurements.forEach((lm: SyncRecord) => mergedMeasurementsMap.set(lm.id, lm));
 
-          dbMeasurements.forEach((dm: any) => {
+          dbMeasurements.forEach((dm: SyncRecord) => {
             const lm = mergedMeasurementsMap.get(dm.id);
             const normalizedMeasuredDate = dm.measuredDate ? new Date(dm.measuredDate).toISOString() : new Date().toISOString();
 
@@ -462,7 +518,7 @@ export async function POST(req: NextRequest) {
                 lm.videos = dm.videos || [];
               }
 
-              if (new Date(dm.updatedAt) > new Date(lm.updatedAt || 0)) {
+              if (new Date(dm.updatedAt ?? 0) > new Date(lm.updatedAt || 0)) {
                 mergedMeasurementsMap.set(dm.id, {
                   ...lm,
                   templateType: dm.templateType,
@@ -507,6 +563,7 @@ export async function POST(req: NextRequest) {
       const dbCustomer = remoteCustomers?.find(dc => dc.id === c.id);
       if (!dbCustomer || new Date(c.updatedAt || 0) > new Date(dbCustomer.updatedAt)) {
         const { error } = await supabaseServer.from("customers").upsert({
+          ...scopeColumns,
           id: c.id,
           name: c.name,
           phone: c.phone,
@@ -545,10 +602,11 @@ export async function POST(req: NextRequest) {
       }
 
       // Rooms
-      for (const r of c.rooms) {
+      for (const r of c.rooms ?? []) {
         const dbRoom = remoteRooms?.find(dr => dr.id === r.id);
         if (!dbRoom || new Date(r.updatedAt || 0) > new Date(dbRoom.updatedAt)) {
           const { error } = await supabaseServer.from("rooms").upsert({
+            ...scopeColumns,
             id: r.id,
             name: r.name,
             customerId: c.id,
@@ -565,10 +623,11 @@ export async function POST(req: NextRequest) {
         }
 
         // Openings
-        for (const o of r.windows) {
+        for (const o of r.windows ?? []) {
           const dbOpening = remoteOpenings?.find(do_ => do_.id === o.id);
           if (!dbOpening || new Date(o.updatedAt || 0) > new Date(dbOpening.updatedAt)) {
             const { error } = await supabaseServer.from("openings").upsert({
+              ...scopeColumns,
               id: o.id,
               name: o.name,
               roomId: r.id,
@@ -588,10 +647,11 @@ export async function POST(req: NextRequest) {
           }
 
           // Measurements
-          for (const m of o.products) {
+          for (const m of o.products ?? []) {
             const dbMeasurement = remoteMeasurements?.find(dm => dm.id === m.id);
             if (!dbMeasurement || new Date(m.updatedAt || 0) > new Date(dbMeasurement.updatedAt)) {
               const { error } = await supabaseServer.from("measurements").upsert({
+                ...scopeColumns,
                 id: m.id,
                 openingId: o.id,
                 templateType: m.templateType,
@@ -638,13 +698,13 @@ export async function POST(req: NextRequest) {
     let responseRoomsCount = 0;
     let responseOpeningsCount = 0;
     let responseMeasurementsCount = 0;
-    finalCustomers.forEach((c: any) => {
+    finalCustomers.forEach((c: SyncRecord) => {
       if (Array.isArray(c.rooms)) {
         responseRoomsCount += c.rooms.length;
-        c.rooms.forEach((r: any) => {
+        c.rooms.forEach((r: SyncRecord) => {
           if (Array.isArray(r.windows)) {
             responseOpeningsCount += r.windows.length;
-            r.windows.forEach((w: any) => {
+            r.windows.forEach((w: SyncRecord) => {
               if (Array.isArray(w.products)) {
                 responseMeasurementsCount += w.products.length;
               }
@@ -698,7 +758,7 @@ export async function POST(req: NextRequest) {
       }
     });
 
-  } catch (error: any) {
+  } catch {
     console.error("[Sync Customers API] Internal error.");
     return NextResponse.json(
       { success: false, error: "Internal server error" },

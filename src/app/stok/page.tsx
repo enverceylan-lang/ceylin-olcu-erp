@@ -1,15 +1,22 @@
 "use client";
 
-import { Plus, Search, Package, Image as ImageIcon } from "lucide-react";
+import { Plus, Search, Image as ImageIcon } from "lucide-react";
 import { useStore } from "@/store/useStore";
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
+
+const subscribeToHydration = () => () => {};
+const getClientSnapshot = () => true;
+const getServerSnapshot = () => false;
 
 export default function StokPage() {
   const { products } = useStore();
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    subscribeToHydration,
+    getClientSnapshot,
+    getServerSnapshot,
+  );
   const [searchTerm, setSearchTerm] = useState("");
 
-  useEffect(() => setMounted(true), []);
 
   if (!mounted) return <div className="p-8 text-center">Yükleniyor...</div>;
 

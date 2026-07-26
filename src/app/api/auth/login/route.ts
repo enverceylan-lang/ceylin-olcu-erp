@@ -13,6 +13,23 @@ type SessionPayload = {
   exp: number;
 };
 
+type LoginUserRecord = {
+  id: string;
+  name: string | null;
+  username: string;
+  password: string;
+  role: string;
+  isActive: boolean;
+  permissions: unknown[] | null;
+  email: string | null;
+  phone: string | null;
+  tcNo: string | null;
+  address: string | null;
+  profileCompletedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
 function base64UrlEncode(value: string): string {
   return Buffer.from(value, "utf8")
     .toString("base64")
@@ -79,7 +96,7 @@ export async function POST(req: NextRequest) {
       .eq("username", cleanUsername)
       .single();
 
-    const user = data as any;
+    const user = data as LoginUserRecord | null;
 
     if (error || !user) {
       return NextResponse.json(
@@ -173,8 +190,16 @@ export async function POST(req: NextRequest) {
       exp: nowSeconds + sessionLifetimeSeconds,
     };
 
-    const sessionToken = createSessionToken(sessionPayload, sessionSecret);
-    const { password: _password, ...sanitizedUser } = user;
+    const sessionToken = createSessionToken(
+      sessionPayload,
+      sessionSecret,
+    );
+
+    const sanitizedUser = Object.fromEntries(
+      Object.entries(user).filter(
+        ([key]) => key !== "password",
+      ),
+    ) as Omit<LoginUserRecord, "password">;
 
     return NextResponse.json({
       success: true,

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyAuth } from "@/lib/authHelper";
+import { loadShadowErpContext } from "@/lib/serverErpContext";
+import { readRequestedErpScopeId } from "@/lib/erpActiveScopeCookie";
 
 const ALLOWED_PUSH_ROLES = new Set([
   "ADMIN",
@@ -248,6 +250,38 @@ export async function POST(req: NextRequest) {
   const errorIds: string[] = [...rejectedIds];
 
   try {
+    const erpContext = await loadShadowErpContext(
+      supabaseServer,
+      user.id,
+      { requestedScopeId: readRequestedErpScopeId(req) },
+    );
+
+    if (!erpContext.ready) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "ERP scope is not ready",
+          reason: erpContext.reason,
+        },
+        { status: erpContext.reason === "READ_FAILED" ? 503 : 409 },
+      );
+    }
+
+    const scopeColumns = {
+      tenant_id: erpContext.scope.tenantId,
+      company_id: erpContext.scope.companyId,
+      branch_id: erpContext.scope.branchId,
+      accounting_period_id:
+        erpContext.scope.accountingPeriodId,
+    };
+
+    for (const change of measurementChanges) {
+      Object.assign(change, scopeColumns);
+    }
+    for (const change of draftChanges) {
+      Object.assign(change, scopeColumns);
+    }
+
     if (measurementChanges.length > 0) {
       const { error } = await supabaseServer
         .from("measurement_changes")

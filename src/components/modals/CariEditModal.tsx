@@ -19,7 +19,7 @@ export function CariEditModal({ isOpen, onClose, customer, onSave }: CariEditMod
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
-    let finalValue: any = value;
+    let finalValue: string | number | boolean | undefined = value;
     
     if (type === 'checkbox') {
       finalValue = (e.target as HTMLInputElement).checked;
@@ -36,8 +36,9 @@ export function CariEditModal({ isOpen, onClose, customer, onSave }: CariEditMod
     try {
       await onSave(customer.id, formData);
       onClose();
-    } catch (err: any) {
-      alert("Hata: " + err.message);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Cari güncellenemedi.";
+      alert("Hata: " + message);
     } finally {
       setIsSaving(false);
     }

@@ -6,7 +6,7 @@ export interface ExportTemplate {
   columns: {
     header: string;
     dbField: string;
-    formatter?: (value: any, row: any) => any;
+    formatter?: (value: unknown, row: unknown) => unknown;
   }[];
 }
 
@@ -22,17 +22,21 @@ export const exportToExcel = <T>(
 
   // Create rows based on template
   const rows = data.map(item => {
-    const row: any = {};
+    const row: Record<string, unknown> = {};
+    const source = item as unknown as Record<string, unknown>;
     
     template.columns.forEach(col => {
       let val;
       
       if (col.dbField.startsWith('customFields.') || col.dbField.startsWith('rawImportData.')) {
         const parts = col.dbField.split('.');
-        const parent = (item as any)[parts[0]];
-        val = parent ? parent[parts[1]] : "";
+        const parent = source[parts[0]];
+        val =
+          parent && typeof parent === 'object'
+            ? (parent as Record<string, unknown>)[parts[1]]
+            : "";
       } else {
-        val = (item as any)[col.dbField];
+        val = source[col.dbField];
       }
 
       if (col.formatter) {
@@ -58,6 +62,6 @@ export const exportToExcel = <T>(
 };
 
 // Common Formatters
-export const booleanFormatter = (val: any) => val ? 'Evet' : 'Hayır';
-export const trueFalseFormatter = (val: any) => val ? 'True' : 'False';
-export const numberFormatter = (val: any) => typeof val === 'number' ? val : 0;
+export const booleanFormatter = (val: unknown) => val ? 'Evet' : 'Hayır';
+export const trueFalseFormatter = (val: unknown) => val ? 'True' : 'False';
+export const numberFormatter = (val: unknown) => typeof val === 'number' ? val : 0;

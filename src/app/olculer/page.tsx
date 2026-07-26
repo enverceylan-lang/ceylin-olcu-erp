@@ -2,13 +2,13 @@
 
 import {
   Search, Ruler, ArrowRight, ChevronDown, ChevronUp, User, Calendar, Layers,
-  Image, Video as VideoIcon, CheckCircle2, AlertCircle, ClipboardList,
+  Image as ImageIcon, Video as VideoIcon, CheckCircle2, AlertCircle, ClipboardList,
   Trash2, Edit3, X, Save, BadgeCheck, Filter, CloudDownload, RefreshCw, MapPin, Wrench
 } from "lucide-react";
 import Link from "next/link";
-import { useStore } from "@/store/useStore";
-import { useMeasurementStore } from "@/store/measurementStore";
-import { useEffect, useState, useMemo } from "react";
+import { Customer, ProductMeasurement, Room, WindowItem, useStore } from "@/store/useStore";
+import { MeasurementRecord, useMeasurementStore } from "@/store/measurementStore";
+import { useEffect, useState, useMemo, useSyncExternalStore } from "react";
 import { getMeasurementDimensions, getTemplateLabel } from "@/lib/measurementAdapter";
 import { useAuthStore, canViewCustomer } from "@/store/useAuthStore";
 import {
@@ -84,13 +84,32 @@ interface EditForm {
   notes: string;
 }
 
+type CustomerWithMeasurementDate = Customer & {
+  lastMeasurementAt?: string;
+};
+
+type DraftWindow = WindowItem & {
+  measurements?: ProductMeasurement[];
+};
+
+type DraftRoom = Omit<Room, "windows"> & {
+  windows: DraftWindow[];
+};
+
+const errorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
 // ─── Main component ────────────────────────────────────────────────────────────
 
 export default function OlculerPage() {
   const { customers } = useStore();
   const measurementStore = useMeasurementStore();
   const { currentUser } = useAuthStore();
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    () => () => undefined,
+    () => true,
+    () => false
+  );
   const [searchTerm, setSearchTerm] = useState("");
   const [expandedCustomers, setExpandedCustomers] = useState<Record<string, boolean>>({});
   const [localDrafts, setLocalDrafts] = useState<FieldMeasurementDraft[]>([]);
@@ -197,8 +216,8 @@ const [manualRepairingMeasurementId, setManualRepairingMeasurementId] =
       loadInbound();
       // Notify zustand components to refresh
       window.dispatchEvent(new Event('local-customers-updated'));
-    } catch (e: any) {
-      alert("İşlem tamamlanamadı. Veriler korunuyor. Hata: " + e.message);
+    } catch (error: unknown) {
+      alert("İşlem tamamlanamadı. Veriler korunuyor. Hata: " + errorMessage(error));
     } finally {
       setProcessingInboundId(null);
     }
@@ -227,8 +246,8 @@ const [manualRepairingMeasurementId, setManualRepairingMeasurementId] =
       loadInbound();
       // Notify zustand components to refresh
       window.dispatchEvent(new Event('local-customers-updated'));
-    } catch (e: any) {
-      alert("İşlem tamamlanamadı. Veriler korunuyor. Hata: " + e.message);
+    } catch (error: unknown) {
+      alert("İşlem tamamlanamadı. Veriler korunuyor. Hata: " + errorMessage(error));
     } finally {
       setProcessingInboundId(null);
     }
@@ -248,10 +267,13 @@ const [manualRepairingMeasurementId, setManualRepairingMeasurementId] =
   }, [customerSearchQuery, customers]);
 
   useEffect(() => {
-    setMounted(true);
-    loadDrafts();
-    loadInbound();
-    measurementStore.loadMeasurements();
+    const initializationTimer = window.setTimeout(() => {
+      void loadDrafts();
+      void loadInbound();
+      void useMeasurementStore.getState().loadMeasurements();
+    }, 0);
+
+    return () => window.clearTimeout(initializationTimer);
   }, []);
 
   if (!mounted) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
@@ -272,19 +294,22 @@ const [manualRepairingMeasurementId, setManualRepairingMeasurementId] =
       let videoCount = 0;
       let latestDate: Date | null = null;
       let latestMeasuredBy = "";
-      let sortDate = new Date((customer as any).lastMeasurementAt || customer.updatedAt || customer.createdAt || 0).getTime();
+      const customerWithMeasurementDate = customer as CustomerWithMeasurementDate;
+      let sortDate = new Date(customerWithMeasurementDate.lastMeasurementAt || customer.updatedAt || customer.createdAt || 0).getTime();
 
       for (const room of activeRooms) {
         photoCount += (room.photos || []).length;
         videoCount += (room.videos || []).length;
         const activeWindows = (room.windows || []).filter((w) => !w.isDeleted);
-        openingCount += activeWindows.length;
         for (const window of activeWindows) {
-          photoCount += (window.photos || []).length;
-          videoCount += (window.videos || []).length;
           const activeProducts = measurementStore.measurements.filter(m =>
             measurementBelongsTo(m, customer.id, room.id, window.id) && !m.isDeleted && !m.isArchived
           );
+          if (activeProducts.length === 0) continue;
+
+          openingCount += 1;
+          photoCount += (window.photos || []).length;
+          videoCount += (window.videos || []).length;
           measurementCount += activeProducts.length;
           for (const p of activeProducts) {
             photoCount += (p.photos || []).length;
@@ -334,7 +359,7 @@ const [manualRepairingMeasurementId, setManualRepairingMeasurementId] =
     return !customer || !room || !opening;
   });
 
-  const getOrphanDisplay = (measurement: any) => {
+  const getOrphanDisplay = (measurement: MeasurementRecord) => {
     const sourceCustomer = customers.find(
       (customer) => customer.id === measurement.customerId && !customer.isDeleted
     );
@@ -344,11 +369,11 @@ const [manualRepairingMeasurementId, setManualRepairingMeasurementId] =
       : undefined;
     const displayCustomer = targetCustomer || sourceCustomer;
     const room = displayCustomer?.rooms?.find(
-      (item: any) => item.id === measurement.roomId && !item.isDeleted
+      (item) => item.id === measurement.roomId && !item.isDeleted
     );
     const openingId = measurementOpeningId(measurement);
     const opening = room?.windows?.find(
-      (item: any) => item.id === openingId && !item.isDeleted
+      (item) => item.id === openingId && !item.isDeleted
     );
     const dimensions = getMeasurementDimensions(measurement);
 
@@ -404,7 +429,7 @@ const [manualRepairingMeasurementId, setManualRepairingMeasurementId] =
           .map((customer) => [customer.id, { ...customer, rooms: [...(customer.rooms || [])] }] as const)
       );
 
-      const repairedMeasurements: any[] = [];
+      const repairedMeasurements: MeasurementRecord[] = [];
       const touchedCustomerIds = new Set<string>();
       const unresolved: string[] = [];
 
@@ -420,33 +445,29 @@ const [manualRepairingMeasurementId, setManualRepairingMeasurementId] =
         }
 
         const rooms = [...(customer.rooms || [])];
-        let roomIndex = rooms.findIndex((room: any) => room.id === measurement.roomId && !room.isDeleted);
+        let roomIndex = rooms.findIndex((room) => room.id === measurement.roomId && !room.isDeleted);
 
         if (roomIndex === -1) {
           rooms.push({
             id: measurement.roomId,
-            name: (measurement as any).roomName || (measurement as any).roomLabel || "Kurtarılan Oda",
+            name: measurement.roomName || measurement.roomLabel || "Kurtarılan Oda",
             photos: [],
             videos: [],
             windows: [],
-          } as any);
+          });
           roomIndex = rooms.length - 1;
         }
 
-        const room: any = { ...rooms[roomIndex] };
-        const windows = Array.isArray(room.windows)
-          ? [...room.windows]
-          : Array.isArray(room.openings)
-            ? [...room.openings]
-            : [];
+        const room: Room = { ...rooms[roomIndex] };
+        const windows = [...(room.windows || [])];
 
-        if (!windows.some((opening: any) => opening.id === openingId && !opening.isDeleted)) {
+        if (!windows.some((opening) => opening.id === openingId && !opening.isDeleted)) {
           windows.push({
             id: openingId,
             name:
-              (measurement as any).openingName ||
-              (measurement as any).windowName ||
-              (measurement as any).openingLabel ||
+              measurement.openingName ||
+              measurement.windowName ||
+              measurement.openingLabel ||
               "Kurtarılan Açıklık",
             photos: [],
             videos: [],
@@ -475,7 +496,7 @@ const [manualRepairingMeasurementId, setManualRepairingMeasurementId] =
       if (repairedMeasurements.length > 0) {
         const customersToSave = Array.from(touchedCustomerIds)
           .map((id) => customerMap.get(id))
-          .filter(Boolean) as any[];
+          .filter((customer): customer is Customer => Boolean(customer));
 
         await saveLocalCustomers(customersToSave);
 await measurementStore.batchUpsertMeasurements(repairedMeasurements);
@@ -488,9 +509,9 @@ await refreshRepairData();
           ? ` ${unresolved.length} ölçü için kesin cari eşleşmesi bulunamadı; kayıtlar korunuyor.`
           : " Yetim ölçü kalmadı.");
       alert(message);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("[OrphanRepair] Onarım başarısız:", error);
-      alert(`Yetim ölçü onarımı tamamlanamadı. Veriler korunuyor. Hata: ${error?.message || "Bilinmeyen hata"}`);
+      alert(`Yetim ölçü onarımı tamamlanamadı. Veriler korunuyor. Hata: ${errorMessage(error)}`);
     } finally {
       setIsRepairingOrphans(false);
     }
@@ -557,7 +578,7 @@ const handleManualOrphanRepair = async (
     const rooms = [...(targetCustomer.rooms || [])];
 
     let roomIndex = rooms.findIndex(
-      (room: any) =>
+      (room) =>
         room.id === measurement.roomId &&
         !room.isDeleted,
     );
@@ -566,29 +587,25 @@ const handleManualOrphanRepair = async (
       rooms.push({
         id: measurement.roomId,
         name:
-          (measurement as any).roomName ||
-          (measurement as any).roomLabel ||
+          measurement.roomName ||
+          measurement.roomLabel ||
           "Kurtarılan Oda",
         photos: [],
         videos: [],
         windows: [],
-      } as any);
+      });
 
       roomIndex = rooms.length - 1;
     }
 
-    const room: any = {
+    const room: Room = {
       ...rooms[roomIndex],
     };
 
-    const windows = Array.isArray(room.windows)
-      ? [...room.windows]
-      : Array.isArray(room.openings)
-        ? [...room.openings]
-        : [];
+    const windows = [...(room.windows || [])];
 
     const openingExists = windows.some(
-      (opening: any) =>
+      (opening) =>
         opening.id === openingId &&
         !opening.isDeleted,
     );
@@ -597,9 +614,9 @@ const handleManualOrphanRepair = async (
       windows.push({
         id: openingId,
         name:
-          (measurement as any).openingName ||
-          (measurement as any).windowName ||
-          (measurement as any).openingLabel ||
+          measurement.openingName ||
+          measurement.windowName ||
+          measurement.openingLabel ||
           "Kurtarılan Açıklık",
         photos: [],
         videos: [],
@@ -640,7 +657,7 @@ const handleManualOrphanRepair = async (
     alert(
       `Ölçü "${targetCustomer.name}" carisine bağlandı ve yetim kayıttan çıkarıldı.`,
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error(
       "[ManualOrphanRepair] Manuel onarım başarısız:",
       error,
@@ -648,7 +665,7 @@ const handleManualOrphanRepair = async (
 
     alert(
       "Manuel onarım tamamlanamadı. Veriler korunuyor. Hata: " +
-        (error?.message || "Bilinmeyen hata"),
+        errorMessage(error),
     );
   } finally {
     setManualRepairingMeasurementId(null);
@@ -669,7 +686,6 @@ const handleManualOrphanRepair = async (
     )
     .filter((d) => draftFilter === "ALL" || d.syncStatus === draftFilter);
 
-  const detailDraft = detailDraftId ? localDrafts.find((d) => d.id === detailDraftId) ?? null : null;
   const editDraft = editDraftId ? localDrafts.find((d) => d.id === editDraftId) ?? null : null;
 
   // ─── Draft actions ───────────────────────────────────────────────────────────
@@ -740,7 +756,7 @@ const handleManualOrphanRepair = async (
     <div className="space-y-6 max-w-6xl mx-auto pb-12">
       {/* Page header */}
       <div>
-        <h1 className="text-2xl font-bold heading-title flex items-center gap-2">
+        <h1 className="flex items-center gap-2 text-xl font-bold heading-title sm:text-2xl">
           <Ruler className="w-6 h-6 text-blue-500" />
           Ölçüler ve Projeler
         </h1>
@@ -782,12 +798,12 @@ const handleManualOrphanRepair = async (
                         {display.targetCustomer?.name || display.sourceCustomer?.name || "Cari bilgisi bulunamadı"}
                       </div>
                       {display.targetCustomer && display.sourceCustomer?.id !== display.targetCustomer.id && (
-                        <div className="mt-0.5 text-[11px] text-green-700 dark:text-green-400">
+                        <div className="mt-0.5 text-xs text-green-700 dark:text-green-400">
                           Kesin eşleşme bulundu → {display.targetCustomer.name}
                         </div>
                       )}
                     </div>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${
                       display.canAutoRepair
                         ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300"
                         : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
@@ -802,7 +818,7 @@ const handleManualOrphanRepair = async (
                     <div><span className="font-semibold">Ölçü türü:</span> {display.templateLabel}</div>
                     <div><span className="font-semibold">Ölçü:</span> {display.summaryLabel}</div>
                     {(measurement.measuredBy || measurement.measuredDate) && (
-                      <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                      <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                         {measurement.measuredBy ? `Ölçen: ${measurement.measuredBy}` : ""}
                         {measurement.measuredBy && measurement.measuredDate ? " • " : ""}
                         {measurement.measuredDate
@@ -829,7 +845,7 @@ const handleManualOrphanRepair = async (
       : "Cari Seç ve Onar"}
   </button>
 )}
-                  <details className="text-[10px] text-gray-400">
+                  <details className="text-xs text-gray-400">
                     <summary className="cursor-pointer select-none">Teknik kimlikleri göster</summary>
                     <div className="mt-1 break-all">Ölçü: {measurement.id}</div>
                     <div className="break-all">Cari: {measurement.customerId}</div>
@@ -865,8 +881,8 @@ const handleManualOrphanRepair = async (
           </div>
 
           {inboundMeasurements.length === 0 ? (
-            <div className="p-6 bg-white dark:bg-gray-800 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 text-center">
-              <p className="text-gray-500 dark:text-gray-400">Bekleyen gelen ölçü bulunmamaktadır.</p>
+            <div className="rounded-xl border border-dashed border-gray-300 bg-white p-3 text-center dark:border-gray-700 dark:bg-gray-800">
+              <p className="text-sm text-gray-500 dark:text-gray-400">Bekleyen gelen ölçü bulunmamaktadır.</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -880,7 +896,7 @@ const handleManualOrphanRepair = async (
                         <p className="text-xs text-gray-400 mt-1">{new Date(inbound.createdAt).toLocaleString('tr-TR')}</p>
                      </div>
                      <div className="flex flex-col gap-1 items-end">
-                       <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">{inbound.entityType}</span>
+                       <span className="text-xs font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">{inbound.entityType}</span>
                        <span className="text-xs font-semibold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">YENİ</span>
                      </div>
                   </div>
@@ -905,7 +921,7 @@ const handleManualOrphanRepair = async (
                                 />
                                 <div className="flex flex-col">
                                   <span className="font-bold">{c.name} {c.customerCode ? `(${c.customerCode})` : ''}</span>
-                                  <span className="text-[10px] truncate max-w-[200px]">{c.phone || 'Telefon yok'} - {c.address || 'Adres yok'}</span>
+                                  <span className="max-w-[200px] truncate text-xs">{c.phone || 'Telefon yok'} - {c.address || 'Adres yok'}</span>
                                 </div>
                               </label>
                             );
@@ -923,7 +939,7 @@ const handleManualOrphanRepair = async (
                             <div className="text-xs text-gray-800 dark:text-gray-200 bg-white dark:bg-gray-700 p-1.5 rounded border border-gray-200 dark:border-gray-600">
                               <span className="font-bold">Seçili Cari:</span> {c.name} - {c.phone || 'Telefon yok'}
                               <div className="truncate text-gray-500 dark:text-gray-400 mt-0.5">{c.address || 'Adres yok'}</div>
-                              <button onClick={() => setCustomerSearchInboundId(inbound.changeId)} className="mt-1 text-indigo-600 hover:underline text-[10px] font-semibold w-full text-center py-1 bg-indigo-50 dark:bg-indigo-900/20 rounded">Cari Rehberinden Değiştir</button>
+                              <button onClick={() => setCustomerSearchInboundId(inbound.changeId)} className="mt-1 w-full rounded bg-indigo-50 py-1 text-center text-xs font-semibold text-indigo-600 hover:underline dark:bg-indigo-900/20">Cari Rehberinden Değiştir</button>
                             </div>
                           ) : <span className="text-xs text-gray-500">Bilinmeyen Cari</span>;
                         })()
@@ -1028,15 +1044,6 @@ const handleManualOrphanRepair = async (
           </div>
         </div>
 
-        {/* Empty state */}
-        {localDrafts.length === 0 && (
-          <div className="bg-white dark:bg-gray-900 border border-dashed border-amber-300 dark:border-amber-800/40 rounded-xl p-10 text-center text-gray-500 dark:text-gray-400">
-            <ClipboardList className="w-10 h-10 text-amber-300 dark:text-amber-700 mx-auto mb-3" />
-            <p className="font-medium">Bu cihazda kayıtlı yerel saha taslağı yok.</p>
-            <p className="text-xs mt-1">Cari detayında "Telefona Taslak Kaydet" ile taslak oluşturabilirsiniz.</p>
-          </div>
-        )}
-
         {localDrafts.length > 0 && filteredDrafts.length === 0 && (
           <div className="bg-white dark:bg-gray-900 border border-dashed border-gray-200 dark:border-gray-700 rounded-xl p-8 text-center text-gray-500 dark:text-gray-400">
             <p className="font-medium">Filtreye uyan taslak bulunamadı.</p>
@@ -1047,16 +1054,17 @@ const handleManualOrphanRepair = async (
         {filteredDrafts.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {filteredDrafts.map((draft) => {
-              const openingCount = (draft.rooms || []).reduce(
-                (acc, r) => acc + ((r.windows || []).filter((w: any) => !w.isDeleted).length),
+              const draftRooms = (draft.rooms || []) as DraftRoom[];
+              const openingCount = draftRooms.reduce(
+                (acc, room) => acc + ((room.windows || []).filter((window) => !window.isDeleted).length),
                 0
               );
-              const measurementCount = (draft.rooms || []).reduce(
-                (acc, r) =>
+              const measurementCount = draftRooms.reduce(
+                (acc, room) =>
                   acc +
-                  (r.windows || []).reduce(
-                    (wacc: number, w: any) =>
-                      wacc + (w.products || w.measurements || []).filter((m: any) => !m.isDeleted).length,
+                  (room.windows || []).reduce(
+                    (windowCount, window) =>
+                      windowCount + (window.products || window.measurements || []).filter((measurement) => !measurement.isDeleted).length,
                     0
                   ),
                 0
@@ -1086,7 +1094,7 @@ const handleManualOrphanRepair = async (
                       )}
                     </div>
                     <span
-                      className={`shrink-0 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${
+                      className={`shrink-0 text-xs font-bold uppercase px-2 py-0.5 rounded-full border ${
                         STATUS_COLORS[draft.syncStatus]
                       }`}
                     >
@@ -1199,11 +1207,11 @@ const handleManualOrphanRepair = async (
                       {(draft.rooms || []).length > 0 && (
                         <div className="space-y-1.5 pt-1 border-t border-amber-200/60 dark:border-amber-800/20">
                           <p className="font-semibold text-slate-700 dark:slate-300">Odalar</p>
-                          {(draft.rooms || []).map((room: any, idx: number) => {
-                            const wCount = (room.windows || []).filter((w: any) => !w.isDeleted).length;
+                          {draftRooms.map((room, idx) => {
+                            const wCount = (room.windows || []).filter((window) => !window.isDeleted).length;
                             const mCount = (room.windows || []).reduce(
-                              (a: number, w: any) =>
-                                a + (w.products || w.measurements || []).filter((m: any) => !m.isDeleted).length,
+                              (count, window) =>
+                                count + (window.products || window.measurements || []).filter((measurement) => !measurement.isDeleted).length,
                               0
                             );
                             return (
@@ -1406,6 +1414,18 @@ const handleManualOrphanRepair = async (
 
       {/* ──────────────────── MAIN CUSTOMERS LIST ──────────────────── */}
       <div className="space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Kayıtlı Ölçüler</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Cari bazında odaları ve açıklıkları görüntüleyin.
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+            {customerStats.length} cari
+          </span>
+        </div>
+
         {customerStats.length === 0 ? (
           <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-12 text-center text-gray-500 dark:text-gray-400">
             <Ruler className="w-12 h-12 text-gray-300 dark:text-gray-700 mb-4 mx-auto" />
@@ -1433,29 +1453,39 @@ const handleManualOrphanRepair = async (
               >
                 {/* Card header */}
                 <div
-                  className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer select-none"
+                  className="grid grid-cols-[minmax(0,1fr)_auto] cursor-pointer select-none items-start gap-3 p-4 sm:p-5"
                   onClick={() => toggleCustomer(customer.id)}
                 >
-                  <div className="space-y-1">
-                    <h3 className="font-bold text-lg text-gray-900 dark:text-white hover:underline">
-                      <Link href={`/cariler/${customer.id}`} onClick={(e) => e.stopPropagation()}>
+                  <div className="min-w-0 space-y-2">
+                    <h3 className="min-w-0 text-lg font-bold text-gray-900 hover:underline dark:text-white">
+                      <Link
+                        href={`/cariler/${customer.id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="block truncate"
+                        title={customer.name}
+                      >
                         {customer.name}
                       </Link>
                     </h3>
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
-                      <span className="flex items-center gap-1">
-                        <MapPin className="w-3.5 h-3.5" /> Lokasyon: {customer.address || "Belirtilmemiş"}
+                    <div className="grid min-w-0 gap-1 text-xs text-gray-500 dark:text-gray-400 sm:grid-cols-2">
+                      <span className="flex min-w-0 items-center gap-1 sm:col-span-2">
+                        <MapPin className="h-3.5 w-3.5 shrink-0" />
+                        <span className="shrink-0 font-medium">Adres:</span>
+                        <span className="truncate" title={customer.address || "Belirtilmemiş"}>
+                          {customer.address || "Belirtilmemiş"}
+                        </span>
                       </span>
                       <span className="flex items-center gap-1">
-                        <Calendar className="w-3.5 h-3.5" /> Son Ölçüm: {latestDateStr}
+                        <Calendar className="h-3.5 w-3.5 shrink-0" /> Son Ölçüm: {latestDateStr}
                       </span>
-                      <span className="flex items-center gap-1">
-                        <User className="w-3.5 h-3.5" /> Ölçen: {latestMeasuredBy}
+                      <span className="flex min-w-0 items-center gap-1">
+                        <User className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">Ölçen: {latestMeasuredBy}</span>
                       </span>
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2 md:gap-3">
+                  <div className="col-span-2 flex flex-wrap items-center gap-2">
                     <span className="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 px-2.5 py-1 rounded-lg text-xs font-semibold">
                       {roomCount} Oda
                     </span>
@@ -1467,7 +1497,7 @@ const handleManualOrphanRepair = async (
                     </span>
                     {photoCount > 0 && (
                       <span className="bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1">
-                        <Image className="w-3.5 h-3.5" /> {photoCount} Foto
+                        <ImageIcon className="w-3.5 h-3.5" /> {photoCount} Foto
                       </span>
                     )}
                     {videoCount > 0 && (
@@ -1477,24 +1507,24 @@ const handleManualOrphanRepair = async (
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2 border-t md:border-t-0 pt-3 md:pt-0">
-                    <button className="text-xs bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 px-3 py-1.5 rounded-lg font-bold flex items-center gap-1 transition-colors">
-                      {isExpanded ? "Ölçüleri Gizle" : "Ölçüleri Gör"}
+                  <div className="col-start-2 row-start-1 flex w-auto items-center justify-self-end gap-1.5 self-start">
+                    <button className="flex items-center justify-center gap-1 rounded-lg bg-gray-100 px-2.5 py-1.5 text-xs font-bold text-gray-800 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">
+                      {isExpanded ? "Gizle" : "Gör"}
                       {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                     </button>
                     <Link
                       href={`/cariler/${customer.id}`}
                       onClick={(e) => e.stopPropagation()}
-                      className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg font-bold flex items-center gap-1 transition-colors"
+                      className="flex items-center justify-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1.5 text-xs font-bold text-white transition-colors hover:bg-blue-700"
                     >
-                      Detaya Git <ArrowRight className="w-3.5 h-3.5" />
+                      Detay <ArrowRight className="w-3.5 h-3.5" />
                     </Link>
                   </div>
                 </div>
 
                 {/* Expanded hierarchy */}
                 {isExpanded && (
-                  <div className="border-t border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-950/20 p-5 space-y-6">
+                  <div className="max-h-[68vh] space-y-6 overflow-y-auto border-t border-gray-100 bg-gray-50/50 p-4 dark:border-gray-800 dark:bg-gray-950/20 sm:p-5">
                     {customer.rooms.filter((r) => !r.isDeleted).length === 0 ? (
                       <p className="text-sm text-gray-500 italic">Oda bulunamadı.</p>
                     ) : null}
@@ -1507,19 +1537,33 @@ const handleManualOrphanRepair = async (
                             <span className="w-2 h-2 rounded-full bg-blue-500" />
                             {room.name}
                             {(room.photos?.length > 0 || room.videos?.length > 0) && (
-                              <span className="text-[10px] text-gray-400 font-normal">
+                              <span className="text-xs font-normal text-gray-400">
                                 ({(room.photos || []).length} Foto, {(room.videos || []).length} Video)
                               </span>
                             )}
                           </h4>
 
                           <div className="space-y-4 pl-4">
-                            {room.windows.filter((w) => !w.isDeleted).length === 0 ? (
+                            {room.windows.filter((w) =>
+                              !w.isDeleted &&
+                              measurementStore.measurements.some((measurement) =>
+                                measurementBelongsTo(measurement, customer.id, room.id, w.id) &&
+                                !measurement.isDeleted &&
+                                !measurement.isArchived
+                              )
+                            ).length === 0 ? (
                               <p className="text-xs text-gray-400 italic">Açıklık bulunmuyor.</p>
                             ) : null}
 
                             {room.windows
-                              .filter((w) => !w.isDeleted)
+                              .filter((w) =>
+                                !w.isDeleted &&
+                                measurementStore.measurements.some((measurement) =>
+                                  measurementBelongsTo(measurement, customer.id, room.id, w.id) &&
+                                  !measurement.isDeleted &&
+                                  !measurement.isArchived
+                                )
+                              )
                               .map((window) => (
                                 <div key={window.id} className="space-y-2">
                                   <h5 className="font-semibold text-xs text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
@@ -1529,7 +1573,7 @@ const handleManualOrphanRepair = async (
 
                                   <div className="space-y-2 pl-5">
                                     {measurementStore.measurements.filter((p) => measurementBelongsTo(p, customer.id, room.id, window.id) && !p.isDeleted && !p.isArchived).length === 0 ? (
-                                      <p className="text-[11px] text-gray-400 italic">Alınmış ölçü kaydı yok.</p>
+                                      <p className="text-xs italic text-gray-400">Alınmış ölçü kaydı yok.</p>
                                     ) : null}
 
                                     {measurementStore.measurements
@@ -1551,14 +1595,14 @@ const handleManualOrphanRepair = async (
                                           >
                                             <div className="space-y-1">
                                               <div className="flex items-center gap-2">
-                                                <span className="bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 px-2 py-0.5 rounded text-[10px] font-bold uppercase">
+                                                <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-bold uppercase text-gray-700 dark:bg-gray-800 dark:text-gray-300">
                                                   {getTemplateLabel(dims.templateType)}
                                                 </span>
                                                 <span className="font-semibold text-gray-800 dark:text-gray-200">
                                                   {dims.summaryLabel}
                                                 </span>
                                               </div>
-                                              <div className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                                              <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                                                 <span>Ölçen: {p.measuredBy}</span>
                                                 {p.measuredDate && (
                                                   <span>• {new Date(p.measuredDate).toLocaleDateString("tr-TR")}</span>
@@ -1574,16 +1618,16 @@ const handleManualOrphanRepair = async (
                                             <div className="flex items-center gap-2">
                                               {isAssigned ? (
                                                 <div className="flex flex-col items-end gap-0.5">
-                                                  <span className="bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800/40 px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1">
+                                                  <span className="flex items-center gap-1 rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-xs font-bold text-green-700 dark:border-green-800/40 dark:bg-green-900/20 dark:text-green-400">
                                                     <CheckCircle2 className="w-3 h-3 text-green-500" />
                                                     Ürün Atandı
                                                   </span>
-                                                  <span className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">
+                                                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
                                                     {p.productGroup} / {p.productType}
                                                   </span>
                                                 </div>
                                               ) : (
-                                                <span className="bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-400 border border-orange-200 dark:border-orange-800/40 px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1">
+                                                <span className="flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs font-bold text-orange-700 dark:border-orange-800/40 dark:bg-orange-900/20 dark:text-orange-400">
                                                   <AlertCircle className="w-3 h-3 text-orange-500" />
                                                   Ürün Atanmadı
                                                 </span>
@@ -1605,6 +1649,15 @@ const handleManualOrphanRepair = async (
           }
         )}
       </div>
+
+      {localDrafts.length === 0 && (
+        <div className="flex items-start gap-2 border-t border-gray-200 px-1 pt-4 text-xs text-gray-400 dark:border-gray-800 dark:text-gray-500">
+          <ClipboardList className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>
+            Bu cihazda kayıtlı yerel saha taslağı yok. Cari detayında &quot;Telefona Taslak Kaydet&quot; ile taslak oluşturabilirsiniz.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

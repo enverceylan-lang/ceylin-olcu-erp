@@ -1,16 +1,35 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { WifiOff, Download, RefreshCw, X, HelpCircle, AlertCircle } from "lucide-react";
+import { WifiOff, Download, RefreshCw, X, HelpCircle } from "lucide-react";
 import { initSync } from "@/lib/syncService";
 import { useStore } from "@/store/useStore";
 import { useMeasurementStore } from "@/store/measurementStore";
 import { runMeasurementMigration } from "@/lib/measurementMigration";
 import { migrateLocalStorageCustomersToIndexedDb } from "@/lib/migrateCustomersToIndexedDb";
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{
+    outcome: "accepted" | "dismissed";
+    platform: string;
+  }>;
+}
+
+type NavigatorWithStandalone = Navigator & {
+  standalone?: boolean;
+};
+
+function isStandaloneMode(): boolean {
+  return (
+    window.matchMedia("(display-mode: standalone)").matches ||
+    (window.navigator as NavigatorWithStandalone).standalone === true
+  );
+}
+
 export function PWAController() {
   const [isOffline, setIsOffline] = useState(false);
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
   const [showIosPrompt, setShowIosPrompt] = useState(false);
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
@@ -20,6 +39,8 @@ export function PWAController() {
     let cleanupSync: (() => void) | undefined;
     // 1. Check offline status
     if (typeof window !== "undefined") {
+      queueMicrotask(() => setIsOffline(!navigator.onLine));
+
       // Step 1: Migrate any old localStorage customers into IndexedDB (one-time, safe)
       migrateLocalStorageCustomersToIndexedDb().then((report) => {
         console.log('[Migration] LocalStorage -> IndexedDB:', {
@@ -49,7 +70,6 @@ export function PWAController() {
       });
 
       cleanupSync = initSync();
-      setIsOffline(!navigator.onLine);
 
       const handleOnline = () => setIsOffline(false);
       const handleOffline = () => setIsOffline(true);
@@ -58,15 +78,15 @@ export function PWAController() {
       window.addEventListener("offline", handleOffline);
 
       // 2. Handle in-app installation (Android / Chrome)
-      const handleBeforeInstallPrompt = (e: Event) => {
+      const handleBeforeInstallPrompt = (event: Event) => {
+        const promptEvent = event as BeforeInstallPromptEvent;
         // Prevent Chrome 67 and earlier from automatically showing the prompt
-        e.preventDefault();
+        promptEvent.preventDefault();
         // Stash the event so it can be triggered later.
-        setDeferredPrompt(e);
+        setDeferredPrompt(promptEvent);
         // Update UI to show the install button
         // Only show if not already in standalone mode
-        const isStandalone = window.matchMedia("(display-mode: standalone)").matches || 
-                             ("standalone" in window.navigator && (window.navigator as any).standalone);
+        const isStandalone = isStandaloneMode();
         if (!isStandalone) {
           setShowInstallPrompt(true);
         }
@@ -83,16 +103,15 @@ export function PWAController() {
       window.addEventListener("appinstalled", handleAppInstalled);
 
       // 3. iOS detection & instruction prompt
-      const isStandalone = window.matchMedia("(display-mode: standalone)").matches || 
-                           ("standalone" in window.navigator && (window.navigator as any).standalone);
-      const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+      const isStandalone = isStandaloneMode();
+      const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !("MSStream" in window);
       
       if (isiOS && !isStandalone) {
         // Show iOS installation tips (Safari menu -> Add to Home Screen)
         // Check if user has already dismissed it this session
         const dismissed = sessionStorage.getItem("pwa-ios-prompt-dismissed");
         if (!dismissed) {
-          setShowIosPrompt(true);
+          queueMicrotask(() => setShowIosPrompt(true));
         }
       }
 
@@ -252,7 +271,7 @@ export function PWAController() {
             </div>
             <div className="flex-1">
               <div className="flex justify-between items-center">
-                <h4 className="font-semibold text-sm text-slate-100">iPhone/iPad'e Yükle</h4>
+                <h4 className="font-semibold text-sm text-slate-100">iPhone/iPad’e Yükle</h4>
                 <button onClick={dismissIosPrompt} className="text-slate-400 hover:text-white p-0.5 rounded">
                   <X className="w-4 h-4" />
                 </button>

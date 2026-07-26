@@ -25,7 +25,7 @@ function simpleHash(str: string): string {
 async function sha256hex(input: string): Promise<string> {
   try {
     const subtle =
-      typeof globalThis !== 'undefined' && (globalThis as any).crypto?.subtle;
+      typeof globalThis !== 'undefined' && globalThis.crypto?.subtle;
     if (!subtle) throw new Error('no subtle');
     const encoder = new TextEncoder();
     const data = encoder.encode(input);

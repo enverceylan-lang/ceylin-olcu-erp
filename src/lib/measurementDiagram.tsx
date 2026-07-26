@@ -1,5 +1,16 @@
 import React from 'react';
 
+interface FacadeSegmentDiagramItem {
+  id: string;
+  label: string;
+  widthCm: string | number;
+}
+
+interface MeasurementDiagramValues {
+  [key: string]: unknown;
+  facadeSegments?: FacadeSegmentDiagramItem[];
+}
+
 /**
  * Renders an SVG diagram for SIMPLE_WIDTH_HEIGHT template.
  */
@@ -36,7 +47,7 @@ export function renderSimpleWidthHeightDiagram(width: number, height: number): R
 /**
  * Renders an SVG diagram for CURTAIN_DETAIL template.
  */
-export function renderCurtainDetailDiagram(rawValues: any): React.ReactNode {
+export function renderCurtainDetailDiagram(rawValues: MeasurementDiagramValues): React.ReactNode {
   const leftWall = Number(rawValues.leftWall || 0);
   const windowWidth = Number(rawValues.windowWidth || 0);
   const rightWall = Number(rawValues.rightWall || 0);
@@ -54,24 +65,20 @@ export function renderCurtainDetailDiagram(rawValues: any): React.ReactNode {
   
   let wPct = totalWidth > 0 ? windowWidth / totalWidth : 0.6;
   let lPct = totalWidth > 0 ? leftWall / totalWidth : 0.2;
-  let rPct = totalWidth > 0 ? rightWall / totalWidth : 0.2;
   
   let hPct = totalHeight > 0 ? windowHeight / totalHeight : 0.6;
   let tPct = totalHeight > 0 ? ceilingGap / totalHeight : 0.2;
-  let bPct = totalHeight > 0 ? floorGap / totalHeight : 0.2;
   
   // Clamp percentages to avoid clipping and keep text readable
   if (wPct < 0.35) {
     const diff = 0.35 - wPct;
     wPct = 0.35;
     lPct = Math.max(0, lPct - diff/2);
-    rPct = Math.max(0, rPct - diff/2);
   }
   if (hPct < 0.35) {
     const diff = 0.35 - hPct;
     hPct = 0.35;
     tPct = Math.max(0, tPct - diff/2);
-    bPct = Math.max(0, bPct - diff/2);
   }
 
   const winX = startX + lPct * wallW;
@@ -155,11 +162,14 @@ export function renderCurtainDetailDiagram(rawValues: any): React.ReactNode {
 /**
  * Renders an SVG diagram for Facade Segments (with optional height details)
  */
-export function renderFacadeSegmentsDiagram(rawValues: any): React.ReactNode {
+export function renderFacadeSegmentsDiagram(rawValues: MeasurementDiagramValues): React.ReactNode {
   const segments = rawValues.facadeSegments || [];
   if (segments.length === 0) return null;
 
-  const totalWidth = segments.reduce((sum: number, s: any) => sum + (Number(s.widthCm) > 0 ? Number(s.widthCm) : 0), 0);
+  const totalWidth = segments.reduce(
+    (sum, segment) => sum + (Number(segment.widthCm) > 0 ? Number(segment.widthCm) : 0),
+    0
+  );
 
   const karton = Number(rawValues.kartonpiyerBoslukCm || 0);
   const camUstu = Number(rawValues.camUstuCm || 0);
@@ -201,7 +211,7 @@ export function renderFacadeSegmentsDiagram(rawValues: any): React.ReactNode {
       <rect x={startX} y={segY} width={drawW} height={segH} fill="none" stroke="#333" strokeWidth="1.5" />
 
       {/* Segments Draw */}
-      {segments.map((seg: any, i: number) => {
+      {segments.map((seg, i) => {
         const pct = totalWidth > 0 ? Number(seg.widthCm) / totalWidth : 1/segments.length;
         const w = Math.max(pct * drawW, 40); // min 40px
         

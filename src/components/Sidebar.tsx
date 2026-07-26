@@ -18,10 +18,14 @@ import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { useAuthStore, ROLE_PERMISSIONS, canViewModule, normalizeUser, normalizeRole } from "@/store/useAuthStore";
 import { useUiStore } from "@/store/useUiStore";
-import { useState, useEffect } from "react";
+import { useState, useSyncExternalStore } from "react";
+
+const subscribeToHydration = () => () => {};
+const getClientSnapshot = () => true;
+const getServerSnapshot = () => false;
 
 const menuItems = [
-  { name: "Dashboard", href: "/", icon: LayoutDashboard },
+  { name: "Ana Sayfa", href: "/", icon: LayoutDashboard },
   { name: "Cariler", href: "/cariler", icon: Users },
   { name: "Ölçüler", href: "/olculer", icon: Ruler },
   { name: "Görevler", href: "/gorevler", icon: ClipboardList },
@@ -50,9 +54,12 @@ export function Sidebar() {
   const { currentUser: rawCurrentUser, switchUser, users, logout } = useAuthStore();
   const { isMobileMenuOpen, setMobileMenuOpen } = useUiStore();
   const [showUserPicker, setShowUserPicker] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    subscribeToHydration,
+    getClientSnapshot,
+    getServerSnapshot,
+  );
   
-  useEffect(() => setMounted(true), []);
 
   if (!rawCurrentUser) return null;
   

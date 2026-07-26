@@ -5,13 +5,15 @@ import { verifyAuth } from "@/lib/authHelper";
 export async function POST(req: NextRequest) {
   const user = await verifyAuth(req);
   if (!user) {
-    // Return unauthorized if user authentication fails in later phases
-    // For now in phase 1, we just return a skeleton
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 }
+    );
   }
 
   try {
     const body = await req.json();
-    const { fileName, mimeType, base64Data, entityType, entityId } = body;
+    const { fileName, entityType, entityId } = body;
 
     // Media upload logic will go here in Phase 2
     return NextResponse.json({
@@ -25,7 +27,7 @@ export async function POST(req: NextRequest) {
         entityId: entityId || "unknown-entity",
       },
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { success: false, error: "Invalid request payload" },
       { status: 400 }

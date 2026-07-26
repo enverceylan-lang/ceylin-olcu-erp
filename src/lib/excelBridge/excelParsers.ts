@@ -2,7 +2,7 @@
  * Parses boolean-like values from Excel
  * e.g., 'Evet', 'Hayır', 'Var', 'Yok', '1', '0', 1, 0, true, false
  */
-export const parseBoolean = (val: any): boolean => {
+export const parseBoolean = (val: unknown): boolean => {
   if (typeof val === 'boolean') return val;
   if (typeof val === 'number') return val > 0;
   if (!val) return false;
@@ -15,7 +15,7 @@ export const parseBoolean = (val: any): boolean => {
  * Parses numeric values or currency text
  * e.g., "1.234,50 ₺", "1500", 1500
  */
-export const parseNumber = (val: any): number => {
+export const parseNumber = (val: unknown): number => {
   if (typeof val === 'number') return val;
   if (!val) return 0;
   
@@ -38,7 +38,7 @@ export const parseNumber = (val: any): number => {
 /**
  * Cleans phone numbers (remove spaces, +90, etc.)
  */
-export const parsePhone = (val: any): string => {
+export const parsePhone = (val: unknown): string => {
   if (!val) return '';
   const str = String(val).replace(/\D/g, '');
   // Optionally remove leading 90 or 0

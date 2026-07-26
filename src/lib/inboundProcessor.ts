@@ -5,11 +5,94 @@ import { saveLocalCustomer, loadLocalCustomers } from "./localCustomerDb";
 import { ensureMeasurementId } from "./measurementIdHelper";
 import { localMeasurementDb } from "./localMeasurementDb";
 
+type LocalMeasurement = ReturnType<
+  typeof useMeasurementStore.getState
+>["measurements"][number];
+
+interface MeasurementNameReference {
+  roomName?: string;
+  roomLabel?: string;
+  openingName?: string;
+  windowName?: string;
+  openingLabel?: string;
+}
+
+type MeasurementPayload = Omit<
+  Partial<LocalMeasurement>,
+  "photos" | "videos"
+> &
+  MeasurementNameReference & {
+    details?: MeasurementNameReference;
+    data?: MeasurementPayload;
+    patch?: MeasurementNameReference & {
+      data?: MeasurementNameReference;
+    };
+    room?: { name?: string };
+    opening?: { name?: string };
+    window?: { name?: string };
+    type?: string;
+    photos?: unknown[];
+    videos?: unknown[];
+  };
+
+type RoomOpening = NonNullable<Room["windows"]>[number];
+
+type IncomingOpening = Omit<
+  Partial<RoomOpening>,
+  "photos" | "videos" | "products"
+> & {
+  id?: string;
+  name?: string;
+  products?: MeasurementPayload[];
+  measurements?: MeasurementPayload[];
+  photos?: unknown[];
+  videos?: unknown[];
+};
+
+type IncomingRoom = Omit<
+  Partial<Room>,
+  "photos" | "videos" | "windows"
+> & {
+  id?: string;
+  name?: string;
+  customerId?: string;
+  windows?: IncomingOpening[];
+  openings?: IncomingOpening[];
+  photos?: unknown[];
+  videos?: unknown[];
+};
+
+interface InboundCustomerPatch {
+  id?: string;
+  rooms?: IncomingRoom[];
+}
+
+interface InboundPatch {
+  customerId?: string;
+  temporaryCustomerId?: string;
+  customerName?: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  name?: string;
+  phone?: string;
+  address?: string;
+  mapLocation?: string;
+  notes?: string;
+  generalNote?: string;
+  rooms?: IncomingRoom[];
+  customer?: InboundCustomerPatch;
+  data?: InboundPatch;
+}
+
+type StructuralRoom = Room & {
+  windows: NonNullable<Room["windows"]>;
+};
+
 /**
  * Strip only heavy binary/base64 data from media arrays, keeping all metadata
  * (localKey, thumbnailRef, mimeType, size, etc.) so references are not lost.
  */
-function sanitizeMediaArray(arr: any[]): any[] {
+function sanitizeMediaArray(arr: unknown[]): unknown[] {
   if (!Array.isArray(arr)) return [];
   return arr
     .map((item) => {
@@ -20,7 +103,10 @@ function sanitizeMediaArray(arr: any[]): any[] {
       }
       if (typeof item === "object" && item !== null) {
         // Keep all metadata keys; only remove the heavy binary 'data' field
-        const { data, base64, ...rest } = item as any;
+        const record = item as Record<string, unknown>;
+        const { data: _data, base64: _base64, ...rest } = record;
+        void _data;
+        void _base64;
         return rest;
       }
       return item;
@@ -34,19 +120,21 @@ function sanitizeMediaArray(arr: any[]): any[] {
  *  - Generates deterministic legacy IDs when absent
  *  - Sanitizes media: keeps metadata, strips binary data
  */
-export async function cleanMediaFromRoom(room: any): Promise<Room> {
+export async function cleanMediaFromRoom(
+  room: IncomingRoom,
+): Promise<Room> {
   const roomId = room.id || `legacy-r-${(room.name || "").replace(/\s/g, "")}`;
   const rawWindows = room.windows || room.openings || [];
 
   const cleanWindows = await Promise.all(
-    rawWindows.map(async (w: any, wIndex: number) => {
+    rawWindows.map(async (w: IncomingOpening, wIndex: number) => {
       const winId =
         w.id ||
         `legacy-w-${roomId}-${(w.name || wIndex).toString().replace(/\s/g, "")}`;
       const rawProducts = w.products || w.measurements || [];
 
       const cleanProducts = await Promise.all(
-        rawProducts.map(async (p: any, pIndex: number) => {
+        rawProducts.map(async (p: MeasurementPayload, pIndex: number) => {
           const pId = await ensureMeasurementId(p.id, {
             customerId: room.customerId || room.id || room.name || "",
             roomKey: roomId,
@@ -87,11 +175,13 @@ export async function cleanMediaFromRoom(room: any): Promise<Room> {
 /**
  * Extract rooms from patch. The patch could be a FieldMeasurementDraft or a Customer object.
  */
-async function extractRoomsFromPatch(patch: any): Promise<Room[]> {
-  let parsedPatch = patch;
-  if (typeof parsedPatch === "string") {
+async function extractRoomsFromPatch(
+  patch: InboundPatch | string,
+): Promise<Room[]> {
+  let parsedPatch: InboundPatch = typeof patch === "string" ? {} : patch;
+  if (typeof patch === "string") {
     try {
-      parsedPatch = JSON.parse(parsedPatch);
+      parsedPatch = JSON.parse(patch) as InboundPatch;
     } catch (e) {
       console.warn("[InboundProcessor] Could not parse patch as JSON", e);
       parsedPatch = {};
@@ -110,7 +200,7 @@ async function extractRoomsFromPatch(patch: any): Promise<Room[]> {
 
 function normalizeSourceCustomerIds(
   inbound: InboundMeasurement,
-  patch: any,
+  patch: InboundPatch,
 ): string[] {
   return Array.from(
     new Set(
@@ -130,7 +220,9 @@ function normalizeSourceCustomerIds(
   );
 }
 
-function normalizeStandaloneMeasurement(measurement: any): any | null {
+function normalizeStandaloneMeasurement(
+  measurement: MeasurementPayload,
+): LocalMeasurement | null {
   const id = measurement?.id;
   const roomId = measurement?.roomId;
   const openingId = measurement?.openingId || measurement?.windowId;
@@ -141,14 +233,14 @@ function normalizeStandaloneMeasurement(measurement: any): any | null {
     id,
     roomId,
     openingId,
-  };
+  } as LocalMeasurement;
 }
 
 async function loadMeasurementsForInbound(
   sourceCustomerIds: string[],
-  nestedMeasurements: any[],
-): Promise<any[]> {
-  const byId = new Map<string, any>();
+  nestedMeasurements: MeasurementPayload[],
+): Promise<LocalMeasurement[]> {
+  const byId = new Map<string, LocalMeasurement>();
 
   nestedMeasurements.forEach((measurement) => {
     const normalized = normalizeStandaloneMeasurement(measurement);
@@ -157,7 +249,7 @@ async function loadMeasurementsForInbound(
 
   const sourceIds = new Set(sourceCustomerIds);
   const localMeasurements = await localMeasurementDb.measurements.toArray();
-  localMeasurements.forEach((measurement: any) => {
+  localMeasurements.forEach((measurement) => {
     if (!sourceIds.has(measurement.customerId)) return;
     const normalized = normalizeStandaloneMeasurement(measurement);
     if (normalized) byId.set(normalized.id, normalized);
@@ -188,8 +280,7 @@ function firstTransferredName(
 }
 
 function roomNameFromMeasurement(
-  measurement: any,
-  index: number,
+  measurement: MeasurementPayload,
 ): string {
   return firstTransferredName(
     [
@@ -215,7 +306,7 @@ function roomNameFromMeasurement(
 }
 
 function openingNameFromMeasurement(
-  measurement: any,
+  measurement: MeasurementPayload,
   index: number,
 ): string {
   return firstTransferredName(
@@ -247,10 +338,12 @@ function openingNameFromMeasurement(
   );
 }
 
-function buildStructuralRoomsFromMeasurements(measurements: any[]): Room[] {
-  const roomsById = new Map<string, any>();
+function buildStructuralRoomsFromMeasurements(
+  measurements: LocalMeasurement[],
+): Room[] {
+  const roomsById = new Map<string, StructuralRoom>();
 
-  measurements.forEach((measurement, measurementIndex) => {
+  measurements.forEach((measurement) => {
     const roomId = measurement.roomId;
     const openingId = measurement.openingId || measurement.windowId;
     if (!roomId || !openingId) return;
@@ -259,15 +352,15 @@ function buildStructuralRoomsFromMeasurements(measurements: any[]): Room[] {
     if (!room) {
       room = {
         id: roomId,
-        name: roomNameFromMeasurement(measurement, roomsById.size),
+        name: roomNameFromMeasurement(measurement),
         photos: [],
         videos: [],
         windows: [],
-      };
+      } as StructuralRoom;
       roomsById.set(roomId, room);
     }
 
-    if (!room.windows.some((opening: any) => opening.id === openingId)) {
+    if (!room.windows.some((opening) => opening.id === openingId)) {
       room.windows.push({
         id: openingId,
         name: openingNameFromMeasurement(measurement, room.windows.length),
@@ -278,11 +371,11 @@ function buildStructuralRoomsFromMeasurements(measurements: any[]): Room[] {
     }
   });
 
-  return Array.from(roomsById.values()) as Room[];
+  return Array.from(roomsById.values());
 }
 
 function mergeRoomStructures(baseRooms: Room[], incomingRooms: Room[]): Room[] {
-  const roomMap = new Map<string, any>();
+  const roomMap = new Map<string, StructuralRoom>();
 
   const addRoom = (room: Room) => {
     const current = roomMap.get(room.id);
@@ -293,15 +386,15 @@ function mergeRoomStructures(baseRooms: Room[], incomingRooms: Room[]): Room[] {
           ...opening,
           products: [],
         })),
-      });
+      } as StructuralRoom);
       return;
     }
 
-    const openingMap = new Map<string, any>();
-    (current.windows || []).forEach((opening: any) =>
+    const openingMap = new Map<string, RoomOpening>();
+    current.windows.forEach((opening) =>
       openingMap.set(opening.id, opening),
     );
-    (room.windows || []).forEach((opening: any) => {
+    (room.windows || []).forEach((opening) => {
       const existingOpening = openingMap.get(opening.id);
       openingMap.set(
         opening.id,
@@ -315,29 +408,31 @@ function mergeRoomStructures(baseRooms: Room[], incomingRooms: Room[]): Room[] {
       ...current,
       ...room,
       windows: Array.from(openingMap.values()),
-    });
+    } as StructuralRoom);
   };
 
   baseRooms.forEach(addRoom);
   incomingRooms.forEach(addRoom);
-  return Array.from(roomMap.values()) as Room[];
+  return Array.from(roomMap.values());
 }
 
 function extractMeasurementsForCustomer(
   rooms: Room[],
   customerId: string,
-): any[] {
-  const measurements: any[] = [];
+): LocalMeasurement[] {
+  const measurements: LocalMeasurement[] = [];
   rooms.forEach((room) =>
     (room.windows || []).forEach((opening) =>
-      (opening.products || []).forEach((measurement: any) =>
+      (opening.products || []).forEach((measurement) =>
         measurements.push({
           ...measurement,
           customerId,
           roomId: room.id,
           openingId:
-            measurement.openingId || measurement.windowId || opening.id,
-        }),
+            (measurement as MeasurementPayload).openingId ||
+            (measurement as MeasurementPayload).windowId ||
+            opening.id,
+        } as LocalMeasurement),
       ),
     ),
   );
@@ -345,7 +440,7 @@ function extractMeasurementsForCustomer(
 }
 
 async function persistAndVerifyMeasurements(
-  measurements: any[],
+  measurements: LocalMeasurement[],
 ): Promise<void> {
   if (measurements.length === 0) {
     throw new Error(
@@ -389,12 +484,15 @@ async function persistAndVerifyMeasurements(
   );
   const persistedById = new Map(
     persisted
-      .filter(Boolean)
-      .map((measurement: any) => [measurement.id, measurement]),
+      .filter(
+        (measurement): measurement is LocalMeasurement =>
+          measurement !== undefined,
+      )
+      .map((measurement) => [measurement.id, measurement]),
   );
 
   const invalid = normalizedMeasurements.filter((expected) => {
-    const actual: any = persistedById.get(expected.id);
+    const actual = persistedById.get(expected.id);
     if (!actual) return true;
     return (
       actual.customerId !== expected.customerId ||
@@ -412,14 +510,24 @@ async function persistAndVerifyMeasurements(
 }
 
 function assignMeasurementsToCustomer(
-  measurements: any[],
+  measurements: LocalMeasurement[],
   customerId: string,
-): any[] {
-  return measurements.map((measurement) => ({
-    ...measurement,
-    customerId,
-    openingId: measurement.openingId || measurement.windowId,
-  }));
+): LocalMeasurement[] {
+  return measurements.map((measurement) => {
+    const openingId = measurement.openingId || measurement.windowId;
+
+    if (!openingId) {
+      throw new Error(
+        `Geçersiz ölçü açıklık bağlantısı: ${measurement.id}`,
+      );
+    }
+
+    return {
+      ...measurement,
+      customerId,
+      openingId,
+    };
+  });
 }
 
 /**
@@ -438,7 +546,7 @@ export async function processAsNewCustomer(
     throw new Error("Bu kayıt daha önce işlenmiş.");
   }
 
-  const patch = inbound.patch || {};
+  const patch = (inbound.patch || {}) as InboundPatch;
   const patchData = patch?.data || {};
   const customerName = (
     inbound.customerName ||
@@ -579,7 +687,7 @@ export async function processAsMerge(
     throw new Error("Hedef mÃ¼ÅŸteri bulunamadı.");
   }
 
-  const patch = inbound.patch || {};
+  const patch = (inbound.patch || {}) as InboundPatch;
   const sourceCustomerIds = normalizeSourceCustomerIds(inbound, patch);
   const patchRooms = await extractRoomsFromPatch(patch);
   const nestedMeasurements = extractMeasurementsForCustomer(

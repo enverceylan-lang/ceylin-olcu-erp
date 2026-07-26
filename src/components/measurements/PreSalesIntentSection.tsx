@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { Customer, RoomProductIntent, ProductIntentItem, generateUUID } from "@/store/useStore";
+import React, { useState } from "react";
+import { RoomProductIntent, generateUUID } from "@/store/useStore";
 import { CheckSquare, Square, Save, Loader2 } from "lucide-react";
 
 interface PreSalesIntentSectionProps {
@@ -27,37 +27,45 @@ const PRODUCT_TYPES = [
   { id: "DIGER", label: "Diğer" }
 ];
 
-export function PreSalesIntentSection({ roomId, roomName, intent, onSave }: PreSalesIntentSectionProps) {
-  const [localIntent, setLocalIntent] = useState<RoomProductIntent | null>(null);
+function createInitialIntent(
+  roomId: string,
+  roomName: string,
+  intent?: RoomProductIntent
+): RoomProductIntent {
+  if (intent) return { ...intent, roomName };
+
+  const now = new Date().toISOString();
+  return {
+    id: generateUUID(),
+    roomId,
+    roomName,
+    products: PRODUCT_TYPES.map((productType) => ({
+      id: generateUUID(),
+      productType: productType.id,
+      label: productType.label,
+      selected: false,
+      note: ""
+    })),
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+export function PreSalesIntentSection(props: PreSalesIntentSectionProps) {
+  const identity = `${props.roomId}:${props.intent?.id || "new"}`;
+  return <PreSalesIntentEditor key={identity} {...props} />;
+}
+
+function PreSalesIntentEditor({ roomId, roomName, intent, onSave }: PreSalesIntentSectionProps) {
+  const [localIntent, setLocalIntent] = useState<RoomProductIntent>(
+    () => createInitialIntent(roomId, roomName, intent)
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ text: string; type: "success" | "error" | "info" } | null>(null);
   const [lastSaveTime, setLastSaveTime] = useState<Date | null>(null);
 
-  useEffect(() => {
-    if (intent) {
-      setLocalIntent({ ...intent, roomName });
-    } else {
-      setLocalIntent({
-        id: generateUUID(),
-        roomId,
-        roomName,
-        products: PRODUCT_TYPES.map(pt => ({
-          id: generateUUID(),
-          productType: pt.id,
-          label: pt.label,
-          selected: false,
-          note: ""
-        })),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
-    }
-  }, [intent, roomId, roomName]);
-
   const handleToggleProduct = (productType: string) => {
-    if (!localIntent) return;
     setLocalIntent(prev => {
-      if (!prev) return prev;
       return {
         ...prev,
         products: prev.products.map(p => {
@@ -69,9 +77,7 @@ export function PreSalesIntentSection({ roomId, roomName, intent, onSave }: PreS
   };
 
   const handleUpdateNote = (productType: string, note: string) => {
-    if (!localIntent) return;
     setLocalIntent(prev => {
-      if (!prev) return prev;
       return {
         ...prev,
         products: prev.products.map(p => {
@@ -83,7 +89,6 @@ export function PreSalesIntentSection({ roomId, roomName, intent, onSave }: PreS
   };
 
   const handleSave = async () => {
-    if (!localIntent) return;
     setIsSaving(true);
     setSaveMessage(null);
     try {
@@ -105,7 +110,7 @@ export function PreSalesIntentSection({ roomId, roomName, intent, onSave }: PreS
         setSaveMessage(null);
       }, 3000);
       
-    } catch (error) {
+    } catch {
       setSaveMessage({
         text: "Seçimler kaydedilemedi. Lütfen tekrar deneyin.",
         type: "error"
@@ -114,8 +119,6 @@ export function PreSalesIntentSection({ roomId, roomName, intent, onSave }: PreS
       setIsSaving(false);
     }
   };
-
-  if (!localIntent) return null;
 
   return (
     <div className="bg-emerald-50/50 dark:bg-emerald-900/10 border-t border-emerald-100 dark:border-emerald-800/30 p-4">

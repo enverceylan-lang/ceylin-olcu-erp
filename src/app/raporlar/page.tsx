@@ -3,15 +3,23 @@
 import { FileText, Download, TrendingUp, DollarSign } from "lucide-react";
 import { useSalesStore } from "@/store/salesStore";
 import { useAuthStore } from "@/store/useAuthStore";
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
+import { getVisibleSales } from "@/lib/salesVisibility";
+
+const subscribeToHydration = () => () => {};
+const getClientSnapshot = () => true;
+const getServerSnapshot = () => false;
 
 export default function RaporlarPage() {
   const { sales, loadSales, isLoading } = useSalesStore();
   const { currentUser } = useAuthStore();
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    subscribeToHydration,
+    getClientSnapshot,
+    getServerSnapshot,
+  );
 
   useEffect(() => {
-    setMounted(true);
     loadSales();
   }, [loadSales]);
 
@@ -37,22 +45,7 @@ export default function RaporlarPage() {
     );
   }
 
-  // Fallback check according to prompt instructions. No personal data in console!
-  // currentUser.id varsa id üzerinden eşleştir. id yoksa username üzerinden güvenli fallback yap.
-  // Fallback kullanılırsa yorum satırıyla belirt ama console'a kişisel veri basma.
-  const visibleSales = isAdmin 
-    ? sales 
-    : sales.filter((sale: any) => {
-        const sid = sale.createdByUserId || sale.createdById || sale.sellerId || sale.userId || sale.salesPersonId;
-        const sname = sale.createdBy || sale.createdByUsername || sale.salesPersonName;
-        
-        if (sid && currentUser?.id && sid === currentUser.id) return true;
-        
-        // username üzerinden güvenli fallback yap
-        if (!sid && sname && currentUser?.username && sname === currentUser.username) return true;
-        
-        return false;
-      });
+  const visibleSales = getVisibleSales(currentUser, sales);
 
   const totalOrders = visibleSales.length;
   const totalRevenue = visibleSales.reduce((acc, sale) => acc + (sale.totalAmount || 0), 0);

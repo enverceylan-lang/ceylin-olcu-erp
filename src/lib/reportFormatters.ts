@@ -1,8 +1,13 @@
 import { MeasurementRecord } from '@/store/measurementStore';
-import { Customer, Room, WindowItem, ProductMeasurement, Note, MEASUREMENT_TEMPLATES } from '@/store/useStore';
-import { getTemplateLabel, getMeasurementDimensions, resolveMeasurementProductLabel, resolveMeasurementProductGroup } from './measurementAdapter';
+import { Customer, ProductMeasurement } from '@/store/useStore';
+import { getMeasurementDimensions, resolveMeasurementProductLabel, resolveMeasurementProductGroup } from './measurementAdapter';
 import { formatFacadeForReport } from './facadeHelper';
 import { getStoredProductCalculation } from './calculationEngine';
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  typeof value === 'object' && value !== null
+    ? value as Record<string, unknown>
+    : {};
 
 export function getValidNote(note?: string | null): string {
   if (!note) return "";
@@ -71,13 +76,14 @@ export function buildWhatsAppShortReport(
   };
 
   const chainText = (
-    value: any,
+    value: unknown,
   ): string => {
+    const record = asRecord(value);
     const direction =
-      value?.chainDirection ??
-      value?.zincirYonu ??
-      value?.chainSide ??
-      value?.controlSide;
+      record.chainDirection ??
+      record.zincirYonu ??
+      record.chainSide ??
+      record.controlSide;
 
     return direction
       ? ` — Zincir ${direction}`
@@ -220,9 +226,10 @@ export function buildWhatsAppShortReport(
 
               cams.forEach(
                 (
-                  cam: any,
+                  camValue: unknown,
                   camIndex: number,
                 ) => {
+                  const cam = asRecord(camValue);
                   const realWidth = Number(
                     cam.realWidthCm ??
                     cam.actualWidthCm ??
@@ -285,7 +292,11 @@ export function buildWhatsAppShortReport(
                   roomLines.push(camLine);
 
                   const camNote =
-                    getValidNote(cam.note);
+                    getValidNote(
+                      typeof cam.note === 'string'
+                        ? cam.note
+                        : undefined,
+                    );
 
                   if (camNote) {
                     roomLines.push(
@@ -323,9 +334,10 @@ export function buildWhatsAppShortReport(
               if (groups.length > 0) {
                 groups.forEach(
                   (
-                    group: any,
+                    groupValue: unknown,
                     groupIndex: number,
                   ) => {
+                    const group = asRecord(groupValue);
                     const partName =
                       group.label ??
                       group.name ??
@@ -507,12 +519,12 @@ export function buildWhatsAppShortReport(
                   facadeSegments.reduce(
                     (
                       total: number,
-                      segment: any,
+                      segment: unknown,
                     ) =>
                       total +
                       (
                         Number(
-                          segment.widthCm,
+                          asRecord(segment).widthCm,
                         ) || 0
                       ),
                     0,

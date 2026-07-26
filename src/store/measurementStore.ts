@@ -1,10 +1,9 @@
 import { create } from 'zustand';
 import { ProductMeasurement } from '@/store/useStore';
-import { loadLocalMeasurements, saveLocalMeasurement, saveLocalMeasurementWithSync, deleteLocalMeasurement, batchSaveLocalMeasurements } from '@/lib/localMeasurementDb';
+import { loadLocalMeasurements, saveLocalMeasurementWithSync, deleteLocalMeasurement, batchSaveLocalMeasurements } from '@/lib/localMeasurementDb';
 import {
   getMeasurementDimensions,
   resolveMeasurementProductType,
-  resolveMeasurementProductLabel,
   resolveMeasurementProductGroup,
 } from '@/lib/measurementAdapter';
 

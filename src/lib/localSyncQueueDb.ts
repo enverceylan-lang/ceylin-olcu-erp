@@ -2,12 +2,40 @@ import Dexie, { type Table } from 'dexie';
 import { getDeviceId } from './deviceIdentity';
 import { useAuthStore } from '@/store/useAuthStore';
 
+export interface SyncPatchProduct {
+  rawValues?: Record<string, unknown>;
+}
+
+export interface SyncPatchOpening {
+  products?: SyncPatchProduct[];
+  measurements?: SyncPatchProduct[];
+}
+
+export interface SyncPatchRoom {
+  windows?: SyncPatchOpening[];
+  openings?: SyncPatchOpening[];
+}
+
+export interface SyncPatch {
+  updatedAt?: string;
+  id?: string;
+  entity?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  timestamp?: string;
+  customerId?: string;
+  roomId?: string;
+  windowId?: string;
+  syncIntent?: string;
+  rooms?: SyncPatchRoom[];
+}
+
 export interface SyncEvent {
   changeId: string;
   entityType: 'CUSTOMER' | 'ROOM' | 'OPENING' | 'MEASUREMENT' | 'DRAFT';
   entityId: string;
   operation: 'INSERT' | 'UPDATE' | 'SOFT_DELETE';
-  patch: any;
+  patch: SyncPatch;
   deviceId: string;
   userId: string;
   createdAt: string;
@@ -33,38 +61,27 @@ export const localSyncQueueDb = new LocalSyncQueueDatabase();
  * Safely strips out photos, videos, and large base64 data to ensure
  * media is NOT included in the delta sync queue.
  */
-function sanitizePatch(patch: any): any {
-  if (!patch || typeof patch !== 'object') return patch;
-  
-  const sanitized = JSON.parse(JSON.stringify(patch));
-  
-  const stripMedia = (obj: any) => {
-    if (!obj || typeof obj !== 'object') return;
-    delete obj.photos;
-    delete obj.videos;
-    delete obj.addressPhotos;
-  };
+function sanitizePatch<T>(value: T): T {
+  if (value === null || value === undefined) return value;
 
-  stripMedia(sanitized);
-
-  // If patch is a full Customer object, deeply strip media
-  if (Array.isArray(sanitized.rooms)) {
-    sanitized.rooms.forEach((room: any) => {
-      stripMedia(room);
-      if (Array.isArray(room.windows)) {
-        room.windows.forEach((win: any) => {
-          stripMedia(win);
-          if (Array.isArray(win.products)) {
-            win.products.forEach((prod: any) => {
-              stripMedia(prod);
-            });
-          }
-        });
-      }
-    });
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizePatch(item)) as unknown as T;
   }
 
-  return sanitized;
+  if (typeof value !== 'object') return value;
+
+  const source = value as Record<string, unknown>;
+  const sanitized: Record<string, unknown> = {};
+
+  for (const key of Object.keys(source)) {
+    if (key === 'photos' || key === 'videos' || key === 'addressPhotos') {
+      continue;
+    }
+
+    sanitized[key] = sanitizePatch(source[key]);
+  }
+
+  return sanitized as T;
 }
 
 const SYNC_COMPARISON_IGNORED_KEYS = new Set([
@@ -75,17 +92,18 @@ const SYNC_COMPARISON_IGNORED_KEYS = new Set([
   'lastReceivedAt'
 ]);
 
-function normalizePatchForComparison(value: any): any {
+function normalizePatchForComparison(value: unknown): unknown {
   if (Array.isArray(value)) {
-    return value.map(normalizePatchForComparison);
+    return value.map((item) => normalizePatchForComparison(item));
   }
 
   if (value && typeof value === 'object') {
-    const normalized: Record<string, any> = {};
+    const source = value as Record<string, unknown>;
+    const normalized: Record<string, unknown> = {};
 
-    for (const key of Object.keys(value).sort()) {
+    for (const key of Object.keys(source).sort()) {
       if (SYNC_COMPARISON_IGNORED_KEYS.has(key)) continue;
-      normalized[key] = normalizePatchForComparison(value[key]);
+      normalized[key] = normalizePatchForComparison(source[key]);
     }
 
     return normalized;
@@ -94,13 +112,18 @@ function normalizePatchForComparison(value: any): any {
   return value;
 }
 
-function getComparablePatchSignature(patch: any): string {
+function getComparablePatchSignature(patch: unknown): string {
   return JSON.stringify(
     normalizePatchForComparison(
       sanitizePatch(patch)
     )
   );
 }
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export interface EnqueueSyncResult {
   success: boolean;
   changeId?: string;
@@ -113,7 +136,7 @@ export async function enqueueSyncEventDetailed(
   entityType: SyncEvent['entityType'],
   entityId: string,
   operation: SyncEvent['operation'],
-  patch: any
+  patch: SyncPatch
 ): Promise<EnqueueSyncResult> {
   try {
     const now = new Date().toISOString();
@@ -201,7 +224,7 @@ export async function enqueueSyncEventDetailed(
       userId,
       createdAt: now
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (typeof window !== 'undefined') {
       console.error('[SyncQueue] Queue event could not be created.');
     }
@@ -218,7 +241,7 @@ export async function enqueueSyncEvent(
   entityType: SyncEvent['entityType'],
   entityId: string,
   operation: SyncEvent['operation'],
-  patch: any
+  patch: SyncPatch
 ): Promise<boolean> {
   const result = await enqueueSyncEventDetailed(
     entityType,
@@ -267,9 +290,9 @@ export async function getPendingSyncEvents(limit: number = 50): Promise<SyncEven
     }
 
     return selectedEvents;
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (typeof window !== 'undefined') {
-      alert(`[DEBUG] getPendingSyncEvents failed: ${err.message}`);
+      alert(`[DEBUG] getPendingSyncEvents failed: ${getErrorMessage(err)}`);
     }
     console.error('[SyncQueue] getPendingSyncEvents failed:', err);
     return [];
@@ -291,6 +314,7 @@ export async function markSyncEventsSynced(changeIds: string[]): Promise<void> {
 }
 
 export async function markSyncEventsError(changeIds: string[], errorMessage?: string): Promise<void> {
+  void errorMessage;
   try {
     const now = new Date().toISOString();
     // Dexie bulkUpdate needs array of {key, changes}. Since we need to increment retryCount,

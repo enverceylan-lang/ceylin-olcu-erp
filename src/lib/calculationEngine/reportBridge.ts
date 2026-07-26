@@ -1,5 +1,16 @@
-import {
-} from '@/lib/measurementCalculations';
+type UnknownRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): UnknownRecord {
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  ) {
+    return value as UnknownRecord;
+  }
+
+  return {};
+}
 
 export interface PlicellReportCam {
   id?: string;
@@ -38,36 +49,37 @@ export interface PlicellReportResult {
 }
 
 export function getStoredProductCalculation(
-  measurement: any,
+  measurementValue: unknown,
   productType?: string
-): Record<string, any> {
+): UnknownRecord {
+  const measurement = asRecord(measurementValue);
+
   const normalizedType =
     String(
       productType ||
-      measurement?.productType ||
+      measurement.productType ||
       ''
     ).toUpperCase();
 
+  const selectedProducts =
+    Array.isArray(measurement.selectedProducts)
+      ? measurement.selectedProducts.map(asRecord)
+      : [];
+
   const selectedProduct =
-    Array.isArray(
-      measurement?.selectedProducts
-    )
-      ? measurement.selectedProducts.find(
-          (item: any) =>
-            String(
-              item?.productType || ''
-            ).toUpperCase() ===
-            normalizedType
-        ) ||
-        measurement.selectedProducts.find(
-          (item: any) =>
-            item?.isActive
-        ) ||
-        measurement.selectedProducts[0]
-      : undefined;
+    selectedProducts.find(
+      item =>
+        String(item.productType || '').toUpperCase() ===
+        normalizedType
+    ) ||
+    selectedProducts.find(
+      item => item.isActive === true
+    ) ||
+    selectedProducts[0] ||
+    {};
 
   return {
-    ...(measurement?.details || {}),
-    ...(selectedProduct?.calculation || {})
+    ...asRecord(measurement.details),
+    ...asRecord(selectedProduct.calculation)
   };
 }

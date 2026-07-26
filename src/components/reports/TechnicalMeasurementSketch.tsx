@@ -112,9 +112,13 @@ export function TechnicalMeasurementSketch(props: TechnicalMeasurementSketchProp
   // 3. Main Segments
   const camUstuH = camUstuCm > 0 ? 30 : 0;
   const camIciH = 90;
-  const kaloriferMermerH = kaloriferMermerBoyuCm > 0 ? 30 : 0;
-  const camAltiH = camAltiCm > 0 ? 30 : 0;
-  const totalSegH = camUstuH + camIciH + kaloriferMermerH + camAltiH;
+  /*
+   * Kalorifer/Mermer ve Cam Altı ölçüleri sağdaki bilgi listesinde
+   * gösterilir. Cephe içinde ayrı bant çizmek, kasa altında anlamı
+   * belirsiz fazladan yatay çizgiler oluşturuyordu.
+   */
+  const totalSegH =
+    camUstuH + camIciH;
 
   const segStartY = yCursor;
 
@@ -168,15 +172,6 @@ export function TechnicalMeasurementSketch(props: TechnicalMeasurementSketchProp
                 <text x={currentX + w/2} y={segStartY + camUstuH + camIciH/2 + 10} fill="#111" fontSize={labelFontSize} textAnchor="middle">{displayLabel}</text>
               )}
 
-              {/* KALORİFER / MERMER */}
-              {kaloriferMermerBoyuCm > 0 && (
-                <line x1={currentX} y1={segStartY + camUstuH + camIciH} x2={currentX + w} y2={segStartY + camUstuH + camIciH} stroke="#111" strokeWidth="1" />
-              )}
-
-              {/* ALT */}
-              {camAltiCm > 0 && (
-                <line x1={currentX} y1={segStartY + camUstuH + camIciH + kaloriferMermerH} x2={currentX + w} y2={segStartY + camUstuH + camIciH + kaloriferMermerH} stroke="#111" strokeWidth="1" />
-              )}
             </>
           ) : (
             /* DUVAR */
@@ -219,13 +214,6 @@ export function TechnicalMeasurementSketch(props: TechnicalMeasurementSketchProp
    * Seçili ürünleri cephe üzerinde belirgin çizgilerle göster.
    * Teknik ölçü çizgileri değişmez; ürün çizgileri ayrı katmandır.
    */
-  const MECHANICAL_TYPES = new Set([
-  'STOR',
-  'ZEBRA',
-  'AHSAP_JALUZI',
-  'JALUZI',
-  'PICASSO'
-]);
 const productLegendItems =
     getProductVisualLegendItems(productTypes);
 
@@ -242,6 +230,48 @@ const productLegendItems =
           String(item.productType || '').toUpperCase()
         )
     );
+
+  // CEYLIN_SLOPED_CEILING_HEIGHT_RULE_V2
+  // Boy ölçüsü ana kasa çiziminin hemen altında, mekanik plandan önce yer alır.
+  const enteredFacadeHeights = [
+    {
+      key: 'SOL',
+      label: 'SOL BOY',
+      value: Number(solYukseklikCm || 0)
+    },
+    {
+      key: 'ORTA',
+      label: 'ORTA BOY',
+      value: Number(ortaYukseklikCm || 0)
+    },
+    {
+      key: 'SAĞ',
+      label: 'SAĞ BOY',
+      value: Number(sagYukseklikCm || 0)
+    }
+  ].filter(item => item.value > 0);
+
+  const shouldRenderFacadeHeights =
+    enteredFacadeHeights.length > 0 &&
+    !suppressFacadeHeight;
+  const hasSlopedCeiling =
+    new Set(
+      enteredFacadeHeights.map(
+        item => item.value.toFixed(3)
+      )
+    ).size > 1;
+
+  const facadeHeightY =
+    yCursor + 25;
+
+  if (shouldRenderFacadeHeights) {
+    /*
+     * Boy çizgisi ve yazıları için 45 px ayır.
+     * Mekanik uygulama planı bu alanın ardından başlar.
+     */
+    yCursor += 45;
+  }
+
   /*
    * Mekanik ürün uygulama krokileri teknik cephe çiziminin
    * ALTINDA, bağımsız bir bantta gösterilir.
@@ -343,14 +373,6 @@ const productLegendItems =
 
     const panelLayerHeight =
       92;
-
-    const typeCounters: Record<
-      string,
-      number
-    > = {
-      CAM_PENCERE: 0,
-      KAPI: 0
-    };
 
     elements.push(
       <text
@@ -764,19 +786,6 @@ const productLegendItems =
       panelLayerHeight;
   }
 if (productLegendItems.length > 0) {
-    const layerStartY =
-      segStartY + 8;
-
-    const availableHeight =
-      Math.max(20, totalSegH - 16);
-
-    const layerGap =
-      Math.min(
-        12,
-        availableHeight /
-          Math.max(productLegendItems.length, 1)
-      );
-
     lineOnlyLegendItems.forEach(
       (item, index) => {
         const tulleIndex =
@@ -951,7 +960,6 @@ if (productLegendItems.length > 0) {
       8;
   }
 
-  const sideHeightTypographyV2 = true;
   const normalizedSidePanelProductTypes =
     productTypes.map(productType =>
       String(productType || '').toUpperCase()
@@ -1021,7 +1029,7 @@ if (productLegendItems.length > 0) {
                   x={sidePanelX}
                   y={itemY}
                   fill="#111827"
-                  fontSize="11.5"
+                  fontSize="10.5"
                   fontWeight="700"
                   stroke="none"
                 >
@@ -1032,7 +1040,7 @@ if (productLegendItems.length > 0) {
                   x={sidePanelX + 147}
                   y={itemY}
                   fill="#0f172a"
-                  fontSize="11.5"
+                  fontSize="10.5"
                   fontWeight="800"
                   textAnchor="end"
                   stroke="none"
@@ -1046,28 +1054,7 @@ if (productLegendItems.length > 0) {
       </g>
     );
   }
-  // CEYLIN_SLOPED_CEILING_HEIGHT_RULE_V1
-  const enteredFacadeHeights = [
-    {
-      key: 'SOL',
-      label: 'SOL BOY',
-      value: Number(solYukseklikCm || 0)
-    },
-    {
-      key: 'ORTA',
-      label: 'ORTA BOY',
-      value: Number(ortaYukseklikCm || 0)
-    },
-    {
-      key: 'SAĞ',
-      label: 'SAĞ BOY',
-      value: Number(sagYukseklikCm || 0)
-    }
-  ].filter(item => item.value > 0);
-
-  if (enteredFacadeHeights.length > 0 && !suppressFacadeHeight) {
-    yCursor += 25;
-
+  if (shouldRenderFacadeHeights) {
     elements.push(
       <g
         key="bottom-facade-heights"
@@ -1077,21 +1064,21 @@ if (productLegendItems.length > 0) {
       >
         <line
           x1={startX}
-          y1={yCursor - 15}
+          y1={facadeHeightY - 15}
           x2={startX}
-          y2={yCursor - 5}
+          y2={facadeHeightY - 5}
         />
         <line
           x1={endX}
-          y1={yCursor - 15}
+          y1={facadeHeightY - 15}
           x2={endX}
-          y2={yCursor - 5}
+          y2={facadeHeightY - 5}
         />
         <line
           x1={startX}
-          y1={yCursor - 10}
+          y1={facadeHeightY - 10}
           x2={endX}
-          y2={yCursor - 10}
+          y2={facadeHeightY - 10}
         />
       </g>
     );
@@ -1101,7 +1088,7 @@ if (productLegendItems.length > 0) {
         <text
           key="single-facade-height"
           x={startX + drawW / 2}
-          y={yCursor + 10}
+          y={facadeHeightY + 10}
           fill="#111"
           fontSize="12"
           fontWeight="bold"
@@ -1147,7 +1134,7 @@ if (productLegendItems.length > 0) {
             <text
               key={'facade-height-' + item.key}
               x={position.x}
-              y={yCursor + 10}
+              y={facadeHeightY + 10}
               fill="#111"
               fontSize="12"
               fontWeight="bold"
@@ -1161,14 +1148,29 @@ if (productLegendItems.length > 0) {
       );
     }
 
-    yCursor += 20;
+    if (hasSlopedCeiling) {
+      elements.push(
+        <text
+          key="sloped-ceiling-note"
+          x={startX + drawW / 2}
+          y={facadeHeightY + 27}
+          fill="#b45309"
+          fontSize="10"
+          fontWeight="bold"
+          textAnchor="middle"
+          stroke="none"
+        >
+          NOT: TAVAN YAMUK
+        </text>
+      );
+    }
   }
 
   const svgH = yCursor + 20;
 
   return (
     <div className="w-full overflow-x-auto print:overflow-visible my-4">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${svgW} ${svgH}`} width="100%" height="auto" style={{ maxWidth: '800px', backgroundColor: '#fff', fontFamily: 'monospace, sans-serif' }}>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${svgW} ${svgH}`} width="100%" height="auto" style={{ maxWidth: '800px', backgroundColor: '#fff', fontFamily: 'Arial, Helvetica, sans-serif' }}>
         {elements}
       </svg>
     </div>

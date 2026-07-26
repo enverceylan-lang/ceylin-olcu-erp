@@ -13,7 +13,7 @@ import {
  * Sync payload içindeki büyük medya verisini çıkarır,
  * fakat gerekli medya referans bilgilerini korur.
  */
-function syncSanitizeMedia(arr: any[]): any[] {
+function syncSanitizeMedia(arr: unknown[]): unknown[] {
   if (!Array.isArray(arr)) return [];
 
   return arr
@@ -24,7 +24,10 @@ function syncSanitizeMedia(arr: any[]): any[] {
       }
 
       if (typeof item === 'object' && item !== null) {
-        const { data, base64, ...rest } = item as any;
+        const mediaItem = item as Record<string, unknown>;
+        const { data, base64, ...rest } = mediaItem;
+        void data;
+        void base64;
         return rest;
       }
 
@@ -37,18 +40,19 @@ function syncSanitizeMedia(arr: any[]): any[] {
  * Ölçü payload'ını derinlemesine temizler.
  * Fotoğraf/video binary içeriğini kuyruğa koymaz.
  */
-function deepSyncSanitize(obj: any): any {
+function deepSyncSanitize(obj: unknown): unknown {
   if (obj === null || obj === undefined) return obj;
   if (typeof obj !== 'object') return obj;
   if (Array.isArray(obj)) return obj.map((item) => deepSyncSanitize(item));
 
-  const result: any = {};
+  const source = obj as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
 
-  for (const key of Object.keys(obj)) {
+  for (const key of Object.keys(source)) {
     if (key === 'photos' || key === 'videos') {
-      result[key] = syncSanitizeMedia(Array.isArray(obj[key]) ? obj[key] : []);
+      result[key] = syncSanitizeMedia(Array.isArray(source[key]) ? source[key] : []);
     } else {
-      result[key] = deepSyncSanitize(obj[key]);
+      result[key] = deepSyncSanitize(source[key]);
     }
   }
 
@@ -99,6 +103,7 @@ export async function saveLocalMeasurementWithSync(
   measurement: MeasurementRecord,
   username: string
 ): Promise<void> {
+  void username;
   try {
     const normalizedMeasurement = normalizeMeasurementLinks(measurement);
     await localMeasurementDb.measurements.put(normalizedMeasurement);
@@ -136,7 +141,9 @@ export async function saveLocalMeasurementWithSync(
         senderDeviceId: enqueueResult.deviceId,
         status: 'SENT',
         sentAt: enqueueResult.createdAt,
-        entityVersion: Number((measurement as any).version || 1),
+        entityVersion: Number(
+          (measurement as MeasurementRecord & { version?: number }).version || 1
+        ),
         createdAt: enqueueResult.createdAt,
         updatedAt: enqueueResult.createdAt
       };

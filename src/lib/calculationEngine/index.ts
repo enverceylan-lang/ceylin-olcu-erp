@@ -24,9 +24,9 @@ export function calculateSelectedProduct(
   productType: string,
   width: number,
   height: number,
-  rawValues: Record<string, any>,
-  siblingProducts: any[] = []
-): Record<string, any> {
+  rawValues: Parameters<typeof calculateSelectedProductLegacy>[3],
+  siblingProducts: Parameters<typeof calculateSelectedProductLegacy>[4] = []
+): ReturnType<typeof normalizeCalculationResult> {
   const legacyCalculation =
     calculateSelectedProductLegacy(
       productType,

@@ -156,6 +156,32 @@ export function applyPaymentToSale(
     amount: roundMoney(payment.amount)
   };
 
+  const samePayment = (sale.payments || []).find(
+    existing => existing.id === normalizedPayment.id
+  );
+
+  if (samePayment) {
+    const isIdentical =
+      roundMoney(samePayment.amount) ===
+        normalizedPayment.amount &&
+      samePayment.paidAt === normalizedPayment.paidAt &&
+      samePayment.method === normalizedPayment.method &&
+      (samePayment.installmentId || '') ===
+        (normalizedPayment.installmentId || '') &&
+      (samePayment.note || '') ===
+        (normalizedPayment.note || '') &&
+      (samePayment.receivedBy || '') ===
+        (normalizedPayment.receivedBy || '');
+
+    if (isIdentical) {
+      return sale;
+    }
+
+    throw new Error(
+      'Aynı tahsilat kimliği farklı içerikle kullanılamaz.'
+    );
+  }
+
   if (normalizedPayment.amount <= 0) {
     throw new Error(
       'Tahsilat tutarı sıfırdan büyük olmalıdır.'

@@ -2,20 +2,25 @@
 
 import { Plus, Search, MapPin, Phone, Trash2, AlertTriangle } from "lucide-react";
 import Link from "next/link";
-import { useStore } from "@/store/useStore";
-import { useEffect, useState } from "react";
+import { Customer, useStore } from "@/store/useStore";
+import { useState, useSyncExternalStore } from "react";
 import { getGoogleMapsUrl } from "@/lib/measurementAdapter";
 import { useAuthStore, canViewCustomer, normalizeRole, canViewCariType, canViewCariList, canAddCustomer, canImportExportExcel } from "@/store/useAuthStore";
 
 import { syncNow } from "@/lib/syncService";
-import { RefreshCw, CheckCircle, AlertCircle, WifiOff, Upload, Download } from "lucide-react";
+import { RefreshCw, Upload, Download } from "lucide-react";
 import { ExcelImportModal } from "@/components/modals/ExcelImportModal";
 import { ExcelExportModal } from "@/components/modals/ExcelExportModal";
-import { customerExcelProfile } from "@/lib/excelBridge";
+import { customerExcelProfile, PreviewResult } from "@/lib/excelBridge";
 import { normalizeCariName } from "@/lib/stringUtils";
 import { saveLocalCustomer } from "@/lib/localCustomerDb";
 
-function isArchivedOrDeletedCustomer(customer: any) {
+type CustomerWithLegacyState = Customer & {
+  status?: string;
+  active?: boolean;
+};
+
+function isArchivedOrDeletedCustomer(customer: CustomerWithLegacyState) {
   return Boolean(
     customer.isArchived ||
     customer.archivedAt ||
@@ -29,14 +34,17 @@ function isArchivedOrDeletedCustomer(customer: any) {
 }
 
 export default function CarilerPage() {
-  const { customers, deleteCustomer, syncStatus, addCustomer, updateCustomer } = useStore();
+  const { customers, deleteCustomer, addCustomer, updateCustomer } = useStore();
   const { currentUser } = useAuthStore();
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    () => () => undefined,
+    () => true,
+    () => false
+  );
   const [searchTerm, setSearchTerm] = useState("");
-  const [viewMode, setViewMode] = useState<'ACTIVE'|'ARCHIVED'|'TRASH'>('ACTIVE');
-  const [syncing, setSyncing] = useState(false);
+  const viewMode: 'ACTIVE' | 'ARCHIVED' | 'TRASH' = 'ACTIVE';
   const [selectedTypeFilter, setSelectedTypeFilter] = useState("ALL");
-  const [customerToDelete, setCustomerToDelete] = useState<any>(null);
+  const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -93,15 +101,15 @@ export default function CarilerPage() {
       }
       alert(`${count} cari adı standartlaştırıldı.`);
       window.dispatchEvent(new Event('local-customers-updated'));
-    } catch (e: any) {
-      alert("Hata: " + e.message);
+    } catch (error: unknown) {
+      alert("Hata: " + (error instanceof Error ? error.message : String(error)));
     } finally {
       setIsStandardizing(false);
       setIsStandardizeModalOpen(false);
     }
   };
 
-  const handleImport = async (previewResult: any) => {
+  const handleImport = async (previewResult: PreviewResult<Customer>) => {
     for (const row of previewResult.rows) {
       if (row.status === 'NEW' || row.status === 'MANUAL_REVIEW') {
         await addCustomer(row.data);
@@ -117,7 +125,7 @@ export default function CarilerPage() {
       columns: [
         { header: "Cari Kodu", dbField: "customerCode" },
         { header: "Cari Adı", dbField: "name" },
-        { header: "Bakiye", dbField: "balance", formatter: (val: any) => val || 0 },
+        { header: "Bakiye", dbField: "balance", formatter: (val: unknown) => val || 0 },
         { header: "Grup Kodu", dbField: "groupCode" },
         { header: "Grup Adı", dbField: "groupName" },
         { header: "Rapor Kodu 1", dbField: "reportCode1" },
@@ -133,12 +141,12 @@ export default function CarilerPage() {
         { header: "Cep Tel 2", dbField: "mobile2" },
         { header: "EMail", dbField: "email" },
         { header: "Plasiyer Adı", dbField: "salespersonName" },
-        { header: "Aktif", dbField: "isActive", formatter: (val: any) => val !== false ? "Evet" : "Hayır" },
-        { header: "E-Fatura", dbField: "eInvoice", formatter: (val: any) => val ? "Evet" : "Hayır" },
+        { header: "Aktif", dbField: "isActive", formatter: (val: unknown) => val !== false ? "Evet" : "Hayır" },
+        { header: "E-Fatura", dbField: "eInvoice", formatter: (val: unknown) => val ? "Evet" : "Hayır" },
         { header: "Cari Yetkili Adı", dbField: "authorizedPerson" },
-        { header: "Risk Var Mı", dbField: "hasRisk", formatter: (val: any) => val ? "Evet" : "Hayır" },
+        { header: "Risk Var Mı", dbField: "hasRisk", formatter: (val: unknown) => val ? "Evet" : "Hayır" },
         { header: "Risk", dbField: "riskLimit" },
-        { header: "Tüm İşlemlerde Kilit", dbField: "isLockedForAllTransactions", formatter: (val: any) => val ? "Evet" : "Hayır" }
+        { header: "Tüm İşlemlerde Kilit", dbField: "isLockedForAllTransactions", formatter: (val: unknown) => val ? "Evet" : "Hayır" }
       ]
     },
     {
@@ -170,10 +178,6 @@ export default function CarilerPage() {
     }
   };
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
   const allowedCariTypes = [
     { value: "CUSTOMER", label: "Müşteriler" },
     { value: "SUPPLIER", label: "Tedarikçiler" },
@@ -186,54 +190,6 @@ export default function CarilerPage() {
   const filterTabs = allowedCariTypes.length > 1
     ? [{ value: "ALL", label: "Tüm Cariler" }, ...allowedCariTypes]
     : allowedCariTypes;
-
-  const handleManualSync = async () => {
-    setSyncing(true);
-    try {
-      await syncNow(true);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  useEffect(() => {
-    if (typeof window !== 'undefined' && mounted) {
-      console.log('[Cariler UI Diagnostic] Current User:', currentUser ? {
-        id: currentUser.id,
-        username: currentUser.username,
-        role: currentUser.role,
-        normRole: normalizeRole(currentUser.role)
-      } : null);
-      console.log('[Cariler UI Diagnostic] Store Customers Count:', customers.length);
-
-      const targetNames = ['test tlf sync 01', 'TEST TELEFON SYNC'];
-      targetNames.forEach(name => {
-        const c = customers.find(x => x.name === name);
-        if (c) {
-          const isDel = !!c.isDeleted;
-          const allowedRole = currentUser ? canViewCustomer(currentUser, c) : false;
-          const cType = c.cariType || "CUSTOMER";
-          const allowedType = allowedCariTypes.some(t => t.value === cType);
-          const matchesFilter = selectedTypeFilter === "ALL" || cType === selectedTypeFilter;
-          const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) || (c.phone && c.phone.includes(searchTerm));
-          console.log(`[Cariler UI Target Debug] "${name}":`, {
-            foundInStore: true,
-            isDeleted: isDel,
-            canViewCustomer: allowedRole,
-            cariType: cType,
-            allowedCariTypesContainsType: allowedType,
-            selectedTypeFilterMatches: matchesFilter,
-            searchQueryMatches: matchesSearch,
-            visibleOnUI: !isDel && allowedRole && matchesFilter && matchesSearch
-          });
-        } else {
-          console.log(`[Cariler UI Target Debug] "${name}": Not found in Zustand store`);
-        }
-      });
-    }
-  }, [customers, currentUser, searchTerm, selectedTypeFilter, mounted]);
 
   if (!mounted) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
 
@@ -265,33 +221,11 @@ export default function CarilerPage() {
     return dateB - dateA;
   });
 
-  const getCariTypeLabel = (type?: string) => {
-    switch (type) {
-      case 'SUPPLIER': return 'Tedarikçi';
-      case 'TAILOR': return 'Terzi';
-      case 'INSTALLER': return 'Montajcı';
-      case 'STAFF': return 'Personel';
-      case 'OTHER': return 'Diğer';
-      default: return 'Müşteri';
-    }
-  };
-
-  const getCariTypeColor = (type?: string) => {
-    switch (type) {
-      case 'SUPPLIER': return 'bg-amber-100 text-amber-800 dark:bg-amber-950/30 dark:text-amber-400 border border-amber-200 dark:border-amber-900/30';
-      case 'TAILOR': return 'bg-purple-100 text-purple-800 dark:bg-purple-950/30 dark:text-purple-400 border border-purple-200 dark:border-purple-900/30';
-      case 'INSTALLER': return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/30 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-900/30';
-      case 'STAFF': return 'bg-teal-100 text-teal-800 dark:bg-teal-950/30 dark:text-teal-400 border border-teal-200 dark:border-teal-900/30';
-      case 'OTHER': return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 border border-gray-200 dark:border-gray-700/50';
-      default: return 'bg-blue-100 text-blue-800 dark:bg-blue-950/30 dark:text-blue-400 border border-blue-200 dark:border-blue-900/30';
-    }
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold heading-title">Cariler</h1>
+          <h1 className="text-xl font-bold heading-title sm:text-2xl">Cariler</h1>
           <p className="text-sm heading-subtitle">Müşterilerinizi yönetin ve yeni müşteri ekleyin.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
@@ -302,14 +236,14 @@ export default function CarilerPage() {
                 className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors font-medium text-sm shadow-sm"
               >
                 <Upload className="w-4 h-4" />
-                Excel'den İçe Aktar
+                Excel&apos;den İçe Aktar
               </button>
               <button
                 onClick={() => setIsExportModalOpen(true)}
                 className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors font-medium text-sm shadow-sm"
               >
                 <Download className="w-4 h-4" />
-                Excel'e Aktar
+                Excel&apos;e Aktar
                 </button>
               </>
             )}
@@ -353,21 +287,32 @@ export default function CarilerPage() {
       )}
 
       <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden shadow-sm">
-        <div className="p-4 border-b border-gray-200 dark:border-gray-800">
-          <div className="relative max-w-md">
-            <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input 
-              type="text" 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Müşteri ara..." 
-              className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-shadow"
-            />
+        <div className="border-b border-gray-200 p-4 dark:border-gray-800">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="relative w-full sm:max-w-md">
+              <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Müşteri ara..."
+                className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2 pl-10 pr-4 text-gray-900 outline-none transition-shadow focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+              />
+            </div>
+            <span className="shrink-0 text-xs font-medium text-gray-500 dark:text-gray-400">
+              {sortedCustomers.length} cari gösteriliyor
+            </span>
           </div>
         </div>
         
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[600px]">
+        <div className="hidden overflow-x-auto md:block">
+          <table className="w-full min-w-[760px] table-fixed border-collapse text-left">
+            <colgroup>
+              <col className="w-[38%]" />
+              <col className="w-[19%]" />
+              <col className="w-[30%]" />
+              <col className="w-[13%]" />
+            </colgroup>
             <thead>
               <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-800 text-sm text-gray-500 dark:text-gray-400">
                 <th className="p-4 font-medium">Müşteri Adı</th>
@@ -386,34 +331,36 @@ export default function CarilerPage() {
               ) : (
                 sortedCustomers.map((customer) => (
                   <tr key={customer.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-                    <td className="p-4">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Link href={`/cariler/${customer.id}`} className="font-medium text-blue-600 dark:text-blue-400 hover:underline">
+                    <td className="min-w-0 p-4">
+                      <div className="min-w-0 space-y-1.5">
+                        <Link
+                          href={`/cariler/${customer.id}`}
+                          title={customer.name}
+                          className="block truncate font-semibold text-blue-600 hover:underline dark:text-blue-400"
+                        >
                           {customer.name}
                         </Link>
-                        
-                        {allowedCariTypes.length > 1 && (
-                          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold border ${getCariTypeColor(customer.cariType)}`}>
-                            {getCariTypeLabel(customer.cariType)}
-                          </span>
-                        )}
-
-                        {customer.approvalStatus === 'PENDING_APPROVAL' && (
-                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-200 dark:border-amber-900/30">
-                            <AlertTriangle className="w-2.5 h-2.5 flex-shrink-0 text-amber-500" />
-                            Onay Bekliyor
-                          </span>
-                        )}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {customer.approvalStatus === 'PENDING_APPROVAL' && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-200 dark:border-amber-900/30">
+                              <AlertTriangle className="w-2.5 h-2.5 flex-shrink-0 text-amber-500" />
+                              Onay Bekliyor
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td className="p-4 text-gray-600 dark:text-gray-300">
-                      <div className="flex items-center gap-2">
-                        <Phone className="w-4 h-4 text-gray-400" />
-                        {customer.phone || '-'}
-                      </div>
+                      <a
+                        href={customer.phone ? `tel:${customer.phone}` : undefined}
+                        className="flex items-center gap-2 truncate hover:text-blue-600 dark:hover:text-blue-400"
+                      >
+                        <Phone className="h-4 w-4 shrink-0 text-gray-400" />
+                        <span className="truncate">{customer.phone || '-'}</span>
+                      </a>
                     </td>
                     <td className="p-4 text-gray-600 dark:text-gray-300">
-                      <div className="flex items-center gap-2 max-w-xs truncate">
+                      <div className="flex min-w-0 items-start gap-2">
                         {(() => {
                           const mapsUrl = getGoogleMapsUrl(customer);
                           if (mapsUrl) {
@@ -438,7 +385,9 @@ export default function CarilerPage() {
                             </span>
                           );
                         })()}
-                        <span className="truncate">{customer.address || '-'}</span>
+                        <span className="line-clamp-2 text-xs leading-5" title={customer.address || '-'}>
+                          {customer.address || '-'}
+                        </span>
                       </div>
                     </td>
                     <td className="p-4 text-right">
@@ -458,6 +407,76 @@ export default function CarilerPage() {
               )}
             </tbody>
           </table>
+        </div>
+
+        <div className="divide-y divide-gray-100 dark:divide-gray-800 md:hidden">
+          {sortedCustomers.length === 0 ? (
+            <p className="p-8 text-center text-sm text-gray-500 dark:text-gray-400">
+              Henüz kayıtlı müşteri bulunmuyor.
+            </p>
+          ) : (
+            sortedCustomers.map((customer) => {
+              const mapsUrl = getGoogleMapsUrl(customer);
+              return (
+                <article key={customer.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 p-4">
+                  <div className="min-w-0 space-y-2">
+                    <div className="min-w-0">
+                      <Link
+                        href={`/cariler/${customer.id}`}
+                        className="block truncate font-semibold text-blue-600 dark:text-blue-400"
+                      >
+                        {customer.name}
+                      </Link>
+                      {customer.approvalStatus === 'PENDING_APPROVAL' && (
+                        <div className="mt-1">
+                          <span className="inline-flex items-center gap-0.5 rounded border border-amber-200 bg-amber-100 px-1.5 py-0.5 text-xs font-bold text-amber-800 dark:border-amber-900/30 dark:bg-amber-950/40 dark:text-amber-400">
+                            <AlertTriangle className="h-2.5 w-2.5 text-amber-500" />
+                            Onay Bekliyor
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid gap-1.5 text-sm text-gray-600 dark:text-gray-300">
+                      <a href={customer.phone ? `tel:${customer.phone}` : undefined} className="flex min-w-0 items-center gap-2">
+                        <Phone className="h-4 w-4 shrink-0 text-gray-400" />
+                        <span className="truncate">{customer.phone || '-'}</span>
+                      </a>
+                      <div className="flex min-w-0 items-start gap-2">
+                        {mapsUrl ? (
+                          <a href={mapsUrl} target="_blank" rel="noopener noreferrer" title="Haritada Göster">
+                            <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+                          </a>
+                        ) : (
+                          <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-gray-300 dark:text-gray-700" />
+                        )}
+                        <span className="line-clamp-2 text-xs leading-5">{customer.address || '-'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex w-24 shrink-0 flex-col items-stretch gap-1.5 self-stretch">
+                    <Link
+                      href={`/cariler/${customer.id}`}
+                      className="flex min-h-0 flex-1 items-center justify-center rounded-lg bg-blue-600 px-2 py-1.5 text-center text-xs font-semibold leading-tight text-white transition-colors hover:bg-blue-700"
+                    >
+                      Cari ve Ölçü<br />Detayı
+                    </Link>
+                    {currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'OFFICE' || currentUser.role === 'ACCOUNTING') && (
+                      <button
+                        onClick={() => setCustomerToDelete(customer)}
+                        className="flex h-8 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-600 transition-colors hover:bg-red-100 hover:text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400"
+                        title="Sil"
+                        aria-label={`${customer.name} carisini sil`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                </article>
+              );
+            })
+          )}
         </div>
       </div>
 

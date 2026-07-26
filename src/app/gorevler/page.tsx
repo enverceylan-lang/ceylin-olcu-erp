@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   BellRing,
@@ -62,6 +61,25 @@ Record<FieldTaskStatus, string> = {
   COMPLETED: "Tamamlandı",
   CANCELLED: "İptal"
 };
+
+interface FieldTaskSnapshotOpening {
+  id?: string;
+  name?: string;
+}
+
+interface FieldTaskSnapshotRoom {
+  id?: string;
+  name?: string;
+  windows?: FieldTaskSnapshotOpening[];
+  openings?: FieldTaskSnapshotOpening[];
+}
+
+interface FieldTaskSnapshot {
+  customer?: {
+    rooms?: FieldTaskSnapshotRoom[];
+  };
+  rooms?: FieldTaskSnapshotRoom[];
+}
 
 function formatDate(
   value?: string
@@ -154,7 +172,10 @@ export default function FieldTasksPage() {
     ]);
 
   useEffect(() => {
-    void loadTasks();
+    const loadTimer = window.setTimeout(
+      () => void loadTasks(),
+      0
+    );
 
     const handleUpdate =
       () => {
@@ -167,6 +188,7 @@ export default function FieldTasksPage() {
     );
 
     return () => {
+      window.clearTimeout(loadTimer);
       window.removeEventListener(
         "field-tasks-updated",
         handleUpdate
@@ -299,7 +321,7 @@ export default function FieldTasksPage() {
          */
         for (const measurement of taskMeasurements) {
           const taskSnapshot =
-            task.customerSnapshot as any;
+            task.customerSnapshot as FieldTaskSnapshot;
 
           const snapshotCustomer =
             taskSnapshot?.customer ||
@@ -312,7 +334,7 @@ export default function FieldTasksPage() {
 
           const snapshotRoom =
             snapshotRooms.find(
-              (candidate: any) =>
+              candidate =>
                 candidate?.id === measurement.roomId
             );
 
@@ -330,7 +352,7 @@ export default function FieldTasksPage() {
 
           const snapshotOpening =
             snapshotOpenings.find(
-              (candidate: any) =>
+              candidate =>
                 candidate?.id === measurementOpeningId
             );
           await saveLocalMeasurementWithSync(

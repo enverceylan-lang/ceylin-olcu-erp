@@ -29,6 +29,11 @@ import {
   normalizeUser
 } from '../src/store/useAuthStore';
 
+import {
+  canViewSale,
+  getVisibleSales
+} from '../src/lib/salesVisibility';
+
 let failed = false;
 
 async function runTest(
@@ -152,6 +157,85 @@ function createPayment(
 }
 
 async function main(): Promise<void> {
+  await runTest(
+    'saleVisibilityUsesOwnerAndAdminRule',
+    () => {
+      const ownedSale = createSale({
+        id: 'sale-owned',
+        createdByUserId: 'office-1',
+        createdByUsername: 'office'
+      });
+      const otherSale = createSale({
+        id: 'sale-other',
+        createdByUserId: 'office-2',
+        createdByUsername: 'other'
+      });
+      const officeUser = normalizeUser({
+        id: 'office-1',
+        username: 'office',
+        role: 'OFFICE',
+        isActive: true
+      });
+      const adminUser = normalizeUser({
+        id: 'admin-1',
+        username: 'admin',
+        role: 'ADMIN',
+        isActive: true
+      });
+
+      assert(
+        canViewSale(officeUser, ownedSale),
+        'Owner could not view own sale'
+      );
+      assert(
+        !canViewSale(officeUser, otherSale),
+        'Non-admin could view another user sale'
+      );
+      assert(
+        getVisibleSales(adminUser, [ownedSale, otherSale])
+          .length === 2,
+        'Admin could not view all sales'
+      );
+    }
+  );
+
+  await runTest(
+    'saleVisibilityLegacyUsernameFallbackIsSafe',
+    () => {
+      const legacySale = createSale({
+        id: 'sale-legacy',
+        createdByUsername: 'Satis.User'
+      });
+      delete legacySale.createdByUserId;
+
+      const matchingUser = normalizeUser({
+        id: 'office-legacy',
+        username: 'satis.user',
+        role: 'OFFICE',
+        isActive: true
+      });
+      const otherUser = normalizeUser({
+        id: 'office-other',
+        username: 'other',
+        role: 'OFFICE',
+        isActive: true
+      });
+
+      assert(
+        canViewSale(matchingUser, legacySale),
+        'Legacy username owner could not view sale'
+      );
+      assert(
+        !canViewSale(otherUser, legacySale),
+        'Legacy sale leaked to another username'
+      );
+      assert(
+        !canViewSale(null, legacySale),
+        'Sale was visible without an authenticated user'
+      );
+    }
+  );
+
   console.log('==================================================');
   console.log(' SALES FINANCE & DUE NOTIFICATION TEST SUITE');
   console.log('==================================================\n');

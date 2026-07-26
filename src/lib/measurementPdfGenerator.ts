@@ -1,23 +1,42 @@
 import jsPDF from 'jspdf';
-import { Customer, ProductMeasurement, MEASUREMENT_TEMPLATES } from '@/store/useStore';
+import {
+  getStoredProductCalculation
+} from '@/lib/calculationEngine';
+import { Customer, ProductMeasurement, WindowItem, MEASUREMENT_TEMPLATES } from '@/store/useStore';
 import { getTemplateLabel, getMeasurementDimensions, resolveMeasurementProductLabel, resolveMeasurementProductGroup } from '@/lib/measurementAdapter';
 import { formatFacadeForReport } from '@/lib/facadeHelper';
 import { getValidNote } from '@/lib/reportFormatters';
 import { useMeasurementStore, MeasurementRecord } from '@/store/measurementStore';
-import {
-  getStoredProductCalculation
-} from '@/lib/calculationEngine';
 
 // A4 Dimensions in mm
 const PAGE_WIDTH = 210;
 const PAGE_HEIGHT = 297;
 const MARGIN = 15;
 
+type UnknownRecord = Record<string, unknown>;
+
+interface PdfFacadeSegment {
+  id?: string;
+  label?: string;
+  type?: string;
+  widthCm?: string | number;
+}
+
+interface PdfPlicellCam {
+  widthCm?: string | number;
+  heightCm?: string | number;
+  note?: string;
+}
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === 'object' && value !== null;
+}
+
 function buildPdfCalculationSummary(
   productType: string,
-  calculation: any
+  calculation: unknown
 ): string {
-  const calc = calculation || {};
+  const calc = isRecord(calculation) ? calculation : {};
   const type = String(productType || '').toUpperCase();
   const parts: string[] = [];
 
@@ -127,8 +146,8 @@ function buildPdfCalculationSummary(
   ) {
     parts.push(
       calc.salesItems
-        .map((item: any) => item.label)
-        .filter(Boolean)
+        .map((item) => isRecord(item) ? item.label : undefined)
+        .filter((label): label is string => typeof label === 'string' && label.length > 0)
         .join(' + ')
     );
   }
@@ -337,7 +356,7 @@ function drawSimpleTable(
 /**
  * Draws the curtain diagram via jsPDF primitives.
  */
-function drawCurtainDetailDiagram(doc: jsPDF, x: number, y: number, rawValues: any) {
+function drawCurtainDetailDiagram(doc: jsPDF, x: number, y: number, rawValues: UnknownRecord) {
   const leftWall = Number(rawValues.leftWall || 0);
   const windowWidth = Number(rawValues.windowWidth || 0);
   const rightWall = Number(rawValues.rightWall || 0);
@@ -353,23 +372,19 @@ function drawCurtainDetailDiagram(doc: jsPDF, x: number, y: number, rawValues: a
 
   let wPct = totalWidth > 0 ? windowWidth / totalWidth : 0.6;
   let lPct = totalWidth > 0 ? leftWall / totalWidth : 0.2;
-  let rPct = totalWidth > 0 ? rightWall / totalWidth : 0.2;
 
   let hPct = totalHeight > 0 ? windowHeight / totalHeight : 0.6;
   let tPct = totalHeight > 0 ? ceilingGap / totalHeight : 0.2;
-  let bPct = totalHeight > 0 ? floorGap / totalHeight : 0.2;
 
   if (wPct < 0.35) {
     const diff = 0.35 - wPct;
     wPct = 0.35;
     lPct = Math.max(0, lPct - diff/2);
-    rPct = Math.max(0, rPct - diff/2);
   }
   if (hPct < 0.35) {
     const diff = 0.35 - hPct;
     hPct = 0.35;
     tPct = Math.max(0, tPct - diff/2);
-    bPct = Math.max(0, bPct - diff/2);
   }
 
   const winX = x + (lPct * wallW);
@@ -410,11 +425,13 @@ function drawFacadeSegmentsDiagram(
   doc: jsPDF,
   x: number,
   y: number,
-  rawValues: any
+  rawValues: UnknownRecord
 ) {
-  const segments =
+  const segments: PdfFacadeSegment[] =
     Array.isArray(rawValues.facadeSegments)
-      ? rawValues.facadeSegments
+      ? rawValues.facadeSegments.filter(
+          (segment): segment is PdfFacadeSegment => isRecord(segment)
+        )
       : [];
 
   if (segments.length === 0) {
@@ -422,7 +439,7 @@ function drawFacadeSegmentsDiagram(
   }
 
   const totalWidth = segments.reduce(
-    (sum: number, segment: any) =>
+    (sum, segment) =>
       sum + Math.max(
         0,
         Number(segment.widthCm || 0)
@@ -490,7 +507,7 @@ function drawFacadeSegmentsDiagram(
   let consumedWidth = 0;
 
   segments.forEach(
-    (segment: any, index: number) => {
+    (segment, index) => {
       const numericWidth =
         Math.max(
           0,
@@ -688,7 +705,6 @@ function drawFacadeSegmentsDiagram(
   );
 }
 function drawSimpleDiagram(doc: jsPDF, x: number, y: number, width: number, height: number) {
-  const wallW = 80;
   const wallH = 60;
 
   const winX = x + 15;
@@ -795,8 +811,9 @@ export async function generateMeasurementPdfBlob(
                 ...p,
                 customerId: customer.id,
                 roomId: room.id,
+                openingId: win.id,
                 windowId: win.id
-              } as any);
+              });
             });
           });
         });
@@ -812,7 +829,7 @@ export async function generateMeasurementPdfBlob(
 
       const plicellProducts: { p: ProductMeasurement; index: number; winName: string }[] = [];
       const mechanicalProducts: { p: ProductMeasurement; index: number; winName: string }[] = [];
-      const standardOpenings: { winName: string; winItem: any; products: ProductMeasurement[] }[] = [];
+      const standardOpenings: { winName: string; winItem: WindowItem; products: ProductMeasurement[] }[] = [];
 
       (room.windows || []).forEach(win => {
         const winMeasurements = resolvedMeasurements.filter(m => m.windowId === win.id && m.customerId === customer.id && !m.isDeleted && !m.isArchived);
@@ -854,7 +871,8 @@ export async function generateMeasurementPdfBlob(
                 plicellProducts.push({ p: pObj, index: plicellProducts.length, winName: win.name });
               } else if (pGroup === 'Mekanik Perde') {
                 if (ap.calculation?.isSegmented && Array.isArray(ap.calculation.groups) && ap.calculation.groups.length > 0) {
-                  ap.calculation.groups.forEach((g: any, gIdx: number) => {
+                  ap.calculation.groups.forEach((group: unknown, gIdx: number) => {
+                    if (!isRecord(group)) return;
                     const gObj: ProductMeasurement = {
                       ...m,
                       id: `${m.id}-group-${gIdx}`,
@@ -863,17 +881,17 @@ export async function generateMeasurementPdfBlob(
                       selectedProducts: [ap],
                       rawValues: {
                         ...m.rawValues,
-                        width: g.realWidthCm,
-                        height: g.realHeightCm,
-                        quantity: g.quantity
+                        width: group.realWidthCm,
+                        height: group.realHeightCm,
+                        quantity: group.quantity
                       },
                       details: {
                         ...m.details,
                         ...ap.calculation,
-                        billingWidth: g.calculatedWidthCm,
-                        billingHeight: g.calculatedHeightCm,
-                        totalM2: g.totalM2,
-                        chainDirection: g.chainDirection
+                        billingWidth: group.calculatedWidthCm,
+                        billingHeight: group.calculatedHeightCm,
+                        totalM2: group.totalM2,
+                        chainDirection: group.chainDirection
                       }
                     };
                     mechanicalProducts.push({ p: gObj, index: mechanicalProducts.length, winName: `${win.name} - ParÃ§a ${gIdx + 1}` });
@@ -947,6 +965,7 @@ export async function generateMeasurementPdfBlob(
               : validNote
                 ? 65
                 : 55;
+
           doc.rect(MARGIN + 4, y, PAGE_WIDTH - MARGIN*2 - 4, boxHeight, 'FD');
 
           let innerY = y + 6;
@@ -1073,11 +1092,16 @@ export async function generateMeasurementPdfBlob(
         plicellProducts.forEach(item => {
            const camListesi = item.p.rawValues?.plicellCamListesi;
            if (camListesi && Array.isArray(camListesi) && camListesi.length > 0) {
-             const validCamListesi = camListesi.filter((cam: any) => Number(cam.widthCm) > 0 && Number(cam.heightCm) > 0);
+             const validCamListesi = camListesi.filter(
+               (cam): cam is PdfPlicellCam =>
+                 isRecord(cam) &&
+                 Number(cam.widthCm) > 0 &&
+                 Number(cam.heightCm) > 0
+             );
              const profilRengi = item.p.rawValues?.profilRengi;
              const profilTxt = profilRengi ? `[Renk: ${profilRengi}] ` : '';
 
-             validCamListesi.forEach((cam: any, idx: number) => {
+             validCamListesi.forEach((cam, idx) => {
                tableData.push([
                  sanitize(item.winName),
                  `${idx + 1}. Cam`,
@@ -1111,7 +1135,7 @@ export async function generateMeasurementPdfBlob(
         doc.text(`[Olcu Grubu: Mekanik Perde]`, MARGIN + 4, y);
         y += 4;
 
-         const tableData = mechanicalProducts.map((item, idx) => {
+         const tableData = mechanicalProducts.map((item) => {
             const storedCalculation =
               getStoredProductCalculation(
                 item.p,

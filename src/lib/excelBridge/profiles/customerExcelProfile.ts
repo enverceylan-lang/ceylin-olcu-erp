@@ -1,5 +1,5 @@
 import { Customer } from "@/store/useStore";
-import { ExcelProfile, ParsedRow } from "../excelTypes";
+import { ExcelProfile } from "../excelTypes";
 import { parseBoolean, parseNumber, parsePhone } from "../excelParsers";
 
 export const customerExcelProfile: ExcelProfile<Customer> = {

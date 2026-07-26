@@ -1,25 +1,34 @@
 "use client";
 
 import { Download, Settings, Upload, ShieldCheck, AlertTriangle, UserPlus, Trash2, Check, X, Shield } from "lucide-react";
-import { useRef, useState, useEffect, Fragment } from "react";
+import { useRef, useState, useEffect, useSyncExternalStore, Fragment } from "react";
 import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, MockUser } from "@/store/useAuthStore";
 import { syncNow } from "@/lib/syncService";
 import { normalizeUsername } from "@/lib/usernameHelper";
+import {
+  createFullSystemBackup,
+  downloadFullSystemBackup,
+  restoreFullSystemBackup,
+  validateFullSystemBackup,
+  type FullSystemBackupPayload,
+} from "@/lib/fullSystemBackup";
+import SalesSyncDiagnosticsCard from "@/components/admin/SalesSyncDiagnosticsCard";
+import ErpContextShadowCard from "@/components/admin/ErpContextShadowCard";
 
-const DATA_KEYS = ["curtain-erp-storage-v3", "curtain-erp-auth-v1"];
-
-type BackupPayload = {
-  version: "olcu-erp-v1";
-  exportedAt: string;
-  data: Record<string, string | null>;
-};
+type BackupPayload =
+  FullSystemBackupPayload;
 
 export default function AyarlarPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState("");
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [pendingBackupData, setPendingBackupData] = useState<BackupPayload | null>(null);
+  const [backupBusy, setBackupBusy] = useState(false);
   
   // Auth Store
   const { currentUser, users, addUser, updateUser, deleteUser, fetchUsers, auditLog } = useAuthStore();
@@ -58,25 +67,50 @@ export default function AyarlarPage() {
   const [userFilter, setUserFilter] = useState<'ACTIVE' | 'PASSIVE' | 'ALL'>('ACTIVE');
 
   useEffect(() => {
-    if (currentUser) {
+    if (!currentUser) return;
+
+    let cancelled = false;
+
+    queueMicrotask(() => {
+      if (cancelled) return;
+
       setSelfName(currentUser.name || "");
       setSelfEmail(currentUser.email || "");
       setSelfPhone(currentUser.phone || "");
       setSelfTcNo(currentUser.tcNo || "");
       setSelfAddress(currentUser.address || "");
       setSelfPassword("");
-    }
-  }, [currentUser?.id]);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser]);
+
+  const currentUserId = currentUser?.id;
+  const currentUserRole = currentUser
+    ? normalizeRole(currentUser.role)
+    : null;
 
   useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (mounted && currentUser && normalizeRole(currentUser.role) === 'ADMIN') {
-      fetchUsers().catch((err) => console.error("Failed to fetch users list:", err));
+    if (
+      mounted &&
+      currentUserId &&
+      currentUserRole === "ADMIN"
+    ) {
+      void fetchUsers().catch((error) => {
+        console.error(
+          "Failed to fetch users list:",
+          error,
+        );
+      });
     }
-  }, [mounted, currentUser?.id]);
+  }, [
+    mounted,
+    currentUserId,
+    currentUserRole,
+    fetchUsers,
+  ]);
 
   if (!mounted) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
 
@@ -101,45 +135,119 @@ export default function AyarlarPage() {
     return String(value);
   };
 
-  const exportBackup = () => {
-    const payload: BackupPayload = {
-      version: "olcu-erp-v1",
-      exportedAt: new Date().toISOString(),
-      data: Object.fromEntries(DATA_KEYS.map((key) => [key, localStorage.getItem(key)])),
-    };
+  const exportBackup = async () => {
+    if (backupBusy) return;
 
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `olcu-erp-v1-yedek-${new Date().toISOString().slice(0, 10)}.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-    setMessage("Yedek dosyası indirildi.");
-  };
+    setBackupBusy(true);
+    setMessage(
+      "Tam sistem yedeği hazırlanıyor…",
+    );
 
-  const importBackup = async (file: File) => {
     try {
-      const parsed = JSON.parse(await file.text()) as BackupPayload;
-      if (parsed.version !== "olcu-erp-v1" || !parsed.data) throw new Error("Geçersiz yedek dosyası.");
+      const payload =
+        await createFullSystemBackup();
 
-      setPendingBackupData(parsed);
-      setShowConfirmModal(true);
+      downloadFullSystemBackup(payload);
+
+      setMessage(
+        `Tam sistem yedeği indirildi: ${payload.manifest.databaseCount} veritabanı, ${payload.manifest.tableCount} tablo, ${payload.manifest.indexedDbRowCount} IndexedDB kaydı.`,
+      );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Yedek geri yüklenemedi.");
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Tam sistem yedeği oluşturulamadı.",
+      );
+    } finally {
+      setBackupBusy(false);
     }
   };
 
-  const handleConfirmImport = () => {
-    if (!pendingBackupData) return;
-    DATA_KEYS.forEach((key) => {
-      const value = pendingBackupData.data[key];
-      if (typeof value === "string") localStorage.setItem(key, value);
-    });
-    setMessage("Yedek geri yüklendi. Sayfa yenileniyor…");
-    setShowConfirmModal(false);
-    window.setTimeout(() => window.location.reload(), 700);
+  const importBackup = async (
+    file: File,
+  ) => {
+    if (backupBusy) return;
+
+    setBackupBusy(true);
+    setMessage(
+      "Yedek dosyası doğrulanıyor…",
+    );
+
+    try {
+      const parsed =
+        JSON.parse(
+          await file.text(),
+        ) as unknown;
+
+      const validated =
+        await validateFullSystemBackup(
+          parsed,
+        );
+
+      setPendingBackupData(
+        validated,
+      );
+
+      setShowConfirmModal(true);
+
+      setMessage(
+        `Yedek doğrulandı: ${validated.manifest.databaseCount} veritabanı, ${validated.manifest.tableCount} tablo, ${validated.manifest.indexedDbRowCount} IndexedDB kaydı.`,
+      );
+    } catch (error) {
+      setPendingBackupData(null);
+
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Yedek dosyası doğrulanamadı.",
+      );
+    } finally {
+      setBackupBusy(false);
+    }
   };
+
+  const handleConfirmImport =
+    async () => {
+      if (
+        !pendingBackupData ||
+        backupBusy
+      ) {
+        return;
+      }
+
+      setBackupBusy(true);
+      setMessage(
+        "Tam sistem geri yükleniyor…",
+      );
+
+      try {
+        const result =
+          await restoreFullSystemBackup(
+            pendingBackupData,
+          );
+
+        setShowConfirmModal(false);
+        setPendingBackupData(null);
+
+        setMessage(
+          `Tam sistem geri yüklendi ve veri ilişkileri doğrulandı: ${result.restoredDatabaseCount} veritabanı, ${result.restoredTableCount} tablo, ${result.restoredIndexedDbRowCount} IndexedDB kaydı. Güvenlik nedeniyle yeniden giriş yapmanız gerekecek.`,
+        );
+
+        window.setTimeout(
+          () =>
+            window.location.reload(),
+          1200,
+        );
+      } catch (error) {
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "Tam sistem geri yüklenemedi.",
+        );
+      } finally {
+        setBackupBusy(false);
+      }
+    };
 
   // User Management Handlers
   const handleAddUserSubmit = async (e: React.FormEvent) => {
@@ -157,7 +265,7 @@ export default function AyarlarPage() {
         name: newName.trim(),
         username: newUsername.trim().toLowerCase(),
         password: newPassword.trim(),
-        role: newRole as any,
+        role: newRole as MockUser["role"],
         isActive: true,
         permissions: [],
         email: newEmail.trim(),
@@ -187,7 +295,7 @@ export default function AyarlarPage() {
 
         try {
           await syncNow(true);
-        } catch (err: any) {}
+        } catch {}
 
         // Secure Logging (Only boolean flags and non-sensitive status)
         console.log("User profile status (admin created user):", {
@@ -210,7 +318,7 @@ export default function AyarlarPage() {
     }
   };
 
-  const startEditingUser = (u: any) => {
+  const startEditingUser = (u: MockUser) => {
     setEditingUserId(u.id);
     setEditName(u.name);
     setEditUsername(u.username);
@@ -231,7 +339,7 @@ export default function AyarlarPage() {
     const updateData: Partial<MockUser> = {
       name: editName.trim(),
       username: editUsername.trim().toLowerCase(),
-      role: editRole as any,
+      role: editRole as MockUser["role"],
       email: editEmail.trim(),
       phone: editPhone.trim(),
       tcNo: editTcNo.trim(),
@@ -252,7 +360,7 @@ export default function AyarlarPage() {
         setMessage("Kullanıcı başarıyla güncellendi.");
         try {
           await syncNow(true);
-        } catch (err: any) {}
+        } catch {}
       } else {
         setMessage("Hata: Kullanıcı güncellenemedi.");
       }
@@ -310,7 +418,7 @@ export default function AyarlarPage() {
       setSelfPassword(""); // reset password input
       try {
         await syncNow(true);
-      } catch (err: any) {}
+      } catch {}
     } else {
       setSelfMessage("Hata: Profil güncellenemedi.");
     }
@@ -769,7 +877,7 @@ export default function AyarlarPage() {
                                                     setMessage("Hata: " + (res.error || "Kullanıcı silinemedi."));
                                                   }
                                                 }
-                                              } catch (err: any) {
+                                              } catch {
                                                 setMessage("Hata: Bir sorun oluştu.");
                                               } finally {
                                                 setUserLoading(false);
@@ -922,21 +1030,39 @@ export default function AyarlarPage() {
         </div>
       )}
 
+      <ErpContextShadowCard />
+
+      {currentUserRole === "ADMIN" && (
+        <SalesSyncDiagnosticsCard />
+      )}
+
       <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <div className="flex items-center gap-3 border-b border-gray-200 p-5 dark:border-gray-800">
           <Settings className="h-5 w-5 text-blue-600" />
           <div>
-            <h2 className="font-semibold text-gray-900 dark:text-white">Cihaz Yedeği</h2>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Cari, oda, açıklık, ölçü ve demo kullanıcı verilerini JSON dosyası olarak koruyun.</p>
+            <h2 className="font-semibold text-gray-900 dark:text-white">Tam Sistem JSON Yedeği</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Cari, oda, açıklık, ölçü, satış, finans, saha görevleri, taslaklar ve senkronizasyon kayıtlarını bütünlük doğrulamalı tek JSON dosyasında koruyun.</p>
           </div>
         </div>
 
         <div className="grid gap-4 p-5 sm:grid-cols-2">
-          <button onClick={exportBackup} className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 cursor-pointer">
-            <Download className="h-4 w-4" /> Yedek İndir
+          <button
+            type="button"
+            onClick={() => void exportBackup()}
+            disabled={backupBusy}
+            className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+          >
+            <Download className="h-4 w-4" />
+            {backupBusy ? "İşlem Sürüyor…" : "Tam Sistem Yedeği İndir"}
           </button>
-          <button onClick={() => inputRef.current?.click()} className="flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-3 font-semibold text-gray-800 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700 cursor-pointer">
-            <Upload className="h-4 w-4" /> Yedekten Geri Yükle
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={backupBusy}
+            className="flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-3 font-semibold text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+          >
+            <Upload className="h-4 w-4" />
+            Tam Sistem Geri Yükle
           </button>
           <input ref={inputRef} type="file" accept="application/json,.json" className="hidden" onChange={(event) => {
             const file = event.target.files?.[0];
@@ -964,7 +1090,7 @@ export default function AyarlarPage() {
               <h4 className="text-lg font-bold">Yedeği Geri Yükle</h4>
             </div>
             <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
-              Mevcut cihaz verileri yedekteki verilerle değiştirilecek. Devam etmek istediğinize emin misiniz?
+              Doğrulanmış tam sistem yedeği; cari, oda, açıklık, ölçü, satış, finans, taslak ve senkronizasyon verilerinin tamamını geri yükleyecek. İşlem öncesinde otomatik güvenlik anlık görüntüsü alınacaktır. Devam etmek istediğinize emin misiniz?
             </p>
             <div className="flex justify-end gap-3 pt-2">
               <button
@@ -979,10 +1105,11 @@ export default function AyarlarPage() {
               </button>
               <button
                 type="button"
-                onClick={handleConfirmImport}
-                className="px-4 py-2 text-xs font-bold rounded-lg bg-blue-600 hover:bg-blue-500 text-white transition-colors cursor-pointer"
+                onClick={() => void handleConfirmImport()}
+                disabled={backupBusy}
+                className="px-4 py-2 text-xs font-bold rounded-lg bg-blue-600 hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50 text-white transition-colors cursor-pointer"
               >
-                Evet, Yükle
+                {backupBusy ? "Geri Yükleniyor…" : "Evet, Tam Sistemi Yükle"}
               </button>
             </div>
           </div>

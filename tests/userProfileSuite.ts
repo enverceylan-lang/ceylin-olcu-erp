@@ -1,16 +1,25 @@
 import 'fake-indexeddb/auto';
-import { useAuthStore, normalizeUser, normalizeRole, MockUser, sanitizeAuditSnapshot, sanitizeAuditEntry } from '../src/store/useAuthStore';
+import { useAuthStore, normalizeUser, normalizeRole, MockUser, UserRole, AuditEntry, sanitizeAuditSnapshot, sanitizeAuditEntry } from '../src/store/useAuthStore';
 import { normalizeUsername } from '../src/lib/usernameHelper';
+
+type AdminUserUpdateBody = Partial<MockUser> & Pick<MockUser, 'id'>;
+type SimulatedClickEvent = { stopPropagation: () => void };
+type PersistMergeTestApi = {
+  persist?: {
+    merge?: (
+      persistedState: unknown,
+      currentState: { users: MockUser[]; currentUser: MockUser | null; auditLog: AuditEntry[] }
+    ) => { auditLog: AuditEntry[] };
+  };
+};
 
 // Mock global fetch for API testing
 global.fetch = async (url: string | URL | Request, options?: RequestInit) => {
   if (typeof url === 'string' && url.includes('/api/admin/users/update')) {
-    const body = JSON.parse(options?.body as string);
-    const existing = useAuthStore.getState().users.find((u: any) => u.id === body.id);
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
+    const body = JSON.parse(options?.body as string) as AdminUserUpdateBody;
+    const existing = useAuthStore.getState().users.find((user) => user.id === body.id);
+    return Response.json(
+      {
         success: true,
         user: {
           id: body.id,
@@ -24,14 +33,11 @@ global.fetch = async (url: string | URL | Request, options?: RequestInit) => {
           isActive: body.isActive !== undefined ? body.isActive : (existing?.isActive !== undefined ? existing.isActive : true),
           profileCompletedAt: existing?.profileCompletedAt || '2026-07-14T19:51:38.000Z'
         }
-      })
-    } as any;
+      },
+      { status: 200 }
+    );
   }
-  return {
-    ok: true,
-    status: 200,
-    json: async () => ({ success: true })
-  } as any;
+  return Response.json({ success: true }, { status: 200 });
 };
 
 let hasFailure = false;
@@ -49,8 +55,9 @@ async function runTest(name: string, fn: () => Promise<void>) {
 
     await fn();
     console.log(`[PASS] ${name}`);
-  } catch (e: any) {
-    console.error(`[FAIL] ${name} -> ${e.message}`);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[FAIL] ${name} -> ${message}`);
     hasFailure = true;
   }
 }
@@ -150,7 +157,7 @@ async function runProfileTests() {
     if (!isProfileComplete) throw new Error('Profile should be complete');
 
     // Simulate API update logic: if complete, name/email/phone etc. cannot be changed
-    let userRecord = { ...existingUser };
+    const userRecord = { ...existingUser };
     const name = 'New Name';
     const email = 'new@mail.com';
 
@@ -176,7 +183,7 @@ async function runProfileTests() {
       phone: '12345',
       tcNo: '11111111111',
       address: 'New Address',
-      role: 'OFFICE' as any,
+      role: 'OFFICE' as UserRole,
       isActive: false
     };
 
@@ -275,11 +282,8 @@ async function runProfileTests() {
     const staff = normalizeUser({ id: 'staff-id', role: 'FIELD', password: '123' });
     useAuthStore.setState({ currentUser: staff });
     const originalFetch = global.fetch;
-    global.fetch = async () => ({
-      ok: false,
-      status: 403,
-      json: async () => ({ success: false, error: 'Forbidden' })
-    } as any);
+    global.fetch = async () =>
+      Response.json({ success: false, error: 'Forbidden' }, { status: 403 });
     try {
       const success = await useAuthStore.getState().addUser({
         name: 'New User',
@@ -303,11 +307,8 @@ async function runProfileTests() {
     const staff = normalizeUser({ id: 'staff-id', role: 'FIELD', password: '123' });
     useAuthStore.setState({ currentUser: staff });
     const originalFetch = global.fetch;
-    global.fetch = async () => ({
-      ok: false,
-      status: 403,
-      json: async () => ({ success: false, error: 'Forbidden' })
-    } as any);
+    global.fetch = async () =>
+      Response.json({ success: false, error: 'Forbidden' }, { status: 403 });
     try {
       const success = await useAuthStore.getState().updateUser('other-id', {
         name: 'Hacked name'
@@ -420,11 +421,8 @@ async function runProfileTests() {
     const admin = normalizeUser({ id: 'admin-id', role: 'ADMIN', password: '123' });
     useAuthStore.setState({ currentUser: admin });
     const originalFetch = global.fetch;
-    global.fetch = async () => ({
-      ok: false,
-      status: 500,
-      json: async () => ({ success: false, error: 'DATABASE_ERROR' })
-    } as any);
+    global.fetch = async () =>
+      Response.json({ success: false, error: 'DATABASE_ERROR' }, { status: 500 });
     try {
       const success = await useAuthStore.getState().addUser({
         name: 'Fail User',
@@ -449,11 +447,8 @@ async function runProfileTests() {
     const staff = normalizeUser({ id: 'staff-id', role: 'FIELD' });
     useAuthStore.setState({ currentUser: admin, users: [admin, staff] });
     const originalFetch = global.fetch;
-    global.fetch = async () => ({
-      ok: false,
-      status: 500,
-      json: async () => ({ success: false, error: 'UPDATE_FAILED' })
-    } as any);
+    global.fetch = async () =>
+      Response.json({ success: false, error: 'UPDATE_FAILED' }, { status: 500 });
     try {
       const success = await useAuthStore.getState().updateUser('staff-id', {
         name: 'New Name'
@@ -501,7 +496,7 @@ async function runProfileTests() {
   await runTest('sensitivePasswordIsNotLogged', async () => {
     let loggedData = '';
     const originalLog = console.log;
-    console.log = (...args: any[]) => {
+    console.log = (...args: unknown[]) => {
       loggedData += args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ');
     };
     try {
@@ -541,7 +536,7 @@ async function runProfileTests() {
     const staff = { id: 'staff-id', name: 'Staff name', username: 'staff1', role: 'FIELD' };
     let editingUserId: string | null = null;
     let editName = '';
-    const startEditingUserSim = (u: any) => {
+    const startEditingUserSim = (u: Pick<MockUser, 'id' | 'name'>) => {
       editingUserId = u.id;
       editName = u.name;
     };
@@ -569,7 +564,10 @@ async function runProfileTests() {
 
   // 20. adminEditFormLoadsExistingValues
   await runTest('adminEditFormLoadsExistingValues', async () => {
-    const user = {
+    const user: Pick<
+      MockUser,
+      'id' | 'name' | 'username' | 'role' | 'email' | 'phone' | 'tcNo' | 'address'
+    > = {
       id: 'u1',
       name: 'Nihat',
       username: 'nihat',
@@ -580,7 +578,9 @@ async function runProfileTests() {
       address: 'Addr'
     };
     let editName = '', editUsername = '', editRole = '', editEmail = '', editPhone = '', editTcNo = '', editAddress = '';
-    const startEditing = (u: any) => {
+    const startEditing = (
+      u: Pick<MockUser, 'name' | 'username' | 'role' | 'email' | 'phone' | 'tcNo' | 'address'>
+    ) => {
       editName = u.name;
       editUsername = u.username;
       editRole = u.role;
@@ -620,7 +620,7 @@ async function runProfileTests() {
       existingUser.email && 
       existingUser.phone;
 
-    let userRecord = { ...existingUser };
+    const userRecord = { ...existingUser };
     const name = 'New Name';
     const email = 'new@mail.com';
 
@@ -682,31 +682,31 @@ async function runProfileTests() {
 
   // 4. successfulCreateClosesForm
   await runTest('successfulCreateClosesForm', async () => {
-    let showAddForm: boolean = true;
-    const setShowAddFormSim = (val: boolean) => { showAddForm = val; };
-    let success = Math.random() >= 0;
+    const formState: { isOpen: boolean } = { isOpen: true };
+    const setShowAddFormSim = (val: boolean) => { formState.isOpen = val; };
+    const success = Math.random() >= 0;
     if (success) {
       setShowAddFormSim(false);
     }
-    if ((showAddForm as any) !== false) throw new Error('Form was not closed');
+    if (formState.isOpen !== false) throw new Error('Form was not closed');
   });
 
   // 5. successfulEditClosesForm
   await runTest('successfulEditClosesForm', async () => {
-    let editingUserId: string | null = 'staff-id';
-    const setEditingUserIdSim = (val: string | null) => { editingUserId = val; };
-    let success = Math.random() >= 0;
+    const editState: { userId: string | null } = { userId: 'staff-id' };
+    const setEditingUserIdSim = (val: string | null) => { editState.userId = val; };
+    const success = Math.random() >= 0;
     if (success) {
       setEditingUserIdSim(null);
     }
-    if ((editingUserId as any) !== null) throw new Error('Editing form was not closed');
+    if (editState.userId !== null) throw new Error('Editing form was not closed');
   });
 
   // 6. successfulCreateShowsSuccessMessage
   await runTest('successfulCreateShowsSuccessMessage', async () => {
     let message = '';
     const setMessageSim = (val: string) => { message = val; };
-    let success = Math.random() >= 0;
+    const success = Math.random() >= 0;
     if (success) {
       setMessageSim('Kullanıcı başarıyla eklendi.');
     }
@@ -717,7 +717,7 @@ async function runProfileTests() {
   await runTest('successfulEditShowsSuccessMessage', async () => {
     let message = '';
     const setMessageSim = (val: string) => { message = val; };
-    let success = Math.random() >= 0;
+    const success = Math.random() >= 0;
     if (success) {
       setMessageSim('Kullanıcı başarıyla güncellendi.');
     }
@@ -726,14 +726,14 @@ async function runProfileTests() {
 
   // 8. loadingClearsAfterSuccess
   await runTest('loadingClearsAfterSuccess', async () => {
-    let userLoading: boolean = false;
-    const setUserLoadingSim = (val: boolean) => { userLoading = val; };
+    const loadingState: { isLoading: boolean } = { isLoading: false };
+    const setUserLoadingSim = (val: boolean) => { loadingState.isLoading = val; };
     setUserLoadingSim(true);
     try {
     } finally {
       setUserLoadingSim(false);
     }
-    if ((userLoading as any) !== false) throw new Error('Loading state was not cleared');
+    if (loadingState.isLoading !== false) throw new Error('Loading state was not cleared');
   });
 
   // 9. currentUserUpdatesWhenAdminEditsOwnRecord
@@ -796,10 +796,10 @@ async function runProfileTests() {
     const originalFetch = global.fetch;
     global.fetch = async (url) => {
       if (url === '/api/admin/users/delete') {
-        return {
-          ok: true,
-          json: async () => ({ success: true, action: 'DELETED', userId: 'staff-id' })
-        } as any;
+        return Response.json(
+          { success: true, action: 'DELETED', userId: 'staff-id' },
+          { status: 200 }
+        );
       }
       return originalFetch(url);
     };
@@ -823,10 +823,10 @@ async function runProfileTests() {
     const originalFetch = global.fetch;
     global.fetch = async (url) => {
       if (url === '/api/admin/users/delete') {
-        return {
-          ok: false,
-          json: async () => ({ success: false, code: 'USER_HAS_LINKED_RECORDS', error: 'Linked records' })
-        } as any;
+        return Response.json(
+          { success: false, code: 'USER_HAS_LINKED_RECORDS', error: 'Linked records' },
+          { status: 409 }
+        );
       }
       return originalFetch(url);
     };
@@ -849,10 +849,10 @@ async function runProfileTests() {
     const originalFetch = global.fetch;
     global.fetch = async (url) => {
       if (url === '/api/admin/users/delete') {
-        return {
-          ok: false,
-          json: async () => ({ success: false, code: 'USER_HAS_LINKED_RECORDS' })
-        } as any;
+        return Response.json(
+          { success: false, code: 'USER_HAS_LINKED_RECORDS' },
+          { status: 409 }
+        );
       }
       return originalFetch(url);
     };
@@ -886,6 +886,7 @@ async function runProfileTests() {
     
     const simDeactivate = async () => { updateCalled = true; };
     const simDelete = async () => { deleteCalled = true; };
+    void simDelete;
     
     await simDeactivate();
     if (deleteCalled) throw new Error('Deactivate should not trigger delete');
@@ -900,9 +901,8 @@ async function runProfileTests() {
     useAuthStore.setState({ currentUser: admin, users: [admin, u1, u2] });
     
     const originalFetch = global.fetch;
-    global.fetch = async (url) => {
-      return { ok: true, json: async () => ({ success: true }) } as any;
-    };
+    global.fetch = async () =>
+      Response.json({ success: true }, { status: 200 });
 
     try {
       await useAuthStore.getState().deleteUser('u1');
@@ -921,9 +921,8 @@ async function runProfileTests() {
     useAuthStore.setState({ currentUser: admin, users: [admin, staff] });
     
     const originalFetch = global.fetch;
-    global.fetch = async (url) => {
-      return { ok: false, json: async () => ({ success: false }) } as any;
-    };
+    global.fetch = async () =>
+      Response.json({ success: false }, { status: 500 });
 
     try {
       await useAuthStore.getState().deleteUser('staff-id');
@@ -957,7 +956,7 @@ async function runProfileTests() {
 
   // 13. deleteRequiresExplicitConfirmation
   await runTest('deleteRequiresExplicitConfirmation', async () => {
-    let confirmSim = () => true;
+    const confirmSim = () => true;
     let promptSim = () => 'Nihat Ceylan';
 
     const normalizeTurkish = (str: string) => {
@@ -1076,23 +1075,22 @@ async function runProfileTests() {
   // 7. loginUsesNormalizedUsername
   await runTest('loginUsesNormalizedUsername', async () => {
     const originalFetch = global.fetch;
-    let requestPayload: any = null;
+    const requestState: { payload: { username?: string } | null } = { payload: null };
     global.fetch = async (url, options) => {
       if (url === '/api/auth/login') {
-        requestPayload = JSON.parse(options?.body as string);
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ success: true, user: { id: 'some-id', username: 'ceylin', role: 'FIELD' } })
-        } as any;
+        requestState.payload = JSON.parse(options?.body as string) as { username?: string };
+        return Response.json(
+          { success: true, user: { id: 'some-id', username: 'ceylin', role: 'FIELD' } },
+          { status: 200 }
+        );
       }
       return originalFetch(url, options);
     };
 
     try {
       await useAuthStore.getState().login(' CEYLİN ', '123');
-      if (requestPayload.username !== 'ceylin') {
-        throw new Error(`Expected normalized username in request payload, got: ${requestPayload.username}`);
+      if (requestState.payload?.username !== 'ceylin') {
+        throw new Error(`Expected normalized username in request payload, got: ${requestState.payload?.username}`);
       }
     } finally {
       global.fetch = originalFetch;
@@ -1234,12 +1232,10 @@ async function runProfileTests() {
     const originalFetch = global.fetch;
     global.fetch = async (url, options) => {
       if (url === '/api/admin/users/update') {
-        const body = JSON.parse(options?.body as string);
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ success: true, user: { ...target, password: 'new' } })
-        } as any;
+        return Response.json(
+          { success: true, user: { ...target, password: 'new' } },
+          { status: 200 }
+        );
       }
       return originalFetch(url, options);
     };
@@ -1289,7 +1285,7 @@ async function runProfileTests() {
       ]
     };
     const currentState = { users: [], currentUser: null, auditLog: [] };
-    const persistConfig = (useAuthStore as any).persist;
+    const persistConfig = (useAuthStore as unknown as PersistMergeTestApi).persist;
     if (persistConfig && persistConfig.merge) {
       const merged = persistConfig.merge(dirtyPersistedState, currentState);
       const entry = merged.auditLog[0];
@@ -1331,7 +1327,7 @@ async function runProfileTests() {
   await runTest('editButtonOpensExistingUserForm', async () => {
     const user = normalizeUser({ id: 'u1', name: 'Nihat', role: 'FIELD' });
     let editingUserId: string | null = null;
-    const startEditingUser = (u: any) => {
+    const startEditingUser = (u: Pick<MockUser, 'id'>) => {
       editingUserId = u.id;
     };
     startEditingUser(user);
@@ -1341,9 +1337,9 @@ async function runProfileTests() {
   await runTest('editFormLoadsExistingValues', async () => {
     const user = normalizeUser({ id: 'u1', name: 'Nihat', email: 'n@n.com', phone: '123', role: 'FIELD' });
     let nameVal = '', emailVal = '', roleVal = '';
-    const startEditingUser = (u: any) => {
+    const startEditingUser = (u: Pick<MockUser, 'name' | 'email' | 'role'>) => {
       nameVal = u.name;
-      emailVal = u.email;
+      emailVal = u.email || '';
       roleVal = u.role;
     };
     startEditingUser(user);
@@ -1355,8 +1351,8 @@ async function runProfileTests() {
   await runTest('editButtonDoesNotToggleActiveState', async () => {
     const user = normalizeUser({ id: 'u1', name: 'Nihat', isActive: true });
     let isEditing = false;
-    let isActive = user.isActive;
-    const onEditClick = (e: any) => {
+    const isActive = user.isActive;
+    const onEditClick = (e: SimulatedClickEvent) => {
       e.stopPropagation();
       isEditing = true;
     };
@@ -1366,9 +1362,8 @@ async function runProfileTests() {
   });
 
   await runTest('editButtonDoesNotTriggerDelete', async () => {
-    const user = normalizeUser({ id: 'u1', name: 'Nihat' });
-    let isDeleteTriggered = false;
-    const onEditClick = (e: any) => {
+    const isDeleteTriggered = false;
+    const onEditClick = (e: SimulatedClickEvent) => {
       e.stopPropagation();
     };
     onEditClick({ stopPropagation: () => {} });
@@ -1383,11 +1378,10 @@ async function runProfileTests() {
     const originalFetch = global.fetch;
     global.fetch = async (url) => {
       if (url === '/api/admin/users/update') {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ success: true, user: { ...staff, isActive: false } })
-        } as any;
+        return Response.json(
+          { success: true, user: { ...staff, isActive: false } },
+          { status: 200 }
+        );
       }
       return originalFetch(url);
     };
@@ -1410,11 +1404,10 @@ async function runProfileTests() {
     const originalFetch = global.fetch;
     global.fetch = async (url) => {
       if (url === '/api/admin/users/update') {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ success: true, user: { ...staff, isActive: true } })
-        } as any;
+        return Response.json(
+          { success: true, user: { ...staff, isActive: true } },
+          { status: 200 }
+        );
       }
       return originalFetch(url);
     };
@@ -1430,8 +1423,8 @@ async function runProfileTests() {
   });
 
   await runTest('activeBadgeDoesNotOpenEdit', async () => {
-    let editingId: string | null = null;
-    const onBadgeClick = (e: any) => {
+    const editingId: string | null = null;
+    const onBadgeClick = (e: SimulatedClickEvent) => {
       e.stopPropagation();
     };
     onBadgeClick({ stopPropagation: () => {} });
@@ -1439,8 +1432,8 @@ async function runProfileTests() {
   });
 
   await runTest('activeBadgeDoesNotDeleteUser', async () => {
-    let deleted = false;
-    const onBadgeClick = (e: any) => {
+    const deleted = false;
+    const onBadgeClick = (e: SimulatedClickEvent) => {
       e.stopPropagation();
     };
     onBadgeClick({ stopPropagation: () => {} });
@@ -1451,7 +1444,7 @@ async function runProfileTests() {
     const admin = normalizeUser({ id: 'admin-id', role: 'ADMIN', password: '123' });
     const staff = normalizeUser({ id: 'staff-id', role: 'FIELD', isActive: true });
     useAuthStore.setState({ currentUser: admin, users: [admin, staff] });
-    const onDeleteClick = (e: any) => {
+    const onDeleteClick = (e: SimulatedClickEvent) => {
       e.stopPropagation();
     };
     onDeleteClick({ stopPropagation: () => {} });
@@ -1472,11 +1465,10 @@ async function runProfileTests() {
     const originalFetch = global.fetch;
     global.fetch = async (url) => {
       if (url === '/api/admin/users/update') {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ success: true, user: { ...staff, name: 'New Name' } })
-        } as any;
+        return Response.json(
+          { success: true, user: { ...staff, name: 'New Name' } },
+          { status: 200 }
+        );
       }
       return originalFetch(url);
     };
@@ -1499,11 +1491,10 @@ async function runProfileTests() {
     const originalFetch = global.fetch;
     global.fetch = async (url) => {
       if (url === '/api/admin/users/update') {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ success: true, user: { ...staff, name: 'New Name' } })
-        } as any;
+        return Response.json(
+          { success: true, user: { ...staff, name: 'New Name' } },
+          { status: 200 }
+        );
       }
       return originalFetch(url);
     };
@@ -1520,7 +1511,7 @@ async function runProfileTests() {
   await runTest('sensitiveFieldsAreNotLogged', async () => {
     let loggedData = '';
     const originalLog = console.log;
-    console.log = (...args: any[]) => {
+    console.log = (...args: unknown[]) => {
       loggedData += args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ');
     };
 
@@ -1559,34 +1550,32 @@ async function runProfileTests() {
     useAuthStore.setState({ currentUser: admin, users: [admin] });
 
     const originalFetch = global.fetch;
-    let createdUser: any = null;
+    const createdUserState: { user: AdminUserUpdateBody | null } = { user: null };
 
     global.fetch = async (url, options) => {
       if (typeof url === 'string' && url.includes('/api/admin/users/update')) {
-        createdUser = JSON.parse(options?.body as string);
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            success: true,
-            user: { ...createdUser, isActive: true }
-          })
-        } as any;
+        createdUserState.user = JSON.parse(options?.body as string) as AdminUserUpdateBody;
+        return Response.json(
+          { success: true, user: { ...createdUserState.user, isActive: true } },
+          { status: 200 }
+        );
       }
       if (typeof url === 'string' && url.includes('/api/auth/login')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
+        if (!createdUserState.user) {
+          return Response.json({ success: false, error: 'User was not created' }, { status: 409 });
+        }
+        return Response.json(
+          {
             success: true,
-            user: { ...createdUser, isActive: true },
+            user: { ...createdUserState.user, isActive: true },
             session: {
               token: 'test-login-session-token',
               expiresAt: '2099-12-31T23:59:59.000Z',
               rememberMe: false
             }
-          })
-        } as any;
+          },
+          { status: 200 }
+        );
       }
       return originalFetch(url, options);
     };
@@ -1616,34 +1605,32 @@ async function runProfileTests() {
     useAuthStore.setState({ currentUser: admin, users: [admin] });
 
     const originalFetch = global.fetch;
-    let createdUser: any = null;
+    const createdUserState: { user: AdminUserUpdateBody | null } = { user: null };
 
     global.fetch = async (url, options) => {
       if (typeof url === 'string' && url.includes('/api/admin/users/update')) {
-        createdUser = JSON.parse(options?.body as string);
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            success: true,
-            user: { ...createdUser, isActive: true }
-          })
-        } as any;
+        createdUserState.user = JSON.parse(options?.body as string) as AdminUserUpdateBody;
+        return Response.json(
+          { success: true, user: { ...createdUserState.user, isActive: true } },
+          { status: 200 }
+        );
       }
       if (typeof url === 'string' && url.includes('/api/auth/login')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
+        if (!createdUserState.user) {
+          return Response.json({ success: false, error: 'User was not created' }, { status: 409 });
+        }
+        return Response.json(
+          {
             success: true,
-            user: { ...createdUser, isActive: true },
+            user: { ...createdUserState.user, isActive: true },
             session: {
               token: 'test-login-session-token',
               expiresAt: '2099-12-31T23:59:59.000Z',
               rememberMe: false
             }
-          })
-        } as any;
+          },
+          { status: 200 }
+        );
       }
       return originalFetch(url, options);
     };
@@ -1676,17 +1663,16 @@ async function runProfileTests() {
     global.fetch = async (url, options) => {
       if (typeof url === 'string' && url.includes('/api/admin/users/update')) {
         if (options?.method === 'GET') {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
+          return Response.json(
+            {
               success: true,
               users: [
                 { id: 'admin-id', name: 'Admin', username: 'admin', role: 'ADMIN', isActive: true },
                 { id: 'field-1', name: 'Field User', username: 'field1', role: 'FIELD', isActive: true }
               ]
-            })
-          } as any;
+            },
+            { status: 200 }
+          );
         }
       }
       return originalFetch(url, options);
@@ -1710,14 +1696,13 @@ async function runProfileTests() {
     global.fetch = async (url, options) => {
       if (typeof url === 'string' && url.includes('/api/auth/login')) {
         loginUsername = JSON.parse(options?.body as string).username;
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
+        return Response.json(
+          {
             success: true,
             user: { id: 'user-1', username: 'ceylin', role: 'FIELD', isActive: true }
-          })
-        } as any;
+          },
+          { status: 200 }
+        );
       }
       return originalFetch(url, options);
     };
@@ -1742,11 +1727,10 @@ async function runProfileTests() {
     const originalFetch = global.fetch;
     global.fetch = async (url, options) => {
       if (typeof url === 'string' && url.includes('/api/auth/login')) {
-        return {
-          ok: false,
-          status: 401,
-          json: async () => ({ success: false, error: 'User is inactive' })
-        } as any;
+        return Response.json(
+          { success: false, error: 'User is inactive' },
+          { status: 401 }
+        );
       }
       return originalFetch(url, options);
     };
@@ -1766,10 +1750,8 @@ async function runProfileTests() {
     const originalFetch = global.fetch;
     global.fetch = async (url, options) => {
       if (typeof url === 'string' && url.includes('/api/auth/login')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
+        return Response.json(
+          {
             success: true,
             user: { id: 'field-1', username: 'field1', role: 'FIELD', isActive: true },
             session: {
@@ -1777,8 +1759,9 @@ async function runProfileTests() {
               expiresAt: '2099-12-31T23:59:59.000Z',
               rememberMe: false
             }
-          })
-        } as any;
+          },
+          { status: 200 }
+        );
       }
       return originalFetch(url, options);
     };
@@ -1796,18 +1779,17 @@ async function runProfileTests() {
     useAuthStore.setState({ currentUser: user, users: [user] });
 
     const originalFetch = global.fetch;
-    let updateBody: any = null;
+    const updateState: { body: AdminUserUpdateBody | null } = { body: null };
     global.fetch = async (url, options) => {
       if (typeof url === 'string' && url.includes('/api/admin/users/update')) {
-        updateBody = JSON.parse(options?.body as string);
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
+        updateState.body = JSON.parse(options?.body as string) as AdminUserUpdateBody;
+        return Response.json(
+          {
             success: true,
-            user: { ...user, ...updateBody }
-          })
-        } as any;
+            user: { ...user, ...updateState.body }
+          },
+          { status: 200 }
+        );
       }
       return originalFetch(url, options);
     };
@@ -1821,7 +1803,7 @@ async function runProfileTests() {
       });
 
       if (!success) throw new Error('Profile update failed');
-      if (updateBody.name !== 'Nihat Ceylan' || !updateBody.profileCompletedAt) {
+      if (updateState.body?.name !== 'Nihat Ceylan' || !updateState.body.profileCompletedAt) {
         throw new Error('Profile details not written to server payload');
       }
     } finally {
@@ -1837,16 +1819,15 @@ async function runProfileTests() {
     let updateId = '';
     global.fetch = async (url, options) => {
       if (typeof url === 'string' && url.includes('/api/admin/users/update')) {
-        const body = JSON.parse(options?.body as string);
+        const body = JSON.parse(options?.body as string) as AdminUserUpdateBody;
         updateId = body.id;
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
+        return Response.json(
+          {
             success: true,
             user: { ...user, ...body }
-          })
-        } as any;
+          },
+          { status: 200 }
+        );
       }
       return originalFetch(url, options);
     };
@@ -1872,10 +1853,8 @@ async function runProfileTests() {
     const originalFetch = global.fetch;
     global.fetch = async (url, options) => {
       if (typeof url === 'string' && url.includes('/api/admin/users/update') && options?.method === 'GET') {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
+        return Response.json(
+          {
             success: true,
             users: [
               {
@@ -1891,8 +1870,9 @@ async function runProfileTests() {
                 profileCompletedAt: '2026-07-15T12:00:00Z'
               }
             ]
-          })
-        } as any;
+          },
+          { status: 200 }
+        );
       }
       return originalFetch(url, options);
     };
@@ -1979,11 +1959,10 @@ async function runProfileTests() {
     const originalFetch = global.fetch;
     global.fetch = async (url, options) => {
       if (typeof url === 'string' && url.includes('/api/auth/login')) {
-        return {
-          ok: false,
-          status: 401,
-          json: async () => ({ success: false, error: 'Default password rejected' })
-        } as any;
+        return Response.json(
+          { success: false, error: 'Default password rejected' },
+          { status: 401 }
+        );
       }
       return originalFetch(url, options);
     };
@@ -2003,10 +1982,8 @@ async function runProfileTests() {
     const originalFetch = global.fetch;
     global.fetch = async (url, options) => {
       if (typeof url === 'string' && url.includes('/api/auth/login')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
+        return Response.json(
+          {
             success: true,
             user: { id: 'user-admin', username: 'admin', role: 'ADMIN', isActive: true },
             session: {
@@ -2014,8 +1991,9 @@ async function runProfileTests() {
               expiresAt: '2099-12-31T23:59:59.000Z',
               rememberMe: false
             }
-          })
-        } as any;
+          },
+          { status: 200 }
+        );
       }
       return originalFetch(url, options);
     };
@@ -2035,10 +2013,8 @@ async function runProfileTests() {
     const originalFetch = global.fetch;
     global.fetch = async (url, options) => {
       if (typeof url === 'string' && url.includes('/api/auth/login')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
+        return Response.json(
+          {
             success: true,
             user: { id: 'staff-id', username: 'fielduser', role: 'FIELD', isActive: true },
             session: {
@@ -2046,8 +2022,9 @@ async function runProfileTests() {
               expiresAt: '2099-12-31T23:59:59.000Z',
               rememberMe: false
             }
-          })
-        } as any;
+          },
+          { status: 200 }
+        );
       }
       return originalFetch(url, options);
     };
@@ -2067,10 +2044,8 @@ async function runProfileTests() {
     const originalFetch = global.fetch;
     global.fetch = async (url, options) => {
       if (typeof url === 'string' && url.includes('/api/auth/login')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
+        return Response.json(
+          {
             success: true,
             user: { id: 'mod-id', username: 'moduser', role: 'MODERATOR', isActive: true },
             session: {
@@ -2078,8 +2053,9 @@ async function runProfileTests() {
               expiresAt: '2099-12-31T23:59:59.000Z',
               rememberMe: false
             }
-          })
-        } as any;
+          },
+          { status: 200 }
+        );
       }
       return originalFetch(url, options);
     };
@@ -2099,11 +2075,10 @@ async function runProfileTests() {
     const originalFetch = global.fetch;
     global.fetch = async (url, options) => {
       if (typeof url === 'string' && url.includes('/api/auth/login')) {
-        return {
-          ok: false,
-          status: 401,
-          json: async () => ({ success: false, error: 'Wrong password' })
-        } as any;
+        return Response.json(
+          { success: false, error: 'Wrong password' },
+          { status: 401 }
+        );
       }
       return originalFetch(url, options);
     };
@@ -2123,11 +2098,10 @@ async function runProfileTests() {
     const originalFetch = global.fetch;
     global.fetch = async (url, options) => {
       if (typeof url === 'string' && url.includes('/api/auth/login')) {
-        return {
-          ok: false,
-          status: 401,
-          json: async () => ({ success: false, error: 'User is inactive' })
-        } as any;
+        return Response.json(
+          { success: false, error: 'User is inactive' },
+          { status: 401 }
+        );
       }
       return originalFetch(url, options);
     };

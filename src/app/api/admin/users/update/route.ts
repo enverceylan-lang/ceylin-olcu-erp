@@ -19,6 +19,22 @@ const supabaseServer = createClient(supabaseUrl, supabaseServiceKey, {
   },
 });
 
+type UserRecord = {
+  id: string;
+  name: string;
+  username: string;
+  password: string | null;
+  role: string;
+  isActive: boolean;
+  permissions: unknown[];
+  createdAt: string;
+  updatedAt: string;
+  email: string | null;
+  phone: string | null;
+  tcNo: string | null;
+  address: string | null;
+  profileCompletedAt: string | null;
+};
 function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
@@ -257,7 +273,7 @@ export async function POST(req: NextRequest) {
     }
 
     const now = new Date().toISOString();
-    let userRecord: any;
+    let userRecord: UserRecord;
 
     if (isCreate) {
       userRecord = {
@@ -288,7 +304,7 @@ export async function POST(req: NextRequest) {
       };
     } else {
       userRecord = {
-        ...existingUser,
+        ...(existingUser as UserRecord),
         updatedAt: now,
       };
 

@@ -4,5 +4,7 @@ export const PILOT_MEDIA_LIMITS = {
 };
 
 export function fileToDataUrl(file: File, type: 'photo' | 'video'): Promise<string> {
+  void file;
+  void type;
   return Promise.reject(new Error("Fotoğraf yükleme kalıcı medya depolama fazında açılacak. Ölçü bilgileriniz kaydedildi."));
 }

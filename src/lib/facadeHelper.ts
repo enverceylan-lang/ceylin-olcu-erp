@@ -43,7 +43,6 @@ export function parseFacadeInput(input: string): { segments: FacadeSegment[], er
   // It handles optional spaces between number and word.
   const regex = /([\d.,]+)\s*([a-zA-ZçÇğĞıİöÖşŞüÜ]+)/g;
   let match;
-  let lastIndex = 0;
   let order = 1;
 
   while ((match = regex.exec(input)) !== null) {
@@ -75,7 +74,6 @@ export function parseFacadeInput(input: string): { segments: FacadeSegment[], er
       label: mapped.label,
     });
 
-    lastIndex = regex.lastIndex;
   }
 
   // Check if there's any unparsed junk at the end or anywhere
@@ -95,7 +93,6 @@ export function formatFacadeForReport(segments: FacadeSegment[]): string {
   
   const shortFormat = segments.map(s => `[${s.label[0]} ${s.widthCm}]`).join(" ");
   const longFormat = segments.map(s => `${s.label} ${s.widthCm}`).join(" + ");
-  const total = segments.reduce((sum, s) => sum + (s.widthCm > 0 ? s.widthCm : 0), 0);
   
   return `CEPHE EN DİZİLİMİ\n${shortFormat}\n\nAçılım:\n${longFormat}`;
 }

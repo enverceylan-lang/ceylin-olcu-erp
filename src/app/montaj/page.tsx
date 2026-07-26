@@ -1,16 +1,23 @@
 "use client";
 
-import { Wrench, Calendar, MapPin, Shield } from "lucide-react";
+import { Calendar, MapPin, Shield } from "lucide-react";
 import { useStore } from "@/store/useStore";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { useAuthStore, normalizeRole } from "@/store/useAuthStore";
+
+const subscribeToHydration = () => () => {};
+const getClientSnapshot = () => true;
+const getServerSnapshot = () => false;
 
 export default function MontajPage() {
   const { montageTasks, customers, updateMontageStatus, updateMontageTask } = useStore();
   const { currentUser, users } = useAuthStore();
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    subscribeToHydration,
+    getClientSnapshot,
+    getServerSnapshot,
+  );
 
-  useEffect(() => setMounted(true), []);
 
   if (!mounted) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
 

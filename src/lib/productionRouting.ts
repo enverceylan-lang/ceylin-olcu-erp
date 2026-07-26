@@ -12,7 +12,21 @@ export function normalizeText(text: string): string {
   return text.split('').map(char => map[char] || char.toUpperCase()).join('');
 }
 
-export function shouldCreateTailorProductionItem(saleItem: any, product?: any): boolean {
+interface ProductionRoutingSaleItem {
+  productGroup?: string;
+  productType?: string;
+}
+
+interface ProductionRoutingProduct {
+  stockCode?: string;
+  name?: string;
+  category?: string;
+}
+
+export function shouldCreateTailorProductionItem(
+  saleItem: ProductionRoutingSaleItem,
+  product?: ProductionRoutingProduct
+): boolean {
   if (!saleItem) return false;
 
   const pg = (saleItem.productGroup || "").trim();
@@ -29,7 +43,9 @@ export function shouldCreateTailorProductionItem(saleItem: any, product?: any): 
     product?.stockCode,
     product?.name,
     product?.category
-  ].filter(Boolean).map(t => normalizeText(t));
+  ]
+    .filter((text): text is string => Boolean(text))
+    .map(text => normalizeText(text));
 
   const isMechanical = texts.some(text =>
     ["STOR", "ZEBRA", "PLICELL", "JALUZI", "AHSAP", "PICASSO", "DIKEY", "MEKANIK"].some(kw => text.includes(kw))

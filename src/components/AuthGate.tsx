@@ -1,16 +1,20 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useSyncExternalStore } from "react";
 import { useAuthStore, normalizeRole, canViewModule, normalizeUser } from "@/store/useAuthStore";
 import { usePathname, useRouter } from "next/navigation";
 import { ShieldAlert, Lock, User, KeyRound, ArrowRight } from "lucide-react";
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
-  const { currentUser: rawCurrentUser, login, users } = useAuthStore();
+  const { currentUser: rawCurrentUser, login } = useAuthStore();
   const pathname = usePathname();
   const router = useRouter();
   
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(true);
@@ -26,22 +30,32 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [profileAddress, setProfileAddress] = useState("");
   const [profileError, setProfileError] = useState("");
 
-  const currentUser = rawCurrentUser ? normalizeUser(rawCurrentUser) : null;
-  const currentUserId = currentUser?.id;
+  const currentUser = rawCurrentUser
+    ? normalizeUser(rawCurrentUser)
+    : null;
 
   useEffect(() => {
-    if (currentUser) {
-      setProfileName(currentUser.name || "");
-      setProfileEmail(currentUser.email || "");
-      setProfilePhone(currentUser.phone || "");
-      setProfileTcNo(currentUser.tcNo || "");
-      setProfileAddress(currentUser.address || "");
-    }
-  }, [currentUserId]);
+    if (!rawCurrentUser) return;
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+    const normalizedUser =
+      normalizeUser(rawCurrentUser);
+
+    let cancelled = false;
+
+    queueMicrotask(() => {
+      if (cancelled) return;
+
+      setProfileName(normalizedUser.name || "");
+      setProfileEmail(normalizedUser.email || "");
+      setProfilePhone(normalizedUser.phone || "");
+      setProfileTcNo(normalizedUser.tcNo || "");
+      setProfileAddress(normalizedUser.address || "");
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [rawCurrentUser]);
 
   // Check if system needs bootstrap
   useEffect(() => {
@@ -112,8 +126,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         } else {
           setError(data.error || "Kurulum başlatılamadı.");
         }
-      } catch (err: any) {
-        setError(err.message || "Ağ hatası oluştu.");
+      } catch (error: unknown) {
+        setError(
+          error instanceof Error
+            ? error.message
+            : "Ağ hatası oluştu.",
+        );
       } finally {
         setBootstrapLoading(false);
       }
@@ -216,7 +234,6 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   // Check if profile is incomplete
   const isAdmin = currentUser && normalizeRole(currentUser.role) === 'ADMIN';
-  const isSettingsPage = pathname.startsWith('/ayarlar');
   
   const isProfileIncomplete = currentUser && (
     !currentUser.profileCompletedAt ||
@@ -265,7 +282,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             router.replace("/");
           }
         }
-      }).catch((err) => {
+      }).catch(() => {
         setProfileError("Profil güncellenirken hata oluştu.");
       });
 

@@ -9,6 +9,19 @@ import type {
 import {
   CALCULATION_ENGINE_VERSION
 } from './version';
+type LegacyRecord = Record<string, unknown>;
+
+function asLegacyRecord(value: unknown): LegacyRecord {
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  ) {
+    return value as LegacyRecord;
+  }
+
+  return {};
+}
 
 function numberOrUndefined(
   value: unknown
@@ -32,7 +45,7 @@ function positiveNumberOrUndefined(
 
 function inferUnit(
   productType: string,
-  legacy: Record<string, any>
+  legacy: LegacyRecord
 ): CalculationUnit {
   const norm = productType.toUpperCase();
 
@@ -78,26 +91,35 @@ function normalizeGroups(
   }
 
   return groups.map(
-    (group: Record<string, any>, index: number) => ({
+    (groupValue: unknown, index: number) => {
+      const group = asLegacyRecord(groupValue);
+
+      return {
       ...group,
 
       id:
-        group.id ||
-        group.generatedItemId ||
-        `group-${index + 1}`,
+        String(
+          group.id ||
+          group.generatedItemId ||
+          `group-${index + 1}`
+        ),
 
       label:
-        group.label ||
-        (
-          group.groupType === 'KAPI'
-            ? 'Kapı'
-            : group.groupType === 'CAM_PENCERE'
-              ? 'Cam / Pencere'
-              : `Parça ${index + 1}`
+        String(
+          group.label ||
+          (
+            group.groupType === 'KAPI'
+              ? 'Kapı'
+              : group.groupType === 'CAM_PENCERE'
+                ? 'Cam / Pencere'
+                : `Parça ${index + 1}`
+          )
         ),
 
       groupType:
-        group.groupType,
+        typeof group.groupType === 'string'
+          ? group.groupType
+          : undefined,
 
       realWidthCm:
         numberOrUndefined(
@@ -157,13 +179,14 @@ function normalizeGroups(
         numberOrUndefined(
           group.lastSegmentIndex
         )
-    })
+      };
+    }
   );
 }
 
 function normalizeSalesItems(
   productType: string,
-  legacy: Record<string, any>,
+  legacy: LegacyRecord,
   defaultUnit: CalculationUnit
 ): CalculationSalesItem[] {
   const sourceItems =
@@ -184,9 +207,11 @@ function normalizeSalesItems(
 
   return sourceItems.map(
     (
-      item: Record<string, any>,
+      itemValue: unknown,
       index: number
     ) => {
+      const item = asLegacyRecord(itemValue);
+
       const fabricMeters =
         positiveNumberOrUndefined(
           item.fabricMeters ??
@@ -233,8 +258,10 @@ function normalizeSalesItems(
         ...item,
 
         id:
-          item.id ||
-          `${productType}-${index + 1}`,
+          String(
+            item.id ||
+            `${productType}-${index + 1}`
+          ),
 
         productType:
           String(
@@ -319,7 +346,7 @@ function normalizeSalesItems(
 }
 
 function normalizeWarnings(
-  legacy: Record<string, any>
+  legacy: LegacyRecord
 ): CalculationWarning[] {
   const warnings: CalculationWarning[] = [];
 
@@ -353,8 +380,8 @@ function normalizeWarnings(
 
 export function normalizeCalculationResult(
   productType: string,
-  legacyCalculation: Record<string, any>
-): Record<string, any> & CalculationEngineResult {
+  legacyCalculation: LegacyRecord
+): LegacyRecord & CalculationEngineResult {
   const norm =
     String(productType || '')
       .toUpperCase();
@@ -454,7 +481,9 @@ export function normalizeCalculationResult(
       ),
 
     description:
-      legacyCalculation.description,
+      typeof legacyCalculation.description === 'string'
+        ? legacyCalculation.description
+        : undefined,
 
     legacyCalculation
   };

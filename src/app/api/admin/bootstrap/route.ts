@@ -28,7 +28,7 @@ export async function GET() {
 
     const needsBootstrap = !users || users.length === 0;
     return NextResponse.json({ success: true, needsBootstrap });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Bootstrap check error:", error);
     return NextResponse.json({ success: true, needsBootstrap: true });
   }
@@ -125,10 +125,16 @@ export async function POST(req: NextRequest) {
       isActive: true,
       createdAt: now
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Bootstrap action error:", error);
     return NextResponse.json(
-      { success: false, error: error.message || "Internal server error" },
+      {
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Internal server error",
+      },
       { status: 500 }
     );
   }

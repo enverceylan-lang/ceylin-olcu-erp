@@ -34,13 +34,26 @@ export function ExcelExportModal<T>({
       if (onFilterData) {
         exportData = onFilterData(data, filter);
       } else {
+        const getFlags = (item: T) =>
+          item as T & {
+            isActive?: boolean;
+            isDeleted?: boolean;
+            hasRisk?: boolean;
+          };
+
         // Fallback simple filters if onFilterData not provided
         if (filter === "ACTIVE") {
-          exportData = data.filter((item: any) => item.isActive !== false && !item.isDeleted);
+          exportData = data.filter(item => {
+            const flags = getFlags(item);
+            return flags.isActive !== false && !flags.isDeleted;
+          });
         } else if (filter === "PASSIVE") {
-          exportData = data.filter((item: any) => item.isActive === false || item.isDeleted);
+          exportData = data.filter(item => {
+            const flags = getFlags(item);
+            return flags.isActive === false || flags.isDeleted;
+          });
         } else if (filter === "WITH_RISK") {
-          exportData = data.filter((item: any) => item.hasRisk === true);
+          exportData = data.filter(item => getFlags(item).hasRisk === true);
         }
       }
 
@@ -55,8 +68,8 @@ export function ExcelExportModal<T>({
       
       exportToExcel(exportData, profile, template, fileName);
       onClose();
-    } catch (err: any) {
-      alert("Hata: " + err.message);
+    } catch (err: unknown) {
+      alert("Hata: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setIsProcessing(false);
     }
@@ -71,7 +84,7 @@ export function ExcelExportModal<T>({
           <div>
             <h2 className="text-xl font-bold flex items-center gap-2">
               <FileSpreadsheet className="w-5 h-5 text-indigo-600" />
-              Excel'e Aktar
+              Excel&apos;e Aktar
             </h2>
             <p className="text-sm text-gray-500 mt-1">
               Dışa aktarım için şablon ve filtre seçin

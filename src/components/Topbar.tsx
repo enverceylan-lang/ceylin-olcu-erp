@@ -2,13 +2,16 @@
 
 import { useTheme } from "next-themes";
 import { Moon, Sun, Menu, Bell, Cloud, CloudOff, RefreshCw, AlertCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useAuthStore, ROLE_PERMISSIONS, normalizeUser } from "@/store/useAuthStore";
 import { useUiStore } from "@/store/useUiStore";
 import { useStore } from "@/store/useStore";
-import { syncNow } from "@/lib/syncService";
 import { pushDeltaSyncEvents } from "@/lib/deltaSyncClient";
-import { forceRequeueAllMeasurementDrafts } from "@/lib/localDraftDb";
+import { CLOUD_SYNC_DISABLED } from "@/lib/syncService";
+import { ErpScopeSelector } from "@/components/ErpScopeSelector";
+const subscribeToHydration = () => () => {};
+const getClientSnapshot = () => true;
+const getServerSnapshot = () => false;
 
 const ROLE_BADGE_COLORS: Record<string, string> = {
   ADMIN: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
@@ -27,11 +30,13 @@ export function Topbar() {
   const { currentUser: rawCurrentUser } = useAuthStore();
   const { toggleMobileMenu } = useUiStore();
   const syncStatus = useStore((state) => state.syncStatus);
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    subscribeToHydration,
+    getClientSnapshot,
+    getServerSnapshot,
+  );
   const [isPushing, setIsPushing] = useState(false);
-  const [isRecovering, setIsRecovering] = useState(false);
 
-  useEffect(() => setMounted(true), []);
 
   if (!rawCurrentUser) return null;
 
@@ -59,30 +64,16 @@ firstStatus: ${result.debug.firstStatus}
       } else {
         alert(`Ölçüler gönderilemedi. İnternet bağlantısını kontrol edip tekrar deneyin.` + (isDev ? `\n\nDETAY: ${result.errors.join(', ')}\n\nDEBUG:\n${debugText}` : ''));
       }
-    } catch (err: any) {
+    } catch (error: unknown) {
       alert(`Beklenmeyen hata oluştu. Lütfen tekrar deneyin.`);
       if (process.env.NODE_ENV === 'development') {
-        console.error("Manual push failed:", err);
+        console.error("Manual push failed:", error);
       }
     } finally {
       setIsPushing(false);
     }
   };
 
-  
-  const handleRecover = async () => {
-    if (!confirm("Eksik aktarılan yerel ölçüleri tam veriyle tekrar eşitleme kuyruğuna almak istiyor musunuz?")) return;
-    
-    setIsRecovering(true);
-    try {
-      const summary = await forceRequeueAllMeasurementDrafts();
-      alert(`Recovery Özeti:\nDraft Toplam: ${summary.draftsFound}\nÖlçü İçeren: ${summary.draftsWithMeasurements}\nKuyruğa Alınan: ${summary.draftsRequeued}\nAtlanan (Ölçüsüz veya Zaten Kurtarılmış): ${summary.skipped}\n\nBu cihazdaki ölçüler tekrar gönderim kuyruğuna alındı. Şimdi "Ölçüleri Gönder" butonuna basabilirsiniz.`);
-    } catch (err: any) {
-      alert("Kurtarma sırasında hata oluştu: " + err.message);
-    } finally {
-      setIsRecovering(false);
-    }
-  };
 
   const currentUser = normalizeUser(rawCurrentUser);
 
@@ -109,25 +100,31 @@ firstStatus: ${result.debug.firstStatus}
             </span>
 
             <div className="flex items-center gap-1.5 border-l border-gray-200 dark:border-gray-800 pl-3 ml-1">
-              {syncStatus === 'synced' && (
+              {CLOUD_SYNC_DISABLED && (
+                <span className="flex items-center gap-1 text-xs font-medium text-slate-500 dark:text-slate-400" title="Ana bulut senkronizasyonu kapalı; veriler bu cihazda korunuyor">
+                  <CloudOff className="w-3.5 h-3.5" />
+                  <span className="hidden md:inline">Yerel Mod</span>
+                </span>
+              )}
+              {!CLOUD_SYNC_DISABLED && syncStatus === 'synced' && (
                 <span className="flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400" title="Senkronize edildi">
                   <Cloud className="w-3.5 h-3.5" />
                   <span className="hidden md:inline">Senkronize edildi</span>
                 </span>
               )}
-              {syncStatus === 'pending' && (
+              {!CLOUD_SYNC_DISABLED && syncStatus === 'pending' && (
                 <span className="flex items-center gap-1 text-xs font-medium text-amber-650 dark:text-amber-400" title="Senkron bekliyor">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                   <span className="hidden md:inline">Senkron bekliyor</span>
                 </span>
               )}
-              {syncStatus === 'offline' && (
+              {!CLOUD_SYNC_DISABLED && syncStatus === 'offline' && (
                 <span className="flex items-center gap-1 text-xs font-medium text-gray-500 dark:text-gray-400" title="Çevrimdışı">
                   <CloudOff className="w-3.5 h-3.5" />
                   <span className="hidden md:inline">Çevrimdışı</span>
                 </span>
               )}
-              {syncStatus === 'error' && (
+              {!CLOUD_SYNC_DISABLED && syncStatus === 'error' && (
                 <span className="flex items-center gap-1 text-xs font-medium text-red-500 dark:text-red-400" title="Senkron hatası">
                   <AlertCircle className="w-3.5 h-3.5" />
                   <span className="hidden md:inline">Senkron hatası</span>
@@ -153,6 +150,7 @@ firstStatus: ${result.debug.firstStatus}
       </div>
 
       <div className="flex items-center gap-4">
+        <ErpScopeSelector />
         <button className="p-2 rounded-md text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
           <Bell className="w-5 h-5" />
         </button>

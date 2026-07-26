@@ -408,20 +408,27 @@ export function RoomPreparationModal({
     }> =
       calculationGroups.length > 0
         ? calculationGroups.map(
-            (group: any, index: number) => ({
+            (group: unknown, index: number) => {
+              const values =
+                typeof group === "object" && group !== null
+                  ? group as Record<string, unknown>
+                  : {};
+
+              return {
               key:
                 String(
-                  group.generatedItemId ||
+                  values.generatedItemId ||
                   `${productType}-${index}`
                 ),
               label: `Parça ${index + 1}`,
               width: Number(
-                group.realWidthCm || 0
+                values.realWidthCm || 0
               ),
               normalHeight: Number(
-                group.realHeightCm || 0
+                values.realHeightCm || 0
               )
-            })
+              };
+            }
           )
         : [];
 

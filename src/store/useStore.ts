@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import { normalizeCariName } from '@/lib/stringUtils';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { useAuthStore, normalizeRole } from './useAuthStore';
-import { saveLocalCustomer, saveLocalCustomers, softDeleteLocalCustomer, loadLocalCustomers } from '@/lib/localCustomerDb';
+import { saveLocalCustomer, saveLocalCustomers, loadLocalCustomers } from '@/lib/localCustomerDb';
 import { shouldCreateTailorProductionItem } from '@/lib/productionRouting';
 
 
@@ -46,7 +46,7 @@ export function generateUUID(): string {
 export function sanitizeCustomersForPersist(customers: Customer[]): Customer[] {
   if (!Array.isArray(customers)) return [];
 
-  const isMediaString = (val: any): boolean => {
+  const isMediaString = (val: unknown): boolean => {
     if (typeof val !== 'string') return false;
     return val.startsWith('data:') || val.includes(';base64,') || val.length > 5000;
   };
@@ -86,8 +86,12 @@ const customStoreStorage = {
     if (typeof window === 'undefined') return;
     try {
       window.localStorage.setItem(name, value);
-    } catch (error: any) {
-      if (error.name === 'QuotaExceededError' || error.code === 22 || error.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
+    } catch (error: unknown) {
+      const storageError = error as {
+        name?: string;
+        code?: number;
+      };
+      if (storageError.name === 'QuotaExceededError' || storageError.code === 22 || storageError.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
         console.warn('[Zustand Storage] QuotaExceededError detected. Cleaning up base64 media and retrying...');
         try {
           const parsed = JSON.parse(value);
@@ -132,7 +136,7 @@ export interface MeasurementTemplate {
     label: string;
     type: 'number' | 'text' | 'select';
     options?: string[];
-    defaultValue?: any;
+    defaultValue?: unknown;
     optional?: boolean;
     hidden?: boolean;
   }[];
@@ -203,7 +207,10 @@ export interface SelectedProductItem {
   isActive: boolean;
   stockId?: string;
   applicationType?: string;
+  // Legacy calculation payloads differ by product type; narrow at each consumer.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   calculation?: Record<string, any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   userOverrides?: Record<string, any>;
   addedAt?: string;
   updatedAt?: string;
@@ -212,6 +219,8 @@ export interface SelectedProductItem {
 export interface ProductMeasurement {
   id: string;
   templateType: string;
+  // Legacy measurement templates use dynamic keys; narrow at each consumer.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   rawValues: Record<string, any>;
   productId?: string;
   productGroup?: string;
@@ -219,6 +228,7 @@ export interface ProductMeasurement {
   selectedProducts?: SelectedProductItem[];
   calculatedWidth?: number;
   calculatedHeight?: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   details?: Record<string, any>;
   notes: string;
   status: string;
@@ -374,8 +384,8 @@ export interface Customer {
   isLockedForAllTransactions?: boolean;
 
   externalSource?: 'OPAK' | 'MANUAL' | 'IMPORT';
-  rawImportData?: Record<string, any>;
-  customFields?: Record<string, any>;
+  rawImportData?: Record<string, unknown>;
+  customFields?: Record<string, unknown>;
 }
 
 export interface Product {
@@ -482,6 +492,7 @@ export interface ProductionItem {
   width: number;
   height: number;
   quantity: number;
+  quantityUnit?: 'mt' | 'm2' | 'adet';
   pleatType?: string;
   wingQuantity?: number;   fonPlacement?: 'LEFT' | 'BOTH';
   productionStatus: string;
@@ -498,6 +509,26 @@ export interface ProductionItem {
   approvedExtraWorkFee?: number;
 }
 
+interface StoreActor {
+  name?: string;
+  email?: string;
+}
+
+interface CascadeEntity {
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deleteBatchId?: string;
+  deleteSource?: string;
+  isArchived?: boolean;
+  archivedAt?: string;
+  archivedBy?: string;
+  archiveBatchId?: string;
+  archiveSource?: string;
+  windows?: CascadeEntity[];
+  products?: CascadeEntity[];
+}
+
 interface AppState {
   customers: Customer[];
   products: Product[];
@@ -511,17 +542,17 @@ interface AppState {
   addCustomer: (customer: Omit<Customer, 'rooms'> & { id?: string }) => Promise<void>;
   updateCustomer: (id: string, data: Partial<Customer>) => Promise<void>;
   deleteCustomer: (id: string) => Promise<void>;
-    archiveCustomer: (id: string, user: any) => Promise<void>;
-    restoreArchivedCustomer: (id: string, user: any) => Promise<void>;
-    moveCustomerToTrash: (id: string, user: any) => Promise<void>;
-    restoreCustomerFromTrash: (id: string, user: any) => Promise<void>;
+    archiveCustomer: (id: string, user: StoreActor | null) => Promise<void>;
+    restoreArchivedCustomer: (id: string, user: StoreActor | null) => Promise<void>;
+    moveCustomerToTrash: (id: string, user: StoreActor | null) => Promise<void>;
+    restoreCustomerFromTrash: (id: string, user: StoreActor | null) => Promise<void>;
   mergeCustomers: (sourceId: string, targetId: string) => Promise<void>;
 
   addRoom: (customerId: string, roomName: string) => Promise<string>;
   deleteRoom: (customerId: string, roomId: string) => Promise<void>;
   moveRoom: (sourceCustomerId: string, targetCustomerId: string, roomId: string) => Promise<void>;
 
-  addWindow: (customerId: string, roomId: string, windowName: string) => Promise<void>;
+  addWindow: (customerId: string, roomId: string, windowName: string) => Promise<string | null>;
   deleteWindow: (customerId: string, roomId: string, windowId: string) => Promise<void>;
 
   updateRoomAttachments: (customerId: string, roomId: string, photos: string[], videos: string[]) => Promise<void>;
@@ -721,7 +752,7 @@ export const useStore = create<AppState>()(
         const username = user?.name || user?.email || 'SYSTEM';
 
         // Helper to archive recursively
-        const cascadeArchive = (items: any[]): any[] => {
+        const cascadeArchive = <T extends CascadeEntity>(items: T[]): T[] => {
           if (!items) return [];
           return items.map(item => {
             if (item.isDeleted || item.isArchived) return item; // Don't touch already deleted/archived items
@@ -735,7 +766,7 @@ export const useStore = create<AppState>()(
               // Recurse children
               windows: item.windows ? cascadeArchive(item.windows) : undefined,
               products: item.products ? cascadeArchive(item.products) : undefined
-            };
+            } as T;
           });
         };
 
@@ -764,14 +795,15 @@ export const useStore = create<AppState>()(
         }
       },
 
-      restoreArchivedCustomer: async (id, user) => {
+      restoreArchivedCustomer: async (id, _user) => {
+        void _user;
         const state = get();
         const customer = state.customers.find(c => c.id === id);
         if (!customer || !customer.isArchived) return;
 
         const batchId = customer.archiveBatchId;
 
-        const cascadeRestore = (items: any[]): any[] => {
+        const cascadeRestore = <T extends CascadeEntity>(items: T[]): T[] => {
           if (!items) return [];
           return items.map(item => {
             if (item.isArchived && item.archiveBatchId === batchId) {
@@ -784,7 +816,7 @@ export const useStore = create<AppState>()(
                 archiveSource: undefined,
                 windows: item.windows ? cascadeRestore(item.windows) : undefined,
                 products: item.products ? cascadeRestore(item.products) : undefined
-              };
+              } as T;
             }
             // If it wasn't archived by THIS batch, we don't touch it
             return item;
@@ -824,7 +856,7 @@ export const useStore = create<AppState>()(
         const now = new Date().toISOString();
         const username = user?.name || user?.email || 'SYSTEM';
 
-        const cascadeTrash = (items: any[]): any[] => {
+        const cascadeTrash = <T extends CascadeEntity>(items: T[]): T[] => {
           if (!items) return [];
           return items.map(item => {
             if (item.isDeleted) return item; // Don't touch already deleted items
@@ -837,7 +869,7 @@ export const useStore = create<AppState>()(
               deleteSource: 'CUSTOMER_CASCADE',
               windows: item.windows ? cascadeTrash(item.windows) : undefined,
               products: item.products ? cascadeTrash(item.products) : undefined
-            };
+            } as T;
           });
         };
 
@@ -865,14 +897,15 @@ export const useStore = create<AppState>()(
         }
       },
 
-      restoreCustomerFromTrash: async (id, user) => {
+      restoreCustomerFromTrash: async (id, _user) => {
+        void _user;
         const state = get();
         const customer = state.customers.find(c => c.id === id);
         if (!customer || !customer.isDeleted) return;
 
         const batchId = customer.deleteBatchId;
 
-        const cascadeRestore = (items: any[]): any[] => {
+        const cascadeRestore = <T extends CascadeEntity>(items: T[]): T[] => {
           if (!items) return [];
           return items.map(item => {
             if (item.isDeleted && item.deleteBatchId === batchId) {
@@ -885,7 +918,7 @@ export const useStore = create<AppState>()(
                 deleteSource: undefined,
                 windows: item.windows ? cascadeRestore(item.windows) : undefined,
                 products: item.products ? cascadeRestore(item.products) : undefined
-              };
+              } as T;
             }
             return item;
           });
@@ -961,7 +994,7 @@ export const useStore = create<AppState>()(
           return {
             customers: state.customers.map(c => {
               if (c.id === targetId) return updatedTargetCustomer;
-              if (c.id === sourceId) return updatedSourceCustomer as any;
+              if (c.id === sourceId) return updatedSourceCustomer;
               return c;
             }),
             syncStatus: 'pending'
@@ -1012,21 +1045,12 @@ export const useStore = create<AppState>()(
       addRoom: async (customerId, roomName) => {
         const state = get();
         const now = new Date().toISOString();
-        const defaultWindow: WindowItem = {
-          id: generateUUID(),
-          name: "Pencere 1",
-          photos: [],
-          videos: [],
-          products: [],
-          createdAt: now,
-          updatedAt: now
-        };
         const newRoom: Room = {
           id: generateUUID(),
           name: roomName,
           photos: [],
           videos: [],
-          windows: [defaultWindow],
+          windows: [],
           createdAt: now,
           updatedAt: now
         };
@@ -1110,7 +1134,9 @@ export const useStore = create<AppState>()(
               syncStatus: 'pending'
             };
           });
+          return newWindow.id;
         }
+        return null;
       },
 
       deleteWindow: async (customerId, roomId, windowId) => {
@@ -1298,6 +1324,12 @@ export const useStore = create<AppState>()(
             width: item.width,
             height: item.height,
             quantity: item.quantity,
+            quantityUnit:
+              item.calculationType === 'mt' ||
+              item.calculationType === 'm2' ||
+              item.calculationType === 'adet'
+                ? item.calculationType
+                : undefined,
             pleatType: item.pleatType,
             productionStatus: 'READY_FOR_CUTTING',
             cutCompleted: false,
@@ -1394,7 +1426,7 @@ export const useStore = create<AppState>()(
       setCustomers: (customers) => {
         const sanitized = sanitizeCustomersForPersist(customers);
         set({ customers: sanitized });
-        saveLocalCustomers(sanitized).catch((err: any) => {
+        saveLocalCustomers(sanitized).catch((err: unknown) => {
           console.error('[Store] Failed to save customers to IndexedDB in setCustomers:', err);
         });
       },
@@ -1404,6 +1436,7 @@ export const useStore = create<AppState>()(
       name: 'curtain-erp-storage-v3', // V3 format
       partialize: (state) => {
         const { customers, ...rest } = state;
+        void customers;
         return rest;
       },
       storage: createJSONStorage(() => customStoreStorage),

@@ -9,7 +9,18 @@ interface ExcelImportModalProps<T> {
   onClose: () => void;
   profile: ExcelProfile<T>;
   existingData: T[];
-  onImport: (previewResult: PreviewResult) => Promise<void>;
+  onImport: (previewResult: PreviewResult<T>) => Promise<void>;
+}
+
+function getPrimaryDataLabel(data: unknown): string {
+  if (!data || typeof data !== 'object') return '-';
+  const row = data as Record<string, unknown>;
+  return String(
+    row.customerCode ||
+    row.stockCode ||
+    row.name ||
+    '-'
+  );
 }
 
 export function ExcelImportModal<T>({ isOpen, onClose, profile, existingData, onImport }: ExcelImportModalProps<T>) {
@@ -17,9 +28,9 @@ export function ExcelImportModal<T>({ isOpen, onClose, profile, existingData, on
   const [file, setFile] = useState<File | null>(null);
   const [sheets, setSheets] = useState<string[]>([]);
   const [selectedSheet, setSelectedSheet] = useState<string>("");
-  const [headers, setHeaders] = useState<string[]>([]);
+  const [, setHeaders] = useState<string[]>([]);
   const [mappings, setMappings] = useState<ExcelColumnMapping[]>([]);
-  const [preview, setPreview] = useState<PreviewResult | null>(null);
+  const [preview, setPreview] = useState<PreviewResult<T> | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -43,8 +54,8 @@ export function ExcelImportModal<T>({ isOpen, onClose, profile, existingData, on
       } else {
         setStep(2);
       }
-    } catch (err: any) {
-      alert("Hata: " + err.message);
+    } catch (err: unknown) {
+      alert("Hata: " + (err instanceof Error ? err.message : String(err)));
       setFile(null);
     } finally {
       setIsProcessing(false);
@@ -60,8 +71,8 @@ export function ExcelImportModal<T>({ isOpen, onClose, profile, existingData, on
       setHeaders(sheetHeaders);
       setMappings(autoMapHeaders(sheetHeaders, profile));
       setStep(3);
-    } catch (err: any) {
-      alert("Hata: " + err.message);
+    } catch (err: unknown) {
+      alert("Hata: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setIsProcessing(false);
     }
@@ -80,8 +91,8 @@ export function ExcelImportModal<T>({ isOpen, onClose, profile, existingData, on
       const result = await generatePreview(file, selectedSheet, mappings, profile, existingData);
       setPreview(result);
       setStep(4);
-    } catch (err: any) {
-      alert("Hata: " + err.message);
+    } catch (err: unknown) {
+      alert("Hata: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setIsProcessing(false);
     }
@@ -93,8 +104,8 @@ export function ExcelImportModal<T>({ isOpen, onClose, profile, existingData, on
     try {
       await onImport(preview);
       onClose();
-    } catch (err: any) {
-      alert("İçe aktarma hatası: " + err.message);
+    } catch (err: unknown) {
+      alert("İçe aktarma hatası: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setIsProcessing(false);
     }
@@ -120,7 +131,7 @@ export function ExcelImportModal<T>({ isOpen, onClose, profile, existingData, on
           <div>
             <h2 className="text-xl font-bold flex items-center gap-2">
               <FileSpreadsheet className="w-5 h-5 text-green-600" />
-              Excel'den İçe Aktar
+              Excel&apos;den İçe Aktar
             </h2>
             <p className="text-sm text-gray-500 mt-1">
               {step === 1 ? "Yüklenecek dosyayı seçin" :
@@ -283,7 +294,7 @@ export function ExcelImportModal<T>({ isOpen, onClose, profile, existingData, on
                           {r.status === 'MANUAL_REVIEW' && <span className="text-amber-600 font-medium">UYARI (YENİ)</span>}
                         </td>
                         <td className="p-2 font-medium">
-                          {r.data.customerCode || r.data.stockCode || r.data.name || "-"}
+                          {getPrimaryDataLabel(r.data)}
                         </td>
                         <td className="p-2 text-gray-600 dark:text-gray-400">
                           {r.errors.length > 0 ? r.errors.join(", ") : r.warnings.length > 0 ? r.warnings.join(", ") : "OK"}

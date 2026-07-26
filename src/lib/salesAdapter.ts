@@ -6,8 +6,17 @@ import { getMeasurementDimensions, resolveMeasurementProductGroup, resolveMeasur
 import {
   CALCULATION_ENGINE_VERSION,
   buildSaleCalculationLines,
-  validateCalculationForSale
+  validateCalculationForSale,
+  type SaleCalculationLine
 } from '@/lib/calculationEngine';
+
+type CalculationRecord = NonNullable<ProductMeasurement['details']>;
+
+interface DraftSalesStore {
+  sales: Sale[];
+  addSale: (sale: Sale) => Promise<void>;
+  updateSale: (sale: Sale) => Promise<void>;
+}
 /**
  * Ölçüden tek bir satış satırı oluşturur.
  */
@@ -33,7 +42,7 @@ function createSaleItemFromMeasurement(
   const calculation = {
     ...(p.details || {}),
     ...(p.selectedProducts?.[0]?.calculation || {})
-  } as any;
+  };
 
   const w = Number(
     calculation.actualWidthCm ||
@@ -265,7 +274,7 @@ function createSaleItemFromMeasurement(
 }
 export function createJumboSaleItem(
   p: MeasurementRecord,
-  g: any,
+  g: CalculationRecord,
   gIdx: number,
   parentItemId: string,
   roomName: string,
@@ -330,7 +339,7 @@ export function createJumboSaleItem(
     note: `${parentLabel} için ek jumbo mekanizma farkı`,
     parentProductRelation: parentItemId,
     isJumboComponent: true
-  } as any;
+  };
 }
 
 interface SalesActor {
@@ -343,7 +352,7 @@ export function createDraftSaleFromCustomer(
   customer: Customer,
   actor: SalesActor
 ): Sale {
-  const items: any[] = [];
+  const items: SaleItem[] = [];
 
   const measurements = useMeasurementStore.getState().measurements.filter(m => m.customerId === customer.id && !m.isDeleted && !m.isArchived);
   measurements.forEach(m => {
@@ -402,7 +411,7 @@ export function createDraftSaleFromCustomer(
               : Number(
                   calc.groups
                     .reduce(
-                      (total: number, group: any) =>
+                      (total: number, group) =>
                         total +
                         Number(
                           group.totalM2 ||
@@ -418,7 +427,7 @@ export function createDraftSaleFromCustomer(
 
           const totalQuantity =
             calc.groups.reduce(
-              (total: number, group: any) =>
+              (total: number, group) =>
                 total + Number(group.quantity || 1),
               0
             );
@@ -468,7 +477,7 @@ export function createDraftSaleFromCustomer(
                 Number(calc.realWidthCm) ||
                 Number(
                   calc.groups.reduce(
-                    (total: number, group: any) =>
+                    (total: number, group) =>
                       total +
                       Number(group.realWidthCm || 0),
                     0
@@ -551,7 +560,7 @@ export function createDraftSaleFromCustomer(
            */
           const jumboGroups =
             calc.groups.filter(
-              (group: any) =>
+              (group) =>
                 Boolean(group.requiresJumbo)
             );
 
@@ -560,7 +569,7 @@ export function createDraftSaleFromCustomer(
               Number(
                 jumboGroups
                   .reduce(
-                    (total: number, group: any) =>
+                    (total: number, group) =>
                       total +
                       Number(
                         group.totalM2 ||
@@ -625,7 +634,7 @@ export function createDraftSaleFromCustomer(
 
           if (salesItems) {
             salesItems.forEach(
-              (saleCalc: any, saleIndex: number) => {
+              (saleCalc: SaleCalculationLine, saleIndex: number) => {
                 const saleItem =
                   createSaleItemFromMeasurement(
                     pObj,
@@ -697,12 +706,12 @@ export function createDraftSaleFromCustomer(
     customer.roomProductIntents.forEach(intent => {
       intent.products?.forEach(pIntent => {
         if (pIntent.selected) {
-          let unit = 'ADET';
+          let unit: SaleItem['metricUnit'] = 'adet';
           const t = pIntent.productType;
           if (['TUL', 'FON', 'GUNESLIK', 'RUSTIK', 'TAVAN_RUSTIK'].includes(t)) {
-            unit = 'METRE';
+            unit = 'mt';
           } else if (['STOR', 'ZEBRA', 'PLICELL', 'JALUZI', 'AHSAP_JALUZI', 'PICASSO', 'DIKEY_PERDE'].includes(t)) {
-            unit = 'M2';
+            unit = 'm2';
           }
 
           items.push({
@@ -892,7 +901,7 @@ export function createDraftSaleFromCustomer(
 
 export async function syncOrCreateDraftSale(
   customer: Customer,
-  salesStore: any,
+  salesStore: DraftSalesStore,
   actor: SalesActor | null
 ): Promise<string> {
   if (
@@ -905,7 +914,7 @@ export async function syncOrCreateDraftSale(
     );
   }
   const existingDraft = salesStore.sales.find(
-    (sale: any) =>
+    (sale) =>
       sale.customerId === customer.id &&
       sale.status === 'TASLAK' &&
       !sale.isDeleted

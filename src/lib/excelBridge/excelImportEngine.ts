@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import { ExcelProfile, ExcelColumnMapping, PreviewResult, ParsedRow, KnownColumn } from "./excelTypes";
+import { ExcelProfile, ExcelColumnMapping, PreviewResult, ParsedRow, ExcelImportMetadata } from "./excelTypes";
 
 /**
  * Reads the headers of an Excel file.
@@ -28,7 +28,7 @@ export const readExcelHeaders = async (file: File, sheetName?: string): Promise<
     let headerName = cell && cell.v ? String(cell.v).trim() : `Kolon ${C + 1}`;
     
     // Handle duplicate header names by appending numbers
-    let originalName = headerName;
+    const originalName = headerName;
     let counter = 1;
     while (headers.includes(headerName)) {
       headerName = `${originalName} (${counter})`;
@@ -77,13 +77,13 @@ export const generatePreview = async <T>(
   mappings: ExcelColumnMapping[], 
   profile: ExcelProfile<T>,
   existingData: T[]
-): Promise<PreviewResult> => {
+): Promise<PreviewResult<T>> => {
   const data = await file.arrayBuffer();
   const workbook = XLSX.read(data, { type: 'array' });
   const worksheet = workbook.Sheets[sheetName];
   
   // Read as array of arrays (defval empty string)
-  const rows: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+  const rows: unknown[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
   
   if (rows.length < 2) {
     throw new Error("Dosyada işlenecek veri bulunamadı.");
@@ -92,7 +92,7 @@ export const generatePreview = async <T>(
   const headers = rows[0].map(String);
   const dataRows = rows.slice(1);
   
-  const result: PreviewResult = {
+  const result: PreviewResult<T> = {
     totalRows: dataRows.length,
     newCount: 0,
     updateCount: 0,
@@ -117,11 +117,12 @@ export const generatePreview = async <T>(
       return;
     }
 
-    const raw: any = {};
-    const parsedData: Partial<T> & { customFields?: any, rawImportData?: any } = {
+    const raw: Record<string, unknown> = {};
+    const parsedData: Partial<T> & ExcelImportMetadata = {
       customFields: {},
       rawImportData: {}
-    } as any;
+    } as Partial<T> & ExcelImportMetadata;
+    const writableData = parsedData as Record<string, unknown>;
     
     let hasError = false;
     const errors: string[] = [];
@@ -139,7 +140,7 @@ export const generatePreview = async <T>(
 
       if (mapping.isCustomField) {
         // If it's mapped to a generic name like "custom_X" or just left as raw
-        parsedData.rawImportData[mapping.excelColumn] = val;
+        parsedData.rawImportData![mapping.excelColumn] = val;
       } else {
         const knownCol = profile.knownColumns.find(c => c.dbField === mapping.dbField);
         if (knownCol) {
@@ -149,35 +150,38 @@ export const generatePreview = async <T>(
             } else if (knownCol.type === 'string') {
               val = String(val).trim();
             } else if (knownCol.type === 'number') {
-              val = Number(val);
-              if (isNaN(val)) throw new Error("Sayısal değer bekleniyor");
+              const numericValue = Number(val);
+              if (Number.isNaN(numericValue)) throw new Error("Sayısal değer bekleniyor");
+              val = numericValue;
             } else if (knownCol.type === 'boolean') {
               val = Boolean(val);
             }
             
             // Avoid type checking issues with dynamic keys
-            (parsedData as any)[mapping.dbField] = val;
-          } catch (e: any) {
+            writableData[mapping.dbField] = val;
+          } catch (e: unknown) {
+            const errorMessage =
+              e instanceof Error ? e.message : String(e);
             hasError = true;
-            errors.push(`${mapping.excelColumn} hücresinde hata: ${e.message}`);
+            errors.push(`${mapping.excelColumn} hücresinde hata: ${errorMessage}`);
           }
         } else {
           // Explicit dbField mapping but not in profile (fallback)
-          (parsedData as any)[mapping.dbField] = val;
+          writableData[mapping.dbField] = val;
         }
       }
     });
 
     // Check required fields
     profile.knownColumns.filter(c => c.required).forEach(c => {
-      const val = (parsedData as any)[c.dbField as string];
+      const val = writableData[c.dbField as string];
       if (val === undefined || val === null || val === "") {
         hasError = true;
         errors.push(`${c.aliases[0]} zorunlu alandır.`);
       }
     });
 
-    let status: ParsedRow['status'] = 'ERROR';
+    let status: ParsedRow<T>['status'] = 'ERROR';
     let matchId: string | undefined;
 
     if (!hasError) {
@@ -189,9 +193,9 @@ export const generatePreview = async <T>(
       }
     }
 
-    const parsedRow: ParsedRow = {
+    const parsedRow: ParsedRow<T> = {
       index,
-      data: parsedData,
+      data: parsedData as T & ExcelImportMetadata,
       raw,
       status,
       errors,

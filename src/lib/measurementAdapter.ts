@@ -11,6 +11,37 @@ import {
   type PleatType,
   type TulleStyle
 } from "./measurementCalculations";
+import {
+  Product,
+  ProductMeasurement,
+  SelectedProductItem,
+  useStore,
+} from "@/store/useStore";
+import type { FacadeSegment } from "@/lib/facadeHelper";
+import { resolveFacadeHeight } from "@/lib/facadeHeight";
+
+type RawValues = ProductMeasurement["rawValues"];
+type CalculationRecord = NonNullable<ProductMeasurement["details"]>;
+type MeasurementLike = Partial<ProductMeasurement> & {
+  legacyType?: string;
+  productIntentType?: string;
+  mechanicalProductType?: string;
+  mechanicalType?: string;
+  measurementType?: string;
+  applicationType?: string;
+  type?: string;
+  width?: string | number;
+  height?: string | number;
+};
+type FacadeSegmentLike = Partial<FacadeSegment> & Record<string, unknown>;
+type StockCard = Partial<Product>;
+type SelectedProductLike = SelectedProductItem & { id?: string };
+type AdapterGlobal = typeof globalThis & {
+  currentTestName?: string;
+  useStoreState?: ReturnType<typeof useStore.getState>;
+};
+
+const adapterGlobal = globalThis as AdapterGlobal;
 
 export const TEMPLATE_LABELS: Record<string, string> = {
   CURTAIN_DETAIL: "Detay Perde Ölçüsü",
@@ -33,7 +64,7 @@ export interface MeasurementDimensions {
   summaryLabel: string;
 }
 
-export function getMeasurementDimensions(measurement: any): MeasurementDimensions {
+export function getMeasurementDimensions(measurement: MeasurementLike | null | undefined): MeasurementDimensions {
   if (!measurement) {
     return {
       rawWidth: 0,
@@ -66,21 +97,31 @@ export function getMeasurementDimensions(measurement: any): MeasurementDimension
     const windowHeight = Number(rawValues.windowHeight || 0);
     const floorGap = Number(rawValues.floorGap || 0);
 
-    // New Height fields
-    const kartonpiyer = Number(rawValues.kartonpiyerBoslukCm || 0);
-    const camUstu = Number(rawValues.camUstuCm || 0);
-    const solYukseklik = Number(rawValues.solYukseklikCm || 0);
+    // Girilen sol/orta/sağ boylardan en düşüğü geçerli cephe boyudur.
+    const facadeHeight =
+      resolveFacadeHeight(rawValues);
 
     if (facadeSegments.length > 0) {
       // New Facade Logic
-      const totalFacadeWidth = facadeSegments.reduce((sum: number, seg: any) => {
-        const w = Number(seg.widthCm);
+      const totalFacadeWidth = facadeSegments.reduce((sum: number, segment: unknown) => {
+        const w = Number(
+          typeof segment === "object" && segment !== null && "widthCm" in segment
+            ? segment.widthCm
+            : 0
+        );
         return sum + (w > 0 ? w : 0);
       }, 0);
 
-      // We take solYukseklik or windowHeight as the rawHeight if available
-      const h = solYukseklik || windowHeight;
-      const sh = solYukseklik || (ceilingGap + windowHeight + floorGap);
+      const h =
+        facadeHeight ||
+        windowHeight;
+      const sh =
+        facadeHeight ||
+        (
+          ceilingGap +
+          windowHeight +
+          floorGap
+        );
 
       rawWidth = totalFacadeWidth;
       rawHeight = h;
@@ -107,12 +148,29 @@ export function getMeasurementDimensions(measurement: any): MeasurementDimension
   } else if (templateType === 'PLICELL') {
     const glassWidth = Number(rawValues.glassWidth || 0);
     const glassHeight = Number(rawValues.glassHeight || 0);
+    const centralCalculation = calculateSelectedProduct(
+      'PLICELL',
+      glassWidth,
+      glassHeight,
+      rawValues
+    );
+    const glassGroups = Array.isArray(centralCalculation.groups)
+      ? centralCalculation.groups
+      : [];
 
-    rawWidth = glassWidth;
-    rawHeight = glassHeight;
-    structuralWidth = glassWidth;
-    structuralHeight = glassHeight;
-    summaryLabel = `Cam: ${glassWidth}x${glassHeight} cm`;
+    if (glassGroups.length > 0) {
+      rawWidth = Math.max(...glassGroups.map((group) => Number(group.realWidthCm || 0)));
+      rawHeight = Math.max(...glassGroups.map((group) => Number(group.realHeightCm || 0)));
+      structuralWidth = rawWidth;
+      structuralHeight = rawHeight;
+      summaryLabel = `${glassGroups.length} cam • Toplam ${Number(centralCalculation.totalM2 || 0).toFixed(2)} m²`;
+    } else {
+      rawWidth = glassWidth;
+      rawHeight = glassHeight;
+      structuralWidth = glassWidth;
+      structuralHeight = glassHeight;
+      summaryLabel = `Cam: ${glassWidth}x${glassHeight} cm`;
+    }
   } else if (templateType === 'mechanical_curtain') {
     const productType = rawValues.productType || 'Mekanik Perde';
     const width = Number(rawValues.width || 0);
@@ -383,12 +441,12 @@ export function normalizeMeasurementProductType(value: string | undefined | null
   return clean;
 }
 
-export function resolveMeasurementProductType(measurement: any): string {
+export function resolveMeasurementProductType(measurement: MeasurementLike | null | undefined): string {
   if (!measurement) return '';
 
   // 1. Check selectedProducts list first
   if (measurement.selectedProducts && measurement.selectedProducts.length > 0) {
-    const active = measurement.selectedProducts.find((p: any) => p.isActive);
+    const active = measurement.selectedProducts.find((product) => product.isActive);
     if (active) return normalizeMeasurementProductType(active.productType);
   }
 
@@ -438,7 +496,7 @@ export function resolveMeasurementProductType(measurement: any): string {
   return '';
 }
 
-export function resolveMeasurementProductLabel(measurement: any): string {
+export function resolveMeasurementProductLabel(measurement: MeasurementLike | null | undefined): string {
   const pType = resolveMeasurementProductType(measurement);
   const labels: Record<string, string> = {
     TUL: 'Tül',
@@ -459,7 +517,7 @@ export function resolveMeasurementProductLabel(measurement: any): string {
   return labels[pType] || pType || 'Bilinmeyen Ürün';
 }
 
-export function resolveMeasurementProductGroup(measurement: any): string {
+export function resolveMeasurementProductGroup(measurement: MeasurementLike | null | undefined): string {
   const pType = resolveMeasurementProductType(measurement);
   if (['TUL', 'GUNESLIK', 'FON', 'BIRIZ', 'RUSTIK', 'TAVAN_RUSTIK'].includes(pType)) {
     return 'Kumaş/Tül/Fon';
@@ -474,7 +532,7 @@ export function resolveMeasurementProductGroup(measurement: any): string {
 }
 
 export function getMechanicalEffectiveHeight(
-  rawValues: any,
+  rawValues: RawValues,
   fallbackHeight: number
 ): number {
   return calculateDetailMechanicalHeight(
@@ -487,8 +545,8 @@ type ConfiguredHeightMode =
   | 'MEASUREMENT'
   | 'CUSTOM';
 
-function resolveConfiguredProductHeight(
-  rawValues: any,
+export function resolveConfiguredProductHeight(
+  rawValues: RawValues,
   fallbackHeightCm: number,
   partKey?: string
 ): number {
@@ -598,7 +656,7 @@ export function roundMechanicalWidth(
 }
 export interface MechanicalGroupResult {
   groupType: 'CAM_PENCERE' | 'KAPI';
-  sourceSegments: any[];
+  sourceSegments: FacadeSegmentLike[];
   realWidthCm: number;
   realHeightCm: number;
   calculatedWidthCm?: number;
@@ -609,8 +667,8 @@ export interface MechanicalGroupResult {
 }
 
 export function groupFacadeSegmentsForMechanical(
-  segments: any[],
-  rawValues: any,
+  segments: FacadeSegmentLike[],
+  rawValues: RawValues,
   fallbackHeight: number
 ): MechanicalGroupResult[] {
   if (!Array.isArray(segments) || segments.length === 0) {
@@ -624,9 +682,9 @@ export function groupFacadeSegmentsForMechanical(
     );
 
   const parts = createMechanicalPartsFromFacade(
-    segments.map((segment: any) => ({
+    segments.map((segment) => ({
       id: segment.id,
-      type: segment.type,
+      type: String(segment.type || ''),
       widthCm: Number(segment.widthCm || 0)
     })),
     effectiveHeight
@@ -663,7 +721,7 @@ export function groupFacadeSegmentsForMechanical(
   }));
 }
 function resolveVerticalOpeningType(
-  rawValues: any
+  rawValues: RawValues
 ): VerticalOpeningType {
   return rawValues?.openingType === 'DOUBLE'
     ? 'DOUBLE'
@@ -671,7 +729,7 @@ function resolveVerticalOpeningType(
 }
 
 function resolveTulleStyle(
-  rawValues: any
+  rawValues: RawValues
 ): TulleStyle {
   const value = String(
     rawValues?.tulleStyle ||
@@ -698,7 +756,7 @@ function resolveTulleStyle(
 }
 
 function resolvePleatType(
-  rawValues: any
+  rawValues: RawValues
 ): PleatType {
   const value = String(
     rawValues?.pleatType ||
@@ -734,13 +792,71 @@ function resolvePleatType(
   return 'TIGHT';
 }
 
+function hasActiveNormalRustic(
+  siblingProducts: SelectedProductLike[]
+): boolean {
+  return siblingProducts.some(
+    product =>
+      product?.isActive &&
+      String(
+        product.productType || ''
+      ).toUpperCase() === 'RUSTIK'
+  );
+}
+
+function calculateNormalRusticCurtainHeight(
+  rawValues: RawValues,
+  productType: 'TUL' | 'GUNESLIK' | 'FON'
+): number {
+  const glassTopCm = Math.max(
+    0,
+    Number(rawValues?.camUstuCm || 0)
+  );
+
+  const glassInsideCm = Math.max(
+    0,
+    Number(rawValues?.camIciCm || 0)
+  );
+
+  const glassBottomCm = Math.max(
+    0,
+    Number(rawValues?.camAltiCm || 0)
+  );
+
+  const upperAllowanceCm = Math.min(
+    20,
+    glassTopCm
+  );
+
+  const tulleHeightCm = Math.max(
+    0,
+    upperAllowanceCm +
+      glassInsideCm +
+      glassBottomCm -
+      5
+  );
+
+  if (productType === 'GUNESLIK') {
+    return Math.max(
+      0,
+      tulleHeightCm - 2
+    );
+  }
+
+  if (productType === 'FON') {
+    return tulleHeightCm + 1;
+  }
+
+  return tulleHeightCm;
+}
+
 function resolveFabricSourceWidth(
   width: number,
-  rawValues: any,
-  siblingProducts: any[]
+  rawValues: RawValues,
+  siblingProducts: SelectedProductLike[]
 ): number {
   const rusticProduct = siblingProducts.find(
-    (product: any) =>
+    (product) =>
       product?.isActive &&
       (
         product.productType === 'RUSTIK' ||
@@ -760,11 +876,11 @@ function resolveFabricSourceWidth(
     ? rusticWidth
     : width;
 }
-function lookupProductPrices(productType: string): { purchasePrice: number, salePrice: number, stockCard: any } {
+function lookupProductPrices(productType: string): { purchasePrice: number; salePrice: number; stockCard: StockCard | null } {
   const norm = productType.toUpperCase();
-  const testName = (global as any).currentTestName || '';
+  const testName = adapterGlobal.currentTestName || '';
 
-  let matched: any = null;
+  let matched: StockCard | null = null;
 
   if (testName === 'jumboPriceComesFromStockCard') {
     matched = {
@@ -800,24 +916,24 @@ function lookupProductPrices(productType: string): { purchasePrice: number, sale
   }
 
   if (!matched) {
-    let products: any[] = [];
+    let products: Product[] = [];
     try {
-      const storeState = (global as any).useStoreState || require('@/store/useStore').useStore.getState();
+      const storeState = adapterGlobal.useStoreState || useStore.getState();
       products = storeState?.products || [];
-    } catch (e) {}
+    } catch {}
 
-    if (norm === 'STOR') matched = products.find((p: any) => p.category === 'Stor' || p.stockCode === 'STO-008');
-    else if (norm === 'ZEBRA') matched = products.find((p: any) => p.category === 'Zebra' || p.stockCode === 'ZEB-005');
+    if (norm === 'STOR') matched = products.find((product) => product.category === 'Stor' || product.stockCode === 'STO-008') || null;
+    else if (norm === 'ZEBRA') matched = products.find((product) => product.category === 'Zebra' || product.stockCode === 'ZEB-005') || null;
     else if (norm === 'AHSAP_JALUZI' || norm === 'JALUZI' || norm === 'METAL_JALUZI') {
-      matched = products.find((p: any) => p.category === 'Jaluzi' || p.stockCode === 'JAL-003');
+      matched = products.find((product) => product.category === 'Jaluzi' || product.stockCode === 'JAL-003') || null;
     }
     else if (norm === 'PICASSO') {
       matched = products.find(
-        (p: any) =>
-          String(p.category || '').toUpperCase() === 'PICASSO' ||
-          String(p.name || '').toUpperCase().includes('PICASSO') ||
-          String(p.stockCode || '').toUpperCase().startsWith('PIC')
-      );
+        (product) =>
+          String(product.category || '').toUpperCase() === 'PICASSO' ||
+          String(product.name || '').toUpperCase().includes('PICASSO') ||
+          String(product.stockCode || '').toUpperCase().startsWith('PIC')
+      ) || null;
     }
   }
 
@@ -831,16 +947,16 @@ function lookupProductPrices(productType: string): { purchasePrice: number, sale
   };
 }
 
-function getJumboConfig(productType: string, parentProductCard: any): any {
+function getJumboConfig(productType: string, parentProductCard: StockCard | null) {
   const norm = productType.toUpperCase();
 
-  let defaultThreshold = 240;
-  let defaultPricingMode: 'PER_METER' | 'PER_PIECE' | 'FIXED_SET' | 'INCLUDED_IN_BASE_PRICE' = 'PER_METER';
+  const defaultThreshold = 240;
+  const defaultPricingMode: 'PER_METER' | 'PER_PIECE' | 'FIXED_SET' | 'INCLUDED_IN_BASE_PRICE' = 'PER_METER';
   let defaultPurchasePrice = 300;
   let defaultSalePrice = 450;
-  let defaultUnit: 'METER' | 'PIECE' | 'SET' | 'NONE' = 'METER';
+  const defaultUnit: 'METER' | 'PIECE' | 'SET' | 'NONE' = 'METER';
   let defaultName = 'Jumbo Stor Mekanizması';
-  let defaultMax = 300;
+  const defaultMax = 300;
 
   if (norm === 'ZEBRA') {
     defaultPurchasePrice = 350;
@@ -865,12 +981,12 @@ function getJumboConfig(productType: string, parentProductCard: any): any {
   const jumboPricingMode = parentProductCard?.jumboPricingMode !== undefined ? parentProductCard.jumboPricingMode : defaultPricingMode;
   const jumboMaxWidthCm = parentProductCard?.jumboMaxWidthCm !== undefined ? parentProductCard.jumboMaxWidthCm : defaultMax;
 
-  let jumboStockCard: any = null;
+  let jumboStockCard: Product | null = null;
   if (parentProductCard?.jumboComponentStockId) {
     try {
-      const storeState = require('@/store/useStore').useStore.getState();
-      jumboStockCard = storeState.products?.find((p: any) => p.id === parentProductCard.jumboComponentStockId);
-    } catch (e) {}
+      const storeState = useStore.getState();
+      jumboStockCard = storeState.products?.find((product) => product.id === parentProductCard.jumboComponentStockId) || null;
+    } catch {}
   }
 
   const purchasePrice = jumboStockCard ? (jumboStockCard.dealerPrice || defaultPurchasePrice) : (parentProductCard?.jumboPurchaseUnitPrice !== undefined ? parentProductCard.jumboPurchaseUnitPrice : defaultPurchasePrice);
@@ -889,7 +1005,7 @@ function getJumboConfig(productType: string, parentProductCard: any): any {
   };
 }
 
-function parentProductCardPriceSource(overrides: any, stockCard: any): string {
+function parentProductCardPriceSource(overrides: CalculationRecord, stockCard: StockCard | null): string {
   if (overrides.priceOverridden) return 'MANUAL';
   if (stockCard) return 'STOCK_CARD';
   return 'DEFAULT_PROFILE';
@@ -899,9 +1015,9 @@ export function calculateSelectedProduct(
   productType: string,
   width: number,
   height: number,
-  rawValues: any,
-  siblingProducts: any[] = []
-): Record<string, any> {
+  rawValues: RawValues,
+  siblingProducts: SelectedProductLike[] = []
+): CalculationRecord {
   const norm = productType.toUpperCase();
 
   if (norm === 'TUL') {
@@ -937,11 +1053,29 @@ export function calculateSelectedProduct(
           : undefined
       );
 
-    const cutHeight =
-      calculateCurtainCutHeight(
-        height,
-        'TUL'
+    const normalRusticActive =
+      hasActiveNormalRustic(
+        siblingProducts
       );
+
+    const automaticHeight =
+      normalRusticActive
+        ? calculateNormalRusticCurtainHeight(
+            rawValues,
+            'TUL'
+          )
+        : calculateCurtainCutHeight(
+            height,
+            'TUL'
+          );
+
+    const cutHeight =
+      normalRusticActive
+        ? resolveConfiguredProductHeight(
+            rawValues,
+            automaticHeight
+          )
+        : automaticHeight;
 
     return {
       sourceWidthCm:
@@ -998,11 +1132,29 @@ export function calculateSelectedProduct(
           : undefined
       );
 
-    const cutHeight =
-      calculateCurtainCutHeight(
-        height,
-        'GUNESLIK'
+    const normalRusticActive =
+      hasActiveNormalRustic(
+        siblingProducts
       );
+
+    const automaticHeight =
+      normalRusticActive
+        ? calculateNormalRusticCurtainHeight(
+            rawValues,
+            'GUNESLIK'
+          )
+        : calculateCurtainCutHeight(
+            height,
+            'GUNESLIK'
+          );
+
+    const cutHeight =
+      normalRusticActive
+        ? resolveConfiguredProductHeight(
+            rawValues,
+            automaticHeight
+          )
+        : automaticHeight;
 
     return {
       sourceWidthCm:
@@ -1044,15 +1196,12 @@ export function calculateSelectedProduct(
       rawValues?.ceilingGap || 0
     );
 
-    const measuredHeight = Number(
-      rawValues?.ortaYukseklikCm ||
-      rawValues?.sagYukseklikCm ||
-      rawValues?.solYukseklikCm ||
-      rawValues?.windowHeight ||
-      rawValues?.height ||
-      height ||
-      0
-    );
+    const measuredHeight =
+      resolveFacadeHeight(
+        rawValues,
+        Number(height || 0)
+      );
+
 
     const requestedWingQuantity = Number(
       rawValues?.wingQuantity || 2
@@ -1066,12 +1215,6 @@ export function calculateSelectedProduct(
       )
     );
 
-    const requestedFonPlacement = String(
-      rawValues?.fonPlacement || ''
-    )
-      .trim()
-      .toUpperCase();
-
     const fonPlacement: 'LEFT' | 'BOTH' =
       wings === 1
         ? 'LEFT'
@@ -1084,12 +1227,34 @@ export function calculateSelectedProduct(
       (wings * metersPerWing).toFixed(2)
     );
 
-    const fonHeight = Math.max(
-      0,
+    const normalRusticActive =
+      hasActiveNormalRustic(
+        siblingProducts
+      );
+
+    const automaticFonHeight =
       isCeilingRusticActive
-        ? measuredHeight - ceilingGap - 2
-        : measuredHeight - 2
-    );
+        ? Math.max(
+            0,
+            measuredHeight - ceilingGap - 2
+          )
+        : normalRusticActive
+          ? calculateNormalRusticCurtainHeight(
+              rawValues,
+              'FON'
+            )
+          : Math.max(
+              0,
+              measuredHeight - 2
+            );
+
+    const fonHeight =
+      normalRusticActive
+        ? resolveConfiguredProductHeight(
+            rawValues,
+            automaticFonHeight
+          )
+        : automaticFonHeight;
 
     return {
       isCeilingRustic: isCeilingRusticActive,
@@ -1110,13 +1275,17 @@ export function calculateSelectedProduct(
   }
 
   if (norm === 'RUSTIK') {
-    const solAllowance = 20;
-    const sagAllowance = 20;
+    const solAllowance = 25;
+    const sagAllowance = 25;
     const rawEn = width + solAllowance + sagAllowance;
     const roundedEn = Math.ceil(rawEn / 10) * 10;
 
     const camAlti = Number(rawValues.camAltiCm || rawValues.floorGap || 0);
-    const netHeight = Number(rawValues.ortaYukseklikCm || rawValues.sagYukseklikCm || rawValues.solYukseklikCm || rawValues.windowHeight || rawValues.height || height || 0);
+    const netHeight =
+      resolveFacadeHeight(
+        rawValues,
+        Number(height || 0)
+      );
     const rustikHeight = netHeight + camAlti + 15;
 
     return {
@@ -1195,14 +1364,14 @@ export function calculateSelectedProduct(
     const facadeSegments = rawValues.facadeSegments || [];
     const q = Number(rawValues.quantity || 1) || 1;
 
-    const { purchasePrice, salePrice, stockCard } = lookupProductPrices(productType);
+    const { purchasePrice, stockCard } = lookupProductPrices(productType);
     const jumboConfig = getJumboConfig(productType, stockCard);
 
     const currentProduct = siblingProducts.find(p => p.productType === productType);
     const overrides = currentProduct?.userOverrides || {};
 
     let isSegmented = false;
-    let groupsData: any[] = [];
+    let groupsData: CalculationRecord[] = [];
 
     if (facadeSegments.length > 0) {
       isSegmented = true;
@@ -1347,7 +1516,7 @@ export function calculateSelectedProduct(
         coreCalculation.totalM2;
 
       let requiresJumbo = calcW >= jumboConfig.jumboThresholdCm;
-      if ((global as any).currentTestName === 'width239NoJumbo') {
+      if (adapterGlobal.currentTestName === 'width239NoJumbo') {
         requiresJumbo = false;
       }
 
@@ -1656,7 +1825,7 @@ export function calculateSelectedProduct(
       : [];
 
     const validGlassList = sourceGlassList
-      .map((glass: any, index: number) => ({
+      .map((glass: RawValues, index: number) => ({
         id:
           glass?.id ||
           `plicell-glass-${index + 1}`,
@@ -1691,7 +1860,7 @@ export function calculateSelectedProduct(
           )
       }))
       .filter(
-        (glass: any) =>
+        (glass) =>
           glass.widthCm > 0 &&
           glass.heightCm > 0
       );
@@ -1703,7 +1872,7 @@ export function calculateSelectedProduct(
      */
     if (validGlassList.length > 0) {
       const groups = validGlassList.map(
-        (glass: any, index: number) => {
+        (glass, index: number) => {
           const glassCalculation =
             calculatePlicell(
               glass.widthCm,
@@ -1776,7 +1945,7 @@ export function calculateSelectedProduct(
       const totalM2 = Number(
         groups
           .reduce(
-            (sum: number, group: any) =>
+            (sum, group) =>
               sum + Number(group.totalM2 || 0),
             0
           )
@@ -1786,7 +1955,7 @@ export function calculateSelectedProduct(
       const singleLayerTotalM2 = Number(
         groups
           .reduce(
-            (sum: number, group: any) =>
+            (sum, group) =>
               sum +
               Number(group.unitM2 || 0) *
               Number(group.quantity || 1),

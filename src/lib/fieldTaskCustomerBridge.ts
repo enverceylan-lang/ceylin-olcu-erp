@@ -1,4 +1,4 @@
-﻿import type {
+import type {
   FieldTask
 } from "@/lib/localFieldTaskDb";
 
@@ -30,6 +30,9 @@ export async function ensureFieldTaskCustomer(
   openingCount: number;
   measurementCount: number;
 }> {
+  // İmza uyumluluğu için korunur; mevcut yerel köprü token kullanmaz.
+  void _sessionToken;
+
   const snapshot =
     task.customerSnapshot as
       | TaskCustomerSnapshot

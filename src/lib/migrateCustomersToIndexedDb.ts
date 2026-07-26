@@ -132,8 +132,11 @@ export async function migrateLocalStorageCustomersToIndexedDb(): Promise<{
     // 8. Mark migration done (do not delete localStorage data)
     window.localStorage.setItem(MIGRATION_DONE_KEY, 'true');
 
-  } catch (err: any) {
-    result.error = String(err?.message || err);
+  } catch (err: unknown) {
+    result.error =
+      err instanceof Error
+        ? err.message
+        : String(err);
     console.error('[Migration] Failed to migrate customers to IndexedDB:', err);
   }
 

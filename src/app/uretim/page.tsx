@@ -1,11 +1,11 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Factory, Search, ChevronDown, ChevronUp, Check, AlertTriangle, AlertCircle, RefreshCw, Clock, Scissors, Package, CheckCircle2, DollarSign, Image as ImageIcon, Plus, X } from "lucide-react";
-import { useStore, ProductionItem, ProductionIssue, Sale, generateUUID } from "@/store/useStore";
-import { getTemplateLabel } from "@/lib/measurementAdapter";
+import { Factory, Search, ChevronDown, ChevronUp, Check, AlertTriangle, Clock, Scissors, Package, CheckCircle2, X } from "lucide-react";
+import { useStore, ProductionItem, ProductionIssue, generateUUID } from "@/store/useStore";
 import { useAuthStore, normalizeRole } from "@/store/useAuthStore";
 import { shouldCreateTailorProductionItem } from "@/lib/productionRouting";
+import { getProductionTransition } from "@/lib/productionWorkflow";
 
 
 const STATUS_LABELS: Record<string, string> = {
@@ -24,6 +24,12 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const getStatusLabel = (status: string) => STATUS_LABELS[status] || status;
+
+const QUANTITY_UNIT_LABELS = {
+  mt: "metre",
+  m2: "m²",
+  adet: "adet"
+} as const;
 
 const getStatusBadgeColorClass = (status: string) => {
   switch (status) {
@@ -65,6 +71,12 @@ const WORKSHOPS = [
 export default function UretimPage() {
   const { sales, customers, products, productionItems, setProductionItems, updateProductionItem } = useStore();
   const { currentUser, users } = useAuthStore();
+  const currentRole = currentUser
+    ? normalizeRole(currentUser.role)
+    : null;
+  const canManageAssignments =
+    currentRole === "ADMIN" ||
+    currentRole === "OFFICE";
   const [mounted, setMounted] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [expandedOrders, setExpandedOrders] = useState<Record<string, boolean>>({});
@@ -86,7 +98,10 @@ export default function UretimPage() {
 
   // Migration Effect: create production items for legacy sales orders if missing
   useEffect(() => {
-    setMounted(true);
+    const mountedTimer = window.setTimeout(
+      () => setMounted(true),
+      0
+    );
     
     const migratedItems: ProductionItem[] = [];
     let needsMigration = false;
@@ -118,6 +133,12 @@ export default function UretimPage() {
               width: item.width,
               height: item.height,
               quantity: item.quantity,
+              quantityUnit:
+                item.calculationType === 'mt' ||
+                item.calculationType === 'm2' ||
+                item.calculationType === 'adet'
+                  ? item.calculationType
+                  : undefined,
               pleatType: item.pleatType,
               productionStatus: 'READY_FOR_CUTTING',
               cutCompleted: false,
@@ -144,6 +165,8 @@ export default function UretimPage() {
     if (needsMigration) {
       setProductionItems([...migratedItems, ...productionItems]);
     }
+
+    return () => window.clearTimeout(mountedTimer);
   }, [sales, products, productionItems, setProductionItems]);
 
   if (!mounted) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
@@ -153,38 +176,27 @@ export default function UretimPage() {
   };
 
   const handleStatusChange = (itemId: string, status: string) => {
-    const data: Partial<ProductionItem> = {
-      productionStatus: status
-    };
-
-    // Auto flag updates
-    if (status === 'CUT') data.cutCompleted = true;
-    if (status === 'SEWN') data.sewingCompleted = true;
-    if (status === 'IRONING') data.ironingCompleted = true;
-    if (status === 'PACKAGING') data.packagingCompleted = true;
-    
-    if (status === 'READY') {
-      data.cutCompleted = true;
-      data.sewingCompleted = true;
-      data.ironingCompleted = true;
-      data.packagingCompleted = true;
-    }
-
-    // Append to history
     const item = productionItems.find(pi => pi.id === itemId);
-    if (item) {
-      data.history = [
+    if (!item) return;
+
+    const transition =
+      getProductionTransition(item, status);
+
+    if (!transition.allowed) return;
+
+    updateProductionItem(itemId, {
+      ...transition.changes,
+      history: [
         ...(item.history || []),
         {
           date: new Date().toISOString(),
           status,
-          employeeId: "workshop",
+          employeeId:
+            currentUser?.id || "workshop",
           notes: `Aşama "${getStatusLabel(status)}" olarak güncellendi.`
         }
-      ];
-    }
-
-    updateProductionItem(itemId, data);
+      ]
+    });
   };
 
   const openIssueModal = (item: ProductionItem, isRework: boolean) => {
@@ -209,19 +221,29 @@ export default function UretimPage() {
       expectedMaterialArrivalDate,
       additionalCost,
       createdAt: new Date().toISOString(),
-      createdBy: "Workshop Staff"
+      createdBy:
+        currentUser?.name || "Atölye Kullanıcısı"
     };
 
     const targetStatus = isReworkType ? "REWORK" : "PROBLEM";
+    const transition =
+      getProductionTransition(
+        issueModalItem,
+        targetStatus
+      );
+
+    if (!transition.allowed) return;
+
     const data: Partial<ProductionItem> = {
-      productionStatus: targetStatus,
+      ...transition.changes,
       issue,
       history: [
         ...(issueModalItem.history || []),
         {
           date: new Date().toISOString(),
           status: targetStatus,
-          employeeId: "workshop",
+          employeeId:
+            currentUser?.id || "workshop",
           notes: `Sorun Bildirildi: ${issueType} - ${issueDescription}`
         }
       ]
@@ -250,7 +272,7 @@ export default function UretimPage() {
     const customer = customers.find(c => c.id === sale.customerId);
     const orderItems = productionItems.filter(item => {
       if (item.orderId !== sale.id) return false;
-      if (currentUser && normalizeRole(currentUser.role) === 'TAILOR') {
+      if (currentUser && currentRole === 'TAILOR') {
         return item.assignedEmployeeId === currentUser.id;
       }
       return true;
@@ -383,8 +405,27 @@ export default function UretimPage() {
                             </div>
                             <div className="text-xs text-gray-500 flex flex-wrap gap-x-3 gap-y-1">
                               <span>Ölçü: <span className="font-bold text-blue-600 dark:text-blue-400">{item.width} × {item.height} cm</span></span>
-                              <span>Miktar: <span className="font-medium text-gray-700 dark:text-gray-300">{item.quantity} m/m²</span></span>
+                              <span>
+                                Miktar:{" "}
+                                <span className="font-medium text-gray-700 dark:text-gray-300">
+                                  {item.quantity}{" "}
+                                  {QUANTITY_UNIT_LABELS[
+                                    item.quantityUnit || "adet"
+                                  ]}
+                                </span>
+                              </span>
                               {item.pleatType && <span>Pile/Dikiş: {item.pleatType}</span>}
+                              {item.wingQuantity && (
+                                <span>Kanat: {item.wingQuantity}</span>
+                              )}
+                              {item.fonPlacement && (
+                                <span>
+                                  Fon Yönü:{" "}
+                                  {item.fonPlacement === "LEFT"
+                                    ? "Sol"
+                                    : "İki Taraf"}
+                                </span>
+                              )}
                             </div>
                           </div>
 
@@ -395,7 +436,8 @@ export default function UretimPage() {
                               <select 
                                 value={item.assignedWorkshopId || ""}
                                 onChange={(e) => updateProductionItem(item.id, { assignedWorkshopId: e.target.value })}
-                                className="bg-transparent border-none outline-none font-medium text-gray-800 dark:text-gray-200 cursor-pointer"
+                                disabled={!canManageAssignments}
+                                className="bg-transparent border-none outline-none font-medium text-gray-800 dark:text-gray-200 cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
                               >
                                 <option value="" className="bg-gray-900 text-white">Atölye Atanmadı</option>
                                 {WORKSHOPS.map(w => <option key={w.id} value={w.id} className="bg-gray-900 text-white">{w.name}</option>)}
@@ -407,7 +449,8 @@ export default function UretimPage() {
                               <select 
                                 value={item.assignedEmployeeId || ""}
                                 onChange={(e) => updateProductionItem(item.id, { assignedEmployeeId: e.target.value })}
-                                className="bg-transparent border-none outline-none font-medium text-gray-800 dark:text-gray-200 cursor-pointer"
+                                disabled={!canManageAssignments}
+                                className="bg-transparent border-none outline-none font-medium text-gray-800 dark:text-gray-200 cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
                               >
                                 <option value="" className="bg-gray-900 text-white">Terzi Seçilmedi</option>
                                 {users.filter(u => normalizeRole(u.role) === 'TAILOR' || normalizeRole(u.role) === 'ADMIN').map(u => <option key={u.id} value={u.id} className="bg-gray-900 text-white">{u.name}</option>)}
@@ -461,30 +504,35 @@ export default function UretimPage() {
                           <div className="flex flex-wrap items-center gap-1.5">
                             <button 
                               onClick={() => handleStatusChange(item.id, 'CUT')}
+                              disabled={item.cutCompleted || item.productionStatus === 'CANCELLED'}
                               className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 border transition-colors ${item.cutCompleted ? 'bg-orange-500/20 text-orange-500 border-orange-500/30' : 'bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 border-transparent'}`}
                             >
                               <Scissors className="w-3.5 h-3.5" /> Kesildi
                             </button>
                             <button 
                               onClick={() => handleStatusChange(item.id, 'SEWN')}
+                              disabled={!item.cutCompleted || item.sewingCompleted || item.productionStatus === 'CANCELLED'}
                               className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 border transition-colors ${item.sewingCompleted ? 'bg-indigo-500/20 text-indigo-500 border-indigo-500/30' : 'bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 border-transparent'}`}
                             >
                               Dikildi
                             </button>
                             <button 
                               onClick={() => handleStatusChange(item.id, 'IRONING')}
+                              disabled={!item.sewingCompleted || item.ironingCompleted || item.productionStatus === 'CANCELLED'}
                               className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 border transition-colors ${item.ironingCompleted ? 'bg-sky-500/20 text-sky-550 border-sky-500/30' : 'bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 border-transparent'}`}
                             >
                               Ütülendi
                             </button>
                             <button 
                               onClick={() => handleStatusChange(item.id, 'PACKAGING')}
+                              disabled={!item.ironingCompleted || item.packagingCompleted || item.productionStatus === 'CANCELLED'}
                               className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 border transition-colors ${item.packagingCompleted ? 'bg-blue-500/20 text-blue-600 border-blue-500/30' : 'bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 border-transparent'}`}
                             >
                               <Package className="w-3.5 h-3.5" /> Paketlendi
                             </button>
                             <button 
                               onClick={() => handleStatusChange(item.id, 'READY')}
+                              disabled={!item.packagingCompleted || item.productionStatus === 'READY' || item.productionStatus === 'CANCELLED'}
                               className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 border transition-colors ${item.productionStatus === 'READY' ? 'bg-green-600 text-white border-green-700' : 'bg-green-50/50 hover:bg-green-100 dark:bg-green-950/20 dark:hover:bg-green-900/30 text-green-600 dark:text-green-400 border-green-500/20'}`}
                             >
                               <CheckCircle2 className="w-3.5 h-3.5" /> Hazır / Tamam
@@ -495,24 +543,28 @@ export default function UretimPage() {
                           <div className="flex flex-wrap items-center gap-1.5">
                             <button 
                               onClick={() => handleStatusChange(item.id, 'WAITING_MATERIAL')}
+                              disabled={item.productionStatus === 'READY' || item.productionStatus === 'CANCELLED'}
                               className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${item.productionStatus === 'WAITING_MATERIAL' ? 'bg-amber-500 text-white border-amber-600' : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border-amber-500/20'}`}
                             >
                               Malzeme Bekliyor
                             </button>
                             <button 
                               onClick={() => handleStatusChange(item.id, 'WAITING_FACTORY')}
+                              disabled={item.productionStatus === 'READY' || item.productionStatus === 'CANCELLED'}
                               className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${item.productionStatus === 'WAITING_FACTORY' ? 'bg-purple-500 text-white border-purple-600' : 'bg-purple-500/10 hover:bg-purple-500/20 text-purple-500 border-purple-500/20'}`}
                             >
                               Fabrikadan Bekleniyor
                             </button>
                             <button 
                               onClick={() => openIssueModal(item, false)}
+                              disabled={item.productionStatus === 'CANCELLED'}
                               className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${item.productionStatus === 'PROBLEM' ? 'bg-red-600 text-white border-red-700' : 'bg-red-500/10 hover:bg-red-500/20 text-red-500 border-red-500/20'}`}
                             >
                               Sorun Var
                             </button>
                             <button 
                               onClick={() => openIssueModal(item, true)}
+                              disabled={item.productionStatus === 'CANCELLED'}
                               className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${item.productionStatus === 'REWORK' ? 'bg-rose-600 text-white border-rose-700' : 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border-rose-500/20'}`}
                             >
                               Yeniden Yapılacak

@@ -1,4 +1,4 @@
-import { useStore, subscribeToStoreChanges, Customer, Room, WindowItem, ProductMeasurement } from '@/store/useStore';
+import { useStore, Customer, Room, WindowItem, ProductMeasurement } from '@/store/useStore';
 import { useAuthStore } from '@/store/useAuthStore';
 
 // Track if a sync is currently in progress
@@ -6,51 +6,55 @@ let isSyncing = false;
 let hasPendingSync = false;
 
 // Flag to temporarily disable all cloud sync processes to protect local data
-const CLOUD_SYNC_DISABLED = true;
+export const CLOUD_SYNC_DISABLED = true;
 
 // Track last 413 Payload Too Large error timestamp
 let last413Time = 0;
 
 // Deep clone payload and strip any raw base64 data URLs / media arrays
 // Helper to identify if a string is a base64 / data URL
-function isDataUrl(val: any): boolean {
-  if (typeof val !== 'string') return false;
-  return val.startsWith('data:') || val.includes(';base64,') || val.length > 5000;
+function isDataUrl(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  return value.startsWith('data:') || value.includes(';base64,') || value.length > 5000;
 }
 
 // Deep clone payload and strip any raw base64 data URLs / media arrays
 // TODO Future architecture: media files should be uploaded to Supabase Storage buckets, and only their public URLs/storage paths saved in DB/media_files table.
-function stripMediaAndDataUrls(obj: any): any {
-  if (obj === null || obj === undefined) return obj;
+function stripMediaAndDataUrls<T>(value: T): T {
+  if (value === null || value === undefined) return value;
 
-  if (typeof obj === 'string') {
-    if (isDataUrl(obj)) {
-      return '';
-    }
-    return obj;
+  if (typeof value === 'string') {
+    return (isDataUrl(value) ? '' : value) as T;
   }
 
-  if (Array.isArray(obj)) {
-    return obj
-      .map(item => stripMediaAndDataUrls(item))
-      .filter(item => item !== '');
+  if (Array.isArray(value)) {
+    const sanitized = value
+      .map((item: unknown) => stripMediaAndDataUrls(item))
+      .filter((item: unknown) => item !== '');
+
+    return sanitized as unknown as T;
   }
 
-  if (typeof obj === 'object') {
-    const res: any = {};
-    for (const key of Object.keys(obj)) {
-      if (['addressPhotos', 'photos', 'videos'].includes(key) && Array.isArray(obj[key])) {
-        res[key] = obj[key]
-          .map((item: any) => stripMediaAndDataUrls(item))
-          .filter((item: any) => item !== '');
+  if (typeof value === 'object') {
+    const source = value as Record<string, unknown>;
+    const result: Record<string, unknown> = {};
+
+    for (const key of Object.keys(source)) {
+      const fieldValue = source[key];
+
+      if (['addressPhotos', 'photos', 'videos'].includes(key) && Array.isArray(fieldValue)) {
+        result[key] = fieldValue
+          .map((item: unknown) => stripMediaAndDataUrls(item))
+          .filter((item: unknown) => item !== '');
       } else {
-        res[key] = stripMediaAndDataUrls(obj[key]);
+        result[key] = stripMediaAndDataUrls(fieldValue);
       }
     }
-    return res;
+
+    return result as T;
   }
 
-  return obj;
+  return value;
 }
 
 // ─── Client-side merge helpers — "latest updatedAt wins" strategy ───
@@ -404,10 +408,12 @@ export async function syncNow(isManual: boolean = false) {
     });
 
     // ── Task A: Measure raw payload size and section breakdown ──
-    const getObjSize = (obj: any): number => {
+    const getObjSize = (value: unknown): number => {
       try {
-        const str = JSON.stringify(obj);
-        return typeof Blob !== 'undefined' ? new Blob([str]).size : str.length;
+        const serialized = JSON.stringify(value);
+        return typeof Blob !== 'undefined'
+          ? new Blob([serialized]).size
+          : serialized.length;
       } catch {
         return 0;
       }
@@ -417,24 +423,24 @@ export async function syncNow(isManual: boolean = false) {
     const sizeUsers = getObjSize(localUsers);
     const sizePendingDeletes = getObjSize(pendingDeletes);
 
-    // Extract flat arrays of sub-entities to measure their sizes
-    const roomsFlat: any[] = [];
-    const openingsFlat: any[] = [];
-    const measurementsFlat: any[] = [];
-    localCustomers.forEach(c => {
-      if (c.rooms) {
-        roomsFlat.push(...c.rooms.map(({ windows, ...rest }: any) => rest));
-        c.rooms.forEach((r: any) => {
-          if (r.windows) {
-            openingsFlat.push(...r.windows.map(({ products, ...rest }: any) => rest));
-            r.windows.forEach((w: any) => {
-              if (w.products) {
-                measurementsFlat.push(...w.products);
-              }
-            });
-          }
+    const roomsFlat: Array<Omit<Room, 'windows'>> = [];
+    const openingsFlat: Array<Omit<WindowItem, 'products'>> = [];
+    const measurementsFlat: ProductMeasurement[] = [];
+
+    localCustomers.forEach((customer) => {
+      customer.rooms?.forEach((room) => {
+        const { windows: roomWindows, ...roomWithoutWindows } = room;
+        void roomWindows;
+        roomsFlat.push(roomWithoutWindows);
+
+        room.windows?.forEach((windowItem) => {
+          const { products: openingProducts, ...openingWithoutProducts } = windowItem;
+          void openingProducts;
+          openingsFlat.push(openingWithoutProducts);
+
+          measurementsFlat.push(...(windowItem.products || []));
         });
-      }
+      });
     });
 
     const sizeRooms = getObjSize(roomsFlat);
@@ -455,7 +461,11 @@ export async function syncNow(isManual: boolean = false) {
     // ── Task B: Sanitizing outgoing sync payload by stripping media ──
     const sanitizedCustomers = stripMediaAndDataUrls(localCustomers);
     // Exclude password field from outgoing users payload for security
-    const outgoingUsers = (localUsers || []).map(({ password, ...u }: any) => u);
+    const outgoingUsers = (localUsers || []).map((user) => {
+      const { password, ...userWithoutPassword } = user;
+      void password;
+      return userWithoutPassword;
+    });
     const sanitizedPayload = {
       customers: sanitizedCustomers,
       pendingDeletes: pendingDeletes,
@@ -466,7 +476,7 @@ export async function syncNow(isManual: boolean = false) {
 
     // ── Diagnostic counts logging (exactly as requested) ──
     const targetCustomerName = 'TEST'; // Match "TEST" or "TEST SYNC OLCU 001"
-    const targetCustomer = localCustomers.find((c: any) => c.name && c.name.toUpperCase().includes(targetCustomerName));
+    const targetCustomer = localCustomers.find((c) => c.name && c.name.toUpperCase().includes(targetCustomerName));
     
     let targetRoomsCount = 0;
     let targetOpeningsCount = 0;
@@ -474,9 +484,9 @@ export async function syncNow(isManual: boolean = false) {
     
     if (targetCustomer) {
       targetRoomsCount = (targetCustomer.rooms || []).length;
-      targetCustomer.rooms?.forEach((r: any) => {
+      targetCustomer.rooms?.forEach((r) => {
         targetOpeningsCount += (r.windows || []).length;
-        r.windows?.forEach((w: any) => {
+        r.windows?.forEach((w) => {
           targetMeasurementsCount += (w.products || []).length;
         });
       });
@@ -492,11 +502,11 @@ export async function syncNow(isManual: boolean = false) {
     let outgoingOpeningsCount = 0;
     let outgoingMeasurementsCount = 0;
     
-    sanitizedCustomers.forEach((c: any) => {
+    sanitizedCustomers.forEach((c) => {
       outgoingRoomsCount += (c.rooms || []).length;
-      c.rooms?.forEach((r: any) => {
+      c.rooms?.forEach((r) => {
         outgoingOpeningsCount += (r.windows || []).length;
-        r.windows?.forEach((w: any) => {
+        r.windows?.forEach((w) => {
           outgoingMeasurementsCount += (w.products || []).length;
         });
       });
@@ -540,7 +550,13 @@ export async function syncNow(isManual: boolean = false) {
       return;
     }
 
-    const result = await response.json();
+    const result = await response.json() as {
+      success?: boolean;
+      error?: string;
+      reason?: string;
+      customers?: Customer[];
+      users?: Array<(typeof localUsers)[number]>;
+    };
     console.log('[Client Sync] response body success:', !!result.success);
     console.log('[Client Sync Target Diagnostic] Server response body success:', !!result.success);
     
@@ -561,22 +577,22 @@ export async function syncNow(isManual: boolean = false) {
     
     if (result.customers) {
       const testMobileName = 'TEST';
-      const remoteHasTestMobile = result.customers.some((c: any) => c.name && c.name.toUpperCase().includes(testMobileName));
+      const remoteHasTestMobile = result.customers.some((c) => c.name && c.name.toUpperCase().includes(testMobileName));
       console.log('[Client Sync Target Diagnostic] Target customer present in server response body:', remoteHasTestMobile);
     }
 
     if (result.customers) {
-      const getCounts = (list: any[]) => {
+      const getCounts = (list: Customer[]) => {
         let rooms = 0;
         let openings = 0;
         let measurements = 0;
         list.forEach(c => {
           if (Array.isArray(c.rooms)) {
             rooms += c.rooms.length;
-            c.rooms.forEach((r: any) => {
+            c.rooms.forEach((r) => {
               if (Array.isArray(r.windows)) {
                 openings += r.windows.length;
-                r.windows.forEach((w: any) => {
+                r.windows.forEach((w) => {
                   if (Array.isArray(w.products)) {
                     measurements += w.products.length;
                   }
@@ -602,9 +618,9 @@ export async function syncNow(isManual: boolean = false) {
       // Target verification check for specific test records
       const targetNames = ['test tlf sync 01', 'TEST TELEFON SYNC', 'TEST MOBILE SAVE'];
       targetNames.forEach(name => {
-        const inRemote = result.customers.find((c: any) => c.name && c.name.toUpperCase().includes(name.toUpperCase()));
-        const inBefore = currentCustomers.find((c: any) => c.name && c.name.toUpperCase().includes(name.toUpperCase()));
-        const inMerged = merged.find((c: any) => c.name && c.name.toUpperCase().includes(name.toUpperCase()));
+        const inRemote = (result.customers || []).find((c) => c.name && c.name.toUpperCase().includes(name.toUpperCase()));
+        const inBefore = currentCustomers.find((c) => c.name && c.name.toUpperCase().includes(name.toUpperCase()));
+        const inMerged = merged.find((c) => c.name && c.name.toUpperCase().includes(name.toUpperCase()));
         console.log(`[Client Sync Target Check] "${name}":`, {
           inRemotePayload: !!inRemote,
           inLocalBeforeMerge: !!inBefore,
@@ -629,8 +645,8 @@ export async function syncNow(isManual: boolean = false) {
       const latestLocalUsers = useAuthStore.getState().users || [];
       const activeUserId = currentUser.id;
 
-      const mergedUsers = result.users.map((remoteUser: any) => {
-        const localUser = latestLocalUsers.find((u: any) => u.id === remoteUser.id);
+      const mergedUsers = result.users.map((remoteUser) => {
+        const localUser = latestLocalUsers.find((u) => u.id === remoteUser.id);
 
         const localUpdate = localUser?.updatedAt
           ? new Date(localUser.updatedAt).getTime()
@@ -684,7 +700,7 @@ export async function syncNow(isManual: boolean = false) {
       useAuthStore.setState({ users: mergedUsers });
 
       const updatedCurrentUser = mergedUsers.find(
-        (u: any) => u.id === activeUserId
+        (u) => u.id === activeUserId
       );
 
       if (updatedCurrentUser) {

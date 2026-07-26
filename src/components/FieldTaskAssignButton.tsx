@@ -28,8 +28,16 @@ import {
   type MockUser
 } from "@/store/useAuthStore";
 
+interface FieldTaskCustomer {
+  id: string;
+  name?: string;
+  phone?: string;
+  address?: string;
+  mapLocation?: string;
+}
+
 interface FieldTaskAssignButtonProps {
-  customer: any;
+  customer: FieldTaskCustomer;
   currentUser: MockUser | null;
   users: MockUser[];
   onAssigned?: (
@@ -96,7 +104,7 @@ function cleanTaskSnapshot(value: unknown): unknown {
 }
 
 function buildTaskCustomerSnapshot(
-  customer: any
+  customer: FieldTaskCustomer
 ): Record<string, unknown> {
   const measurements =
     useMeasurementStore
@@ -299,7 +307,7 @@ export function FieldTaskAssignButton({
       <button
         type="button"
         onClick={handleOpen}
-        className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-bold shadow-sm transition-colors"
+        className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#5699a3] bg-[#397986] px-3 py-2 text-center text-sm font-bold leading-tight text-white shadow-sm transition-colors hover:bg-[#478995]"
         title="Cariyi saha personeline ölçü görevi olarak ata"
       >
         <Ruler className="w-4 h-4" />

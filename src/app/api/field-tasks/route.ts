@@ -1,6 +1,8 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyAuth } from "@/lib/authHelper";
+import { loadShadowErpContext } from "@/lib/serverErpContext";
+import { readRequestedErpScopeId } from "@/lib/erpActiveScopeCookie";
 
 const ADMIN_ROLES = new Set([
   "ADMIN",
@@ -139,6 +141,20 @@ export async function GET(req: NextRequest) {
   }
 
   const supabase = getSupabaseServer();
+  const erpContext = await loadShadowErpContext(supabase, user.id, {
+    requestedScopeId: readRequestedErpScopeId(req),
+  });
+
+  if (!erpContext.ready) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "ERP scope is not ready",
+        reason: erpContext.reason,
+      },
+      { status: erpContext.reason === "READ_FAILED" ? 503 : 409 },
+    );
+  }
 
   const sinceParam =
     req.nextUrl.searchParams.get("since");
@@ -149,6 +165,13 @@ export async function GET(req: NextRequest) {
   let query = supabase
     .from("field_tasks")
     .select("*")
+    .match({
+      tenant_id: erpContext.scope.tenantId,
+      company_id: erpContext.scope.companyId,
+      branch_id: erpContext.scope.branchId,
+      accounting_period_id:
+        erpContext.scope.accountingPeriodId,
+    })
     .order("updated_at", {
       ascending: false,
     })
@@ -264,6 +287,20 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = getSupabaseServer();
+  const erpContext = await loadShadowErpContext(supabase, user.id, {
+    requestedScopeId: readRequestedErpScopeId(req),
+  });
+
+  if (!erpContext.ready) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "ERP scope is not ready",
+        reason: erpContext.reason,
+      },
+      { status: erpContext.reason === "READ_FAILED" ? 503 : 409 },
+    );
+  }
 
   const {
     data: assignedUser,
@@ -310,6 +347,11 @@ export async function POST(req: NextRequest) {
     new Date().toISOString();
 
   const record = {
+    tenant_id: erpContext.scope.tenantId,
+    company_id: erpContext.scope.companyId,
+    branch_id: erpContext.scope.branchId,
+    accounting_period_id:
+      erpContext.scope.accountingPeriodId,
     id,
 
     customer_id: customerId,
@@ -445,11 +487,32 @@ export async function PATCH(req: NextRequest) {
   }
 
   const supabase = getSupabaseServer();
+  const erpContext = await loadShadowErpContext(supabase, user.id, {
+    requestedScopeId: readRequestedErpScopeId(req),
+  });
+
+  if (!erpContext.ready) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "ERP scope is not ready",
+        reason: erpContext.reason,
+      },
+      { status: erpContext.reason === "READ_FAILED" ? 503 : 409 },
+    );
+  }
 
   let existingQuery = supabase
     .from("field_tasks")
     .select("*")
-    .eq("id", id);
+    .eq("id", id)
+    .match({
+      tenant_id: erpContext.scope.tenantId,
+      company_id: erpContext.scope.companyId,
+      branch_id: erpContext.scope.branchId,
+      accounting_period_id:
+        erpContext.scope.accountingPeriodId,
+    });
 
   if (FIELD_ROLES.has(role)) {
     existingQuery = existingQuery.eq(
@@ -518,6 +581,13 @@ export async function PATCH(req: NextRequest) {
     .from("field_tasks")
     .update(updateRecord)
     .eq("id", id)
+    .match({
+      tenant_id: erpContext.scope.tenantId,
+      company_id: erpContext.scope.companyId,
+      branch_id: erpContext.scope.branchId,
+      accounting_period_id:
+        erpContext.scope.accountingPeriodId,
+    })
     .select("*")
     .single();
 

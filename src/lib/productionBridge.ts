@@ -24,6 +24,16 @@ function resolveProductionQuantity(item: CentralSaleItem): number {
   return Number(item.quantity || 1);
 }
 
+function resolveProductionQuantityUnit(
+  item: CentralSaleItem
+): 'mt' | 'm2' | 'adet' {
+  if (Number(item.fabricMeters || 0) > 0) {
+    return 'mt';
+  }
+
+  return item.metricUnit;
+}
+
 function toLegacySaleItem(item: CentralSaleItem): LegacySaleItem {
   return {
     id: item.id,
@@ -61,7 +71,8 @@ function toLegacySaleItem(item: CentralSaleItem): LegacySaleItem {
 
 function toProductionItem(
   sale: CentralSale,
-  item: CentralSaleItem
+  item: CentralSaleItem,
+  assignedEmployeeId?: string
 ): ProductionItem {
   return {
     id: `central-production-${sale.id}-${item.id}`,
@@ -85,6 +96,7 @@ function toProductionItem(
       0
     ),
     quantity: resolveProductionQuantity(item),
+    quantityUnit: resolveProductionQuantityUnit(item),
     pleatType: item.pleatDetails,
     wingQuantity: item.wingQuantity,     fonPlacement: item.fonPlacement,
     productionStatus: 'READY_FOR_CUTTING',
@@ -92,6 +104,7 @@ function toProductionItem(
     sewingCompleted: false,
     ironingCompleted: false,
     packagingCompleted: false,
+    assignedEmployeeId,
     dueDate: formatDefaultDeliveryPromiseDate(),
     history: [
       {
@@ -142,6 +155,11 @@ export async function syncCentralSaleToTailorProduction(
   const { useStore, generateUUID } = await import('@/store/useStore');
 
   useStore.setState(state => {
+    const assignedTailorId =
+      state.customers.find(
+        customer => customer.id === sale.customerId
+      )?.assignedTailorId || undefined;
+
     const existingKeys = new Set(
       state.productionItems.map(
         item => `${item.orderId}|${item.saleLineId}`
@@ -152,7 +170,79 @@ export async function syncCentralSaleToTailorProduction(
       .filter(
         item => !existingKeys.has(`${sale.id}|${item.id}`)
       )
-      .map(item => toProductionItem(sale, item));
+      .map(item =>
+        toProductionItem(
+          sale,
+          item,
+          assignedTailorId
+        )
+      );
+
+    const tailorItemsById = new Map(
+      tailorItems.map(item => [item.id, item])
+    );
+
+    const existingProductionItems =
+      state.productionItems.map(item => {
+        const sourceItem =
+          item.orderId === sale.id
+            ? tailorItemsById.get(item.saleLineId)
+            : undefined;
+
+        if (!sourceItem) return item;
+
+        let repairedItem = item;
+
+        if (!repairedItem.quantityUnit) {
+          repairedItem = {
+            ...repairedItem,
+            quantityUnit:
+              resolveProductionQuantityUnit(sourceItem)
+          };
+        }
+
+        if (
+          !repairedItem.pleatType &&
+          sourceItem.pleatDetails
+        ) {
+          repairedItem = {
+            ...repairedItem,
+            pleatType: sourceItem.pleatDetails
+          };
+        }
+
+        if (
+          repairedItem.wingQuantity === undefined &&
+          sourceItem.wingQuantity !== undefined
+        ) {
+          repairedItem = {
+            ...repairedItem,
+            wingQuantity: sourceItem.wingQuantity
+          };
+        }
+
+        if (
+          repairedItem.fonPlacement === undefined &&
+          sourceItem.fonPlacement !== undefined
+        ) {
+          repairedItem = {
+            ...repairedItem,
+            fonPlacement: sourceItem.fonPlacement
+          };
+        }
+
+        if (
+          !repairedItem.assignedEmployeeId &&
+          assignedTailorId
+        ) {
+          return {
+            ...repairedItem,
+            assignedEmployeeId: assignedTailorId
+          };
+        }
+
+        return repairedItem;
+      });
 
     const legacyItems = productionSourceItems.map(toLegacySaleItem);
 
@@ -207,7 +297,7 @@ export async function syncCentralSaleToTailorProduction(
       sales: nextSales,
       productionItems: [
         ...newProductionItems,
-        ...state.productionItems
+        ...existingProductionItems
       ],
       productionTasks: nextProductionTasks
     };

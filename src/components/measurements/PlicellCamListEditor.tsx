@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 
 export interface PlicellCamItem {
@@ -32,35 +32,6 @@ export function PlicellCamListEditor({
   const [rows, setRows] = useState<PlicellCamItem[]>(
     () => plicellCamListesi || []
   );
-
-  useEffect(() => {
-    const incomingRows = plicellCamListesi || [];
-
-    setRows((currentRows) => {
-      const currentJson = JSON.stringify(currentRows);
-      const incomingJson = JSON.stringify(incomingRows);
-
-      return currentJson === incomingJson
-        ? currentRows
-        : incomingRows;
-    });
-
-    const nextAdet = camAdedi ? String(camAdedi) : "";
-    const nextBoy = ortakCamBoyuCm ? String(ortakCamBoyuCm) : "";
-    const nextRenk = profilRengi || "";
-
-    setLocalAdet((current) =>
-      current === nextAdet ? current : nextAdet
-    );
-
-    setLocalBoy((current) =>
-      current === nextBoy ? current : nextBoy
-    );
-
-    setLocalRenk((current) =>
-      current === nextRenk ? current : nextRenk
-    );
-  }, [plicellCamListesi, camAdedi, ortakCamBoyuCm, profilRengi]);
 
   const normalizeNumber = (val: string) => {
     const normalized = val.replace(',', '.').replace(/[^0-9.]/g, '');
@@ -108,12 +79,12 @@ export function PlicellCamListEditor({
     onChange({ camAdedi: adet, ortakCamBoyuCm: boy, profilRengi: val, plicellCamListesi: rows });
   };
 
-  const handleRowChange = (index: number, field: keyof PlicellCamItem, value: string) => {
+  const handleRowChange = (index: number, field: 'widthCm' | 'note', value: string) => {
     const newRows = [...rows];
     if (field === 'widthCm') {
-      newRows[index][field] = normalizeNumber(value);
+      newRows[index] = { ...newRows[index], widthCm: normalizeNumber(value) };
     } else {
-      newRows[index] = { ...newRows[index], [field]: value } as any;
+      newRows[index] = { ...newRows[index], note: value };
     }
     setRows(newRows);
     

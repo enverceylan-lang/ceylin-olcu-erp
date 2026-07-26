@@ -2,17 +2,19 @@ import React from 'react';
 import { X, Printer, Share2, Loader2, ZoomIn, ZoomOut, RotateCcw, Move } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
-import { Customer, MEASUREMENT_TEMPLATES, WindowItem, ProductMeasurement } from '@/store/useStore';
-import { getTemplateLabel, getMeasurementDimensions, resolveMeasurementProductLabel, resolveMeasurementProductGroup } from '@/lib/measurementAdapter';
+import { Customer, MEASUREMENT_TEMPLATES, WindowItem } from '@/store/useStore';
+import { getTemplateLabel, resolveMeasurementProductLabel, resolveMeasurementProductGroup } from '@/lib/measurementAdapter';
 import { getValidNote } from '@/lib/reportFormatters';
+import { resolveFacadeHeight } from '@/lib/facadeHeight';
 import {
   getStoredProductCalculation
 } from '@/lib/calculationEngine';
-import { renderSimpleWidthHeightDiagram, renderCurtainDetailDiagram } from '@/lib/measurementDiagram';
 import { TechnicalMeasurementSketch } from './TechnicalMeasurementSketch';
 import { PlicellMeasurementSketch } from './PlicellMeasurementSketch';
-import { formatFacadeForReport } from '@/lib/facadeHelper';
 import { useMeasurementStore, MeasurementRecord } from '@/store/measurementStore';
+import packageJson from '../../../package.json';
+
+const REPORT_APP_VERSION = packageJson.version;
 
 const MECHANICAL_VISUAL_PRODUCT_TYPES =
   new Set([
@@ -71,8 +73,8 @@ function getSameOpeningMeasurements(
 }
 
 function getSketchProductTypes(
-  products: any[],
-  current: any
+  products: MeasurementRecord[],
+  current: MeasurementRecord
 ): string[] {
   const sameOpening =
     getSameOpeningMeasurements(products, current);
@@ -85,7 +87,7 @@ function getSketchProductTypes(
     }
 
     if (Array.isArray(item?.selectedProducts)) {
-      item.selectedProducts.forEach((sp: any) => {
+      item.selectedProducts.forEach(sp => {
         if (sp?.isActive !== false && sp?.productType) {
           rawTypes.push(String(sp.productType));
         }
@@ -96,8 +98,8 @@ function getSketchProductTypes(
   return Array.from(new Set(rawTypes));
 }
 function getSketchProductHeights(
-  products: any[],
-  current: any
+  products: MeasurementRecord[],
+  current: MeasurementRecord
 ): Array<{
   productType: string;
   label: string;
@@ -135,23 +137,17 @@ function getSketchProductHeights(
       item?.rawValues || {};
 
     const fullHeight =
-      Math.max(
-        Number(rawValues.solYukseklikCm || 0),
-        Number(rawValues.ortaYukseklikCm || 0),
-        Number(rawValues.sagYukseklikCm || 0),
-        Number(rawValues.height || 0),
-        Number(rawValues.windowHeight || 0)
-      );
+      resolveFacadeHeight(rawValues);
 
     const activeProducts =
       Array.isArray(item?.selectedProducts)
         ? item.selectedProducts.filter(
-            (product: any) =>
+            product =>
               product?.isActive !== false
           )
         : [];
 
-    activeProducts.forEach((product: any) => {
+    activeProducts.forEach(product => {
       const productType =
         String(
           product?.productType || ''
@@ -179,7 +175,7 @@ function getSketchProductHeights(
       const groupHeights =
         Array.isArray(calculation.groups)
           ? calculation.groups
-              .map((group: any) =>
+              .map(group =>
                 Number(
                   group?.realHeightCm ||
                   group?.calculatedHeightCm ||
@@ -288,19 +284,19 @@ function getSketchProductHeights(
 }
 
 function shouldSuppressSunshadeFacadeHeight(
-  measurement: any
+  measurement: MeasurementRecord
 ): boolean {
   const activeProducts =
     Array.isArray(measurement?.selectedProducts)
       ? measurement.selectedProducts.filter(
-          (product: any) =>
+          product =>
             product?.isActive !== false
         )
       : [];
 
   const sunshade =
     activeProducts.find(
-      (product: any) =>
+      product =>
         String(
           product?.productType || ''
         ).toUpperCase() === 'GUNESLIK'
@@ -337,12 +333,12 @@ function shouldSuppressSunshadeFacadeHeight(
 }
 
 function getSketchFonPlacement(
-  measurements: any[]
+  measurements: MeasurementRecord[]
 ): 'LEFT' | 'BOTH' | undefined {
   for (const measurement of measurements) {
     const fonProduct =
       measurement?.selectedProducts?.find(
-        (product: any) =>
+        product =>
           product?.isActive !== false &&
           String(
             product?.productType || ''
@@ -364,8 +360,8 @@ function getSketchFonPlacement(
 }
 
 function getGeneralSketchProductHeights(
-  products: any[],
-  current: any
+  products: MeasurementRecord[],
+  current: MeasurementRecord
 ): Array<{
   productType: string;
   label: string;
@@ -391,7 +387,7 @@ function getGeneralSketchProductHeights(
 }
 
 function buildMechanicalVisualPanels(
-  measurements: any[]
+  measurements: MeasurementRecord[]
 ): Array<{
   id?: string;
   productType: string;
@@ -424,7 +420,10 @@ function buildMechanicalVisualPanels(
   measurements.forEach(measurement => {
     if (!measurement) return;
 
-    const candidates: any[] = [];
+    const candidates: Array<{
+      productType: string;
+      calculation: NonNullable<MeasurementRecord['details']>;
+    }> = [];
 
     if (
       MECHANICAL_VISUAL_PRODUCT_TYPES.has(
@@ -435,10 +434,9 @@ function buildMechanicalVisualPanels(
     ) {
       candidates.push({
         productType:
-          measurement.productType,
+          String(measurement.productType || ''),
         calculation:
-          measurement.calculation ||
-          measurement.details
+          measurement.details || {}
       });
     }
 
@@ -449,7 +447,7 @@ function buildMechanicalVisualPanels(
     ) {
       measurement.selectedProducts
         .filter(
-          (product: any) =>
+          product =>
             product?.isActive !== false &&
             MECHANICAL_VISUAL_PRODUCT_TYPES.has(
               String(
@@ -457,8 +455,11 @@ function buildMechanicalVisualPanels(
               ).toUpperCase()
             )
         )
-        .forEach((product: any) => {
-          candidates.push(product);
+        .forEach(product => {
+          candidates.push({
+            productType: String(product.productType || ''),
+            calculation: product.calculation || {}
+          });
         });
     }
 
@@ -469,9 +470,7 @@ function buildMechanicalVisualPanels(
         ).toUpperCase();
 
       const calculation =
-        candidate.calculation ||
-        candidate.details ||
-        {};
+        candidate.calculation;
 
       const groups =
         Array.isArray(calculation.groups)
@@ -479,14 +478,16 @@ function buildMechanicalVisualPanels(
           : [];
 
       groups.forEach(
-        (group: any, index: number) => {
+        (group: Record<string, unknown>, index: number) => {
           panels.push({
             id:
-              group.generatedItemId ||
+              String(group.generatedItemId || '') ||
               `${measurement.id || 'measurement'}-${productType}-${index}`,
             productType,
             groupType:
-              group.groupType,
+              group.groupType
+                ? String(group.groupType)
+                : undefined,
             widthCm:
               Number(
                 group.realWidthCm ||
@@ -549,7 +550,7 @@ function buildMechanicalVisualPanels(
 
 function buildCalculationReportDetails(
   productType: string,
-  calculation: any
+  calculation: NonNullable<MeasurementRecord['details']>
 ): string[] {
   const calc = calculation || {};
   const details: string[] = [];
@@ -699,7 +700,7 @@ function buildCalculationReportDetails(
   ) {
     details.push(
       `Satış Kalemleri: ${calc.salesItems
-        .map((item: any) => item.label)
+        .map(item => item.label)
         .filter(Boolean)
         .join(' + ')}`
     );
@@ -715,7 +716,7 @@ interface MeasurementVisualReportProps {
   measurements?: MeasurementRecord[];
 }
 
-export function MeasurementVisualReport({ isOpen, onClose, customer, users, measurements: propMeasurements }: MeasurementVisualReportProps) {
+export function MeasurementVisualReport({ isOpen, onClose, customer, measurements: propMeasurements }: MeasurementVisualReportProps) {
   const [isGeneratingPdf, setIsGeneratingPdf] = React.useState(false);
   const [previewNode, setPreviewNode] = React.useState<React.ReactNode | null>(null);
   const [previewZoom, setPreviewZoom] = React.useState(1);
@@ -889,9 +890,14 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
   }, [closePreview]);
 
   React.useEffect(() => {
-    if (previewNode) {
-      resetPreviewTransform();
-    }
+    if (!previewNode) return;
+
+    const resetTimer = window.setTimeout(
+      resetPreviewTransform,
+      0
+    );
+
+    return () => window.clearTimeout(resetTimer);
   }, [
     previewNode,
     resetPreviewTransform
@@ -924,6 +930,62 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
   let globalPlicellM2 = 0;
   let globalMechanicalCount = 0;
   let globalMechanicalM2 = 0;
+  const materialTotals = new Map<
+    string,
+    { label: string; meters: number }
+  >();
+
+  activeMeasurements.forEach(measurement => {
+    const activeProducts =
+      measurement.selectedProducts?.filter(
+        product => product.isActive
+      ) || [];
+
+    activeProducts.forEach(product => {
+      const productType = String(
+        product.productType || ''
+      ).toUpperCase();
+      const calculation = product.calculation || {};
+      const meterValue = Number(
+        calculation.fabricUsageMeters ??
+          calculation.totalLengthMeters ??
+          0
+      );
+
+      if (
+        meterValue <= 0 ||
+        ![
+          'TUL',
+          'GUNESLIK',
+          'FON',
+          'RUSTIK',
+          'TAVAN_RUSTIK'
+        ].includes(productType)
+      ) {
+        return;
+      }
+
+      const current = materialTotals.get(productType);
+
+      materialTotals.set(productType, {
+        label: resolveMeasurementProductLabel({
+          productType
+        }),
+        meters:
+          Number(current?.meters || 0) +
+          meterValue
+      });
+    });
+  });
+
+  const globalMaterialTotals =
+    Array.from(materialTotals.values()).sort(
+      (left, right) =>
+        left.label.localeCompare(
+          right.label,
+          'tr'
+        )
+    );
 
   const renderSelectedProductsSection = (p: MeasurementRecord) => {
     const activeItems = p.selectedProducts?.filter(sp => sp.isActive) || [];
@@ -1017,7 +1079,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                   calc.groups.length > 0 && (
                     <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
                       {calc.groups.map(
-                        (group: any, groupIndex: number) => {
+                        (group, groupIndex: number) => {
                           const realWidth =
                             Number(
                               group.realWidthCm || 0
@@ -1270,6 +1332,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
       </div>
     );
   };
+  void renderSelectedProductsSection;
 
   const generateVisualReportPdfFile = async (): Promise<File> => {
     const reportElement =
@@ -1284,14 +1347,106 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
      * Klon üzerinde koyu ekran teması beyaz PDF temasına çevrilir.
      * Orijinal ekrana müdahale edilmez.
      */
-    const canvas = await html2canvas(reportElement, {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: '#ffffff',
-      logging: false,
-      windowWidth: reportElement.scrollWidth,
-      windowHeight: reportElement.scrollHeight,
-      onclone: clonedDocument => {
+    const reportWidth =
+      Math.max(
+        reportElement.scrollWidth,
+        reportElement.clientWidth,
+        1
+      );
+
+    const reportHeight =
+      Math.max(
+        reportElement.scrollHeight,
+        reportElement.clientHeight,
+        1
+      );
+
+    const isMobileDevice =
+      window.matchMedia(
+        '(max-width: 768px)'
+      ).matches;
+
+    const preferredScale =
+      isMobileDevice ? 1.25 : 2;
+
+    const maxCanvasPixels =
+      isMobileDevice
+        ? 12_000_000
+        : 32_000_000;
+
+    const maxCanvasDimension = 16_384;
+
+    const dimensionSafeScale =
+      Math.min(
+        maxCanvasDimension / reportWidth,
+        maxCanvasDimension / reportHeight
+      );
+
+    const pixelSafeScale =
+      Math.sqrt(
+        maxCanvasPixels /
+          (reportWidth * reportHeight)
+      );
+
+    const renderScale =
+      Math.max(
+        0.25,
+        Math.min(
+          preferredScale,
+          dimensionSafeScale,
+          pixelSafeScale
+        )
+      );
+
+    /*
+     * html2canvas reads some computed styles before onclone runs.
+     * Apply the PDF-only sRGB palette to the source report temporarily,
+     * then always remove it after rasterization.
+     */
+    const sourceColorSafetyStyle =
+      document.createElement('style');
+
+    sourceColorSafetyStyle.dataset.pdfColorSafety =
+      'true';
+    sourceColorSafetyStyle.textContent = `
+      #visual-report-print-area,
+      #visual-report-print-area *,
+      #visual-report-print-area *::before,
+      #visual-report-print-area *::after {
+        font-family: Arial, Helvetica, sans-serif !important;
+        color: #0f172a !important;
+        background-color: #ffffff !important;
+        border-color: #cbd5e1 !important;
+        outline-color: #cbd5e1 !important;
+        text-decoration-color: #0f172a !important;
+        background-image: none !important;
+        box-shadow: none !important;
+        text-shadow: none !important;
+      }
+    `;
+    document.head.appendChild(
+      sourceColorSafetyStyle
+    );
+
+    let canvas: HTMLCanvasElement;
+    let clonedReportHeight =
+      reportHeight;
+    let clonedKeepTogetherBlocks: Array<{
+      top: number;
+      bottom: number;
+    }> = [];
+
+    try {
+      canvas = await html2canvas(reportElement, {
+        scale: renderScale,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+        removeContainer: true,
+        imageTimeout: 15_000,
+        windowWidth: reportWidth,
+        windowHeight: reportHeight,
+        onclone: clonedDocument => {
         const clonedReport =
           clonedDocument.getElementById(
             'visual-report-print-area'
@@ -1313,10 +1468,32 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
           #visual-report-print-area {
             width: 100% !important;
             max-width: none !important;
+            font-family: Arial, Helvetica, sans-serif !important;
+            font-size: 13px !important;
+            line-height: 1.35 !important;
             background: #ffffff !important;
             color: #0f172a !important;
             border: none !important;
             box-shadow: none !important;
+          }
+
+          /*
+           * Tailwind/Chrome may expose CSS Color 4 values such as lab(...).
+           * html2canvas 1.x cannot parse them, so the cloned PDF-only tree
+           * uses a small, explicit sRGB palette.
+           */
+          #visual-report-print-area *,
+          #visual-report-print-area *::before,
+          #visual-report-print-area *::after {
+            font-family: Arial, Helvetica, sans-serif !important;
+            color: #0f172a !important;
+            background-color: #ffffff !important;
+            border-color: #cbd5e1 !important;
+            outline-color: #cbd5e1 !important;
+            text-decoration-color: #0f172a !important;
+            background-image: none !important;
+            box-shadow: none !important;
+            text-shadow: none !important;
           }
 
           #visual-report-print-area .measurement-card {
@@ -1327,6 +1504,38 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
             border: 1px solid #cbd5e1 !important;
             box-shadow: none !important;
           }
+
+          #visual-report-print-area table {
+            width: 100% !important;
+            table-layout: fixed !important;
+            border-collapse: collapse !important;
+          }
+
+          #visual-report-print-area table th,
+          #visual-report-print-area table td {
+            padding: 6px 4px !important;
+            font-size: 10px !important;
+            line-height: 1.25 !important;
+            white-space: normal !important;
+            overflow-wrap: break-word !important;
+          }
+
+          #visual-report-print-area table th:nth-child(1),
+          #visual-report-print-area table td:nth-child(1) { width: 5% !important; }
+          #visual-report-print-area table th:nth-child(2),
+          #visual-report-print-area table td:nth-child(2) { width: 18% !important; }
+          #visual-report-print-area table th:nth-child(3),
+          #visual-report-print-area table td:nth-child(3) { width: 17% !important; }
+          #visual-report-print-area table th:nth-child(4),
+          #visual-report-print-area table td:nth-child(4) { width: 12% !important; }
+          #visual-report-print-area table th:nth-child(5),
+          #visual-report-print-area table td:nth-child(5) { width: 12% !important; }
+          #visual-report-print-area table th:nth-child(6),
+          #visual-report-print-area table td:nth-child(6) { width: 10% !important; }
+          #visual-report-print-area table th:nth-child(7),
+          #visual-report-print-area table td:nth-child(7) { width: 10% !important; }
+          #visual-report-print-area table th:nth-child(8),
+          #visual-report-print-area table td:nth-child(8) { width: 16% !important; }
 
           #visual-report-print-area h1,
           #visual-report-print-area h2,
@@ -1359,9 +1568,54 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
           }
         `;
 
-        clonedDocument.head.appendChild(pdfStyle);
-      }
-    });
+          clonedDocument.head.appendChild(pdfStyle);
+
+          /*
+           * Sayfa kırılım koordinatları ekrandaki rapordan değil,
+           * PDF stilleri uygulanmış klondan alınır. Tablo/font
+           * boyutları değiştiğinde kaynak DOM koordinatları sapıyordu.
+           */
+          void clonedReport.offsetHeight;
+
+          const clonedReportRect =
+            clonedReport.getBoundingClientRect();
+
+          clonedReportHeight =
+            Math.max(
+              clonedReport.scrollHeight,
+              clonedReportRect.height,
+              1
+            );
+
+          clonedKeepTogetherBlocks =
+            Array.from(
+              clonedReport.querySelectorAll<HTMLElement>(
+                '.measurement-card, .pdf-keep-together'
+              )
+            ).map(element => {
+              const rect =
+                element.getBoundingClientRect();
+
+              return {
+                top: Math.max(
+                  0,
+                  rect.top -
+                    clonedReportRect.top +
+                    clonedReport.scrollTop
+                ),
+                bottom: Math.min(
+                  clonedReportHeight,
+                  rect.bottom -
+                    clonedReportRect.top +
+                    clonedReport.scrollTop
+                )
+              };
+            });
+        }
+      });
+    } finally {
+      sourceColorSafetyStyle.remove();
+    }
 
     const pdf =
       new jsPDF({
@@ -1373,9 +1627,12 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
 
     const pageWidth = 210;
     const pageHeight = 297;
-    const margin = 8;
-    const usableWidth = pageWidth - margin * 2;
-    const usableHeight = pageHeight - margin * 2;
+    const horizontalMargin = 12;
+    const verticalMargin = 8;
+    const usableWidth =
+      pageWidth - horizontalMargin * 2;
+    const usableHeight =
+      pageHeight - verticalMargin * 2;
 
     /*
      * Tek uzun görseli her sayfada tekrar basmak yerine,
@@ -1388,40 +1645,35 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
       );
 
     /*
+     * Bir kartı sonraki sayfaya taşımak için mevcut sayfanın en az
+     * bu kadarı dolmuş olmalı. Aksi halde kısa bir başlık veya bölüm
+     * yüzünden A4 sayfasının büyük kısmı boş kalıyordu.
+     */
+    const minimumFilledPageHeight =
+      Math.floor(
+        pagePixelHeight * 0.5
+      );
+
+    /*
      * DOM kart sınırlarını canvas piksel koordinatlarına çevir.
      * Böylece bir kart A4 sınırına denk gelirse kesmek yerine
      * kartın başlangıcından yeni sayfa açılır.
      */
-    const reportRect =
-      reportElement.getBoundingClientRect();
-
     const canvasScaleY =
       canvas.height /
       Math.max(
-        reportElement.scrollHeight,
-        reportRect.height,
+        clonedReportHeight,
         1
       );
 
     const keepTogetherBlocks =
-      Array.from(
-        reportElement.querySelectorAll<HTMLElement>(
-          '.measurement-card, .pdf-keep-together'
-        )
-      )
-        .map(element => {
-          const rect =
-            element.getBoundingClientRect();
-
+      clonedKeepTogetherBlocks
+        .map(block => {
           const top =
             Math.max(
               0,
               Math.round(
-                (
-                  rect.top -
-                  reportRect.top +
-                  reportElement.scrollTop
-                ) *
+                block.top *
                   canvasScaleY
               )
             );
@@ -1430,11 +1682,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
             Math.min(
               canvas.height,
               Math.round(
-                (
-                  rect.bottom -
-                  reportRect.top +
-                  reportElement.scrollTop
-                ) *
+                block.bottom *
                   canvasScaleY
               )
             );
@@ -1489,8 +1737,11 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
       const crossingBlock =
         keepTogetherBlocks.find(
           block =>
+            block.height <=
+              pagePixelHeight &&
             block.top >
-              sourceY + 20 &&
+              sourceY +
+                minimumFilledPageHeight &&
             block.top <
               proposedBottom &&
             block.bottom >
@@ -1577,19 +1828,25 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
       pdf.addImage(
         pageCanvas,
         'PNG',
-        margin,
-        margin,
+        horizontalMargin,
+        verticalMargin,
         usableWidth,
         renderedHeight,
         undefined,
         'FAST'
       );
 
+      pageCanvas.width = 1;
+      pageCanvas.height = 1;
+
       sourceY +=
         safeSliceHeight;
 
       pageIndex += 1;
     }
+
+    canvas.width = 1;
+    canvas.height = 1;
 
 
     const safeCustomerName =
@@ -1601,7 +1858,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
         .toLowerCase();
 
     const fileName =
-      `ceylin-olcu-raporu-${safeCustomerName || 'musteri'}.pdf`;
+      `ceylin-perde-ceyiz-olcu-raporu-${safeCustomerName || 'musteri'}.pdf`;
 
     const pdfBlob =
       pdf.output('blob');
@@ -1613,7 +1870,61 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
     );
   };
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
+    /*
+     * Yazdırma ve paylaşma aynı A4 PDF motorunu kullanmalı.
+     * Tarayıcının HTML yazdırma motoru farklı sayfa kırılımları
+     * üretebildiği için önce doğrulanmış PDF indirilir; kullanıcı
+     * dosyayı tarayıcı/PDF görüntüleyicisinden yazdırabilir.
+     */
+    setIsGeneratingPdf(true);
+
+    try {
+      const pdfFile =
+        await generateVisualReportPdfFile();
+
+      const downloadUrl =
+        URL.createObjectURL(pdfFile);
+
+      const downloadLink =
+        document.createElement('a');
+
+      downloadLink.href = downloadUrl;
+      downloadLink.download = pdfFile.name;
+      downloadLink.style.display = 'none';
+
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      downloadLink.remove();
+
+      window.setTimeout(
+        () => {
+          URL.revokeObjectURL(downloadUrl);
+        },
+        60_000
+      );
+
+      return;
+    } catch (error) {
+      console.error(
+        'PDF print generation error:',
+        error
+      );
+
+      window.alert(
+        'PDF hazırlanamadı. Lütfen tekrar deneyin.'
+      );
+      return;
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+
+    const runLegacyPrint = () => {
+    /*
+     * Eski iframe yazdırma akışı, geriye dönük başvuru için şimdilik
+     * korunuyor. Yukarıdaki ortak PDF akışı başarılı olduğunda buraya
+     * ulaşılmaz.
+     */
     const printArea =
       document.getElementById(
         'visual-report-print-area'
@@ -1671,7 +1982,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
     }
 
     const documentTitle =
-      'CEYLİN ERP - Saha Ölçü Raporu';
+      'CEYLİN PERDE & ÇEYİZ - Saha Ölçü Raporu';
 
     frameDocument.open();
     frameDocument.write(
@@ -1696,6 +2007,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
       '}' +
       'body{' +
       'position:static!important;' +
+      'font-family:Arial,Helvetica,sans-serif!important;' +
       '}' +
       '#visual-report-print-area{' +
       'position:static!important;' +
@@ -1744,8 +2056,8 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
       '#visual-report-print-area table th,' +
       '#visual-report-print-area table td{' +
       'padding:2px 2px!important;' +
-      'font-size:7.2px!important;' +
-      'line-height:1.15!important;' +
+      'font-size:9px!important;' +
+      'line-height:1.25!important;' +
       'word-break:normal!important;' +
       'overflow-wrap:break-word!important;' +
       'white-space:normal!important;' +
@@ -1753,27 +2065,21 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
       'vertical-align:middle!important;' +
       '}' +
       '#visual-report-print-area table th:nth-child(1),' +
-      '#visual-report-print-area table td:nth-child(1){width:4%!important;}' +
+      '#visual-report-print-area table td:nth-child(1){width:5%!important;}' +
       '#visual-report-print-area table th:nth-child(2),' +
-      '#visual-report-print-area table td:nth-child(2){width:12%!important;}' +
+      '#visual-report-print-area table td:nth-child(2){width:18%!important;}' +
       '#visual-report-print-area table th:nth-child(3),' +
-      '#visual-report-print-area table td:nth-child(3){width:12%!important;}' +
+      '#visual-report-print-area table td:nth-child(3){width:17%!important;}' +
       '#visual-report-print-area table th:nth-child(4),' +
-      '#visual-report-print-area table td:nth-child(4){width:9%!important;}' +
+      '#visual-report-print-area table td:nth-child(4){width:12%!important;}' +
       '#visual-report-print-area table th:nth-child(5),' +
-      '#visual-report-print-area table td:nth-child(5){width:9%!important;}' +
+      '#visual-report-print-area table td:nth-child(5){width:12%!important;}' +
       '#visual-report-print-area table th:nth-child(6),' +
-      '#visual-report-print-area table td:nth-child(6){width:8%!important;}' +
+      '#visual-report-print-area table td:nth-child(6){width:10%!important;}' +
       '#visual-report-print-area table th:nth-child(7),' +
-      '#visual-report-print-area table td:nth-child(7){width:8%!important;}' +
+      '#visual-report-print-area table td:nth-child(7){width:10%!important;}' +
       '#visual-report-print-area table th:nth-child(8),' +
-      '#visual-report-print-area table td:nth-child(8){width:7%!important;}' +
-      '#visual-report-print-area table th:nth-child(9),' +
-      '#visual-report-print-area table td:nth-child(9){width:7%!important;}' +
-      '#visual-report-print-area table th:nth-child(10),' +
-      '#visual-report-print-area table td:nth-child(10){width:10%!important;}' +
-      '#visual-report-print-area table th:nth-child(11),' +
-      '#visual-report-print-area table td:nth-child(11){width:14%!important;}' +
+      '#visual-report-print-area table td:nth-child(8){width:16%!important;}' +
       '/* CEYLIN_MEASUREMENT_CARD_PRINT_KEEP_V1 */' +
       '#visual-report-print-area .measurement-card{' +
       'page-break-inside:avoid!important;' +
@@ -1826,30 +2132,77 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
         { once: true }
       );
     }
+    };
+
+    void runLegacyPrint;
   };
 
   const handleWhatsAppShare = async () => {
-    try {
-      setIsGeneratingPdf(true);
-      const pdfFile = await generateVisualReportPdfFile();
+    setIsGeneratingPdf(true);
 
-      // Web Share API with files support
-      if (pdfFile && navigator.share && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
-        try {
-          await navigator.share({
-            title: 'CEYLİN ERP',
+    let pdfFile: File;
+
+    try {
+      pdfFile =
+        await generateVisualReportPdfFile();
+    } catch (error) {
+      console.error(
+        'PDF generation error:',
+        error
+      );
+      alert(
+        'PDF oluşturulamadı. Rapor çok uzunsa daha az ölçüyle tekrar deneyin.'
+      );
+      setIsGeneratingPdf(false);
+      return;
+    }
+
+    try {
+      const shareNavigator = navigator as {
+        share?: Navigator['share'];
+        canShare?: Navigator['canShare'];
+      };
+      const supportsFileShare =
+        Boolean(
+          shareNavigator.share &&
+          shareNavigator.canShare &&
+          shareNavigator.canShare({
             files: [pdfFile]
-          });
-        } catch (err) {
-          console.error('Share error:', err);
-          fallbackWhatsApp(pdfFile);
-        }
+          })
+        );
+
+      if (supportsFileShare) {
+        await shareNavigator.share!({
+          title: 'CEYLİN PERDE & ÇEYİZ',
+          files: [pdfFile]
+        });
       } else {
         fallbackWhatsApp(pdfFile);
       }
     } catch (error) {
-      console.error('PDF generate/share error:', error);
-      alert('PDF oluşturulamadı veya paylaşılamadı.');
+      if (
+        error instanceof DOMException &&
+        error.name === 'AbortError'
+      ) {
+        return;
+      }
+
+      console.error(
+        'PDF share error:',
+        error
+      );
+
+      try {
+        fallbackWhatsApp(pdfFile);
+      } catch (fallbackError) {
+        console.error(
+          'PDF fallback share error:',
+          fallbackError
+        );
+        alert(
+          'PDF oluşturuldu ancak paylaşım açılamadı.'
+        );
+      }
     } finally {
       setIsGeneratingPdf(false);
     }
@@ -1858,7 +2211,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
   const fallbackWhatsApp = (file: File) => {
     if (typeof window === 'undefined') return;
     const wpUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(
-      `CEYLİN ERP - ${customer.name} ölçü raporu hazır.`
+      `CEYLİN PERDE & ÇEYİZ - ${customer.name} ölçü raporu hazır.`
     )}`;
     window.open(wpUrl, '_blank');
 
@@ -2100,12 +2453,12 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
 
         {/* Modal Body / Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-slate-950/20 print:p-0 print:overflow-visible print:bg-white">
-          <div id="visual-report-print-area" className="bg-slate-900 text-white font-sans max-w-4xl mx-auto rounded-xl p-6 border border-slate-800 shadow-sm print:border-none print:shadow-none print:p-0 print:bg-white print:text-black">
+          <div id="visual-report-print-area" className="bg-slate-900 text-white max-w-4xl mx-auto rounded-xl p-6 border border-slate-800 shadow-sm print:border-none print:shadow-none print:p-0 print:bg-white print:text-black" style={{ fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '13px', lineHeight: 1.35 }}>
 
             {/* Report Header Title */}
-            <div className="text-center pb-6 border-b border-slate-800 print:border-slate-300">
-              <h1 className="text-2xl font-black tracking-wider text-blue-500 print:text-blue-700">CEYLİN ERP</h1>
-              <h2 className="text-xs font-bold uppercase tracking-widest text-slate-400 print:text-slate-600 mt-1">Saha Ölçü Raporu</h2>
+            <div className="border-b border-slate-800 pb-4 text-left print:border-slate-300">
+              <h1 className="text-lg font-black tracking-wide text-blue-500 print:text-blue-700">CEYLİN PERDE & ÇEYİZ</h1>
+              <h2 className="mt-1 text-[11px] font-bold uppercase tracking-widest text-slate-400 print:text-slate-600">Saha Ölçü Raporu</h2>
             </div>
 
             {/* Customer Information Block */}
@@ -2178,7 +2531,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                             plicellProducts.push({ p: pObj, index: ++plicellCounter, winName: win.name });
                           } else if (pGroup === 'Mekanik Perde') {
                             if (ap.calculation?.isSegmented && Array.isArray(ap.calculation.groups) && ap.calculation.groups.length > 0) {
-                              ap.calculation.groups.forEach((g: any, gIdx: number) => {
+                              ap.calculation.groups.forEach((g, gIdx: number) => {
                                 const gObj: MeasurementRecord = {
                                   ...m,
                                   id: `${m.id}-group-${gIdx}`,
@@ -2260,9 +2613,26 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                           {/* A. Render Standard Openings */}
                           {standardOpenings.map(({ winName, winItem, products }) => {
                             const showWinHeader = windows.length > 1;
+                            const hasCombinedProductSketch =
+                              products.some(
+                                measurement =>
+                                  [
+                                    'SIMPLE_WIDTH_HEIGHT',
+                                    'CURTAIN_DETAIL',
+                                    'CURTAIN'
+                                  ].includes(
+                                    measurement.templateType
+                                  ) &&
+                                  Boolean(
+                                    measurement.selectedProducts?.some(
+                                      product =>
+                                        product.isActive
+                                    )
+                                  )
+                              );
 
                             return (
-                              <div key={winItem.id} className="space-y-4">
+                              <div key={winItem.id} className="pdf-keep-together space-y-4">
                                 {showWinHeader && (
                                   <h4 className="opening-header text-xs font-bold text-slate-400 print:text-slate-600 border-b border-slate-800 print:border-slate-200 pb-1 flex items-center justify-between">
                                     <span>[Açıklık: {winName}]</span>
@@ -2334,7 +2704,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                       ? generalSegments.reduce(
                                           (
                                             total: number,
-                                            segment: any
+                                            segment
                                           ) =>
                                             total +
                                             Math.max(
@@ -2378,7 +2748,45 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                   }
 
                                   return (
-                                    <div className="pdf-keep-together mb-6 rounded-xl border-2 border-blue-200 bg-blue-50/40 p-5 print:border-slate-400 print:bg-white">
+                                    <div
+                                      className="pdf-keep-together mb-6 cursor-zoom-in rounded-xl border-2 border-blue-200 bg-blue-50/40 p-5 transition-opacity hover:opacity-90 print:cursor-default print:border-slate-400 print:bg-white"
+                                      role="button"
+                                      tabIndex={0}
+                                      aria-label={`${winName} genel ürün görselini büyüt`}
+                                      onClick={() =>
+                                        setPreviewNode(
+                                          <div className="flex min-h-[50vh] h-full w-full items-center justify-center rounded-lg bg-white p-4">
+                                            <TechnicalMeasurementSketch
+                                              facadeSegments={generalSegments}
+                                              width={generalWidth}
+                                              height={generalHeight}
+                                              totalFacadeWidthCm={generalTotalWidth}
+                                              kartonpiyerBoslukCm={Number(firstMeasurement.rawValues?.kartonpiyerBoslukCm || firstMeasurement.rawValues?.ceilingGap || 0)}
+                                              camUstuCm={Number(firstMeasurement.rawValues?.camUstuCm || 0)}
+                                              camIciCm={Number(firstMeasurement.rawValues?.camIciCm || firstMeasurement.rawValues?.windowHeight || 0)}
+                                              kaloriferMermerBoyuCm={Number(firstMeasurement.rawValues?.kaloriferMermerBoyuCm || 0)}
+                                              camAltiCm={Number(firstMeasurement.rawValues?.camAltiCm || firstMeasurement.rawValues?.floorGap || 0)}
+                                              solYukseklikCm={Number(firstMeasurement.rawValues?.solYukseklikCm || 0)}
+                                              ortaYukseklikCm={Number(firstMeasurement.rawValues?.ortaYukseklikCm || 0)}
+                                              sagYukseklikCm={Number(firstMeasurement.rawValues?.sagYukseklikCm || 0)}
+                                              productTypes={generalProductTypes}
+                                              fonPlacement={getSketchFonPlacement(products)}
+                                              productHeights={getGeneralSketchProductHeights(products, firstMeasurement)}
+                                              mechanicalPanels={buildMechanicalVisualPanels(getSameOpeningMeasurements(activeMeasurements, firstMeasurement))}
+                                            />
+                                          </div>
+                                        )
+                                      }
+                                      onKeyDown={event => {
+                                        if (
+                                          event.key === 'Enter' ||
+                                          event.key === ' '
+                                        ) {
+                                          event.preventDefault();
+                                          event.currentTarget.click();
+                                        }
+                                      }}
+                                    >
                                       <div className="mb-3">
                                         <h4 className="text-sm font-black text-blue-900 print:text-black">
                                           {winName} — Genel Ürün Görseli
@@ -2451,6 +2859,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                   );
                                 })()}
 
+                                {!hasCombinedProductSketch && (
                                 <div className="flex flex-wrap gap-6 print:block">
                                   {products.map((p, pIdx) => {
                                     const isSimple = p.templateType === 'SIMPLE_WIDTH_HEIGHT';
@@ -2495,6 +2904,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                             .filter(Boolean)
                                         )
                                       );
+                                    void selectedProductTypes;
 
                                     if (isSimple) {
                                       widthToDraw = Number(p.rawValues?.width || 0);
@@ -2504,7 +2914,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                       const facadeSegments = p.rawValues?.facadeSegments;
                                       if (facadeSegments && Array.isArray(facadeSegments) && facadeSegments.length > 0) {
                                         segmentsToDraw = facadeSegments;
-                                        totalWidth = facadeSegments.reduce((sum: number, s: any) => sum + (Number(s.widthCm) > 0 ? Number(s.widthCm) : 0), 0);
+                                        totalWidth = facadeSegments.reduce((sum: number, segment) => sum + (Number(segment.widthCm) > 0 ? Number(segment.widthCm) : 0), 0);
                                       } else {
                                         widthToDraw = Number(p.rawValues?.windowWidth || 0);
                                         heightToDraw = Number(p.rawValues?.windowHeight || 0);
@@ -2512,7 +2922,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                       }
 
                                       if (segmentsToDraw.length > 0 && totalWidth === 0) {
-                                        totalWidth = segmentsToDraw.reduce((sum: number, s: any) => sum + (Number(s.widthCm) > 0 ? Number(s.widthCm) : 0), 0);
+                                        totalWidth = segmentsToDraw.reduce((sum: number, segment) => sum + (Number(segment.widthCm) > 0 ? Number(segment.widthCm) : 0), 0);
                                       }
                                     }
 
@@ -2596,7 +3006,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                             <div className="w-full grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
                                               {Object.entries(p.rawValues || {}).map(([k, v]) => {
                                                 const template = MEASUREMENT_TEMPLATES[p.templateType];
-                                                const label = template?.fields.find((f: any) => f.key === k)?.label || k;
+                                                const label = template?.fields.find(field => field.key === k)?.label || k;
                                                 return (
                                                   <div key={k} className="bg-slate-50 print:bg-white p-2 rounded border border-slate-200 print:border-slate-300">
                                                     <span className="text-[9px] text-slate-500 block uppercase font-medium">{label}</span>
@@ -2611,6 +3021,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                     );
                                   })}
                                 </div>
+                                )}
                               </div>
                             );
                           })}
@@ -2622,7 +3033,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                 const camListesi = p.rawValues?.plicellCamListesi;
 
                                 if (camListesi && Array.isArray(camListesi) && camListesi.length > 0) {
-                                  const validCamListesi = camListesi.filter((cam: any) => Number(cam.widthCm) > 0 && Number(cam.heightCm) > 0);
+                                  const validCamListesi = camListesi.filter(cam => Number(cam.widthCm) > 0 && Number(cam.heightCm) > 0);
 
                                   if (validCamListesi.length === 0) {
                                     return (
@@ -2795,7 +3206,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                               </h4>
 
                               <div className="overflow-x-auto rounded-lg border border-slate-850 print:border-slate-200">
-                                <table className="w-full text-xs text-left border-collapse">
+                                <table className="w-full table-fixed border-collapse text-left text-[11px]">
                                   <thead>
                                     <tr className="bg-slate-950/60 print:bg-slate-100 text-slate-400 print:text-slate-700 font-bold border-b border-slate-850 print:border-slate-200">
                                       <th className="p-2.5 text-center w-12">No</th>
@@ -2803,11 +3214,8 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                       <th className="p-2.5">Ürün Tipi</th>
                                       <th className="p-2.5 text-right">Gerçek En</th>
                                       <th className="p-2.5 text-right">Gerçek Boy</th>
-                                      <th className="p-2.5 text-right">Hesap En</th>
-                                      <th className="p-2.5 text-right">Hesap Boy</th>
                                       <th className="p-2.5 text-center w-16">Adet</th>
                                       <th className="p-2.5 text-center w-20">Zincir</th>
-                                      <th className="p-2.5 text-right w-20">Birim m²</th>
                                       <th className="p-2.5 text-right w-24">Toplam m²</th>
                                     </tr>
                                   </thead>
@@ -2852,28 +3260,12 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                         const productType =
                                           resolveMeasurementProductLabel(p);
 
-                                        const calcWidth =
-                                          Number(
-                                            storedCalculation.billingWidthCm ??
-                                            storedCalculation.billingWidth ??
-                                            0
-                                          );
-
-                                        const calcHeight =
-                                          Number(
-                                            storedCalculation.billingHeightCm ??
-                                            storedCalculation.billingHeight ??
-                                            0
-                                          );
-
                                         const totalM2 =
                                           Number(
                                             storedCalculation.totalM2 ??
                                             storedCalculation.totalSystemM2 ??
                                             0
                                           );
-
-                                        const unitM2 = Number(                                           storedCalculation.unitM2 ??                                           0                                         );
 
                                         const chainDirection =
                                           p.details?.chainDirection ||
@@ -2898,13 +3290,10 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                             <td className="p-2.5 font-medium text-blue-400 print:text-blue-700">{productType}</td>
                                             <td className="p-2.5 text-right font-semibold">{w.toFixed(1)} cm</td>
                                             <td className="p-2.5 text-right font-semibold">{h.toFixed(1)} cm</td>
-                                            <td className="p-2.5 text-right font-bold text-blue-400 print:text-blue-700">{calcWidth} cm</td>
-                                            <td className="p-2.5 text-right font-bold text-blue-400 print:text-blue-700">{calcHeight} cm</td>
                                             <td className="p-2.5 text-center font-semibold">{q} Adet</td>
                                             <td className="p-2.5 text-center font-bold text-amber-400 print:text-black">
                                               {chainDirection === 'LEFT' ? 'Sol' : 'Sağ'}
                                             </td>
-                                            <td className="p-2.5 text-right font-bold text-blue-400 print:text-blue-750">{unitM2.toFixed(2)} m²</td>
                                             <td className="p-2.5 text-right font-bold text-green-400 print:text-green-700">{totalM2.toFixed(2)} m²</td>
                                           </tr>
                                         );
@@ -2915,12 +3304,12 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
                                           {rows}
                                           <tr className="bg-slate-950/40 print:bg-slate-50 font-bold border-t-2 border-slate-850 print:border-slate-300">
                                             <td colSpan={3} className="p-3 text-slate-300 print:text-slate-700">Toplam Mekanik Adedi: {mechanicalCurtainProducts.reduce((acc, curr) => acc + Number(curr.p.rawValues?.quantity || 1), 0)}</td>
-                                            <td colSpan={7} className="p-3 text-right text-slate-400 print:text-slate-600">Toplam Oda m²:</td>
+                                            <td colSpan={4} className="p-3 text-right text-slate-400 print:text-slate-600">Toplam Oda m²:</td>
                                             <td className="p-3 text-right text-green-400 print:text-green-700 text-sm">{roomMechanicalM2.toFixed(2)} m²</td>
                                           </tr>
                                           {notesList.length > 0 && (
                                             <tr>
-                                              <td colSpan={11} className="p-3 bg-slate-950/20 border-t border-slate-900 print:border-slate-200">
+                                              <td colSpan={8} className="p-3 bg-slate-950/20 border-t border-slate-900 print:border-slate-200">
                                                 <div className="space-y-1 text-slate-300 print:text-slate-700">
                                                   <span className="font-bold uppercase text-[9.5px] text-amber-500 print:text-amber-700 block">Notlar:</span>
                                                   {notesList.map(n => (
@@ -2947,18 +3336,50 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
               )}
             </div>
 
-            {/* Grand Totals Section */}
-            {globalPlicellCount > 0 && (
-              <div className="my-6 p-4 rounded-xl bg-slate-950/60 print:bg-slate-50 border border-slate-850 print:border-slate-300 flex justify-between items-center text-sm font-bold print:text-xs">
-                <span className="text-slate-300 print:text-slate-700">Genel Plicell Rapor Toplamı:</span>
-                <span className="text-green-400 print:text-green-700 text-lg print:text-sm">{globalPlicellCount} Adet Cam / {globalPlicellM2.toFixed(2)} m²</span>
-              </div>
-            )}
-
-            {globalMechanicalCount > 0 && (
-              <div className="my-4 p-4 rounded-xl bg-slate-950/60 print:bg-slate-50 border border-slate-850 print:border-slate-300 flex justify-between items-center text-sm font-bold print:text-xs">
-                <span className="text-slate-300 print:text-slate-700">Genel Mekanik Perde Rapor Toplamı:</span>
-                <span className="text-green-400 print:text-green-700 text-lg print:text-sm">{globalMechanicalCount} Adet Mekanik Perde / {globalMechanicalM2.toFixed(2)} m²</span>
+            <div className="pdf-keep-together">
+            {/* Grand Totals / Manual Pricing Summary */}
+            {(globalPlicellCount > 0 ||
+              globalMechanicalCount > 0 ||
+              globalMaterialTotals.length > 0) && (
+              <div className="pdf-keep-together my-6 overflow-hidden rounded-xl border-2 border-slate-700 bg-slate-950/60 print:border-slate-400 print:bg-white">
+                <div className="border-b border-slate-700 bg-slate-900 px-4 py-3 text-sm font-black uppercase tracking-wide text-white print:border-slate-400 print:bg-slate-100 print:text-xs print:text-black">
+                  Genel Rapor Toplamları - Manuel Fiyatlandırma Özeti
+                </div>
+                <div className="divide-y divide-slate-800 print:divide-slate-300">
+                  {globalPlicellCount > 0 && (
+                    <div className="flex items-center justify-between gap-4 px-4 py-3 text-xs">
+                      <span className="font-semibold text-slate-300 print:text-slate-700">
+                        Plicell
+                      </span>
+                      <span className="text-right font-bold text-green-400 print:text-green-700">
+                        {globalPlicellCount} adet cam - {globalPlicellM2.toFixed(2)} m²
+                      </span>
+                    </div>
+                  )}
+                  {globalMechanicalCount > 0 && (
+                    <div className="flex items-center justify-between gap-4 px-4 py-3 text-xs">
+                      <span className="font-semibold text-slate-300 print:text-slate-700">
+                        Mekanik Perde
+                      </span>
+                      <span className="text-right font-bold text-green-400 print:text-green-700">
+                        {globalMechanicalCount} adet - {globalMechanicalM2.toFixed(2)} m²
+                      </span>
+                    </div>
+                  )}
+                  {globalMaterialTotals.map(item => (
+                    <div
+                      key={item.label}
+                      className="flex items-center justify-between gap-4 px-4 py-3 text-xs"
+                    >
+                      <span className="font-semibold text-slate-300 print:text-slate-700">
+                        {item.label}
+                      </span>
+                      <span className="text-right font-bold text-green-400 print:text-green-700">
+                        {item.meters.toFixed(2)} metre
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -2975,8 +3396,9 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, users, meas
             )}
 
             {/* Document footer signature */}
-            <div className="text-center text-[10px] text-slate-500 print:text-slate-600 mt-6 pt-4 border-t border-slate-850/50 print:border-slate-200">
-              <p>CEYLİN ERP - Saha Pilot Uygulaması</p>
+            <div className="mt-6 border-t border-slate-850/50 pt-3 text-left text-[9px] font-semibold text-slate-500 print:border-slate-200 print:text-slate-600">
+              <p>ENVerp v{REPORT_APP_VERSION}</p>
+            </div>
             </div>
 
           </div>

@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { normalizeUsername } from '@/lib/usernameHelper';
+import type {
+  Customer,
+  MontageTask,
+  ProductMeasurement
+} from './useStore';
 
 // Fallback UUID v4 generator for insecure/HTTP mobile environments
 function generateUUID(): string {
@@ -51,10 +56,10 @@ export function normalizeRole(role: UserRole | undefined): 'ADMIN' | 'MODERATOR'
   return role;
 }
 
-export function sanitizeAuditSnapshot(obj: any): any {
+export function sanitizeAuditSnapshot<T>(obj: T): T {
   if (obj === null || obj === undefined) return obj;
   if (Array.isArray(obj)) {
-    return obj.map(item => sanitizeAuditSnapshot(item));
+    return obj.map(item => sanitizeAuditSnapshot(item)) as T;
   }
   if (typeof obj === 'object') {
     const redactedFields = new Set([
@@ -62,19 +67,25 @@ export function sanitizeAuditSnapshot(obj: any): any {
       'accesstoken', 'refreshtoken', 'sessiontoken', 'jwt',
       'recoverytoken', 'secret', 'servicerolekey'
     ]);
-    const cleaned: any = {};
-    for (const key of Object.keys(obj)) {
+    const source = obj as Record<string, unknown>;
+    const cleaned: Record<string, unknown> = {};
+    for (const key of Object.keys(source)) {
       if (redactedFields.has(key.toLowerCase())) {
         continue;
       }
-      cleaned[key] = sanitizeAuditSnapshot(obj[key]);
+      cleaned[key] = sanitizeAuditSnapshot(source[key]);
     }
-    return cleaned;
+    return cleaned as T;
   }
   return obj;
 }
 
-export function sanitizeAuditEntry(entry: any): any {
+export function sanitizeAuditEntry<T extends {
+  beforeSnapshot?: unknown;
+  afterSnapshot?: unknown;
+  previousValue?: string;
+  newValue?: string;
+}>(entry: T): T {
   if (!entry) return entry;
   const cleaned = { ...entry };
   if (cleaned.beforeSnapshot) {
@@ -87,7 +98,7 @@ export function sanitizeAuditEntry(entry: any): any {
     try {
       const parsed = JSON.parse(cleaned.previousValue);
       cleaned.previousValue = JSON.stringify(sanitizeAuditSnapshot(parsed));
-    } catch (e) {
+    } catch {
       // If it's not JSON, do nothing
     }
   }
@@ -95,7 +106,7 @@ export function sanitizeAuditEntry(entry: any): any {
     try {
       const parsed = JSON.parse(cleaned.newValue);
       cleaned.newValue = JSON.stringify(sanitizeAuditSnapshot(parsed));
-    } catch (e) {
+    } catch {
       // If it's not JSON, do nothing
     }
   }
@@ -108,7 +119,7 @@ export function getRoleDefaultPermissions(role: UserRole): string[] {
   return modules.filter(m => canViewModule(normRole, m === 'dashboard' ? '' : m));
 }
 
-export function normalizeUser(user: any): MockUser {
+export function normalizeUser(user: UserInput | null | undefined): MockUser {
   const now = new Date().toISOString();
   if (!user) {
     return {
@@ -161,7 +172,7 @@ export function normalizeUser(user: any): MockUser {
   };
 }
 
-export function getUserPermissions(user: any): string[] {
+export function getUserPermissions(user: UserInput | null | undefined): string[] {
   if (!user) return [];
   const normalized = normalizeUser(user);
   return normalized.permissions || [];
@@ -253,7 +264,7 @@ export function canEditModule(role: UserRole | undefined, modulePath: string): b
   return false;
 }
 
-export function canCreateCariType(user: any, cariType: string): boolean {
+export function canCreateCariType(user: UserInput | null | undefined, cariType: string): boolean {
   if (!user) return false;
   const safeUser = normalizeUser(user);
   const role = safeUser.role;
@@ -272,7 +283,7 @@ export function canCreateCariType(user: any, cariType: string): boolean {
   return false;
 }
 
-export function canViewCariType(user: any, cariType: string): boolean {
+export function canViewCariType(user: UserInput | null | undefined, cariType: string): boolean {
   if (!user) return false;
   const safeUser = normalizeUser(user);
   const normRole = normalizeRole(safeUser.role);
@@ -286,7 +297,7 @@ export function canViewCariType(user: any, cariType: string): boolean {
   return false;
 }
 
-export function canViewCariList(user: any): boolean {
+export function canViewCariList(user: UserInput | null | undefined): boolean {
   if (!user) return false;
   const safeUser = normalizeUser(user);
   const normRole = normalizeRole(safeUser.role);
@@ -294,7 +305,7 @@ export function canViewCariList(user: any): boolean {
   return normRole === 'ADMIN' || normRole === 'MODERATOR' || normRole === 'OFFICE' || normRole === 'ACCOUNTING';
 }
 
-export function canAddCustomer(user: any): boolean {
+export function canAddCustomer(user: UserInput | null | undefined): boolean {
   if (!user) return false;
   const safeUser = normalizeUser(user);
   const normRole = normalizeRole(safeUser.role);
@@ -302,14 +313,14 @@ export function canAddCustomer(user: any): boolean {
   return normRole === 'ADMIN' || normRole === 'MODERATOR' || normRole === 'OFFICE' || normRole === 'ACCOUNTING' || normRole === 'FIELD';
 }
 
-export function canImportExportExcel(user: any): boolean {
+export function canImportExportExcel(user: UserInput | null | undefined): boolean {
   if (!user) return false;
   const safeUser = normalizeUser(user);
   const normRole = normalizeRole(safeUser.role);
   return normRole === 'ADMIN';
 }
 
-export function canEditCari(user: any, cariType: string): boolean {
+export function canEditCari(user: UserInput | null | undefined, cariType: string): boolean {
   if (!user) return false;
   const normRole = normalizeRole(user.role || normalizeUser(user).role);
   if (normRole === 'ADMIN') return true;
@@ -317,29 +328,30 @@ export function canEditCari(user: any, cariType: string): boolean {
   return false;
 }
 
-export function canMergeCari(user: any): boolean {
+export function canMergeCari(user: UserInput | null | undefined): boolean {
   if (!user) return false;
   return normalizeRole(user.role || normalizeUser(user).role) === 'ADMIN';
 }
 
-export function canArchiveCari(user: any, cariType: string): boolean {
+export function canArchiveCari(user: UserInput | null | undefined, _cariType: string): boolean {
+  void _cariType;
   if (!user) return false;
   const normRole = normalizeRole(user.role || normalizeUser(user).role);
   if (normRole === 'ADMIN') return true;
   return false;
 }
 
-export function canChangeCariCode(user: any): boolean {
+export function canChangeCariCode(user: UserInput | null | undefined): boolean {
   if (!user) return false;
   return normalizeRole(user.role || normalizeUser(user).role) === 'ADMIN';
 }
 
-export function canMoveMeasurementBetweenCustomers(user: any): boolean {
+export function canMoveMeasurementBetweenCustomers(user: UserInput | null | undefined): boolean {
   if (!user) return false;
   return normalizeRole(user.role || normalizeUser(user).role) === 'ADMIN';
 }
 
-export function canViewCariCard(user: any, customer: any): boolean {
+export function canViewCariCard(user: UserInput | null | undefined, customer: Customer | null | undefined): boolean {
   if (!user || !customer) return false;
   const safeUser = normalizeUser(user);
   const role = safeUser.role;
@@ -365,9 +377,9 @@ export function canViewCariCard(user: any, customer: any): boolean {
     const isCreator = customer.createdById === userId;
     const isPendingApproval = customer.approvalStatus === 'PENDING_APPROVAL';
     
-    const tookMeasurement = customer.rooms?.some((room: any) =>
-      room.windows?.some((win: any) =>
-        win.products?.some((p: any) => p.measuredById === userId)
+    const tookMeasurement = customer.rooms?.some(room =>
+      room.windows?.some(win =>
+        win.products?.some(product => product.measuredById === userId)
       )
     );
     
@@ -387,7 +399,7 @@ export function canViewCariCard(user: any, customer: any): boolean {
   return false;
 }
 
-export function canViewFinancialAreas(user: any): boolean {
+export function canViewFinancialAreas(user: UserInput | null | undefined): boolean {
   if (!user) return false;
   const safeUser = normalizeUser(user);
   const role = safeUser.role;
@@ -398,7 +410,7 @@ export function canViewFinancialAreas(user: any): boolean {
   return normRole === 'ADMIN' || normRole === 'OFFICE' || role === 'ACCOUNTING';
 }
 
-export function canEditCustomerCoreFields(user: any, customer: any): boolean {
+export function canEditCustomerCoreFields(user: UserInput | null | undefined, customer: Customer | null | undefined): boolean {
   if (!user || !customer) return false;
   const safeUser = normalizeUser(user);
   const role = safeUser.role;
@@ -410,7 +422,7 @@ export function canEditCustomerCoreFields(user: any, customer: any): boolean {
   return false;
 }
 
-export function canEditCustomerLocation(user: any, customer: any): boolean {
+export function canEditCustomerLocation(user: UserInput | null | undefined, customer: Customer | null | undefined): boolean {
   if (!user || !customer) return false;
   const safeUser = normalizeUser(user);
   const role = safeUser.role;
@@ -427,11 +439,11 @@ export function canEditCustomerLocation(user: any, customer: any): boolean {
   return false;
 }
 
-export function canEditCustomerExtraDescription(user: any, customer: any): boolean {
+export function canEditCustomerExtraDescription(user: UserInput | null | undefined, customer: Customer | null | undefined): boolean {
   return canEditCustomerLocation(user, customer);
 }
 
-export function canViewCustomerContactFields(user: any, customer: any): boolean {
+export function canViewCustomerContactFields(user: UserInput | null | undefined, customer: Customer | null | undefined): boolean {
   if (!user || !customer) return false;
   const safeUser = normalizeUser(user);
   const role = safeUser.role;
@@ -443,13 +455,13 @@ export function canViewCustomerContactFields(user: any, customer: any): boolean 
   return true;
 }
 
-export function canViewMeasurementForWork(user: any, customer: any): boolean {
+export function canViewMeasurementForWork(user: UserInput | null | undefined, customer: Customer | null | undefined): boolean {
   if (!user || !customer) return false;
   const safeUser = normalizeUser(user);
   return canViewCariCard(safeUser, customer);
 }
 
-export function canViewProductionFields(user: any, customer: any): boolean {
+export function canViewProductionFields(user: UserInput | null | undefined, customer: Customer | null | undefined): boolean {
   if (!user || !customer) return false;
   const safeUser = normalizeUser(user);
   const role = safeUser.role;
@@ -464,7 +476,7 @@ export function canViewProductionFields(user: any, customer: any): boolean {
   return false;
 }
 
-export function canViewInstallationFields(user: any, customer: any): boolean {
+export function canViewInstallationFields(user: UserInput | null | undefined, customer: Customer | null | undefined): boolean {
   if (!user || !customer) return false;
   const safeUser = normalizeUser(user);
   const role = safeUser.role;
@@ -479,11 +491,11 @@ export function canViewInstallationFields(user: any, customer: any): boolean {
   return false;
 }
 
-export function canViewCustomer(user: any, customer: any): boolean {
+export function canViewCustomer(user: UserInput | null | undefined, customer: Customer | null | undefined): boolean {
   return canViewCariCard(user, customer);
 }
 
-export function canViewCustomerWorkflowReport(user: any, customer: any): boolean {
+export function canViewCustomerWorkflowReport(user: UserInput | null | undefined, customer: Customer | null | undefined): boolean {
   if (!user || !customer) return false;
   const safeUser = normalizeUser(user);
   const role = safeUser.role;
@@ -495,9 +507,9 @@ export function canViewCustomerWorkflowReport(user: any, customer: any): boolean
   if (normRole === 'FIELD') {
     const isAssignedMeasure = customer.assignedMeasureId === userId;
     const isCreator = customer.createdById === userId;
-    const tookMeasurement = customer.rooms?.some((room: any) =>
-      room.windows?.some((win: any) =>
-        win.products?.some((p: any) => p.measuredById === userId)
+    const tookMeasurement = customer.rooms?.some(room =>
+      room.windows?.some(win =>
+        win.products?.some(product => product.measuredById === userId)
       )
     );
     return isAssignedMeasure || isCreator || !!tookMeasurement;
@@ -518,7 +530,7 @@ export function canViewCustomerWorkflowReport(user: any, customer: any): boolean
  * Ölçü ve cari verisini satış taslağına aktarma yetkisi.
  * UI ve işlem girişinde birlikte doğrulanmalıdır.
  */
-export function canTransferMeasurementToSale(user: any): boolean {
+export function canTransferMeasurementToSale(user: UserInput | null | undefined): boolean {
   if (!user) return false;
 
   const safeUser = normalizeUser(user);
@@ -531,7 +543,21 @@ export function canTransferMeasurementToSale(user: any): boolean {
   );
 }
 
-export function canViewCustomerFinancialReport(user: any): boolean {
+export type UserInput = Partial<MockUser> & {
+  fullName?: string;
+  adSoyad?: string;
+  displayName?: string;
+  emailAddress?: string;
+  mail?: string;
+  phoneNumber?: string;
+  telefon?: string;
+};
+
+interface AssignedProductionTask {
+  assignedEmployeeId?: string;
+}
+
+export function canViewCustomerFinancialReport(user: UserInput | null | undefined): boolean {
   if (!user) return false;
   const safeUser = normalizeUser(user);
   const role = safeUser.role;
@@ -542,14 +568,15 @@ export function canViewCustomerFinancialReport(user: any): boolean {
   return normRole === 'ADMIN' || normRole === 'OFFICE' || role === 'ACCOUNTING';
 }
 
-export function canViewMeasurement(user: any, measurement: any): boolean {
+export function canViewMeasurement(user: UserInput | null | undefined, _measurement: ProductMeasurement): boolean {
+  void _measurement;
   const safeUser = normalizeUser(user);
   const normRole = normalizeRole(safeUser.role);
   if (normRole === 'ADMIN' || normRole === 'OFFICE' || normRole === 'FIELD') return true;
   return false;
 }
 
-export function canViewProductionTask(user: any, task: any): boolean {
+export function canViewProductionTask(user: UserInput | null | undefined, task: AssignedProductionTask): boolean {
   const safeUser = normalizeUser(user);
   const normRole = normalizeRole(safeUser.role);
   if (normRole === 'ADMIN' || normRole === 'OFFICE') return true;
@@ -560,7 +587,7 @@ export function canViewProductionTask(user: any, task: any): boolean {
   return false;
 }
 
-export function canViewInstallationTask(user: any, task: any): boolean {
+export function canViewInstallationTask(user: UserInput | null | undefined, task: MontageTask): boolean {
   const safeUser = normalizeUser(user);
   const normRole = normalizeRole(safeUser.role);
   if (normRole === 'ADMIN' || normRole === 'OFFICE') return true;
@@ -572,6 +599,12 @@ export function canViewInstallationTask(user: any, task: any): boolean {
 }
 
 // ─── Audit Entry ───
+export interface AuditSnapshot {
+  [key: string]: unknown;
+  password?: unknown;
+  passwordChanged?: boolean;
+}
+
 export interface AuditEntry {
   id: string;
   entityType: string;
@@ -582,8 +615,8 @@ export interface AuditEntry {
   changedBy: string;
   changedAt: string;
   reason: string;
-  beforeSnapshot?: any;
-  afterSnapshot?: any;
+  beforeSnapshot?: AuditSnapshot | null;
+  afterSnapshot?: AuditSnapshot | null;
   changedFields?: string[];
 }
 
@@ -743,6 +776,7 @@ export const useAuthStore = create<AuthState>()(
         }),
       
       switchUser: (_userId: string) => {
+        void _userId;
         console.warn("Kullanıcı değiştirmek için yeniden giriş yapılmalıdır.");
       },
       
@@ -870,8 +904,10 @@ export const useAuthStore = create<AuthState>()(
               const updatedUserFromServer = normalizeUser(result.user);
               
               const targetUserBefore = get().users.find((u: MockUser) => u.id === id);
-              const beforeSnapshot: any = targetUserBefore ? { ...targetUserBefore } : null;
-              const afterSnapshot: any = {
+              const beforeSnapshot:
+                (Partial<MockUser> & Record<string, unknown>) | null =
+                targetUserBefore ? { ...targetUserBefore } : null;
+              const afterSnapshot: Partial<MockUser> & Record<string, unknown> = {
                 ...updatedUserFromServer
               };
 
@@ -896,8 +932,8 @@ export const useAuthStore = create<AuthState>()(
 
               if (beforeSnapshot) {
                 fieldsToCheck.forEach((f) => {
-                  const prevVal = (beforeSnapshot as any)[f];
-                  const newVal = (afterSnapshot as any)[f];
+                  const prevVal = beforeSnapshot[f];
+                  const newVal = afterSnapshot[f];
                   if (prevVal !== newVal) {
                     changedFields.push(f);
                   }
@@ -1000,9 +1036,14 @@ export const useAuthStore = create<AuthState>()(
               error: result.error || "Silme işlemi başarısız."
             };
           }
-        } catch (err: any) {
+        } catch (err: unknown) {
           console.error("Delete user API failed:", err);
-          return { success: false, error: err.message || "Delete user API failed" };
+          return {
+            success: false,
+            error: err instanceof Error
+              ? err.message
+              : "Delete user API failed"
+          };
         }
       },
 
@@ -1026,8 +1067,7 @@ export const useAuthStore = create<AuthState>()(
           if (response.ok) {
             const result = await response.json();
             if (result.success && Array.isArray(result.users)) {
-              const fetchedUsers = result.users.map((u: any) => {
-                const existing = get().users.find((ex: MockUser) => ex.id === u.id);
+              const fetchedUsers = result.users.map((u: UserInput) => {
                 return normalizeUser({
                   ...u,
                   password: undefined
@@ -1046,23 +1086,19 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'curtain-erp-auth-v1',
-      merge: (persistedState: any, currentState: any) => {
+      merge: (persistedState: unknown, currentState: AuthState) => {
         if (!persistedState) return currentState;
+        const persisted = persistedState as Partial<AuthState>;
         
         // ─── Run Migration/Normalizations ───
-        let changed = false;
-        let users = persistedState.users;
+        let users = persisted.users;
         if (Array.isArray(users)) {
-          users = users.map((u: any) => {
+          users = users.map((u: UserInput) => {
             const norm = normalizeUser(u);
-            if (JSON.stringify(norm) !== JSON.stringify(u)) {
-              changed = true;
-            }
             return norm;
           });
         } else {
           users = currentState.users;
-          changed = true;
         }
 
         users = users.map((u: MockUser) => ({
@@ -1070,14 +1106,14 @@ export const useAuthStore = create<AuthState>()(
           password: undefined
         }));
 
-        let currentUser = persistedState.currentUser;
+        let currentUser = persisted.currentUser;
         const sessionToken =
-          typeof persistedState.sessionToken === 'string'
-            ? persistedState.sessionToken
+          typeof persisted.sessionToken === 'string'
+            ? persisted.sessionToken
             : null;
         const sessionExpiresAt =
-          typeof persistedState.sessionExpiresAt === 'string'
-            ? persistedState.sessionExpiresAt
+          typeof persisted.sessionExpiresAt === 'string'
+            ? persisted.sessionExpiresAt
             : null;
         const sessionIsValid =
           !!sessionToken &&
@@ -1090,7 +1126,7 @@ export const useAuthStore = create<AuthState>()(
             password: undefined
           });
           const isValid = users.some(
-            (u: any) => u.id === normCur.id && u.isActive
+            (u: MockUser) => u.id === normCur.id && u.isActive
           );
 
           currentUser = isValid ? normCur : null;
@@ -1098,22 +1134,22 @@ export const useAuthStore = create<AuthState>()(
           currentUser = null;
         }
 
-        let auditLog = persistedState.auditLog;
+        let auditLog = persisted.auditLog;
         if (Array.isArray(auditLog)) {
-          auditLog = auditLog.map((entry: any) => sanitizeAuditEntry(entry));
+          auditLog = auditLog.map(entry => sanitizeAuditEntry(entry));
         } else {
           auditLog = [];
         }
 
         return {
           ...currentState,
-          ...persistedState,
+          ...persisted,
           users,
           currentUser,
           auditLog,
           sessionToken: currentUser ? sessionToken : null,
           sessionExpiresAt: currentUser ? sessionExpiresAt : null,
-          rememberMe: Boolean(currentUser && persistedState.rememberMe === true)
+          rememberMe: Boolean(currentUser && persisted.rememberMe === true)
         };
       },
       storage: createJSONStorage(() => safeAuthStorage),

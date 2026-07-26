@@ -1,6 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
+import Image from "next/image";
 import { useEffect } from "react";
 
 interface MediaPreviewModalProps {
@@ -49,10 +50,14 @@ export function MediaPreviewModal({ url, type, onClose }: MediaPreviewModalProps
         className="relative max-w-full max-h-full flex items-center justify-center cursor-default"
       >
         {type === 'photo' ? (
-          <img 
+          <Image
             src={url} 
-            alt="Medya Önizleme" 
-            className="max-w-[95vw] max-h-[90vh] object-contain rounded-lg shadow-2xl select-none"
+            alt="Medya Önizleme"
+            width={1600}
+            height={1200}
+            sizes="95vw"
+            unoptimized
+            className="w-auto max-w-[95vw] h-auto max-h-[90vh] object-contain rounded-lg shadow-2xl select-none"
           />
         ) : (
           <video 

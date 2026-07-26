@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { ArrowLeft, Save, Trash2, Edit2, CheckCircle, Calculator } from "lucide-react";
+import { ArrowLeft, Save, Trash2 } from "lucide-react";
 import { FileDown } from "lucide-react";
 import { MessageCircle } from "lucide-react";
 import Link from "next/link";
@@ -9,8 +9,12 @@ import { useRouter } from "next/navigation";
 import { useStore } from "@/store/useStore";
 import { useSalesStore, Sale, SaleStatus, SaleItem, PaymentMethod } from "@/store/salesStore";
 import InstallmentPlanPanel from "@/components/sales/InstallmentPlanPanel";
+import PaymentTrackingPanel from "@/components/sales/PaymentTrackingPanel";
 import { generateSalesPdfFile, openSalesPdfPreview } from "@/lib/salesPdfGenerator";
 import { prepareSaleForApproval } from "@/lib/salesApproval";
+import { getSaleRemainingBalance } from "@/lib/salesFinance";
+import { useAuthStore } from "@/store/useAuthStore";
+import { canViewSale } from "@/lib/salesVisibility";
 
 export default function SaleDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
@@ -19,6 +23,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
   const router = useRouter();
   const { customers } = useStore();
   const { sales, loadSales, updateSale, removeSale, isLoading } = useSalesStore();
+  const currentUser = useAuthStore(state => state.currentUser);
 
   const [mounted, setMounted] = useState(false);
   const [sale, setSale] = useState<Sale | null>(null);
@@ -39,23 +44,32 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
 
   useEffect(() => {
     if (mounted && !isLoading) {
-      const found = sales.find(s => s.id === id);
-      if (found) {
-        setSale(JSON.parse(JSON.stringify(found))); // deep copy for local edit
-        setCashPrice(found.cashPrice);
-        setInstallmentPrice(found.installmentPrice);
-        setDownPayment(found.downPayment);
-        setDownPaymentMethod(found.downPaymentMethod || "");
-        setGeneralDueDate(
-          found.generalDueDate || ""
-        );
-        setGlobalDiscount(found.discount);
-      }
+      const initializationTimer = window.setTimeout(() => {
+        const found = sales.find(s => s.id === id);
+        if (found) {
+          setSale(structuredClone(found));
+          setCashPrice(found.cashPrice);
+          setInstallmentPrice(found.installmentPrice);
+          setDownPayment(found.downPayment);
+          setDownPaymentMethod(found.downPaymentMethod || "");
+          setGeneralDueDate(found.generalDueDate || "");
+          setGlobalDiscount(found.discount);
+        }
+      }, 0);
+
+      return () => window.clearTimeout(initializationTimer);
     }
   }, [mounted, isLoading, sales, id]);
 
   if (!mounted || isLoading) return <div className="p-8 text-center">Yükleniyor...</div>;
   if (!sale) return <div className="p-8 text-center text-red-500">Kayıt bulunamadı.</div>;
+  if (!canViewSale(currentUser, sale)) {
+    return (
+      <div className="p-8 text-center text-red-600">
+        Bu satış kaydını görüntüleme yetkiniz bulunmuyor.
+      </div>
+    );
+  }
 
   const customer = customers.find(c => c.id === sale.customerId);
 
@@ -76,9 +90,11 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
   };
 
   const getRemainingBalance = () => {
-    const baseTotal = sale.totalAmount;
-    const finalTotal = baseTotal - globalDiscount;
-    return finalTotal - downPayment;
+    return getSaleRemainingBalance({
+      ...sale,
+      discount: globalDiscount,
+      downPayment
+    });
   };
 
   const saleForFinance: Sale = {
@@ -505,6 +521,18 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
               setGlobalDiscount(updatedSale.discount);
             }}
           />
+
+          <PaymentTrackingPanel
+            sale={saleForFinance}
+            onChange={updatedSale => {
+              setSale(updatedSale);
+            }}
+          />
+
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            Eklenen tahsilatın kalıcı olması için satış kaydını
+            &quot;Kaydet&quot; düğmesiyle tamamlayın.
+          </p>
 
           <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 shadow-sm">
              <h2 className="font-semibold text-gray-900 dark:text-white mb-4">Durum</h2>

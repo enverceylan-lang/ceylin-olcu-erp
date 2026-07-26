@@ -1,12 +1,13 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, ChevronRight, Layers, Camera, Video, FileText, CheckCircle, Shield, AlertTriangle, MapPin, MessageCircle, Loader2, Ruler, RefreshCw } from "lucide-react";
+import React, { useState, useSyncExternalStore } from "react";
+import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, ChevronRight, Layers, Camera, Video, FileText, Shield, AlertTriangle, MapPin, MessageCircle, Loader2, Ruler, RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useStore, WindowItem, MEASUREMENT_TEMPLATES, ProductMeasurement } from "@/store/useStore";
+import Image from "next/image";
+import { useStore, Customer, Room, WindowItem, MEASUREMENT_TEMPLATES, ProductMeasurement } from "@/store/useStore";
 import { useMeasurementStore } from "@/store/measurementStore";
-import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer, canViewCustomerWorkflowReport, canViewCustomerFinancialReport, canViewCustomerContactFields, canViewFinancialAreas, canEditCustomerLocation, canViewCariCard, canEditCari, canMergeCari, canArchiveCari, canMoveMeasurementBetweenCustomers, canTransferMeasurementToSale } from "@/store/useAuthStore";
+import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer, canViewCustomerWorkflowReport, canViewCustomerFinancialReport, canViewCustomerContactFields, canViewCariCard, canEditCari, canMergeCari, canArchiveCari, canMoveMeasurementBetweenCustomers, canTransferMeasurementToSale } from "@/store/useAuthStore";
 import { getMeasurementDimensions, getTemplateLabel, getGoogleMapsUrl, getWorkflowStatusLabel, getWorkflowStatusColorClass, WORKFLOW_STATUS_LABELS } from "@/lib/measurementAdapter";
 import { fileToDataUrl } from "@/lib/fileStorage";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
@@ -16,7 +17,7 @@ import { MeasurementVisualReport } from "@/components/reports/MeasurementVisualR
 import { RoomPreparationModal } from "@/components/reports/RoomPreparationModal";
 import { localDraftDb, FieldMeasurementDraft, forceRequeueCustomerMeasurementTree } from "@/lib/localDraftDb";
 import { useSalesStore } from "@/store/salesStore";
-import { createDraftSaleFromCustomer, syncOrCreateDraftSale } from "@/lib/salesAdapter";
+import { syncOrCreateDraftSale } from "@/lib/salesAdapter";
 import { ShoppingCart, Edit, Merge, Archive } from "lucide-react";
 import { CariEditModal } from "@/components/modals/CariEditModal";
 import { MergeCustomerModal } from "@/components/modals/MergeCustomerModal";
@@ -24,9 +25,24 @@ import { MoveRoomModal } from "@/components/modals/MoveRoomModal";
 import { FacadeSegmentsEditor } from "@/components/measurements/FacadeSegmentsEditor";
 import { PlicellCamListEditor } from "@/components/measurements/PlicellCamListEditor";
 import { FieldTaskAssignButton } from "@/components/FieldTaskAssignButton";
+import { hasSlopedFacadeHeight } from "@/lib/facadeHeight";
 
 const measurementOpeningId = (measurement: { openingId?: string; windowId?: string }) =>
   measurement.openingId || measurement.windowId || "";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+type DeleteConfirmation =
+  | { type: "room"; data: { customerId: string; roomId: string; roomName: string } }
+  | { type: "window"; data: { customerId: string; roomId: string; windowId: string; windowName: string } }
+  | { type: "measurement"; data: { customerId: string; roomId: string; windowId: string; measurementId: string } }
+  | {
+      type: "photo";
+      data:
+        | { type: "measurement"; url: string; customerId: string; roomId: string; windowId: string; measurementId: string }
+        | { type?: never; customerId: string; index: number };
+    };
 
 export default function CariDetayPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
@@ -38,7 +54,6 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const { currentUser, addAuditEntry, users } = useAuthStore();
   const user = currentUser!;
   const customer = customers.find(c => c.id === id);
-  const { addSale } = useSalesStore();
   const router = useRouter();
 
   const normRole = user ? normalizeRole(user.role) : 'FIELD';
@@ -58,14 +73,14 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       } else {
         alert(result.message);
       }
-    } catch (err: any) {
-      alert("Kurtarma sırasında hata oluştu: " + err.message);
+    } catch (error: unknown) {
+      alert("Kurtarma sırasında hata oluştu: " + (error instanceof Error ? error.message : String(error)));
     } finally {
       setIsRecovering(false);
     }
   };
   const [isMoveRoomModalOpen, setIsMoveRoomModalOpen] = useState(false);
-  const [roomToMove, setRoomToMove] = useState<any>(null);
+  const [roomToMove, setRoomToMove] = useState<Room | null>(null);
 
   const canEdit = canEditCari(user, cariType);
   const canMerge = canMergeCari(user);
@@ -111,10 +126,14 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     }
   };
 
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    () => () => undefined,
+    () => true,
+    () => false
+  );
   const permissions = ROLE_PERMISSIONS[currentUser?.role || "FIELD"] || { label: "Kullanıcı", canAccessOfficeMode: false, canOverrideMeasuredBy: false };
   const [mode, setMode] = useState<"MEASUREMENT" | "OFFICE">("MEASUREMENT");
-  const [activeTab, setActiveTab] = useState<"rooms" | "timeline" | "financial">("rooms");
+  const [requestedTab, setActiveTab] = useState<"rooms" | "timeline" | "financial">("rooms");
 
   const CUSTOMER_WORKFLOW_LABELS: Record<string, string> = {
     YENI: "Yeni",
@@ -133,6 +152,10 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
   const [activeRoomIdForWindow, setActiveRoomIdForWindow] = useState<string | null>(null);
   const [activeWindowIdForProduct, setActiveWindowIdForProduct] = useState<string | null>(null);
+  const [pendingNewWindow, setPendingNewWindow] = useState<{
+    roomId: string;
+    windowId: string;
+  } | null>(null);
   const [expandedRooms, setExpandedRooms] = useState<Record<string, boolean>>({});
   const [isAddingRoom, setIsAddingRoom] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
@@ -149,7 +172,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
   // Measurement Template Form State
   const [selectedTemplate, setSelectedTemplate] = useState("CURTAIN_DETAIL");
-  const [rawValues, setRawValues] = useState<Record<string, any>>({});
+  const [rawValues, setRawValues] = useState<ProductMeasurement["rawValues"]>({});
   // For ADMIN/SALES entering on behalf of someone else
   const [overrideMeasuredById, setOverrideMeasuredById] = useState(currentUser?.id || "");
   const [measurementNotes, setMeasurementNotes] = useState("");
@@ -174,11 +197,9 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isVisualReportOpen, setIsVisualReportOpen] = useState(false);
   const [isPrepModalOpen, setIsPrepModalOpen] = useState(false);
-  const [selectedRoomForPrep, setSelectedRoomForPrep] = useState<any>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState<{
-    type: 'room' | 'window' | 'measurement' | 'photo';
-    data: any;
-  } | null>(null);
+  const [selectedRoomForPrep, setSelectedRoomForPrep] = useState<Room | null>(null);
+  const [renderedAt] = useState(() => Date.now());
+  const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmation | null>(null);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -280,18 +301,17 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     }
   };
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (activeTab === "timeline" && customer && currentUser && !canViewCustomerWorkflowReport(currentUser, customer)) {
-      setActiveTab("rooms");
-    }
-    if (activeTab === "financial" && currentUser && !canViewCustomerFinancialReport(currentUser)) {
-      setActiveTab("rooms");
-    }
-  }, [activeTab, customer, currentUser]);
+  const activeTab =
+    requestedTab === "timeline" &&
+    customer &&
+    currentUser &&
+    !canViewCustomerWorkflowReport(currentUser, customer)
+      ? "rooms"
+      : requestedTab === "financial" &&
+          currentUser &&
+          !canViewCustomerFinancialReport(currentUser)
+        ? "rooms"
+        : requestedTab;
 
   if (!mounted) return <div className="p-8 text-center">Yükleniyor...</div>;
 
@@ -318,7 +338,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     if (!customer.createdAt) return 0;
     const start = new Date(customer.createdAt).getTime();
     const isFinished = customer.workflowStatus === "TAMAMLANDI" || customer.workflowStatus === "IPTAL";
-    const end = isFinished && customer.updatedAt ? new Date(customer.updatedAt).getTime() : Date.now();
+    const end = isFinished && customer.updatedAt ? new Date(customer.updatedAt).getTime() : renderedAt;
     const diffTime = Math.max(0, end - start);
     return Math.floor(diffTime / (1000 * 60 * 60 * 24));
   };
@@ -365,67 +385,6 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
     // Sort events by date descending (newest first)
     return events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  };
-
-  const buildWhatsAppReport = () => {
-    const lines: string[] = [
-      `*CEYLİN ERP - SAHA ÖLÇÜ RAPORU*`,
-      `Müşteri: ${customer.name}`,
-      `Telefon: ${customer.phone || '-'}`,
-      `Adres: ${customer.address || customer.mapLocation || '-'}`,
-      `Rapor Tarihi: ${new Date().toLocaleString('tr-TR')}`,
-      ''
-    ];
-
-    if (customer.rooms.length === 0) {
-      lines.push('Henüz oda ve ölçü kaydı bulunmuyor.');
-    }
-
-    customer.rooms.forEach((room, roomIndex) => {
-      lines.push(`*${roomIndex + 1}. ODA: ${room.name}*`);
-
-      if (room.windows.length === 0) {
-        lines.push('- Açıklık kaydı yok');
-      }
-
-      room.windows.forEach((opening, openingIndex) => {
-        lines.push(`${openingIndex + 1}.${roomIndex + 1} Açıklık: ${opening.name}`);
-
-        const mProds = measurementStore.measurements.filter(m => measurementOpeningId(m) === opening.id && !m.isDeleted);
-        if (mProds.length === 0) {
-          lines.push('  - Ölçü alınmamış');
-        }
-
-        mProds.forEach((measurement, measurementIndex) => {
-          const template = MEASUREMENT_TEMPLATES[measurement.templateType];
-          const dims = getMeasurementDimensions(measurement);
-          lines.push(`  Ölçü ${measurementIndex + 1}: ${getTemplateLabel(measurement.templateType)}`);
-
-          (template?.fields || []).forEach((field) => {
-            const value = measurement.rawValues?.[field.key];
-            lines.push(`  - ${field.label}: ${value ?? '-'}${field.type === 'number' ? '' : ''}`);
-          });
-
-          if (dims.structuralWidth || dims.structuralHeight) {
-            lines.push(`  - Toplam Ölçü: ${dims.structuralWidth || '-'} × ${dims.structuralHeight || '-'} cm`);
-          }
-
-          lines.push(`  - Ölçüyü Alan: ${measurement.measuredBy || '-'}`);
-          lines.push(`  - Tarih: ${measurement.measuredDate ? new Date(measurement.measuredDate).toLocaleString('tr-TR') : '-'}`);
-          if (measurement.notes) lines.push(`  - Not: ${measurement.notes}`);
-          if (measurement.photos?.length) lines.push(`  - Fotoğraf: ${measurement.photos.length} adet`);
-          if (measurement.videos?.length) lines.push(`  - Video: ${measurement.videos.length} adet`);
-        });
-      });
-
-      lines.push('');
-    });
-
-    const mapsUrl = getGoogleMapsUrl(customer);
-    if (mapsUrl) lines.push(`Konum: ${mapsUrl}`);
-    lines.push('CEYLİN ERP.0 - Saha Pilot');
-
-    return lines.join('\n');
   };
 
   const handleShareWhatsAppReport = async () => {
@@ -544,10 +503,26 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     }
     setIsSaving(true);
     try {
-      addWindow(customer.id, roomId, windowName);
+      const newWindowId =
+        await addWindow(
+          customer.id,
+          roomId,
+          windowName.trim()
+        );
+
+      if (!newWindowId) {
+        throw new Error(
+          "Açıklık oluşturulamadı."
+        );
+      }
+
       await syncNow();
       setActiveRoomIdForWindow(null);
       setWindowName("");
+      beginNewWindowMeasurement(
+        roomId,
+        newWindowId
+      );
     } catch (err) {
       console.error(err);
       showToast("Pencere kaydedilirken senkronizasyon hatası oluştu.");
@@ -555,6 +530,92 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       setIsSaving(false);
     }
   };
+
+  const beginNewWindowMeasurement = (
+    roomId: string,
+    windowId: string
+  ) => {
+    setPendingNewWindow({
+      roomId,
+      windowId
+    });
+    setActiveWindowIdForProduct(
+      windowId
+    );
+    setEditingMeasurementId(null);
+    setSelectedTemplate(
+      "CURTAIN_DETAIL"
+    );
+    setRawValues({});
+    setMeasurementNotes("");
+    setOverrideMeasuredById(user.id);
+  };
+
+  const isLegacyEmptyDefaultWindow = (
+    window: WindowItem
+  ) =>
+    window.name === "Pencere 1" &&
+    window.products.length === 0 &&
+    (window.photos?.length || 0) === 0 &&
+    (window.videos?.length || 0) === 0;
+
+  const handleStartRoomMeasurement =
+    async (room: Room) => {
+      if (isSaving) return;
+
+      setIsSaving(true);
+
+      try {
+        const legacyEmptyWindow =
+          room.windows.find(
+            isLegacyEmptyDefaultWindow
+          );
+
+        if (legacyEmptyWindow) {
+          await updateWindowItem(
+            customer.id,
+            room.id,
+            legacyEmptyWindow.id,
+            {
+              name: room.name,
+              updatedAt:
+                new Date().toISOString()
+            }
+          );
+
+          beginNewWindowMeasurement(
+            room.id,
+            legacyEmptyWindow.id
+          );
+          return;
+        }
+
+        const newWindowId =
+          await addWindow(
+            customer.id,
+            room.id,
+            room.name
+          );
+
+        if (!newWindowId) {
+          throw new Error(
+            "Oda ölçüsü başlatılamadı."
+          );
+        }
+
+        beginNewWindowMeasurement(
+          room.id,
+          newWindowId
+        );
+      } catch (error) {
+        console.error(error);
+        showToast(
+          "Oda ölçüsü başlatılamadı."
+        );
+      } finally {
+        setIsSaving(false);
+      }
+    };
 
   const triggerFileSelector = (useCamera: boolean) => {
     if (!mediaUploadType || !mediaUploadCallback) return;
@@ -602,15 +663,124 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     setOverrideMeasuredById(user.id);
   };
 
+  const hasMeaningfulMeasurementInput = () => {
+    const positiveNumber =
+      (value: unknown) =>
+        Number.isFinite(Number(value)) &&
+        Number(value) > 0;
+
+    const facadeSegments =
+      Array.isArray(rawValues.facadeSegments)
+        ? rawValues.facadeSegments
+        : [];
+
+    if (
+      facadeSegments.some(
+        segment =>
+          isRecord(segment) &&
+          positiveNumber(segment.widthCm)
+      )
+    ) {
+      return true;
+    }
+
+    const plicellGlasses =
+      Array.isArray(rawValues.plicellCamListesi)
+        ? rawValues.plicellCamListesi
+        : [];
+
+    if (
+      plicellGlasses.some(
+        glass =>
+          isRecord(glass) &&
+          positiveNumber(
+            glass.widthCm ??
+              glass.enCm ??
+              glass.width
+          )
+      ) &&
+      (
+        positiveNumber(
+          rawValues.ortakCamBoyuCm
+        ) ||
+        plicellGlasses.some(
+          glass =>
+            isRecord(glass) &&
+            positiveNumber(
+              glass.heightCm ??
+                glass.boyCm ??
+                glass.height
+            )
+        )
+      )
+    ) {
+      return true;
+    }
+
+    const templateFields =
+      MEASUREMENT_TEMPLATES[
+        selectedTemplate
+      ]?.fields || [];
+
+    return templateFields.some(
+      field =>
+        field.type === 'number' &&
+        positiveNumber(
+          rawValues[field.key]
+        )
+    );
+  };
+
+  const handleCloseMeasurementForm =
+    async (
+      roomId: string,
+      window: WindowItem
+    ) => {
+      const shouldRemoveEmptyWindow =
+        !editingMeasurementId &&
+        pendingNewWindow?.roomId ===
+          roomId &&
+        pendingNewWindow.windowId ===
+          window.id &&
+        window.products.length === 0;
+
+      setActiveWindowIdForProduct(null);
+      setEditingMeasurementId(null);
+      setRawValues({});
+      setMeasurementNotes("");
+
+      if (!shouldRemoveEmptyWindow) {
+        return;
+      }
+
+      await deleteWindow(
+        customer.id,
+        roomId,
+        window.id
+      );
+      setPendingNewWindow(null);
+      await syncNow();
+      showToast(
+        "Ölçü girilmediği için boş açıklık kaydedilmedi."
+      );
+    };
+
   const handleSaveMeasurement = async (roomId: string, windowId: string) => {
     if (isSaving) return;
+
+    if (!hasMeaningfulMeasurementInput()) {
+      showToast(
+        "En az bir geçerli ölçü girmeden kayıt yapılamaz. İptal etmek için X düğmesini kullanın."
+      );
+      return;
+    }
+
     setIsSaving(true);
     try {
-      const isOfficeEntry = permissions.canAccessOfficeMode && overrideMeasuredById !== user.id;
       const measuredByUser = users.find(u => u.id === overrideMeasuredById) || user;
       const now = new Date().toISOString();
 
-      const parsedRawValues: Record<string, any> = {};
+      const parsedRawValues: ProductMeasurement["rawValues"] = {};
       const templateFields = MEASUREMENT_TEMPLATES[selectedTemplate]?.fields || [];
       templateFields.forEach(f => {
         const val = rawValues[f.key];
@@ -627,7 +797,11 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
       if (rawValues.facadeSegments && Array.isArray(rawValues.facadeSegments) && rawValues.facadeSegments.length > 0) {
         parsedRawValues.facadeSegments = rawValues.facadeSegments;
-        parsedRawValues.totalFacadeWidthCm = rawValues.facadeSegments.reduce((sum: number, s: any) => sum + (Number(s.widthCm) > 0 ? Number(s.widthCm) : 0), 0);
+        parsedRawValues.totalFacadeWidthCm = rawValues.facadeSegments.reduce(
+          (sum: number, segment: unknown) =>
+            sum + (isRecord(segment) && Number(segment.widthCm) > 0 ? Number(segment.widthCm) : 0),
+          0
+        );
       }
 
       if (selectedTemplate === 'PLICELL') {
@@ -637,11 +811,47 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
         if (rawValues.profilRengi !== undefined) parsedRawValues.profilRengi = rawValues.profilRengi;
       }
 
+      const slopedCeiling =
+        hasSlopedFacadeHeight(
+          parsedRawValues
+        );
+
+      if (slopedCeiling) {
+        const existingHeightNote =
+          String(
+            parsedRawValues.yukseklikNotu ||
+              ''
+          ).trim();
+
+        if (
+          !existingHeightNote
+            .toLocaleLowerCase('tr-TR')
+            .includes('tavan yamuk')
+        ) {
+          parsedRawValues.yukseklikNotu =
+            existingHeightNote
+              ? `${existingHeightNote} — Tavan Yamuk`
+              : 'Tavan Yamuk';
+        }
+      }
+
+      const savedMeasurementNotes =
+        slopedCeiling &&
+        !measurementNotes
+          .toLocaleLowerCase('tr-TR')
+          .includes('tavan yamuk')
+          ? (
+              measurementNotes.trim()
+                ? `${measurementNotes.trim()} — Tavan Yamuk`
+                : 'Tavan Yamuk'
+            )
+          : measurementNotes;
+
       if (editingMeasurementId) {
         updateProductMeasurement(customer.id, roomId, windowId, editingMeasurementId, {
           templateType: selectedTemplate,
           rawValues: parsedRawValues,
-          notes: measurementNotes,
+          notes: savedMeasurementNotes,
           measuredBy: measuredByUser.name,
           measuredById: measuredByUser.id,
           updatedAt: now,
@@ -650,7 +860,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
         addProductMeasurement(customer.id, roomId, windowId, {
           templateType: selectedTemplate,
           rawValues: parsedRawValues,
-          notes: measurementNotes,
+          notes: savedMeasurementNotes,
           status: "MEASURED",
           measuredBy: measuredByUser.name,
           measuredById: measuredByUser.id,
@@ -666,6 +876,12 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       await syncNow();
       setActiveWindowIdForProduct(null);
       setEditingMeasurementId(null);
+      if (
+        pendingNewWindow?.windowId ===
+        windowId
+      ) {
+        setPendingNewWindow(null);
+      }
     } catch (err) {
       console.error(err);
       showToast("Ölçü kaydedilirken senkronizasyon hatası oluştu.");
@@ -827,7 +1043,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     }
   };
 
-  const handleSaveCustomer = async (id: string, data: Partial<any>) => {
+  const handleSaveCustomer = async (id: string, data: Partial<Customer>) => {
     await updateCustomer(id, data);
     if (user) {
       addAuditEntry({
@@ -918,14 +1134,25 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   };
 
 
-  const renderMeasurementForm = (room: any, window: any, isInlineEdit: boolean = false) => {
+  const renderMeasurementForm = (room: Room, window: WindowItem, isInlineEdit = false) => {
     return (
       <div key={isInlineEdit ? editingMeasurementId : "new"} className={`mt-4 border-2 border-blue-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-lg ${isInlineEdit ? "" : "ml-6"} relative`}>
                               <div className="bg-blue-50 dark:bg-gray-900 p-3 border-b border-blue-100 dark:border-gray-700 flex justify-between items-center">
                                 <h5 className="font-bold text-blue-900 dark:text-gray-100">
                                   {editingMeasurementId ? "Saha Ölçüsü Düzenleme Formu" : "Saha Ölçü Formu"}
                                 </h5>
-                                <button onClick={() => { setActiveWindowIdForProduct(null); setEditingMeasurementId(null); }}><X className="w-5 h-5 text-blue-400 hover:text-blue-600 dark:text-gray-400 dark:hover:text-gray-200" /></button>
+                                <button
+                                  type="button"
+                                  aria-label="Ölçü formunu kapat"
+                                  onClick={() =>
+                                    void handleCloseMeasurementForm(
+                                      room.id,
+                                      window
+                                    )
+                                  }
+                                >
+                                  <X className="w-5 h-5 text-blue-400 hover:text-blue-600 dark:text-gray-400 dark:hover:text-gray-200" />
+                                </button>
                               </div>
 
                               <div className="p-4 space-y-4">
@@ -977,6 +1204,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                 {selectedTemplate === 'PLICELL' && (
                                   <div className="mb-4">
                                     <PlicellCamListEditor
+                                      key={activeWindowIdForProduct || 'new'}
                                       camAdedi={rawValues.camAdedi}
                                       ortakCamBoyuCm={rawValues.ortakCamBoyuCm}
                                       profilRengi={rawValues.profilRengi}
@@ -997,7 +1225,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                         <label className="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1">{f.label}</label>
                                         {f.type === 'select' ? (
                                           <select
-                                            value={rawValues[f.key] !== undefined ? rawValues[f.key] : (f.options && f.options.length > 0 ? f.options[0] : '')}
+                                            value={String(rawValues[f.key] !== undefined ? rawValues[f.key] : (f.options && f.options.length > 0 ? f.options[0] : ''))}
                                             onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
                                             className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
                                           >
@@ -1008,7 +1236,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                         ) : isNotesField ? (
                                           <textarea
                                             placeholder={f.label}
-                                            value={rawValues[f.key] !== undefined ? rawValues[f.key] : (f.defaultValue !== undefined ? f.defaultValue : '')}
+                                            value={String(rawValues[f.key] !== undefined ? rawValues[f.key] : (f.defaultValue !== undefined ? f.defaultValue : ''))}
                                             onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
                                             className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow resize-y"
                                             rows={2}
@@ -1018,7 +1246,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                             type={f.type}
                                             step={f.type === 'number' ? 'any' : undefined}
                                             placeholder={f.label}
-                                            value={rawValues[f.key] !== undefined ? rawValues[f.key] : (f.defaultValue !== undefined ? f.defaultValue : '')}
+                                            value={String(rawValues[f.key] !== undefined ? rawValues[f.key] : (f.defaultValue !== undefined ? f.defaultValue : ''))}
                                             onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
                                             className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
                                           />
@@ -1080,7 +1308,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   </div>
 )}
       {/* Header & Mode Toggle */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="flex flex-col lg:flex-row items-start justify-between gap-5">
         <div className="flex items-center gap-4">
           <Link href="/cariler" className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
             <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-300" />
@@ -1091,12 +1319,12 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5 w-full lg:max-w-3xl">
           {currentUser?.role === 'ADMIN' && (
             <button
               onClick={handleTargetRecover}
               disabled={isRecovering}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer"
+              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#c48a32] bg-[#a96824] px-3 py-2 text-center text-sm font-bold leading-tight text-white shadow-sm transition-colors hover:bg-[#bd7b2d] disabled:cursor-wait disabled:opacity-70"
               title="Bu Carinin Ölçülerini Yeniden Gönderime Hazırla"
             >
               {isRecovering ? (
@@ -1104,13 +1332,13 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
               ) : (
                 <RefreshCw className="w-4 h-4" />
               )}
-              <span className="hidden sm:inline">Ölçü Kurtar</span>
+              <span>Ölçü Kurtar</span>
             </button>
           )}
           {canEdit && (
             <button
               onClick={() => setIsEditModalOpen(true)}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer"
+              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#8f70c9] bg-[#7355a6] px-3 py-2 text-center text-sm font-bold leading-tight text-white shadow-sm transition-colors hover:bg-[#8262b8]"
               title="Cari bilgilerini düzenle"
             >
               <Edit className="w-4 h-4" />
@@ -1121,7 +1349,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
           {canMerge && (
             <button
               onClick={() => setIsMergeModalOpen(true)}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer"
+              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#6686ba] bg-[#4f6f9f] px-3 py-2 text-center text-sm font-bold leading-tight text-white shadow-sm transition-colors hover:bg-[#5c7caf]"
               title="Başka bir cari ile birleştir"
             >
               <Merge className="w-4 h-4" />
@@ -1130,12 +1358,12 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
           )}
 
           {canArchive && !customer.isArchived && !customer.isDeleted && (
-    <div className="flex gap-2 mt-4 sm:mt-0">
-      <button onClick={handleArchiveCustomer} className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-yellow-200 text-yellow-600 hover:bg-yellow-50 dark:border-yellow-900 dark:text-yellow-500 dark:hover:bg-yellow-900/20 text-sm font-medium transition-colors">
+    <div className="contents">
+      <button onClick={handleArchiveCustomer} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#d0a440] bg-[#c59632] px-3 py-2 text-center text-sm font-bold leading-tight text-[#2f240b] shadow-sm transition-colors hover:bg-[#d2a640]">
         <Archive className="w-4 h-4" />
         Arşivle
       </button>
-      <button onClick={handleMoveToTrash} className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-500 dark:hover:bg-red-900/20 text-sm font-medium transition-colors">
+      <button onClick={handleMoveToTrash} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#c46773] bg-[#a94756] px-3 py-2 text-center text-sm font-bold leading-tight text-white shadow-sm transition-colors hover:bg-[#ba5665]">
         <Trash2 className="w-4 h-4" />
         Sil
       </button>
@@ -1149,7 +1377,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
           />
           <button
             onClick={handleShareWhatsAppReport}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-green-650 hover:bg-green-700 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer"
+            className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#5aa47e] bg-[#3f805f] px-3 py-2 text-center text-sm font-bold leading-tight text-white shadow-sm transition-colors hover:bg-[#4b906d]"
             title="Müşteri ölçü raporunu WhatsApp ile paylaş"
           >
             <MessageCircle className="w-4 h-4" />
@@ -1158,7 +1386,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
           <button
             onClick={() => setIsVisualReportOpen(true)}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer"
+            className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#6e96c8] bg-[#527eae] px-3 py-2 text-center text-sm font-bold leading-tight text-white shadow-sm transition-colors hover:bg-[#628dbd]"
             title="Görsel Ölçü Raporunu Görüntüle"
           >
             <FileText className="w-4 h-4" />
@@ -1169,7 +1397,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
             <button
               onClick={handleTransferToSales}
               disabled={isSaving}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#ce805d] bg-[#ad5f3d] px-3 py-2 text-center text-sm font-bold leading-tight text-white shadow-sm transition-colors hover:bg-[#bf704c] disabled:cursor-wait disabled:opacity-50"
               title="Ölçüleri yeni satış/teklif taslağına kopyala"
             >
               <ShoppingCart className="w-4 h-4" />
@@ -1179,7 +1407,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
           <button
             onClick={handleSaveAsLocalDraft}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-800 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer"
+            className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#66778d] bg-[#4f6075] px-3 py-2 text-center text-sm font-bold leading-tight text-white shadow-sm transition-colors hover:bg-[#5c6d83]"
             title="Saha ölçü taslağını telefona kaydet"
           >
             <Ruler className="w-4 h-4 text-blue-400" />
@@ -1190,14 +1418,14 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
           <div className="flex bg-gray-200 dark:bg-gray-800 rounded-xl p-1 shadow-inner">
           <button
             onClick={() => setMode("MEASUREMENT")}
-            className={`px-6 py-2 text-sm font-bold rounded-lg transition-colors ${mode === 'MEASUREMENT' ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
+            className={`px-6 py-2 text-sm font-bold rounded-lg transition-colors ${mode === 'MEASUREMENT' ? 'bg-white dark:bg-[#435269] text-[#527eae] dark:text-[#9fc1e8] shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
           >
             Sahadan Ölçü Modu
           </button>
           {permissions.canAccessOfficeMode ? (
             <button
               onClick={() => setMode("OFFICE")}
-              className={`px-6 py-2 text-sm font-bold rounded-lg transition-colors ${mode === 'OFFICE' ? 'bg-white dark:bg-gray-700 text-orange-600 dark:text-orange-400 shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
+              className={`px-6 py-2 text-sm font-bold rounded-lg transition-colors ${mode === 'OFFICE' ? 'bg-white dark:bg-[#594b47] text-[#ad5f3d] dark:text-[#e1a486] shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
             >
               Ofis / Satış Modu
             </button>
@@ -1217,18 +1445,21 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Sidebar */}
         <div className="lg:col-span-1 space-y-6">
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 shadow-sm">
-            <h2 className="font-semibold text-gray-900 dark:text-white mb-4">Müşteri Kartı</h2>
-            <div className="space-y-4 text-sm">
+          <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-gray-50/80 px-4 py-4 dark:border-gray-800 dark:bg-gray-800/40 sm:px-5">
               <div>
-                <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase mb-1">Cari Tipi</span>
-                <span className={`inline-block px-2.5 py-1 rounded-lg text-xs font-semibold border ${getCariTypeColor(customer.cariType)}`}>
-                  {getCariTypeLabel(customer.cariType)}
-                </span>
+                <h2 className="font-bold text-gray-900 dark:text-white">Müşteri Kartı</h2>
+                <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">Kimlik, iletişim ve adres bilgileri</p>
               </div>
+              <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold border ${getCariTypeColor(customer.cariType)}`}>
+                  {getCariTypeLabel(customer.cariType)}
+              </span>
+            </div>
+
+            <div className="divide-y divide-gray-100 px-4 text-sm dark:divide-gray-800 sm:px-5">
 
               {customer.approvalStatus === 'PENDING_APPROVAL' && (
-                <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-250 dark:border-amber-900/30 rounded-xl space-y-2">
+                <div className="my-4 space-y-2 rounded-xl border border-amber-250 bg-amber-50 p-3 dark:border-amber-900/30 dark:bg-amber-950/20">
                   <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400 text-xs font-bold">
                     <AlertTriangle className="w-4 h-4 flex-shrink-0" />
                     Yönetici Onayı Bekliyor
@@ -1250,32 +1481,40 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
               )}
 
               {customer.customerCode && (
-                <div>
-                  <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">Cari Kodu</span>
-                  <span className="font-medium text-gray-900 dark:text-white">{customer.customerCode}</span>
+                <div className="py-3">
+                  <span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Cari Kodu</span>
+                  <span className="mt-1 block break-all font-mono text-sm font-semibold text-gray-900 dark:text-white">{customer.customerCode}</span>
                 </div>
               )}
               {canViewCustomerContactFields(currentUser, customer) && customer.taxNumber && (
-                <div>
-                  <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">TC / Vergi No</span>
-                  <span className="font-medium text-gray-900 dark:text-white">{customer.taxNumber}</span>
+                <div className="py-3">
+                  <span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">TC / Vergi No</span>
+                  <span className="mt-1 block font-mono text-sm font-semibold text-gray-900 dark:text-white">{customer.taxNumber}</span>
                 </div>
               )}
               {canViewCustomerContactFields(currentUser, customer) && (
-                <div>
-                  <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">Telefon</span>
-                  <span className="font-medium text-gray-900 dark:text-white">{customer.phone || '-'}</span>
+                <div className="py-3">
+                  <span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Telefon</span>
+                  {customer.phone ? (
+                    <a href={`tel:${customer.phone}`} className="mt-1 inline-flex min-h-8 items-center font-bold text-blue-700 hover:underline dark:text-blue-300">
+                      {customer.phone}
+                    </a>
+                  ) : (
+                    <span className="mt-1 block text-gray-400">Belirtilmemiş</span>
+                  )}
                 </div>
               )}
               {canViewCustomerContactFields(currentUser, customer) && customer.phone2 && (
-                <div>
-                  <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">Telefon 2</span>
-                  <span className="font-medium text-gray-900 dark:text-white">{customer.phone2}</span>
+                <div className="py-3">
+                  <span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Telefon 2</span>
+                  <a href={`tel:${customer.phone2}`} className="mt-1 inline-flex min-h-8 items-center font-bold text-blue-700 hover:underline dark:text-blue-300">
+                    {customer.phone2}
+                  </a>
                 </div>
               )}
               {canViewCustomerContactFields(currentUser, customer) && (
-                <div>
-                  <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase mb-1">Adres</span>
+                <div className="py-3">
+                  <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Adres</span>
                   {(() => {
                     const mapsUrl = getGoogleMapsUrl(customer);
                     if (mapsUrl) {
@@ -1284,7 +1523,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                           href={mapsUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex items-start gap-1.5 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium group"
+                           className="group flex min-h-10 items-start gap-2 rounded-lg bg-blue-50 p-2.5 font-medium text-blue-700 hover:bg-blue-100 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-950/50"
                           title="Haritada Göster"
                         >
                           <MapPin className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
@@ -1305,11 +1544,16 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                 </div>
               )}
               {canViewCustomerContactFields(currentUser, customer) && (
-                <div>
-                  <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase mb-1">Cari Konum</span>
-                  <div className="font-medium text-gray-900 dark:text-white mb-2 break-all">
-                    {customer.mapLocation || "Konum Belirlenmemiş"}
+                <div className="py-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Cari Konum</span>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${customer.mapLocation ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300" : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"}`}>
+                      {customer.mapLocation ? "Kayıtlı" : "Belirtilmemiş"}
+                    </span>
                   </div>
+                  {customer.mapLocation && (
+                    <div className="mb-2 break-all font-mono text-[10px] leading-relaxed text-gray-500 dark:text-gray-400">{customer.mapLocation}</div>
+                  )}
 
                   {locationAccuracy !== null && (
                     <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
@@ -1323,7 +1567,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                     </div>
                   )}
 
-                  <div className="flex flex-col gap-2 mt-2">
+                  <div className="grid grid-cols-2 gap-2 mt-2">
                     {(() => {
                       const mapsUrl = getGoogleMapsUrl(customer);
                       return (
@@ -1337,7 +1581,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                               showToast("Konum veya adres bilgisi bulunmuyor.");
                             }
                           }}
-                          className={`flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition-colors border ${
+                          className={`flex min-h-10 items-center justify-center gap-1.5 px-2 py-2 text-center text-xs font-bold rounded-lg transition-colors border ${
                             mapsUrl
                               ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800/50 hover:bg-blue-100 dark:hover:bg-blue-900/40"
                               : "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 border-gray-250 dark:border-gray-700 cursor-not-allowed"
@@ -1352,7 +1596,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                     <button
                       onClick={handleUpdateLocation}
                       disabled={updatingLocation}
-                      className="flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition-colors border bg-emerald-600 hover:bg-emerald-700 text-white border-transparent disabled:bg-emerald-700/50 disabled:cursor-not-allowed"
+                      className="flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-transparent bg-emerald-700 px-2 py-2 text-center text-xs font-bold text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-emerald-700/50"
                     >
                       {updatingLocation ? (
                         <>
@@ -1371,21 +1615,24 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
               )}
 
               {canViewAddressPhoto && (
-                <div>
-                  <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase mb-1.5">Bina / Adres Fotoğrafları</span>
+                <div className="py-3">
+                  <span className="mb-2 block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Bina / Adres Fotoğrafları</span>
 
                   {(() => {
                     const addressPhotos = customer.addressPhotos || [];
                     if (addressPhotos.length > 0) {
                       return (
-                        <div className="flex gap-2 flex-wrap mb-2">
+                        <div className="grid grid-cols-3 gap-2 mb-2">
                           {addressPhotos.map((url, i) => (
                             <div
                               key={i}
-                              className="relative group w-14 h-14 rounded-lg overflow-hidden border border-gray-250 dark:border-gray-850"
+                              className="relative group aspect-square w-full overflow-hidden rounded-lg border border-gray-250 dark:border-gray-850"
                             >
-                              <img
+                              <Image
                                 src={url}
+                                fill
+                                unoptimized
+                                sizes="96px"
                                 onClick={() => { setPreviewUrl(url); setPreviewType('photo'); }}
                                 className="w-full h-full object-cover cursor-pointer hover:opacity-85 transition-opacity"
                                 alt={`Adres Fotoğrafı ${i + 1}`}
@@ -1434,15 +1681,15 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
               )}
 
               {customer.extraDescription && (
-                <div>
-                  <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">Ek Açıklama</span>
-                  <span className="font-medium text-gray-900 dark:text-white">{customer.extraDescription}</span>
+                <div className="py-3">
+                  <span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Ek Açıklama</span>
+                  <p className="mt-1.5 rounded-lg bg-amber-50 p-2.5 font-medium leading-relaxed text-gray-800 dark:bg-amber-950/20 dark:text-gray-200">{customer.extraDescription}</p>
                 </div>
               )}
               {customer.generalNote && (
-                <div>
-                  <span className="block text-xs text-gray-500 dark:text-gray-400 font-semibold uppercase">Genel Açıklama</span>
-                  <span className="font-medium text-gray-900 dark:text-white break-words">{customer.generalNote}</span>
+                <div className="py-3">
+                  <span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Genel Açıklama</span>
+                  <p className="mt-1.5 break-words rounded-lg bg-gray-50 p-2.5 font-medium leading-relaxed text-gray-800 dark:bg-gray-800/60 dark:text-gray-200">{customer.generalNote}</p>
                 </div>
               )}
             </div>
@@ -1575,6 +1822,36 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
           {([...(customer.rooms || [])].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())).map((room) => {
             const isExpanded = expandedRooms[room.id] !== false;
+            const windowHasMeasurement = (
+              window: WindowItem
+            ) =>
+              window.products.length > 0 ||
+              measurementStore.measurements.some(
+                measurement =>
+                  measurementOpeningId(
+                    measurement
+                  ) === window.id &&
+                  !measurement.isDeleted
+              );
+            const visibleWindows =
+              room.windows.filter(
+                window =>
+                  !(
+                    isLegacyEmptyDefaultWindow(
+                      window
+                    ) &&
+                    !windowHasMeasurement(
+                      window
+                    )
+                  )
+              );
+            const hasMeasuredOpening =
+              visibleWindows.some(
+                window =>
+                  windowHasMeasurement(
+                    window
+                  )
+              );
 
             return (
               <div id={`room-card-${room.id}`} key={room.id} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden shadow-sm">
@@ -1648,7 +1925,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                           onClick={() => { setPreviewUrl(url); setPreviewType('photo'); }}
                           className="relative w-16 h-16 rounded overflow-hidden border cursor-pointer hover:opacity-85 transition-opacity"
                         >
-                          <img src={url} className="w-full h-full object-cover" />
+                          <Image src={url} fill unoptimized sizes="64px" alt={`Oda fotoğrafı ${i + 1}`} className="w-full h-full object-cover" />
                         </div>
                       ))}
                       {room.videos?.map((url, i) => (
@@ -1686,33 +1963,19 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                 {/* WINDOWS / OPENINGS */}
                 {isExpanded && (
                   <div className="p-4 space-y-6">
-                    {room.windows.length === 0 && (
-                      <div className="p-4 text-center">
-                        <button
-                          onClick={async () => {
-                            if (isSaving) return;
-                            setIsSaving(true);
-                            try {
-                              addWindow(customer.id, room.id, "Pencere 1");
-                              await syncNow();
-                            } catch (err) {
-                              console.error(err);
-                            } finally {
-                              setIsSaving(false);
-                            }
-                          }}
-                          className="text-sm font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 px-4 py-2 rounded-lg flex items-center gap-2 w-full justify-center border border-transparent dark:border-blue-800/50 transition-colors cursor-pointer"
-                        >
-                          <Plus className="w-4 h-4" /> Yeni Şablonla Ölçü Al
-                        </button>
-                      </div>
-                    )}
-                    {room.windows.map(window => {
-                      const isSingleDefault = room.windows.length === 1 && window.name === "Pencere 1";
+                    {visibleWindows.map(window => {
+                      const isPrimaryRoomOpening =
+                        window.name ===
+                          room.name ||
+                        (
+                          visibleWindows.length === 1 &&
+                          window.name ===
+                            "Pencere 1"
+                        );
                       return (
-                        <div key={window.id} className={isSingleDefault ? "space-y-4" : "border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50/50 dark:bg-gray-900/50 space-y-4 ml-2"}>
+                        <div key={window.id} className={isPrimaryRoomOpening ? "space-y-4" : "border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50/50 dark:bg-gray-900/50 space-y-4 ml-2"}>
 
-                          {!isSingleDefault && (
+                          {!isPrimaryRoomOpening && (
                             <div className="flex justify-between items-center pb-2 border-b border-gray-200 dark:border-gray-700">
                               <div className="flex items-center gap-4">
                                 <h4 className="font-bold text-gray-900 dark:text-white flex items-center gap-2 text-md">
@@ -1759,7 +2022,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                 onClick={() => { setPreviewUrl(url); setPreviewType('photo'); }}
                                 className="relative w-12 h-12 rounded overflow-hidden border cursor-pointer hover:opacity-85 transition-opacity"
                               >
-                                <img src={url} className="w-full h-full object-cover" />
+                                <Image src={url} fill unoptimized sizes="48px" alt={`Açıklık fotoğrafı ${i + 1}`} className="w-full h-full object-cover" />
                               </div>
                             ))}
                             {window.videos?.map((url, i) => (
@@ -1890,11 +2153,11 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                             ...(p.details || {}),
                                             ...(
                                               p.selectedProducts?.find(
-                                                (selectedProduct: any) =>
+                                                (selectedProduct) =>
                                                   selectedProduct?.isActive
                                               )?.calculation || {}
                                             )
-                                          } as any;
+                                          };
 
                                           const billingWidth = Number(
                                             storedCalculation.billingWidthCm ??
@@ -1924,11 +2187,11 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                             ...(p.details || {}),
                                             ...(
                                               p.selectedProducts?.find(
-                                                (selectedProduct: any) =>
+                                                (selectedProduct) =>
                                                   selectedProduct?.isActive
                                               )?.calculation || {}
                                             )
-                                          } as any;
+                                          };
 
                                           const totalM2 = Number(
                                             storedCalculation.totalSystemM2 ??
@@ -1963,7 +2226,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                     </div>
                                   )}
                                   <div className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">
-                                    <span className="text-gray-500 font-normal">Cam Adedi:</span> {p.rawValues.plicellCamListesi.filter((cam: any) => Number(cam.widthCm) > 0 && Number(cam.heightCm) > 0).length}
+                                    <span className="text-gray-500 font-normal">Cam Adedi:</span> {p.rawValues.plicellCamListesi.filter((cam: unknown) => isRecord(cam) && Number(cam.widthCm) > 0 && Number(cam.heightCm) > 0).length}
                                   </div>
                                   <div className="space-y-1.5 border-t border-gray-200 dark:border-gray-700 pt-2">
                                     {(() => {
@@ -1971,11 +2234,11 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                         ...(p.details || {}),
                                         ...(
                                           p.selectedProducts?.find(
-                                            (selectedProduct: any) =>
+                                            (selectedProduct) =>
                                               selectedProduct?.isActive
                                           )?.calculation || {}
                                         )
-                                      } as any;
+                                      };
 
                                       const storedGroups = Array.isArray(
                                         storedCalculation.groups
@@ -1991,13 +2254,15 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                         storedCalculation.totalSystemM2 ??
                                         storedCalculation.totalM2 ??
                                         storedGroups.reduce(
-                                          (sum: number, group: any) =>
-                                            sum + Number(
-                                              group?.totalM2 ??
-                                              group?.chargeableM2 ??
-                                              group?.unitM2 ??
-                                              0
-                                            ),
+                                          (sum: number, group: unknown) =>
+                                            sum + (isRecord(group)
+                                              ? Number(
+                                                  group.totalM2 ??
+                                                  group.chargeableM2 ??
+                                                  group.unitM2 ??
+                                                  0
+                                                )
+                                              : 0),
                                           0
                                         )
                                       );
@@ -2006,7 +2271,8 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                         <>
                                           {storedGroups.length > 0 ? (
                                             storedGroups.map(
-                                              (group: any, i: number) => {
+                                              (group: unknown, i: number) => {
+                                                if (!isRecord(group)) return null;
                                                 const realWidth = Number(
                                                   group.realWidthCm ??
                                                   group.actualWidthCm ??
@@ -2045,8 +2311,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                                 return (
                                                   <div
                                                     key={
-                                                      group.generatedItemId ||
-                                                      group.id ||
+                                                      String(group.generatedItemId || group.id || "") ||
                                                       i
                                                     }
                                                     className="text-sm text-gray-700 dark:text-gray-300 flex items-center justify-between"
@@ -2104,8 +2369,9 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                       </div>
                                       <div className="flex flex-wrap items-center gap-2">
                                         {(Array.isArray(p.rawValues?.facadeSegments) ? p.rawValues.facadeSegments : [])
-                                          .filter((segment: any) => Number(segment?.widthCm || 0) > 0)
-                                          .map((segment: any, segmentIndex: number) => {
+                                          .filter((segment: unknown) => isRecord(segment) && Number(segment.widthCm || 0) > 0)
+                                          .map((segment: unknown, segmentIndex: number) => {
+                                            if (!isRecord(segment)) return null;
                                             const normalizedSegmentType = String(segment?.type || segment?.label || '').toUpperCase();
                                             const segmentShortLabel =
                                               normalizedSegmentType === 'WALL' || normalizedSegmentType === 'DUVAR'
@@ -2119,7 +2385,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                                       : String(segment?.label || normalizedSegmentType || '?').charAt(0).toUpperCase();
 
                                             return (
-                                              <div key={segment?.id || segmentIndex} className="flex items-center gap-2">
+                                              <div key={String(segment.id || "") || segmentIndex} className="flex items-center gap-2">
                                                 {segmentIndex > 0 && <span className="font-bold text-gray-400 dark:text-gray-600">+</span>}
                                                 <div className="min-w-[76px] rounded-lg border border-blue-200 dark:border-blue-900/60 bg-white dark:bg-gray-950 px-3 py-2 text-center">
                                                   <div className="text-lg font-black leading-none text-gray-900 dark:text-white">
@@ -2147,7 +2413,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                   ) : (
                                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
                                       {Object.entries(p.rawValues || {})
-                                        .filter(([key, val]) => {
+                                        .filter(([key]) => {
                                           if (key === 'facadeSegments' || key === 'totalFacadeWidthCm') return false;
                                           if (p.templateType === 'PLICELL' && (key === 'plicellCamListesi' || key === 'camAdedi' || key === 'ortakCamBoyuCm' || key === 'profilRengi')) return false;
                                           const template = MEASUREMENT_TEMPLATES[p.templateType] || (p.templateType === 'CURTAIN' ? MEASUREMENT_TEMPLATES['CURTAIN_DETAIL'] : undefined);
@@ -2191,7 +2457,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                       onClick={() => { setPreviewUrl(url); setPreviewType('photo'); }}
                                       className="relative w-12 h-12 rounded overflow-hidden border cursor-pointer hover:opacity-85 transition-opacity"
                                     >
-                                      <img src={url} className="w-full h-full object-cover" />
+                                      <Image src={url} fill unoptimized sizes="48px" alt={`Ölçü fotoğrafı ${i + 1}`} className="w-full h-full object-cover" />
                                       <button
                                         onClick={(e) => { e.stopPropagation(); setDeleteConfirm({ type: 'photo', data: { url, type: 'measurement', customerId: customer.id, roomId: room.id, windowId: window.id, measurementId: p.id } }); }}
                                         className="absolute top-0 right-0 bg-red-500 text-white rounded-bl p-0.5"
@@ -2250,7 +2516,11 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                 <div className="mb-3 p-2 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded">
                                   <span className="text-[10px] text-orange-600 font-bold uppercase block mb-1">Ofis Ürün Ataması</span>
                                   <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{p.productGroup} - {p.productType}</div>
-                                  <div className="text-xs text-gray-600 dark:text-gray-400">Üretim Ölçüsü: {p.calculatedWidth}x{p.calculatedHeight}</div>
+                                  <div className="text-xs text-gray-600 dark:text-gray-400">
+                                    {p.templateType === 'PLICELL'
+                                      ? `Plicell Özeti: ${getMeasurementDimensions(p).summaryLabel}`
+                                      : `Üretim Ölçüsü: ${p.calculatedWidth}x${p.calculatedHeight}`}
+                                  </div>
                                 </div>
                               ) : null}
 
@@ -2393,8 +2663,26 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                     );
                   })}
 
-                    {/* Add Window Area */}
-                    {activeRoomIdForWindow === room.id ? (
+                    {/* First room measurement / additional opening area */}
+                    {mode === 'MEASUREMENT' &&
+                    !hasMeasuredOpening &&
+                    visibleWindows.length === 0 ? (
+                      <div className="ml-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleStartRoomMeasurement(
+                              room
+                            )
+                          }
+                          disabled={isSaving}
+                          className="w-full py-3 border-2 border-dashed rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors border-blue-300 dark:border-blue-800 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:cursor-wait disabled:opacity-50"
+                        >
+                          <Ruler className="w-5 h-5" />
+                          Bu Odanın Ölçüsünü Al
+                        </button>
+                      </div>
+                    ) : activeRoomIdForWindow === room.id ? (
                       <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl border dark:border-gray-700 ml-2">
                         <div className="flex justify-between items-center mb-3">
                           <h4 className="font-bold text-sm dark:text-white">Yeni Açıklık (Pencere/Kapı) Tanımla</h4>
@@ -2415,7 +2703,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                       <div className="ml-2">
                         <button onClick={() => setActiveRoomIdForWindow(room.id)} className={`w-full py-3 border-2 border-dashed rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors ${mode === 'MEASUREMENT' ? 'border-blue-300 dark:border-blue-800 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20' : 'border-gray-300 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}>
                           <Plus className="w-5 h-5" />
-                          Bu Odaya Açıklık Ekle
+                          Bu Odaya Farklı Açıklık Ekle
                         </button>
                       </div>
                     )}

@@ -4,22 +4,28 @@ import { Plus, Search, FileText } from "lucide-react";
 import Link from "next/link";
 import { useStore } from "@/store/useStore";
 import { useSalesStore } from "@/store/salesStore";
-import { useEffect, useState } from "react";
+import { useAuthStore } from "@/store/useAuthStore";
+import { getVisibleSales } from "@/lib/salesVisibility";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 export default function SatisPage() {
   const { customers } = useStore();
   const { sales, loadSales, isLoading } = useSalesStore();
-  const [mounted, setMounted] = useState(false);
+  const currentUser = useAuthStore(state => state.currentUser);
+  const mounted = useSyncExternalStore(
+    () => () => undefined,
+    () => true,
+    () => false
+  );
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
-    setMounted(true);
-    loadSales();
+    void loadSales();
   }, [loadSales]);
 
   if (!mounted || isLoading) return <div className="p-8 text-center">Yükleniyor...</div>;
 
-  const enrichedSales = sales.map(sale => ({
+  const enrichedSales = getVisibleSales(currentUser, sales).map(sale => ({
     ...sale,
     customerName: customers.find(c => c.id === sale.customerId)?.name || "Silinmiş Müşteri"
   })).filter(sale => 
@@ -62,7 +68,7 @@ export default function SatisPage() {
                 <th className="px-6 py-4">Tarih</th>
                 <th className="px-6 py-4">Müşteri</th>
                 <th className="px-6 py-4">Durum</th>
-                <th className="px-6 py-4 text-right">Tutar</th>
+                <th className="px-6 py-4 text-right">Kalan Bakiye</th>
                 <th className="px-6 py-4 text-center">İşlem</th>
               </tr>
             </thead>

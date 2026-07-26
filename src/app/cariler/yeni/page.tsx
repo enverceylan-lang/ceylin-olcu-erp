@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { ArrowLeft, Save, MapPin, Loader2, Camera, X } from "lucide-react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useStore, generateUUID } from "@/store/useStore";
 import { useAuthStore, canCreateCariType, normalizeRole } from "@/store/useAuthStore";
@@ -13,11 +14,15 @@ export default function YeniCariPage() {
   const router = useRouter();
   const addCustomer = useStore((state) => state.addCustomer);
   const { currentUser } = useAuthStore();
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    () => () => undefined,
+    () => true,
+    () => false
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showPhotoSourceModal, setShowPhotoSourceModal] = useState(false);
-  const [submitId, setSubmitId] = useState<string | null>(null);
+  const [submitId, setSubmitId] = useState<string>(() => generateUUID());
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -49,11 +54,6 @@ export default function YeniCariPage() {
     };
     input.click();
   };
-
-  useEffect(() => {
-    setMounted(true);
-    setSubmitId(generateUUID());
-  }, []);
 
   const canCreateAny = currentUser && (
     canCreateCariType(currentUser, 'CUSTOMER') || 
@@ -368,8 +368,11 @@ export default function YeniCariPage() {
                       key={i}
                       className="relative group w-16 h-16 rounded-lg overflow-hidden border border-gray-250 dark:border-gray-850"
                     >
-                      <img
+                      <Image
                         src={url}
+                        fill
+                        unoptimized
+                        sizes="64px"
                         className="w-full h-full object-cover"
                         alt={`Adres Fotoğrafı ${i + 1}`}
                       />

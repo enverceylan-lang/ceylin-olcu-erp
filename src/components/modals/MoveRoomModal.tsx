@@ -41,8 +41,9 @@ export function MoveRoomModal({ isOpen, onClose, sourceCustomer, roomToMove, onC
     try {
       await onConfirm(targetId, roomToMove.id);
       onClose();
-    } catch (err: any) {
-      alert("Hata: " + err.message);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Oda taşıma işlemi tamamlanamadı.";
+      alert("Hata: " + message);
     } finally {
       setIsProcessing(false);
     }

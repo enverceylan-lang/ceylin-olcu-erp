@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyAuth } from "@/lib/authHelper";
+import { loadShadowErpContext } from "@/lib/serverErpContext";
+import { readRequestedErpScopeId } from "@/lib/erpActiveScopeCookie";
 
 const ALLOWED_PULL_ROLES = new Set([
   "ADMIN",
@@ -120,11 +122,36 @@ export async function POST(req: NextRequest) {
         autoRefreshToken: false,
       },
     });
+    const erpContext = await loadShadowErpContext(
+      supabaseServer,
+      user.id,
+      { requestedScopeId: readRequestedErpScopeId(req) },
+    );
+
+    if (!erpContext.ready) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "ERP scope is not ready",
+          reason: erpContext.reason,
+        },
+        { status: erpContext.reason === "READ_FAILED" ? 503 : 409 },
+      );
+    }
+
+    const scopeColumns = {
+      tenant_id: erpContext.scope.tenantId,
+      company_id: erpContext.scope.companyId,
+      branch_id: erpContext.scope.branchId,
+      accounting_period_id:
+        erpContext.scope.accountingPeriodId,
+    };
 
     const [draftResult, measurementResult] = await Promise.all([
       supabaseServer
         .from("draft_changes")
         .select("*")
+        .match(scopeColumns)
         .gt("revision", draftCursor)
         .order("revision", { ascending: true })
         .limit(100),
@@ -132,6 +159,7 @@ export async function POST(req: NextRequest) {
       supabaseServer
         .from("measurement_changes")
         .select("*")
+        .match(scopeColumns)
         .gt("revision", measurementCursor)
         .order("revision", { ascending: true })
         .limit(100),
