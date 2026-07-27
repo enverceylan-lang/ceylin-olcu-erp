@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { hashPassword, verifyAuth } from "@/lib/authHelper";
 import { normalizeUsername } from "@/lib/usernameHelper";
+import {
+  isKnownFinanceLikePermission,
+} from "@/lib/finance/financePermissionCatalog";
+import {
+  isFinancePermission,
+} from "@/lib/finance/financeRoleDefaults";
+import {
+  mergeSelectedFinancePermissions,
+} from "@/lib/finance/userFinancePermissions";
 
 const supabaseUrl =
   process.env.SUPABASE_URL ||
@@ -155,6 +164,8 @@ export async function POST(req: NextRequest) {
     const isCreate = !existingUser;
     const isAdmin = caller.role?.toLowerCase() === "admin";
     const isSelfUpdate = !isCreate && targetId === caller.id;
+    const hasFinancePermissionUpdate =
+      Object.prototype.hasOwnProperty.call(body, "financePermissions");
 
     // Admin herkes üzerinde işlem yapabilir.
     // Personel yalnız kendi eksik profilini tamamlayabilir.
@@ -176,6 +187,81 @@ export async function POST(req: NextRequest) {
         },
         { status: 403 }
       );
+    }
+
+    if (hasFinancePermissionUpdate && !isAdmin) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: "FINANCE_PERMISSION_UPDATE_FORBIDDEN",
+          error: "Finans yetkilerini yalnız yönetici güncelleyebilir.",
+        },
+        { status: 403 }
+      );
+    }
+
+    const targetRole = String(
+      role ?? existingUser?.role ?? "FIELD"
+    );
+    let nextPermissions: string[] | null = null;
+
+    if (isCreate) {
+      const initialPermissions = Array.isArray(body.permissions)
+        ? body.permissions
+        : [];
+      const unknownFinancePermissions = initialPermissions
+        .filter(isKnownFinanceLikePermission)
+        .map(String);
+
+      if (unknownFinancePermissions.length > 0) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: "UNKNOWN_FINANCE_PERMISSION",
+            error: "Bilinmeyen finans yetkisi gönderildi.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const selectedFinancePermissions = hasFinancePermissionUpdate
+        ? body.financePermissions
+        : initialPermissions.filter(isFinancePermission);
+      const permissionUpdate = mergeSelectedFinancePermissions({
+        existingPermissions: initialPermissions,
+        selectedFinancePermissions,
+        targetRole,
+      });
+
+      if (!permissionUpdate.ok) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: permissionUpdate.code,
+            error: "Finans yetkisi isteği geçersiz.",
+          },
+          { status: permissionUpdate.code === "PLATFORM_FINANCE_DENIED" ? 403 : 400 }
+        );
+      }
+      nextPermissions = permissionUpdate.permissions;
+    } else if (hasFinancePermissionUpdate) {
+      const permissionUpdate = mergeSelectedFinancePermissions({
+        existingPermissions: existingUser.permissions,
+        selectedFinancePermissions: body.financePermissions,
+        targetRole,
+      });
+
+      if (!permissionUpdate.ok) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: permissionUpdate.code,
+            error: "Finans yetkisi isteği geçersiz.",
+          },
+          { status: permissionUpdate.code === "PLATFORM_FINANCE_DENIED" ? 403 : 400 }
+        );
+      }
+      nextPermissions = permissionUpdate.permissions;
     }
 
     // Kullanıcı adı yalnız admin tarafından belirlenebilir.
@@ -283,7 +369,7 @@ export async function POST(req: NextRequest) {
         password: finalPassword,
         role: role || "FIELD",
         isActive: isActive !== undefined ? Boolean(isActive) : true,
-        permissions: Array.isArray(body.permissions) ? body.permissions : [],
+        permissions: nextPermissions || [],
         createdAt: now,
         updatedAt: now,
 
@@ -334,6 +420,10 @@ export async function POST(req: NextRequest) {
 
         if (role !== undefined) {
           userRecord.role = role;
+        }
+
+        if (nextPermissions) {
+          userRecord.permissions = nextPermissions;
         }
 
         if (isActive !== undefined) {

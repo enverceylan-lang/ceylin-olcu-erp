@@ -14,6 +14,9 @@ import {
 } from "@/lib/fullSystemBackup";
 import SalesSyncDiagnosticsCard from "@/components/admin/SalesSyncDiagnosticsCard";
 import ErpContextShadowCard from "@/components/admin/ErpContextShadowCard";
+import FinancePermissionEditor from "@/components/admin/FinancePermissionEditor";
+import type { FinancePermission } from "@/lib/finance/financeAccessPolicy";
+import { isFinancePermission } from "@/lib/finance/financeRoleDefaults";
 
 type BackupPayload =
   FullSystemBackupPayload;
@@ -63,6 +66,7 @@ export default function AyarlarPage() {
   const [editPhone, setEditPhone] = useState("");
   const [editTcNo, setEditTcNo] = useState("");
   const [editAddress, setEditAddress] = useState("");
+  const [editFinancePermissions, setEditFinancePermissions] = useState<FinancePermission[]>([]);
   const [userLoading, setUserLoading] = useState(false);
   const [userFilter, setUserFilter] = useState<'ACTIVE' | 'PASSIVE' | 'ALL'>('ACTIVE');
 
@@ -328,6 +332,9 @@ export default function AyarlarPage() {
     setEditPhone(u.phone || "");
     setEditTcNo(u.tcNo || "");
     setEditAddress(u.address || "");
+    setEditFinancePermissions(
+      (u.permissions || []).filter(isFinancePermission),
+    );
   };
 
   const handleSaveEdit = async (id: string) => {
@@ -343,7 +350,8 @@ export default function AyarlarPage() {
       email: editEmail.trim(),
       phone: editPhone.trim(),
       tcNo: editTcNo.trim(),
-      address: editAddress.trim()
+      address: editAddress.trim(),
+      financePermissions: editFinancePermissions
     };
 
     if (editPassword.trim() && editPassword.trim() !== "••••") {
@@ -946,6 +954,12 @@ export default function AyarlarPage() {
                                 />
                               </div>
                             </div>
+                            <FinancePermissionEditor
+                              role={editRole}
+                              selectedPermissions={editFinancePermissions}
+                              onChange={setEditFinancePermissions}
+                              isSelf={u.id === currentUser?.id}
+                            />
                           </td>
                         </tr>
                       )}

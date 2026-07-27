@@ -37,6 +37,7 @@ export interface MockUser {
   role: UserRole;
   isActive: boolean;
   permissions?: string[];
+  financePermissions?: string[];
   storedPermissions?: string[];
   permissionVersion?: number;
   createdAt?: string;
@@ -913,7 +914,7 @@ export const useAuthStore = create<AuthState>()(
                 ...updatedUserFromServer
               };
 
-              const fieldsToCheck = ['name', 'email', 'phone', 'tcNo', 'address', 'role', 'isActive'];
+              const fieldsToCheck = ['name', 'email', 'phone', 'tcNo', 'address', 'role', 'isActive', 'permissions'];
               const changedFields: string[] = [];
 
               const isPasswordChanged = dataCopy.password !== undefined && dataCopy.password !== null && dataCopy.password.trim() !== '' && dataCopy.password.trim() !== '••••';
