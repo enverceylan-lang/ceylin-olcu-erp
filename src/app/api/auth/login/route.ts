@@ -3,12 +3,17 @@ import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
 import { hashPassword } from "@/lib/authHelper";
 import { normalizeUsername } from "@/lib/usernameHelper";
+import {
+  LEGACY_FINANCE_PERMISSION_VERSION,
+  resolveFinancePermissions,
+} from "@/lib/finance/financePermissionResolver";
 
 type SessionPayload = {
   sub: string;
   username: string;
   role: string;
   authVersion: string;
+  permissionVersion: number;
   iat: number;
   exp: number;
 };
@@ -180,12 +185,22 @@ export async function POST(req: NextRequest) {
     }
 
     const nowSeconds = Math.floor(Date.now() / 1000);
+    const permissionResolution = resolveFinancePermissions({
+      role: user.role,
+      storedPermissions: user.permissions,
+      financePermissionGrants: [],
+      financePermissionDenies: [],
+      permissionVersion: LEGACY_FINANCE_PERMISSION_VERSION,
+      expectedPermissionVersion: LEGACY_FINANCE_PERMISSION_VERSION,
+      applyRoleDefaults: false,
+    });
     const sessionLifetimeSeconds = rememberMe ? 30 * 24 * 60 * 60 : 12 * 60 * 60;
     const sessionPayload: SessionPayload = {
       sub: String(user.id),
       username: String(user.username),
       role: String(user.role),
       authVersion: getAuthVersion(user),
+      permissionVersion: LEGACY_FINANCE_PERMISSION_VERSION,
       iat: nowSeconds,
       exp: nowSeconds + sessionLifetimeSeconds,
     };
@@ -205,6 +220,11 @@ export async function POST(req: NextRequest) {
       success: true,
       user: {
         ...sanitizedUser,
+        storedPermissions: Array.isArray(user.permissions)
+          ? [...user.permissions]
+          : [],
+        permissions: permissionResolution.effectivePermissions,
+        permissionVersion: LEGACY_FINANCE_PERMISSION_VERSION,
         email: user.email || null,
         phone: user.phone || null,
         tcNo: user.tcNo || null,
@@ -215,6 +235,7 @@ export async function POST(req: NextRequest) {
         token: sessionToken,
         expiresAt: new Date(sessionPayload.exp * 1000).toISOString(),
         rememberMe,
+        permissionVersion: LEGACY_FINANCE_PERMISSION_VERSION,
       },
     });
   } catch {

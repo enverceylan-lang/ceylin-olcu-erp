@@ -16,6 +16,8 @@ export type AuthenticatedUser = {
   profileCompletedAt?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+  permissionVersion: number;
+  sessionPermissionVersion: number;
 };
 
 type SessionPayload = {
@@ -23,6 +25,7 @@ type SessionPayload = {
   username: string;
   role: string;
   authVersion: string;
+  permissionVersion?: number;
   iat: number;
   exp: number;
 };
@@ -191,7 +194,21 @@ export async function verifyAuth(
       return null;
     }
 
-    return user;
+    const permissionVersion = 0;
+    const sessionPermissionVersion =
+      typeof payload.permissionVersion === "number"
+        ? payload.permissionVersion
+        : 0;
+
+    if (permissionVersion !== sessionPermissionVersion) {
+      return null;
+    }
+
+    return {
+      ...user,
+      permissionVersion,
+      sessionPermissionVersion,
+    };
   } catch {
     console.error("[Auth Verification] Request authentication failed.");
     return null;

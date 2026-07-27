@@ -37,6 +37,8 @@ export interface MockUser {
   role: UserRole;
   isActive: boolean;
   permissions?: string[];
+  storedPermissions?: string[];
+  permissionVersion?: number;
   createdAt?: string;
   updatedAt?: string;
   email?: string;
