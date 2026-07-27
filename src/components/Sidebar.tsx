@@ -7,6 +7,7 @@ import { LayoutDashboard,
   Ruler, 
   Package, 
   ShoppingCart, 
+  Landmark,
   Factory, 
   Wrench, 
   FileText, 
@@ -19,6 +20,8 @@ import { twMerge } from "tailwind-merge";
 import { useAuthStore, ROLE_PERMISSIONS, canViewModule, normalizeUser, normalizeRole } from "@/store/useAuthStore";
 import { useUiStore } from "@/store/useUiStore";
 import { useState, useSyncExternalStore } from "react";
+import { decideFinanceAccess } from "@/lib/finance/financeAccessPolicy";
+import { useFinanceRuntimeContext } from "@/lib/finance/useFinanceRuntimeContext";
 
 const subscribeToHydration = () => () => {};
 const getClientSnapshot = () => true;
@@ -31,6 +34,7 @@ const menuItems = [
   { name: "Görevler", href: "/gorevler", icon: ClipboardList },
   { name: "Stok", href: "/stok", icon: Package },
   { name: "Satış", href: "/satis", icon: ShoppingCart },
+  { name: "Finans", href: "/finans", icon: Landmark },
   { name: "Üretim", href: "/uretim", icon: Factory },
   { name: "Montaj", href: "/montaj", icon: Wrench },
   { name: "Raporlar", href: "/raporlar", icon: FileText },
@@ -54,6 +58,7 @@ export function Sidebar() {
   const { currentUser: rawCurrentUser, switchUser, users, logout } = useAuthStore();
   const { isMobileMenuOpen, setMobileMenuOpen } = useUiStore();
   const [showUserPicker, setShowUserPicker] = useState(false);
+  const financeRuntime = useFinanceRuntimeContext();
   const mounted = useSyncExternalStore(
     subscribeToHydration,
     getClientSnapshot,
@@ -66,8 +71,20 @@ export function Sidebar() {
   const currentUser = normalizeUser(rawCurrentUser);
 
   const permissions = ROLE_PERMISSIONS[currentUser.role] || { label: 'Kullanıcı' };
-  const visibleMenuItems = menuItems.filter(item => 
-    canViewModule(currentUser.role, item.href)
+  const financeAccess =
+    financeRuntime.state === "ready"
+      ? decideFinanceAccess({
+          packageType: financeRuntime.packageType,
+          permissions: financeRuntime.permissions,
+          scope: financeRuntime.scope,
+          requestedCapability: "BASIC_FINANCE",
+          financeContext: { scope: financeRuntime.scope },
+        })
+      : null;
+  const visibleMenuItems = menuItems.filter((item) =>
+    item.href === "/finans"
+      ? financeAccess?.allowed === true
+      : canViewModule(currentUser.role, item.href)
   );
 
   return (

@@ -7,7 +7,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useStore, Customer, Room, WindowItem, MEASUREMENT_TEMPLATES, ProductMeasurement } from "@/store/useStore";
 import { useMeasurementStore } from "@/store/measurementStore";
-import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer, canViewCustomerWorkflowReport, canViewCustomerFinancialReport, canViewCustomerContactFields, canViewCariCard, canEditCari, canMergeCari, canArchiveCari, canMoveMeasurementBetweenCustomers, canTransferMeasurementToSale } from "@/store/useAuthStore";
+import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer, canViewCustomerWorkflowReport, canViewCustomerContactFields, canViewCariCard, canEditCari, canMergeCari, canArchiveCari, canMoveMeasurementBetweenCustomers, canTransferMeasurementToSale } from "@/store/useAuthStore";
 import { getMeasurementDimensions, getTemplateLabel, getGoogleMapsUrl, getWorkflowStatusLabel, getWorkflowStatusColorClass, WORKFLOW_STATUS_LABELS } from "@/lib/measurementAdapter";
 import { fileToDataUrl } from "@/lib/fileStorage";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
@@ -26,6 +26,7 @@ import { FacadeSegmentsEditor } from "@/components/measurements/FacadeSegmentsEd
 import { PlicellCamListEditor } from "@/components/measurements/PlicellCamListEditor";
 import { FieldTaskAssignButton } from "@/components/FieldTaskAssignButton";
 import { hasSlopedFacadeHeight } from "@/lib/facadeHeight";
+import { CustomerFinancePanel } from "@/components/finance/CustomerFinancePanel";
 
 const measurementOpeningId = (measurement: { openingId?: string; windowId?: string }) =>
   measurement.openingId || measurement.windowId || "";
@@ -307,11 +308,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     currentUser &&
     !canViewCustomerWorkflowReport(currentUser, customer)
       ? "rooms"
-      : requestedTab === "financial" &&
-          currentUser &&
-          !canViewCustomerFinancialReport(currentUser)
-        ? "rooms"
-        : requestedTab;
+      : requestedTab;
 
   if (!mounted) return <div className="p-8 text-center">Yükleniyor...</div>;
 
@@ -1797,18 +1794,16 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                 Cari İş Akış Raporu
               </button>
             )}
-            {canViewCustomerFinancialReport(currentUser) && (
-              <button
-                onClick={() => setActiveTab("financial")}
-                className={`pb-3 text-sm font-semibold border-b-2 transition-colors cursor-pointer ${
-                  activeTab === "financial"
-                    ? "border-blue-500 text-blue-600 dark:text-blue-400"
-                    : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400"
-                }`}
-              >
-                Cari Rapor / Ekstre
-              </button>
-            )}
+            <button
+              onClick={() => setActiveTab("financial")}
+              className={`pb-3 text-sm font-semibold border-b-2 transition-colors cursor-pointer ${
+                activeTab === "financial"
+                  ? "border-blue-500 text-blue-600 dark:text-blue-400"
+                  : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400"
+              }`}
+            >
+              Finans
+            </button>
           </div>
 
           {activeTab === "rooms" && (
@@ -2812,42 +2807,8 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
             </div>
           )}
 
-          {activeTab === "financial" && canViewCustomerFinancialReport(currentUser) && (
-            <div className="space-y-6">
-              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden shadow-sm">
-                <div className="p-5 border-b border-gray-200 dark:border-gray-800">
-                  <h4 className="font-bold text-gray-900 dark:text-white">Cari Hesap Ekstresi (Finansal Hareketler)</h4>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-sm min-w-[700px]">
-                    <thead>
-                      <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-800 text-gray-500 dark:text-gray-400 font-bold">
-                        <th className="p-4 font-semibold">Tarih</th>
-                        <th className="p-4 font-semibold">Belge Türü</th>
-                        <th className="p-4 font-semibold">Belge No</th>
-                        <th className="p-4 font-semibold">Açıklama</th>
-                        <th className="p-4 font-semibold text-right">Borç (Tutar)</th>
-                        <th className="p-4 font-semibold text-right">Alacak (Ödeme)</th>
-                        <th className="p-4 font-semibold text-right">Bakiye</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td colSpan={7} className="p-12 text-center text-gray-500 dark:text-gray-400">
-                          <div className="max-w-md mx-auto space-y-2">
-                            <FileText className="w-10 h-10 text-gray-300 mx-auto" />
-                            <p className="font-bold text-gray-800 dark:text-gray-200 text-sm">Kayıt Bulunamadı</p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                              Henüz satış, fatura veya tahsilat kaydı bulunmuyor. Satış modülü aktif olduğunda cari hareketleri burada görünecek.
-                            </p>
-                          </div>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
+          {activeTab === "financial" && (
+            <CustomerFinancePanel customerId={customer.id} currency="TRY" />
           )}
         </div>
 
