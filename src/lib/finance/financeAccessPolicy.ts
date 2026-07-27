@@ -17,6 +17,27 @@ export type FinancePermission =
   | "finance.payment.create"
   | "finance.payment.reverse"
   | "finance.transfer.create"
+  | "finance.transfer.reverse"
+  | "finance.cash.collection.create"
+  | "finance.cash.collection.reverse"
+  | "finance.cash.payment.create"
+  | "finance.cash.payment.reverse"
+  | "finance.bank.collection.create"
+  | "finance.bank.collection.reverse"
+  | "finance.bank.payment.create"
+  | "finance.bank.payment.reverse"
+  | "finance.pos.collection.create"
+  | "finance.pos.collection.reverse"
+  | "finance.pos.refund.create"
+  | "finance.pos.refund.reverse"
+  | "finance.cheque.receipt.create"
+  | "finance.cheque.receipt.reverse"
+  | "finance.cheque.issue.create"
+  | "finance.cheque.issue.reverse"
+  | "finance.note.receipt.create"
+  | "finance.note.receipt.reverse"
+  | "finance.note.issue.create"
+  | "finance.note.issue.reverse"
   | "finance.cash.view"
   | "finance.bank.view"
   | "finance.pos.view"
@@ -34,6 +55,27 @@ export type FinanceCapability =
   | "PAYMENT_CREATE"
   | "PAYMENT_REVERSE"
   | "TRANSFER_CREATE"
+  | "TRANSFER_REVERSE"
+  | "CASH_COLLECTION_CREATE"
+  | "CASH_COLLECTION_REVERSE"
+  | "CASH_PAYMENT_CREATE"
+  | "CASH_PAYMENT_REVERSE"
+  | "BANK_COLLECTION_CREATE"
+  | "BANK_COLLECTION_REVERSE"
+  | "BANK_PAYMENT_CREATE"
+  | "BANK_PAYMENT_REVERSE"
+  | "POS_COLLECTION_CREATE"
+  | "POS_COLLECTION_REVERSE"
+  | "POS_REFUND_CREATE"
+  | "POS_REFUND_REVERSE"
+  | "CHEQUE_RECEIPT_CREATE"
+  | "CHEQUE_RECEIPT_REVERSE"
+  | "CHEQUE_ISSUE_CREATE"
+  | "CHEQUE_ISSUE_REVERSE"
+  | "NOTE_RECEIPT_CREATE"
+  | "NOTE_RECEIPT_REVERSE"
+  | "NOTE_ISSUE_CREATE"
+  | "NOTE_ISSUE_REVERSE"
   | "CASH_VIEW"
   | "BANK_VIEW"
   | "POS_VIEW"
@@ -114,6 +156,90 @@ const CAPABILITY_REQUIREMENTS: Record<
   },
   TRANSFER_CREATE: {
     permission: "finance.transfer.create",
+    feature: "customerFinance",
+  },
+  TRANSFER_REVERSE: {
+    permission: "finance.transfer.reverse",
+    feature: "customerFinance",
+  },
+  CASH_COLLECTION_CREATE: {
+    permission: "finance.cash.collection.create",
+    feature: "customerFinance",
+  },
+  CASH_COLLECTION_REVERSE: {
+    permission: "finance.cash.collection.reverse",
+    feature: "customerFinance",
+  },
+  CASH_PAYMENT_CREATE: {
+    permission: "finance.cash.payment.create",
+    feature: "customerFinance",
+  },
+  CASH_PAYMENT_REVERSE: {
+    permission: "finance.cash.payment.reverse",
+    feature: "customerFinance",
+  },
+  BANK_COLLECTION_CREATE: {
+    permission: "finance.bank.collection.create",
+    feature: "customerFinance",
+  },
+  BANK_COLLECTION_REVERSE: {
+    permission: "finance.bank.collection.reverse",
+    feature: "customerFinance",
+  },
+  BANK_PAYMENT_CREATE: {
+    permission: "finance.bank.payment.create",
+    feature: "customerFinance",
+  },
+  BANK_PAYMENT_REVERSE: {
+    permission: "finance.bank.payment.reverse",
+    feature: "customerFinance",
+  },
+  POS_COLLECTION_CREATE: {
+    permission: "finance.pos.collection.create",
+    feature: "customerFinance",
+  },
+  POS_COLLECTION_REVERSE: {
+    permission: "finance.pos.collection.reverse",
+    feature: "customerFinance",
+  },
+  POS_REFUND_CREATE: {
+    permission: "finance.pos.refund.create",
+    feature: "customerFinance",
+  },
+  POS_REFUND_REVERSE: {
+    permission: "finance.pos.refund.reverse",
+    feature: "customerFinance",
+  },
+  CHEQUE_RECEIPT_CREATE: {
+    permission: "finance.cheque.receipt.create",
+    feature: "customerFinance",
+  },
+  CHEQUE_RECEIPT_REVERSE: {
+    permission: "finance.cheque.receipt.reverse",
+    feature: "customerFinance",
+  },
+  CHEQUE_ISSUE_CREATE: {
+    permission: "finance.cheque.issue.create",
+    feature: "customerFinance",
+  },
+  CHEQUE_ISSUE_REVERSE: {
+    permission: "finance.cheque.issue.reverse",
+    feature: "customerFinance",
+  },
+  NOTE_RECEIPT_CREATE: {
+    permission: "finance.note.receipt.create",
+    feature: "customerFinance",
+  },
+  NOTE_RECEIPT_REVERSE: {
+    permission: "finance.note.receipt.reverse",
+    feature: "customerFinance",
+  },
+  NOTE_ISSUE_CREATE: {
+    permission: "finance.note.issue.create",
+    feature: "customerFinance",
+  },
+  NOTE_ISSUE_REVERSE: {
+    permission: "finance.note.issue.reverse",
     feature: "customerFinance",
   },
   CASH_VIEW: {

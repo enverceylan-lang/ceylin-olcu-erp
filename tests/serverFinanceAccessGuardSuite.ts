@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import {
+  guardServerFinanceChannelAccess,
   guardServerFinanceAccess,
+  type ServerFinanceChannelAccessGuardInput,
   type ServerFinanceAccessGuardInput,
 } from "../src/lib/serverFinanceAccessGuard";
 import type { ErpScope } from "../src/lib/erpScope";
@@ -170,4 +172,155 @@ assert.equal(
   true,
 );
 
-console.log("[PASS] server finance access guard (15 required scenarios)");
+function channelRequest(
+  overrides: Partial<ServerFinanceChannelAccessGuardInput> = {},
+): ServerFinanceChannelAccessGuardInput {
+  return {
+    authenticatedUser: {
+      id: "office-1",
+      role: "OFFICE",
+      permissionVersion: 1,
+      sessionPermissionVersion: 1,
+    },
+    channel: "CASH",
+    operation: "COLLECTION",
+    direction: "CREATE",
+    requestedPermission: "finance.cash.collection.create",
+    packageType: "NORMAL",
+    actorScope: scope,
+    resourceScope: scope,
+    customerId: "customer-1",
+    ...overrides,
+  };
+}
+
+assert.equal(guardServerFinanceChannelAccess(channelRequest()).allowed, true);
+assert.equal(
+  guardServerFinanceChannelAccess(
+    channelRequest({
+      operation: "PAYMENT",
+      requestedPermission: "finance.cash.payment.create",
+    }),
+  ).allowed,
+  false,
+);
+assert.equal(
+  guardServerFinanceChannelAccess(
+    channelRequest({
+      channel: "BANK",
+      requestedPermission: "finance.bank.collection.create",
+    }),
+  ).allowed,
+  true,
+);
+assert.equal(
+  guardServerFinanceChannelAccess(
+    channelRequest({
+      channel: "BANK",
+      operation: "PAYMENT",
+      requestedPermission: "finance.bank.payment.create",
+    }),
+  ).allowed,
+  false,
+);
+assert.equal(
+  guardServerFinanceChannelAccess(
+    channelRequest({
+      channel: "POS",
+      requestedPermission: "finance.pos.collection.create",
+    }),
+  ).allowed,
+  true,
+);
+assert.equal(
+  guardServerFinanceChannelAccess(
+    channelRequest({
+      channel: "POS",
+      operation: "REFUND",
+      requestedPermission: "finance.pos.refund.create",
+    }),
+  ).allowed,
+  false,
+);
+assert.equal(
+  guardServerFinanceChannelAccess(
+    channelRequest({
+      resourceScope: { ...scope, branchId: "branch-2" },
+    }),
+  ).allowed,
+  false,
+);
+assert.equal(
+  guardServerFinanceChannelAccess(
+    channelRequest({ packageType: "ECO" }),
+  ).reasonCode,
+  "PACKAGE_FEATURE_DENIED",
+);
+assert.equal(
+  guardServerFinanceChannelAccess(
+    channelRequest({
+      authenticatedUser: {
+        id: "field-1",
+        role: "FIELD",
+        storedPermissions: ["finance.collection.create"],
+        permissionVersion: 1,
+        sessionPermissionVersion: 1,
+      },
+    }),
+  ).allowed,
+  false,
+);
+assert.equal(
+  guardServerFinanceChannelAccess(
+    channelRequest({
+      authenticatedUser: {
+        id: "admin-1",
+        role: "ADMIN",
+        permissionVersion: 1,
+        sessionPermissionVersion: 1,
+        applyRoleDefaults: false,
+      },
+    }),
+  ).allowed,
+  false,
+);
+assert.equal(
+  guardServerFinanceChannelAccess(
+    channelRequest({
+      authenticatedUser: {
+        id: "platform-1",
+        role: "PLATFORM_SUPER_ADMIN",
+        financePermissionGrants: ["finance.cash.collection.create"],
+        permissionVersion: 1,
+        sessionPermissionVersion: 1,
+      },
+    }),
+  ).allowed,
+  false,
+);
+const channelDenied = guardServerFinanceChannelAccess(
+  channelRequest({
+    authenticatedUser: {
+      id: "field-1",
+      role: "FIELD",
+      permissionVersion: 1,
+      sessionPermissionVersion: 1,
+    },
+  }),
+);
+assert.equal("financialData" in channelDenied, false);
+for (const resourceScope of [
+  { ...scope, tenantId: "tenant-2" },
+  { ...scope, companyId: "company-2" },
+  { ...scope, branchId: "branch-2" },
+  { ...scope, accountingPeriodId: "period-2" },
+]) {
+  assert.equal(
+    guardServerFinanceChannelAccess(
+      channelRequest({ resourceScope }),
+    ).allowed,
+    false,
+  );
+}
+
+console.log("[PASS] server finance access guard (Aşama 5 + 16 channel scenarios)");

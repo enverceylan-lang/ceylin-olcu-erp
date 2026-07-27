@@ -81,5 +81,74 @@ assert.equal(
   resolve({ role: "COMPANY_ADMIN" }).effectivePermissions.length > 0,
   true,
 );
+const cashCollectionOnly = resolve({
+  role: "FIELD",
+  financePermissionGrants: ["finance.cash.collection.create"],
+});
+assert.equal(
+  cashCollectionOnly.effectivePermissions.includes(
+    "finance.cash.collection.create",
+  ),
+  true,
+);
+assert.equal(
+  cashCollectionOnly.effectivePermissions.includes(
+    "finance.cash.payment.create",
+  ),
+  false,
+);
+assert.equal(
+  resolve({
+    role: "FIELD",
+    financePermissionGrants: ["finance.bank.collection.create"],
+  }).effectivePermissions.includes("finance.bank.payment.create"),
+  false,
+);
+assert.equal(
+  resolve({
+    role: "FIELD",
+    financePermissionGrants: ["finance.pos.collection.create"],
+  }).effectivePermissions.includes("finance.pos.refund.create"),
+  false,
+);
+const channelDeny = resolve({
+  financePermissionDenies: ["finance.bank.payment.create"],
+});
+assert.equal(
+  channelDeny.effectivePermissions.includes("finance.cash.collection.create"),
+  true,
+);
+assert.equal(
+  resolve({
+    role: "FIELD",
+    financePermissionGrants: ["finance.cash.collection.create"],
+    financePermissionDenies: ["finance.cash.collection.create"],
+  }).effectivePermissions.includes("finance.cash.collection.create"),
+  false,
+);
+const legacyCollection = resolve({
+  role: "FIELD",
+  storedPermissions: ["finance.collection.create"],
+});
+assert.equal(
+  legacyCollection.effectivePermissions.includes(
+    "finance.cash.collection.create",
+  ),
+  false,
+);
+assert.deepEqual(legacyCollection.legacyPermissions, [
+  "finance.collection.create",
+]);
+assert.equal(
+  legacyCollection.issues.includes("LEGACY_FINANCE_PERMISSION_PRESENT"),
+  true,
+);
+assert.equal(
+  resolve({
+    role: "FIELD",
+    storedPermissions: ["finance.payment.create"],
+  }).effectivePermissions.includes("finance.bank.payment.create"),
+  false,
+);
 
-console.log("[PASS] finance permission resolver (15 required scenarios)");
+console.log("[PASS] finance permission resolver (Aşama 5 + 12 channel scenarios)");

@@ -24,10 +24,18 @@ export interface FinancePermissionResolution {
   grantedPermissions: FinancePermission[];
   deniedPermissions: FinancePermission[];
   invalidPermissions: string[];
+  legacyPermissions: FinancePermission[];
   permissionVersion: number;
   versionMatches: boolean;
   issues: string[];
 }
+
+const LEGACY_GENERAL_PERMISSIONS = new Set<FinancePermission>([
+  "finance.collection.create",
+  "finance.collection.reverse",
+  "finance.payment.create",
+  "finance.payment.reverse",
+]);
 
 function splitPermissions(values: readonly unknown[] | null | undefined): {
   valid: FinancePermission[];
@@ -99,6 +107,14 @@ export function resolveFinancePermissions(
   if (stored.invalid.length || grants.invalid.length || denies.invalid.length) {
     issues.push("INVALID_PERMISSION");
   }
+  const legacyPermissions = sortPermissions(
+    grantedPermissions.filter((permission) =>
+      LEGACY_GENERAL_PERMISSIONS.has(permission),
+    ),
+  );
+  if (legacyPermissions.length > 0) {
+    issues.push("LEGACY_FINANCE_PERMISSION_PRESENT");
+  }
   if (!versionMatches) {
     issues.push("PERMISSION_VERSION_MISMATCH");
   }
@@ -126,6 +142,7 @@ export function resolveFinancePermissions(
         ...denies.invalid,
       ]),
     ].sort(),
+    legacyPermissions,
     permissionVersion: input.permissionVersion,
     versionMatches,
     issues,

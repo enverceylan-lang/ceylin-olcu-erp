@@ -11,6 +11,12 @@ import {
 } from "./finance/financePermissionResolver";
 import type { ErpPackage, ErpFeature } from "./packageFeatures";
 import type { ErpScope } from "./erpScope";
+import {
+  resolveFinanceChannelPermission,
+  type FinanceChannel,
+  type FinanceChannelOperation,
+  type FinanceOperationDirection,
+} from "./finance/financeChannelPermissions";
 
 export interface FinanceGuardUser {
   id: string;
@@ -38,7 +44,8 @@ export type ServerFinanceAccessReasonCode =
   | FinanceAccessReasonCode
   | "UNAUTHENTICATED"
   | "PERMISSION_VERSION_MISMATCH"
-  | "REQUIRED_PERMISSION_MISMATCH";
+  | "REQUIRED_PERMISSION_MISMATCH"
+  | "CHANNEL_OPERATION_DENIED";
 
 export interface ServerFinanceAccessGuardDecision {
   allowed: boolean;
@@ -126,4 +133,61 @@ export function guardServerFinanceAccess(
     evaluatedScope: access.evaluatedScope,
     permissionVersionValid: true,
   };
+}
+
+export interface ServerFinanceChannelAccessGuardInput
+  extends Omit<
+    ServerFinanceAccessGuardInput,
+    "requestedCapability"
+  > {
+  channel: FinanceChannel;
+  operation: FinanceChannelOperation;
+  direction: FinanceOperationDirection;
+}
+
+export function guardServerFinanceChannelAccess(
+  input: ServerFinanceChannelAccessGuardInput,
+): ServerFinanceAccessGuardDecision {
+  if (!input.authenticatedUser) {
+    return denied("UNAUTHENTICATED", input.requestedPermission);
+  }
+
+  const user = input.authenticatedUser;
+  const resolution = resolveFinancePermissions({
+    role: user.role,
+    storedPermissions: user.storedPermissions,
+    financePermissionGrants: user.financePermissionGrants,
+    financePermissionDenies: user.financePermissionDenies,
+    permissionVersion: user.permissionVersion,
+    expectedPermissionVersion: user.sessionPermissionVersion,
+    applyRoleDefaults: user.applyRoleDefaults,
+  });
+
+  if (!resolution.versionMatches) {
+    return denied(
+      "PERMISSION_VERSION_MISMATCH",
+      input.requestedPermission,
+      resolution,
+    );
+  }
+
+  const mapping = resolveFinanceChannelPermission(input);
+  if (!mapping) {
+    return denied(
+      "CHANNEL_OPERATION_DENIED",
+      input.requestedPermission,
+      resolution,
+    );
+  }
+
+  return guardServerFinanceAccess({
+    authenticatedUser: input.authenticatedUser,
+    requestedPermission: input.requestedPermission,
+    requestedCapability: mapping.capability,
+    packageType: input.packageType,
+    actorScope: input.actorScope,
+    resourceScope: input.resourceScope,
+    customerId: input.customerId,
+    saleId: input.saleId,
+  });
 }
