@@ -142,17 +142,17 @@ export default function OpenMeasurementsNotice({
 
   return (
     <section
-      className="rounded-2xl border border-yellow-200 bg-yellow-50 p-4 shadow-sm dark:border-yellow-900/60 dark:bg-yellow-950/30"
+      className="overflow-hidden rounded-2xl border border-amber-200 bg-amber-50/70 p-4 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/25"
       aria-label="Satışa bağlanmamış ölçüler"
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="font-bold text-yellow-900 dark:text-yellow-100">
+          <p className="break-words font-bold text-amber-950 dark:text-amber-100">
             Bu müşterinin satışa bağlanmamış{" "}
             {openMeasurements.length} ölçüsü var.
           </p>
 
-          <p className="mt-1 text-sm text-yellow-800 dark:text-yellow-200">
+          <p className="mt-1 break-words text-sm leading-relaxed text-amber-800 dark:text-amber-200">
             Satışa eklenecek ölçüleri seçin.
           </p>
         </div>
@@ -164,7 +164,7 @@ export default function OpenMeasurementsNotice({
               previous => !previous
             )
           }
-          className="inline-flex min-h-10 items-center justify-center rounded-xl border border-yellow-300 bg-white px-4 py-2 text-sm font-bold text-yellow-900 shadow-sm transition-colors hover:bg-yellow-100 dark:border-yellow-800 dark:bg-gray-900 dark:text-yellow-100 dark:hover:bg-yellow-950"
+          className="inline-flex min-h-10 w-full items-center justify-center rounded-xl border border-amber-300 bg-white px-4 py-2 text-sm font-bold text-amber-950 shadow-sm transition-colors hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-500/25 dark:border-amber-800 dark:bg-gray-900 dark:text-amber-100 dark:hover:bg-amber-950 sm:w-auto"
         >
           {isExpanded
             ? "Ölçüleri Gizle"
@@ -185,10 +185,10 @@ export default function OpenMeasurementsNotice({
                 <label
                   key={measurement.id}
                   className={[
-                    "flex cursor-pointer items-start gap-3 rounded-xl border bg-white p-3 transition-colors dark:bg-gray-900",
+                    "flex min-w-0 cursor-pointer items-start gap-3 rounded-xl border bg-white p-3 transition-colors hover:bg-amber-50/60 dark:bg-gray-900 dark:hover:bg-amber-950/20",
                     isSelected
-                      ? "border-blue-400 ring-2 ring-blue-100 dark:border-blue-500 dark:ring-blue-950"
-                      : "border-yellow-200 hover:border-yellow-300 dark:border-yellow-900"
+                      ? "border-blue-400 bg-blue-50/50 ring-2 ring-blue-100 dark:border-blue-500 dark:bg-blue-950/20 dark:ring-blue-950"
+                      : "border-amber-200 hover:border-amber-300 dark:border-amber-900 dark:hover:border-amber-800"
                   ].join(" ")}
                 >
                   <input
@@ -199,7 +199,7 @@ export default function OpenMeasurementsNotice({
                         measurement.id
                       )
                     }
-                    className="mt-1 h-4 w-4 rounded border-gray-300"
+                    className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 accent-blue-600 focus:ring-2 focus:ring-blue-500/30 dark:border-gray-600"
                   />
 
                   <span className="min-w-0 flex-1">
@@ -216,7 +216,7 @@ export default function OpenMeasurementsNotice({
                       </span>
                     </span>
 
-                    <span className="mt-1 block break-all text-xs text-gray-500 dark:text-gray-400">
+                    <span className="mt-1 block break-words text-xs text-gray-500 dark:text-gray-400">
                       Kayıt: {measurement.id}
                     </span>
                   </span>
@@ -225,8 +225,8 @@ export default function OpenMeasurementsNotice({
             }
           )}
 
-          <div className="flex flex-col gap-2 border-t border-yellow-200 pt-3 sm:flex-row sm:items-center sm:justify-between dark:border-yellow-900">
-            <span className="text-sm font-medium text-yellow-900 dark:text-yellow-100">
+          <div className="flex flex-col gap-3 border-t border-amber-200 pt-3 sm:flex-row sm:items-center sm:justify-between dark:border-amber-900">
+            <span className="break-words text-sm font-medium text-amber-950 dark:text-amber-100">
               {selectedMeasurementIds.length} ölçü seçildi
             </span>
 
@@ -240,7 +240,7 @@ export default function OpenMeasurementsNotice({
               onClick={() =>
                 void applySelectedMeasurements()
               }
-              className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-gray-400 disabled:text-gray-100 dark:bg-blue-700 dark:hover:bg-blue-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-400 sm:w-auto"
             >
               {isApplying
                 ? "Satışa Ekleniyor..."
