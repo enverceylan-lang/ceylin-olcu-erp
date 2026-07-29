@@ -113,42 +113,43 @@ export default function YeniSatisPage() {
 
   if (!mounted) {
     return (
-      <div className="p-8 text-center text-gray-500">
+      <div className="p-8 text-center text-gray-500 dark:text-gray-400">
         Yükleniyor...
       </div>
     );
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6 pb-24">
-      <div className="flex items-center gap-4">
+    <div className="mx-auto max-w-3xl space-y-6 overflow-x-hidden px-4 pb-24 sm:px-6">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-5">
         <Link
           href="/satis"
-          className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800"
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-600 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+          aria-label="Satış listesine dön"
         >
-          <ArrowLeft className="w-5 h-5" />
+          <ArrowLeft className="h-5 w-5 shrink-0" />
         </Link>
 
-        <div>
-          <h1 className="text-2xl font-bold heading-title">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl font-bold heading-title break-words sm:text-2xl">
             Merkezi Satış Taslağı
           </h1>
 
-          <p className="text-sm heading-subtitle">
+          <p className="mt-1 text-sm heading-subtitle break-words text-gray-600 dark:text-gray-400">
             Ölçü ve ürün seçimlerini merkezi hesap kasasından
             satış taslağına aktarır.
           </p>
         </div>
-      </div>
+      </header>
 
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 shadow-sm space-y-5">
-        <div>
-          <label className="block text-sm font-medium mb-2">
+      <div className="space-y-5 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:p-6">
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/60">
+          <label className="mb-2 block text-sm font-semibold text-gray-900 dark:text-gray-100">
             Müşteri
           </label>
 
           {customers.length === 0 ? (
-            <div className="text-sm text-red-500">
+            <div className="text-sm font-medium text-red-600 dark:text-red-400">
               Önce müşteri eklemelisiniz.
             </div>
           ) : (
@@ -157,7 +158,7 @@ export default function YeniSatisPage() {
               onChange={event =>
                 setSelectedCustomerId(event.target.value)
               }
-              className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg p-3"
+              className="min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition-shadow focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
             >
               {customers.map(customer => (
                 <option
@@ -171,7 +172,7 @@ export default function YeniSatisPage() {
           )}
         </div>
 
-        <div className="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/30 p-4 text-sm">
+        <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4 text-sm leading-relaxed text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-200">
           Bu ekran bağımsız kumaş hesabı yapmaz. Ölçüde
           kaydedilmiş merkezi hesap sonuçlarını kullanır.
           Mevcut taslak varsa fiyat ve manuel satırlar korunarak
@@ -179,7 +180,10 @@ export default function YeniSatisPage() {
         </div>
 
         {message && (
-          <div className="rounded-lg border border-red-300 bg-red-50 dark:bg-red-950/30 p-3 text-sm text-red-700 dark:text-red-300">
+          <div
+            role="alert"
+            className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200"
+          >
             {message}
           </div>
         )}
@@ -192,17 +196,17 @@ export default function YeniSatisPage() {
             isSaving ||
             customers.length === 0
           }
-          className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 disabled:cursor-not-allowed text-white px-5 py-3 rounded-lg font-semibold"
+          className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-gray-400 disabled:text-gray-100 dark:bg-blue-700 dark:hover:bg-blue-600 dark:disabled:bg-gray-600 dark:disabled:text-gray-300"
         >
           {isSaving ? (
             <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Taslak hazırlanıyor...
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+              <span>Taslak hazırlanıyor...</span>
             </>
           ) : (
             <>
-              <Save className="w-4 h-4" />
-              Merkezi Satış Taslağını Aç
+              <Save className="h-4 w-4 shrink-0" />
+              <span>Merkezi Satış Taslağını Aç</span>
             </>
           )}
         </button>
