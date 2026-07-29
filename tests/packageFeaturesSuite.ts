@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import {
+  packageInputHasFeature,
+  normalizeErpPackage,
+  getPackageDisplayLabel,
   PACKAGE_FEATURES,
   decideFeatureAccess,
   hasPackageFeature,
@@ -120,3 +123,66 @@ assert.deepEqual(
 );
 
 console.log("[PASS] package features and access order");
+assert.equal(
+  normalizeErpPackage("STANDARD"),
+  "NORMAL"
+);
+
+assert.equal(
+  normalizeErpPackage("NORMAL"),
+  "NORMAL"
+);
+
+assert.equal(
+  getPackageDisplayLabel("NORMAL"),
+  "STANDARD"
+);
+
+assert.equal(
+  getPackageDisplayLabel("STANDARD"),
+  "STANDARD"
+);
+
+assert.equal(
+  packageInputHasFeature(
+    "ECO",
+    "operations"
+  ),
+  false
+);
+
+assert.equal(
+  packageInputHasFeature(
+    "NORMAL",
+    "operations"
+  ),
+  true
+);
+
+assert.equal(
+  packageInputHasFeature(
+    "STANDARD",
+    "agenda"
+  ),
+  true
+);
+
+assert.equal(
+  packageInputHasFeature(
+    "PLUS",
+    "operationPdf"
+  ),
+  true
+);
+
+assert.equal(
+  packageInputHasFeature(
+    "PLUS",
+    "operationWhatsApp"
+  ),
+  true
+);
+
+console.log(
+  "PACKAGE_OPERATIONS_COMPAT_TEST: PAK"
+);
