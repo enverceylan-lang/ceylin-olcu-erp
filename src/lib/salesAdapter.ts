@@ -350,11 +350,36 @@ interface SalesActor {
 
 export function createDraftSaleFromCustomer(
   customer: Customer,
-  actor: SalesActor
+  actor: SalesActor,
+  selectedMeasurementIds?: string[]
 ): Sale {
   const items: SaleItem[] = [];
 
-  const measurements = useMeasurementStore.getState().measurements.filter(m => m.customerId === customer.id && !m.isDeleted && !m.isArchived);
+  const selectedMeasurementIdSet =
+    selectedMeasurementIds
+      ? new Set(
+          selectedMeasurementIds
+            .map(id => id.trim())
+            .filter(id => id.length > 0)
+        )
+      : null;
+
+  const measurements =
+    useMeasurementStore
+      .getState()
+      .measurements
+      .filter(
+        measurement =>
+          measurement.customerId === customer.id &&
+          !measurement.isDeleted &&
+          !measurement.isArchived &&
+          (
+            !selectedMeasurementIdSet ||
+            selectedMeasurementIdSet.has(
+              measurement.id
+            )
+          )
+      );
   measurements.forEach(m => {
     const room = customer.rooms?.find(r => r.id === m.roomId);
     const win = room?.windows?.find(w => w.id === m.windowId);

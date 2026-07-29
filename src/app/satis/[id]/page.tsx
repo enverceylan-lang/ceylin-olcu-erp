@@ -15,6 +15,10 @@ import { prepareSaleForApproval } from "@/lib/salesApproval";
 import { getSaleRemainingBalance } from "@/lib/salesFinance";
 import { useAuthStore } from "@/store/useAuthStore";
 import { canViewSale } from "@/lib/salesVisibility";
+import OpenMeasurementsNotice from "@/components/sales/OpenMeasurementsNotice";
+import { createDraftSaleFromCustomer } from "@/lib/salesAdapter";
+import { useOperationsStore } from "@/store/useOperationsStore";
+import { useErpRuntimeContext } from "@/lib/useErpRuntimeContext";
 
 export default function SaleDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
@@ -24,6 +28,17 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
   const { customers } = useStore();
   const { sales, loadSales, updateSale, removeSale, isLoading } = useSalesStore();
   const currentUser = useAuthStore(state => state.currentUser);
+
+  const syncMainOperation =
+    useOperationsStore(
+      state => state.syncMainOperation
+    );
+
+  const {
+    scope,
+    loading: scopeLoading,
+    error: scopeError
+  } = useErpRuntimeContext();
 
   const [mounted, setMounted] = useState(false);
   const [sale, setSale] = useState<Sale | null>(null);
@@ -37,6 +52,16 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
   const [generalDueDate, setGeneralDueDate] =
     useState("");
   const [globalDiscount, setGlobalDiscount] = useState(0);
+
+  const [
+    isInstallmentModalOpen,
+    setIsInstallmentModalOpen
+  ] = useState(false);
+
+  const [
+    isPaymentModalOpen,
+    setIsPaymentModalOpen
+  ] = useState(false);
 
   useEffect(() => {
     loadSales().then(() => setMounted(true));
@@ -107,6 +132,114 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
     remainingBalance: getRemainingBalance()
   };
 
+  const currentSaleMeasurementIds =
+    Array.from(
+      new Set(
+        sale.items.flatMap(item =>
+          String(item.measurementId || "")
+            .split(",")
+            .map(measurementId =>
+              measurementId.trim()
+            )
+            .filter(
+              measurementId =>
+                measurementId.length > 0
+            )
+        )
+      )
+    );
+
+  const handleApplyMeasurements =
+    async (
+      measurementIds: string[]
+    ) => {
+      if (!customer) {
+        alert(
+          "Satışın cari kaydı bulunamadı."
+        );
+        return;
+      }
+
+      if (
+        !currentUser?.id ||
+        !currentUser.username ||
+        !currentUser.name
+      ) {
+        alert(
+          "Satışı yapan kullanıcı bilgisi bulunamadı."
+        );
+        return;
+      }
+
+      const selectedDraft =
+        createDraftSaleFromCustomer(
+          customer,
+          {
+            id: currentUser.id,
+            username:
+              currentUser.username,
+            name: currentUser.name
+          },
+          measurementIds
+        );
+
+      const existingMeasurementIds =
+        new Set(
+          currentSaleMeasurementIds
+        );
+
+      const newItems =
+        selectedDraft.items.filter(
+          item => {
+            const linkedIds =
+              String(
+                item.measurementId || ""
+              )
+                .split(",")
+                .map(id => id.trim())
+                .filter(
+                  id => id.length > 0
+                );
+
+            return linkedIds.some(
+              measurementId =>
+                !existingMeasurementIds.has(
+                  measurementId
+                )
+            );
+          }
+        );
+
+      if (newItems.length === 0) {
+        alert(
+          "Seçilen ölçülerden eklenecek yeni satış kalemi bulunamadı."
+        );
+        return;
+      }
+
+      const nextItems = [
+        ...sale.items,
+        ...newItems
+      ];
+
+      const totalAmount =
+        nextItems.reduce(
+          (sum, item) =>
+            sum +
+            Number(
+              item.rowTotal || 0
+            ),
+          0
+        );
+
+      setSale({
+        ...sale,
+        items: nextItems,
+        totalAmount,
+        updatedAt:
+          new Date().toISOString()
+      });
+    };
   const handleSave = async () => {
     if (
       Number(downPayment || 0) > 0 &&
@@ -147,7 +280,124 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
         updatedAt: new Date().toISOString()
       };
 
+      if (scopeLoading) {
+
+        alert(
+
+          "Şirket, şube ve dönem kapsamı hâlâ yükleniyor."
+
+        );
+
+        return;
+
+      }
+
+
+      if (!scope) {
+
+        alert(
+
+          scopeError ||
+
+          "Aktif şirket, şube veya muhasebe dönemi bulunamadı."
+
+        );
+
+        return;
+
+      }
+
+
+      if (!customer) {
+
+        alert(
+
+          "Satışın bağlı olduğu cari kaydı bulunamadı."
+
+        );
+
+        return;
+
+      }
+
+
+      if (!currentUser?.id) {
+
+        alert(
+
+          "Aktif kullanıcı bilgisi bulunamadı."
+
+        );
+
+        return;
+
+      }
+
+
+      if (updatedSale.items.length === 0) {
+
+        alert(
+
+          "Ürün veya hizmet kalemi olmayan satış kaydedilemez."
+
+        );
+
+        return;
+
+      }
+
+
       await updateSale(updatedSale);
+
+
+      const operationResult =
+
+        syncMainOperation({
+
+          scope,
+
+          sale: updatedSale,
+
+          customer: {
+
+            id: customer.id,
+
+            name: customer.name,
+
+            phone: customer.phone || "",
+
+            address: customer.address || ""
+
+          },
+
+          createdByUserId:
+
+            currentUser.id
+
+        });
+
+
+      if (
+
+        operationResult.outcome ===
+
+        "REJECTED"
+
+      ) {
+
+        throw new Error(
+
+          `MAIN_OPERATION_REJECTED:${
+
+            operationResult.reason
+
+          }`
+
+        );
+
+      }
+
+
       router.replace("/satis");
     } catch (error) {
       console.error(
@@ -271,6 +521,17 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-24">
+      {customer && (
+        <OpenMeasurementsNotice
+          customerId={customer.id}
+          excludedMeasurementIds={
+            currentSaleMeasurementIds
+          }
+          onApplyMeasurements={
+            handleApplyMeasurements
+          }
+        />
+      )}
       {/* Header */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
@@ -512,27 +773,38 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
               </div>
             </div>
           </div>
+          <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+            <h2 className="mb-3 font-semibold text-gray-900 dark:text-white">
+              Ödeme ve Vade
+            </h2>
 
-          <InstallmentPlanPanel
-            sale={saleForFinance}
-            onChange={updatedSale => {
-              setSale(updatedSale);
-              setDownPayment(updatedSale.downPayment);
-              setGlobalDiscount(updatedSale.discount);
-            }}
-          />
+            <div className="grid grid-cols-1 gap-3">
+              <button
+                type="button"
+                onClick={() =>
+                  setIsInstallmentModalOpen(true)
+                }
+                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-purple-200 bg-purple-50 px-4 py-2 text-sm font-bold text-purple-800 transition-colors hover:bg-purple-100 dark:border-purple-900 dark:bg-purple-950/40 dark:text-purple-200"
+              >
+                Taksit Planı
+              </button>
 
-          <PaymentTrackingPanel
-            sale={saleForFinance}
-            onChange={updatedSale => {
-              setSale(updatedSale);
-            }}
-          />
+              <button
+                type="button"
+                onClick={() =>
+                  setIsPaymentModalOpen(true)
+                }
+                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-sm font-bold text-green-800 transition-colors hover:bg-green-100 dark:border-green-900 dark:bg-green-950/40 dark:text-green-200"
+              >
+                Tahsilat Girişi
+              </button>
+            </div>
 
-          <p className="text-xs text-amber-700 dark:text-amber-300">
-            Eklenen tahsilatın kalıcı olması için satış kaydını
-            &quot;Kaydet&quot; düğmesiyle tamamlayın.
-          </p>
+            <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+              Satış sırasında oluşturulan taksit ve tahsilat kayıtları,
+              Kaydet ve Çık ile kalıcılaştırılır.
+            </p>
+          </div>
 
           <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 shadow-sm">
              <h2 className="font-semibold text-gray-900 dark:text-white mb-4">Durum</h2>
@@ -553,6 +825,136 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         </div>
       </div>
+      {isInstallmentModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Taksit planı"
+          onClick={() =>
+            setIsInstallmentModalOpen(false)
+          }
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-gray-50 p-4 shadow-2xl dark:bg-gray-950"
+            onClick={event =>
+              event.stopPropagation()
+            }
+          >
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+                  Taksit Planı
+                </h2>
+
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Elden taksit sayısı ve vadeleri satışa bağlı olarak düzenlenir.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setIsInstallmentModalOpen(false)
+                }
+                className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-bold text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+              >
+                Kapat
+              </button>
+            </div>
+
+            <InstallmentPlanPanel
+              sale={saleForFinance}
+              onChange={updatedSale => {
+                setSale(updatedSale);
+                setDownPayment(
+                  updatedSale.downPayment
+                );
+                setGlobalDiscount(
+                  updatedSale.discount
+                );
+              }}
+            />
+
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() =>
+                  setIsInstallmentModalOpen(false)
+                }
+                className="rounded-xl bg-purple-600 px-4 py-2 text-sm font-bold text-white hover:bg-purple-700"
+              >
+                Planı Uygula
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isPaymentModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Tahsilat girişi"
+          onClick={() =>
+            setIsPaymentModalOpen(false)
+          }
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-gray-50 p-4 shadow-2xl dark:bg-gray-950"
+            onClick={event =>
+              event.stopPropagation()
+            }
+          >
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+                  Tahsilat Girişi
+                </h2>
+
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Yalnız satış sırasında alınan tahsilatı buradan girin.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setIsPaymentModalOpen(false)
+                }
+                className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-bold text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+              >
+                Kapat
+              </button>
+            </div>
+
+            <PaymentTrackingPanel
+              sale={saleForFinance}
+              onChange={updatedSale => {
+                setSale(updatedSale);
+              }}
+            />
+
+            <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">
+              Tahsilat, satış kaydı Kaydet ve Çık düğmesiyle
+              tamamlandığında kalıcılaştırılır.
+            </p>
+
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() =>
+                  setIsPaymentModalOpen(false)
+                }
+                className="rounded-xl bg-green-600 px-4 py-2 text-sm font-bold text-white hover:bg-green-700"
+              >
+                Tahsilatı Uygula
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
