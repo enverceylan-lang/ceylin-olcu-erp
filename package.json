@@ -93,7 +93,9 @@
                     "test:provider-operation-status-command":  "tsx tests/providerOperationStatusCommandServiceSuite.ts",
                     "test:provider-operation-actions-ui":  "tsx tests/providerOperationActionsUiSuite.ts",
                     "test:provider-earnings-view":  "tsx tests/providerEarningsViewServiceSuite.ts",
-                    "test:plicell-piece-input":  "tsx tests/plicellPieceInputSuite.ts"
+                    "test:plicell-piece-input":  "tsx tests/plicellPieceInputSuite.ts",
+                    "test:provider-earnings-finalize-payment-store":  "tsx tests/providerEarningsFinalizePaymentStoreSuite.ts",
+                    "test:provider-earnings-finalize-payment-ui":  "tsx tests/providerEarningsFinalizePaymentUiSuite.ts"
                 },
     "dependencies":  {
                          "@prisma/client":  "^7.8.0",

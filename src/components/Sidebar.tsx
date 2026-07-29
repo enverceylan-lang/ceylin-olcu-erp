@@ -1,16 +1,18 @@
 "use client";
+import PlatformSuperAdminLink from "@/components/PlatformSuperAdminLink";
+
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, 
-  Users, 
-  Ruler, 
-  Package, 
-  ShoppingCart, 
+import { LayoutDashboard,
+  Users,
+  Ruler,
+  Package,
+  ShoppingCart,
   Landmark,
-  Factory, 
-  Wrench, 
-  FileText, 
+  Factory,
+  Wrench,
+  FileText,
   Settings,
   ChevronDown,
   X,
@@ -64,10 +66,10 @@ export function Sidebar() {
     getClientSnapshot,
     getServerSnapshot,
   );
-  
+
 
   if (!rawCurrentUser) return null;
-  
+
   const currentUser = normalizeUser(rawCurrentUser);
 
   const permissions = ROLE_PERMISSIONS[currentUser.role] || { label: 'Kullanıcı' };
@@ -91,13 +93,13 @@ export function Sidebar() {
     <>
       {/* Backdrop for mobile */}
       {isMobileMenuOpen && (
-        <div 
+        <div
           onClick={() => setMobileMenuOpen(false)}
           className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 md:hidden transition-opacity duration-300 ease-in-out"
         />
       )}
 
-      <aside 
+      <aside
         className={twMerge(
           clsx(
             "w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 h-screen flex flex-col",
@@ -124,20 +126,20 @@ export function Sidebar() {
           </button>
         </div>
 
-      
+
       <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
         {visibleMenuItems.map((item) => {
           const isActive = pathname === item.href || (pathname.startsWith(item.href) && item.href !== "/");
           return (
-            <Link
+<Link
               key={item.name}
               href={item.href}
               onClick={() => setMobileMenuOpen(false)}
               className={twMerge(
                 clsx(
                   "flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm font-medium",
-                  isActive 
-                    ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" 
+                  isActive
+                    ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
                     : "text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
                 )
               )}
@@ -147,12 +149,64 @@ export function Sidebar() {
             </Link>
           );
         })}
-      </nav>
-      
+              <Link
+          href="/operasyonlar"
+          className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+        >
+          <span aria-hidden="true">🧰</span>
+          <span>
+            {normalizeRole(currentUser.role) === "TAILOR" ||
+            normalizeRole(currentUser.role) === "INSTALLER"
+              ? "Benim İşlerim"
+              : "Operasyonlar"}
+          </span>
+        </Link>
+        {(normalizeRole(currentUser.role) === "TAILOR" ||
+          normalizeRole(currentUser.role) === "INSTALLER") ? (
+          <Link
+            href="/hakedislerim"
+            className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          >
+            <span aria-hidden="true">
+              💰
+            </span>
+
+            <span>
+              Benim Hakedişlerim
+            </span>
+          </Link>
+        ) : null}
+
+        {(normalizeRole(currentUser.role) === "ADMIN" ||
+          normalizeRole(currentUser.role) === "ACCOUNTING") ? (
+          <Link
+            href="/bekleyen-hakedisler"
+            onClick={() => setMobileMenuOpen(false)}
+            className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          >
+            <span aria-hidden="true">
+              🧾
+            </span>
+
+            <span>
+              Bekleyen Hakedişler
+            </span>
+          </Link>
+        ) : null}
+        <Link
+          href="/ajanda"
+          className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+        >
+          <span aria-hidden="true">📅</span>
+          <span>Ajanda</span>
+        </Link>
+        <PlatformSuperAdminLink />
+</nav>
+
       {/* User Switcher / Profile */}
       <div className="p-4 border-t border-gray-200 dark:border-gray-800 relative">
         <div className="flex items-center justify-between gap-2">
-          <button 
+          <button
             disabled={normalizeRole(currentUser.role) !== 'ADMIN'}
             onClick={() => setShowUserPicker(!showUserPicker)}
             className="flex items-center gap-3 px-2 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-850 transition-colors text-left flex-1 min-w-0 disabled:hover:bg-transparent disabled:cursor-default"
@@ -168,9 +222,9 @@ export function Sidebar() {
               <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showUserPicker ? 'rotate-180' : ''} shrink-0`} />
             )}
           </button>
-          
+
           {normalizeRole(currentUser.role) !== 'ADMIN' && (
-            <button 
+            <button
               onClick={() => logout()}
               className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer shrink-0"
               title="Çıkış Yap"
@@ -191,8 +245,8 @@ export function Sidebar() {
                 key={user.id}
                 onClick={() => { switchUser(user.id); setShowUserPicker(false); setMobileMenuOpen(false); }}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${
-                  currentUser.id === user.id 
-                    ? 'bg-blue-50 dark:bg-blue-900/20' 
+                  currentUser.id === user.id
+                    ? 'bg-blue-50 dark:bg-blue-900/20'
                     : 'hover:bg-gray-50 dark:hover:bg-gray-750/50'
                 }`}
               >
@@ -209,7 +263,7 @@ export function Sidebar() {
               </button>
             ))}
             <div className="border-t border-gray-200 dark:border-gray-700 p-2 bg-gray-50 dark:bg-gray-800/50">
-              <button 
+              <button
                 onClick={() => { logout(); setShowUserPicker(false); setMobileMenuOpen(false); }}
                 className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
               >
