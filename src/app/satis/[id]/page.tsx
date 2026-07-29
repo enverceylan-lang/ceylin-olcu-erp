@@ -19,6 +19,7 @@ import OpenMeasurementsNotice from "@/components/sales/OpenMeasurementsNotice";
 import { createDraftSaleFromCustomer } from "@/lib/salesAdapter";
 import { useOperationsStore } from "@/store/useOperationsStore";
 import { useErpRuntimeContext } from "@/lib/useErpRuntimeContext";
+import { getSaleStatusPresentation } from "@/lib/saleStatusPresentation";
 
 export default function SaleDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
@@ -534,46 +535,59 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
       )}
       {/* Header */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <Link href="/satis" className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+        <div className="flex items-center gap-4 min-w-0 w-full md:w-auto">
+          <Link href="/satis" className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors shrink-0">
             <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-300" />
           </Link>
-          <div>
-            <h1 className="text-2xl font-bold heading-title">{sale.saleNo}</h1>
-            <p className="text-sm heading-subtitle">{customer?.name || "Bilinmiyor"}</p>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
+              <h1 className="text-2xl font-bold heading-title text-gray-900 dark:text-white break-words">
+                {customer?.name || "Bilinmeyen Müşteri"}
+              </h1>
+              <span
+                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold shrink-0 ring-1 ring-inset ${
+                  getSaleStatusPresentation(sale.status).badgeClass
+                }`}
+              >
+                {getSaleStatusPresentation(sale.status).label}
+              </span>
+            </div>
+            <p className="mt-1 text-sm heading-subtitle text-gray-500 dark:text-gray-400">Teklif / Satış No: {sale.saleNo}</p>
           </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 w-full md:w-auto">
           <button
             type="button"
             onClick={handleSendApprovalWhatsApp}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-green-50 hover:bg-green-100 text-green-700 font-bold shadow-sm transition-colors"
+            className="inline-flex min-h-10 items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/40 dark:text-emerald-400 font-bold shadow-sm transition-colors text-xs"
           >
-            <MessageCircle className="w-4 h-4" />
-            WhatsApp Onay
+            <MessageCircle className="w-4 h-4 shrink-0" />
+            <span>WhatsApp Onay</span>
           </button>
           <button
             type="button"
             onClick={handlePreviewPdf}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold shadow-sm transition-colors"
+            className="inline-flex min-h-10 items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 dark:bg-purple-950/30 dark:hover:bg-purple-900/40 dark:text-purple-400 font-bold shadow-sm transition-colors text-xs"
           >
-            <FileDown className="w-4 h-4" />
-            PDF Görüntüle
+            <FileDown className="w-4 h-4 shrink-0" />
+            <span>PDF Görüntüle</span>
           </button>
           <button
+            type="button"
             onClick={handleDelete}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 font-bold shadow-sm transition-colors"
+            className="inline-flex min-h-10 items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-950/30 dark:hover:bg-red-900/40 dark:text-red-400 font-bold shadow-sm transition-colors text-xs"
           >
-            <Trash2 className="w-4 h-4" />
-            Sil
+            <Trash2 className="w-4 h-4 shrink-0" />
+            <span>Sil</span>
           </button>
           <button
+            type="button"
             onClick={handleSave}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-sm transition-colors"
+            className="inline-flex min-h-10 items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-700 dark:hover:bg-blue-600 font-bold shadow-sm transition-colors text-xs"
           >
-            <Save className="w-4 h-4" />
-            Kaydet ve Çık
+            <Save className="w-4 h-4 shrink-0" />
+            <span>Kaydet ve Çık</span>
           </button>
         </div>
       </div>
@@ -784,7 +798,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
                 onClick={() =>
                   setIsInstallmentModalOpen(true)
                 }
-                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-purple-200 bg-purple-50 px-4 py-2 text-sm font-bold text-purple-800 transition-colors hover:bg-purple-100 dark:border-purple-900 dark:bg-purple-950/40 dark:text-purple-200"
+                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-purple-200 bg-purple-50 px-4 py-2.5 text-sm font-bold text-purple-800 transition-all hover:bg-purple-100 focus:outline-none focus:ring-2 focus:ring-purple-500/20 dark:border-purple-900/60 dark:bg-purple-950/30 dark:text-purple-300 dark:hover:bg-purple-900/40"
               >
                 Taksit Planı
               </button>
@@ -794,7 +808,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
                 onClick={() =>
                   setIsPaymentModalOpen(true)
                 }
-                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-sm font-bold text-green-800 transition-colors hover:bg-green-100 dark:border-green-900 dark:bg-green-950/40 dark:text-green-200"
+                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-green-200 bg-green-50 px-4 py-2.5 text-sm font-bold text-green-800 transition-all hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-500/20 dark:border-green-900/60 dark:bg-green-950/30 dark:text-green-300 dark:hover:bg-green-900/40"
               >
                 Tahsilat Girişi
               </button>

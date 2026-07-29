@@ -1,5 +1,6 @@
 "use client";
 
+import { getSaleStatusPresentation } from "@/lib/saleStatusPresentation";
 import { Plus, Search, FileText } from "lucide-react";
 import Link from "next/link";
 import { useStore } from "@/store/useStore";
@@ -81,8 +82,17 @@ export default function SatisPage() {
                 </tr>
               ) : (
                 enrichedSales.map((sale) => (
-                  <tr key={sale.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-                    <td className="px-6 py-4 font-medium text-gray-900 dark:text-white">
+                  <tr
+                    key={sale.id}
+                    className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                  >
+                    <td className="relative pl-7 pr-6 py-4 font-medium text-gray-900 dark:text-white">
+                      <div
+                        aria-hidden="true"
+                        className={`absolute bottom-1.5 left-0 top-1.5 w-1 rounded-r-md ${
+                          getSaleStatusPresentation(sale.status).stripColorClass
+                        }`}
+                      />
                       {sale.saleNo}
                     </td>
                     <td className="px-6 py-4 text-gray-500 dark:text-gray-400">
@@ -92,15 +102,10 @@ export default function SatisPage() {
                       {sale.customerName}
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold
-                        ${sale.status === 'TASLAK' ? 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300' :
-                        sale.status === 'TEKLİF' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' :
-                        sale.status === 'ONAYLANDI' ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400' :
-                        sale.status === 'TAMAMLANDI' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
-                        sale.status === 'İPTAL' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
-                        'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400'}`}
+                      <span
+                        className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${getSaleStatusPresentation(sale.status).badgeClass}`}
                       >
-                        {sale.status}
+                        {getSaleStatusPresentation(sale.status).label}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right font-medium text-gray-900 dark:text-white">
