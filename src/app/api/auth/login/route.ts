@@ -28,6 +28,8 @@ type LoginUserRecord = {
   permissions: unknown[] | null;
   email: string | null;
   phone: string | null;
+  providerCustomerId: string | null;
+  providerType: "TAILOR" | "INSTALLER" | null;
   tcNo: string | null;
   address: string | null;
   profileCompletedAt: string | null;
@@ -97,6 +99,7 @@ export async function POST(req: NextRequest) {
       .select([
         "id", "name", "username", "password", "role", "isActive", "permissions",
         "email", "phone", "tcNo", "address", "profileCompletedAt", "createdAt", "updatedAt",
+        "providerCustomerId", "providerType",
       ].join(","))
       .eq("username", cleanUsername)
       .single();
@@ -192,7 +195,7 @@ export async function POST(req: NextRequest) {
       financePermissionDenies: [],
       permissionVersion: LEGACY_FINANCE_PERMISSION_VERSION,
       expectedPermissionVersion: LEGACY_FINANCE_PERMISSION_VERSION,
-      applyRoleDefaults: false,
+      applyRoleDefaults: true,
     });
     const sessionLifetimeSeconds = rememberMe ? 30 * 24 * 60 * 60 : 12 * 60 * 60;
     const sessionPayload: SessionPayload = {
@@ -227,6 +230,10 @@ export async function POST(req: NextRequest) {
         permissionVersion: LEGACY_FINANCE_PERMISSION_VERSION,
         email: user.email || null,
         phone: user.phone || null,
+      providerCustomerId:
+        user.providerCustomerId || null,
+      providerType:
+        user.providerType || null,
         tcNo: user.tcNo || null,
         address: user.address || null,
         profileCompletedAt: user.profileCompletedAt || null,
