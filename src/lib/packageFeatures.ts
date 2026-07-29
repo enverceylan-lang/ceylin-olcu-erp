@@ -16,7 +16,11 @@ export type ErpFeature =
   | "installerPayroll"
   | "multiBranch"
   | "multiWarehouse"
-  | "capacityPlanning";
+  | "capacityPlanning"
+  | "operations"
+  | "agenda"
+  | "operationPdf"
+  | "operationWhatsApp";
 
 export type PackageFeatureMap = Record<ErpFeature, boolean>;
 
@@ -37,6 +41,10 @@ const ECO_FEATURES: PackageFeatureMap = {
   multiBranch: false,
   multiWarehouse: false,
   capacityPlanning: false,
+  operations: false,
+  agenda: false,
+  operationPdf: false,
+  operationWhatsApp: false,
 };
 
 const NORMAL_FEATURES: PackageFeatureMap = {
@@ -48,6 +56,10 @@ const NORMAL_FEATURES: PackageFeatureMap = {
   supplierOrders: true,
   tailorPayroll: true,
   installerPayroll: true,
+  operations: true,
+  agenda: true,
+  operationPdf: true,
+  operationWhatsApp: true,
 };
 
 const PLUS_FEATURES: PackageFeatureMap = {
@@ -133,6 +145,69 @@ export function decideFeatureAccess(
     return { allowed: false, reason: "OWNERSHIP_DENIED" };
   }
   return { allowed: true };
+}
+
+export type ErpPackageInput =
+  | ErpPackage
+  | "STANDARD";
+
+export function normalizeErpPackage(
+  value: string | null | undefined
+): ErpPackage | null {
+  const normalized =
+    value?.trim().toUpperCase();
+
+  if (normalized === "STANDARD") {
+    return "NORMAL";
+  }
+
+  if (
+    normalized === "ECO" ||
+    normalized === "NORMAL" ||
+    normalized === "PLUS"
+  ) {
+    return normalized;
+  }
+
+  return null;
+}
+
+export function getPackageDisplayLabel(
+  value: string | null | undefined
+): "ECO" | "STANDARD" | "PLUS" | "PAKET TANIMSIZ" {
+  const normalized =
+    normalizeErpPackage(value);
+
+  if (normalized === "NORMAL") {
+    return "STANDARD";
+  }
+
+  if (normalized === "ECO") {
+    return "ECO";
+  }
+
+  if (normalized === "PLUS") {
+    return "PLUS";
+  }
+
+  return "PAKET TANIMSIZ";
+}
+
+export function packageInputHasFeature(
+  packageValue: string | null | undefined,
+  feature: ErpFeature
+): boolean {
+  const normalized =
+    normalizeErpPackage(packageValue);
+
+  if (!normalized) {
+    return false;
+  }
+
+  return hasPackageFeature(
+    normalized,
+    feature
+  );
 }
 import {
   erpScopeMatches,
