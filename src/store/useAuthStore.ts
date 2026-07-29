@@ -44,6 +44,9 @@ export interface MockUser {
   updatedAt?: string;
   email?: string;
   phone?: string;
+
+  providerCustomerId?: string;
+  providerType?: "TAILOR" | "INSTALLER";
   tcNo?: string;
   address?: string;
   profileCompletedAt?: string;
@@ -142,6 +145,12 @@ export function normalizeUser(user: UserInput | null | undefined): MockUser {
   const legacyName = (rawName || user.fullName || user.adSoyad || user.displayName || '').trim();
   const legacyEmail = (user.email || user.emailAddress || user.mail || '').trim();
   const legacyPhone = (user.phone || user.phoneNumber || user.telefon || '').trim();
+  const legacyProviderCustomerId = String(
+    user.providerCustomerId ||
+    user.linkedCariId ||
+    user.linkedCustomerId ||
+    ""
+  ).trim();
 
   const role = user.role || (user.id === 'user-admin' ? 'ADMIN' : 'FIELD');
   const isActive = typeof user.isActive === 'boolean' ? user.isActive : true;
@@ -164,6 +173,17 @@ export function normalizeUser(user: UserInput | null | undefined): MockUser {
     name: legacyName || 'İsimsiz Kullanıcı',
     email: legacyEmail || undefined,
     phone: legacyPhone || undefined,
+
+    providerCustomerId:
+      legacyProviderCustomerId ||
+      undefined,
+
+    providerType:
+      normalizeRole(role) === "TAILOR"
+        ? "TAILOR"
+        : normalizeRole(role) === "INSTALLER"
+          ? "INSTALLER"
+          : undefined,
     username,
     password,
     role,
@@ -553,6 +573,8 @@ export type UserInput = Partial<MockUser> & {
   emailAddress?: string;
   mail?: string;
   phoneNumber?: string;
+  linkedCariId?: string;
+  linkedCustomerId?: string;
   telefon?: string;
 };
 
@@ -905,6 +927,21 @@ export const useAuthStore = create<AuthState>()(
             const result = await response.json();
             if (result.success && result.user) {
               const updatedUserFromServer = normalizeUser(result.user);
+    const normalizedProviderRole =
+      normalizeRole(
+        updatedUserFromServer.role
+      );
+
+    if (
+      normalizedProviderRole !== "TAILOR" &&
+      normalizedProviderRole !== "INSTALLER"
+    ) {
+      updatedUserFromServer.providerCustomerId =
+        undefined;
+
+      updatedUserFromServer.providerType =
+        undefined;
+    }
               
               const targetUserBefore = get().users.find((u: MockUser) => u.id === id);
               const beforeSnapshot:
@@ -914,7 +951,7 @@ export const useAuthStore = create<AuthState>()(
                 ...updatedUserFromServer
               };
 
-              const fieldsToCheck = ['name', 'email', 'phone', 'tcNo', 'address', 'role', 'isActive', 'permissions'];
+              const fieldsToCheck = ['name', 'email', 'phone', 'tcNo', 'address', 'role', 'isActive', 'permissions', 'providerCustomerId', 'providerType'];
               const changedFields: string[] = [];
 
               const isPasswordChanged = dataCopy.password !== undefined && dataCopy.password !== null && dataCopy.password.trim() !== '' && dataCopy.password.trim() !== '••••';

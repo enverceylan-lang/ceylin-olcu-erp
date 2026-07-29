@@ -3,6 +3,7 @@
 import { Download, Settings, Upload, ShieldCheck, AlertTriangle, UserPlus, Trash2, Check, X, Shield } from "lucide-react";
 import { useRef, useState, useEffect, useSyncExternalStore, Fragment } from "react";
 import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, MockUser } from "@/store/useAuthStore";
+import { useStore } from "@/store/useStore";
 import { syncNow } from "@/lib/syncService";
 import { normalizeUsername } from "@/lib/usernameHelper";
 import {
@@ -35,6 +36,7 @@ export default function AyarlarPage() {
   
   // Auth Store
   const { currentUser, users, addUser, updateUser, deleteUser, fetchUsers, auditLog } = useAuthStore();
+  const customers = useStore(state => state.customers);
 
   // Logged in user profile edit form states
   const [selfName, setSelfName] = useState("");
@@ -55,6 +57,7 @@ export default function AyarlarPage() {
   const [newPhone, setNewPhone] = useState("");
   const [newTcNo, setNewTcNo] = useState("");
   const [newAddress, setNewAddress] = useState("");
+  const [newProviderCustomerId, setNewProviderCustomerId] = useState("");
 
   // Edit User State
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -66,6 +69,7 @@ export default function AyarlarPage() {
   const [editPhone, setEditPhone] = useState("");
   const [editTcNo, setEditTcNo] = useState("");
   const [editAddress, setEditAddress] = useState("");
+  const [editProviderCustomerId, setEditProviderCustomerId] = useState("");
   const [editFinancePermissions, setEditFinancePermissions] = useState<FinancePermission[]>([]);
   const [userLoading, setUserLoading] = useState(false);
   const [userFilter, setUserFilter] = useState<'ACTIVE' | 'PASSIVE' | 'ALL'>('ACTIVE');
@@ -127,6 +131,8 @@ export default function AyarlarPage() {
     phone: "Telefon",
     tcNo: "TC kimlik",
     address: "Adres",
+    providerCustomerId: "Hizmet sağlayıcı carisi",
+    providerType: "Hizmet sağlayıcı türü",
     passwordChanged: "Şifre",
   };
 
@@ -253,11 +259,83 @@ export default function AyarlarPage() {
       }
     };
 
+  const isProviderRole = (role: string): boolean => {
+    const normalized = normalizeRole(
+      role as MockUser["role"]
+    );
+
+    return (
+      normalized === "TAILOR" ||
+      normalized === "INSTALLER"
+    );
+  };
+
+  const getProviderCariType = (
+    role: string
+  ): "TAILOR" | "INSTALLER" | null => {
+    const normalized = normalizeRole(
+      role as MockUser["role"]
+    );
+
+    if (normalized === "TAILOR") {
+      return "TAILOR";
+    }
+
+    if (normalized === "INSTALLER") {
+      return "INSTALLER";
+    }
+
+    return null;
+  };
+
+  const getProviderCariOptions = (role: string) => {
+    const expectedType = getProviderCariType(role);
+
+    if (!expectedType) {
+      return [];
+    }
+
+    return customers
+      .filter(customer => (
+        customer.cariType === expectedType &&
+        customer.isDeleted !== true &&
+        customer.isArchived !== true
+      ))
+      .sort((left, right) =>
+        left.name.localeCompare(right.name, "tr")
+      );
+  };
+
+  const getProviderCariName = (
+    customerId?: string
+  ): string => {
+    if (!customerId) {
+      return "Cari bağlantısı yok";
+    }
+
+    return (
+      customers.find(
+        customer => customer.id === customerId
+      )?.name ||
+      "Bağlı cari bulunamadı"
+    );
+  };
+
   // User Management Handlers
   const handleAddUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim() || !newUsername.trim() || !newPassword.trim()) {
       setMessage("Hata: Ad soyad, kullanıcı adı ve şifre zorunludur.");
+      return;
+    }
+
+    if (
+      isProviderRole(newRole) &&
+      !newProviderCustomerId.trim()
+    ) {
+      setMessage(
+        "Hata: Terzi veya montajcı kullanıcı için hizmet sağlayıcı carisi seçilmelidir."
+      );
       return;
     }
 
@@ -275,7 +353,10 @@ export default function AyarlarPage() {
         email: newEmail.trim(),
         phone: newPhone.trim(),
         tcNo: newTcNo.trim(),
-        address: newAddress.trim()
+        address: newAddress.trim(),
+        providerCustomerId: isProviderRole(newRole)
+          ? newProviderCustomerId
+          : undefined
       });
 
       if (success) {
@@ -294,6 +375,7 @@ export default function AyarlarPage() {
         setNewPhone("");
         setNewTcNo("");
         setNewAddress("");
+        setNewProviderCustomerId("");
         setShowAddForm(false);
         setMessage("Kullanıcı başarıyla eklendi.");
 
@@ -332,6 +414,9 @@ export default function AyarlarPage() {
     setEditPhone(u.phone || "");
     setEditTcNo(u.tcNo || "");
     setEditAddress(u.address || "");
+    setEditProviderCustomerId(
+      u.providerCustomerId || ""
+    );
     setEditFinancePermissions(
       (u.permissions || []).filter(isFinancePermission),
     );
@@ -343,6 +428,16 @@ export default function AyarlarPage() {
       return;
     }
 
+    if (
+      isProviderRole(editRole) &&
+      !editProviderCustomerId.trim()
+    ) {
+      setMessage(
+        "Hata: Terzi veya montajcı kullanıcı için hizmet sağlayıcı carisi seçilmelidir."
+      );
+      return;
+    }
+
     const updateData: Partial<MockUser> = {
       name: editName.trim(),
       username: editUsername.trim().toLowerCase(),
@@ -351,7 +446,10 @@ export default function AyarlarPage() {
       phone: editPhone.trim(),
       tcNo: editTcNo.trim(),
       address: editAddress.trim(),
-      financePermissions: editFinancePermissions
+      financePermissions: editFinancePermissions,
+      providerCustomerId: isProviderRole(editRole)
+        ? editProviderCustomerId
+        : undefined
     };
 
     if (editPassword.trim() && editPassword.trim() !== "••••") {
@@ -627,8 +725,11 @@ export default function AyarlarPage() {
                 <div>
                   <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1">Rol</label>
                   <select 
-                    value={newRole} 
-                    onChange={e => setNewRole(e.target.value)}
+                    value={newRole}
+                    onChange={e => {
+                      setNewRole(e.target.value);
+                      setNewProviderCustomerId("");
+                    }}
                     className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none cursor-pointer"
                   >
                     <option value="ADMIN">Yönetici (Admin)</option>
@@ -637,6 +738,54 @@ export default function AyarlarPage() {
                     <option value="TAILOR">Terzi / Üretici</option>
                     <option value="INSTALLER">Montaj Ekibi</option>
                   </select>
+                </div>
+                <div>
+                  <label
+                    htmlFor="new-provider-customer"
+                    className="block font-bold text-gray-600 dark:text-gray-400 mb-1"
+                  >
+                    Hizmet Sağlayıcı Carisi
+                    {isProviderRole(newRole) && (
+                      <span className="text-red-500"> *</span>
+                    )}
+                  </label>
+
+                  <select
+                    id="new-provider-customer"
+                    value={newProviderCustomerId}
+                    required={isProviderRole(newRole)}
+                    disabled={!isProviderRole(newRole)}
+                    onChange={e =>
+                      setNewProviderCustomerId(e.target.value)
+                    }
+                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-950 dark:border-gray-700 text-gray-900 dark:text-white text-xs outline-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <option value="">
+                      {isProviderRole(newRole)
+                        ? "Cari seçiniz"
+                        : "Bu rol için uygulanmaz"}
+                    </option>
+
+                    {getProviderCariOptions(newRole).map(customer => (
+                      <option
+                        key={customer.id}
+                        value={customer.id}
+                      >
+                        {customer.name}
+                        {customer.customerCode
+                          ? ` — ${customer.customerCode}`
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+
+                  {isProviderRole(newRole) &&
+                    getProviderCariOptions(newRole).length === 0 && (
+                      <p className="mt-1 text-[10px] text-amber-600 dark:text-amber-400">
+                        Bu role uygun aktif cari bulunamadı.
+                        Önce Cari Kartları bölümünden cariyi oluşturun.
+                      </p>
+                    )}
                 </div>
                 <div>
                   <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1">Mail Adresi <span className="font-normal text-slate-500">(İsteğe bağlı)</span></label>
@@ -790,8 +939,11 @@ export default function AyarlarPage() {
                         <td className="p-4 font-medium">
                           {isEditing ? (
                             <select 
-                              value={editRole} 
-                              onChange={e => setEditRole(e.target.value)}
+                              value={editRole}
+                              onChange={e => {
+                                setEditRole(e.target.value);
+                                setEditProviderCustomerId("");
+                              }}
                               className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 text-gray-900 dark:text-white text-xs cursor-pointer outline-none"
                             >
                               <option value="ADMIN">Yönetici (Admin)</option>
@@ -801,9 +953,25 @@ export default function AyarlarPage() {
                               <option value="INSTALLER">Montaj Ekibi</option>
                             </select>
                           ) : (
-                            <span className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded text-[10px] font-bold uppercase border dark:border-gray-800">
-                              {ROLE_PERMISSIONS[u.role]?.label || u.role}
-                            </span>
+                            <div className="space-y-1">
+                              <span className="inline-block bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded text-[10px] font-bold uppercase border dark:border-gray-800">
+                                {ROLE_PERMISSIONS[u.role]?.label || u.role}
+                              </span>
+
+                              {isProviderRole(u.role) && (
+                                <p
+                                  className={`text-[10px] ${
+                                    u.providerCustomerId
+                                      ? "text-indigo-600 dark:text-indigo-400"
+                                      : "text-amber-600 dark:text-amber-400"
+                                  }`}
+                                >
+                                  {getProviderCariName(
+                                    u.providerCustomerId
+                                  )}
+                                </p>
+                              )}
+                            </div>
                           )}
                         </td>
                         <td className="p-4 text-center">
@@ -954,6 +1122,51 @@ export default function AyarlarPage() {
                                 />
                               </div>
                             </div>
+                            {isProviderRole(editRole) && (
+                              <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50/60 p-3 dark:border-indigo-900/50 dark:bg-indigo-950/20">
+                                <label
+                                  htmlFor="edit-provider-customer"
+                                  className="mb-1 block font-semibold text-gray-700 dark:text-gray-300"
+                                >
+                                  Hizmet Sağlayıcı Carisi
+                                  <span className="text-red-500"> *</span>
+                                </label>
+
+                                <select
+                                  id="edit-provider-customer"
+                                  value={editProviderCustomerId}
+                                  required
+                                  onChange={e =>
+                                    setEditProviderCustomerId(
+                                      e.target.value
+                                    )
+                                  }
+                                  className="w-full rounded-lg border border-gray-200 bg-white p-2 text-xs text-gray-900 outline-none dark:border-gray-700 dark:bg-gray-950 dark:text-white"
+                                >
+                                  <option value="">Cari seçiniz</option>
+
+                                  {getProviderCariOptions(editRole).map(
+                                    customer => (
+                                      <option
+                                        key={customer.id}
+                                        value={customer.id}
+                                      >
+                                        {customer.name}
+                                        {customer.customerCode
+                                          ? ` — ${customer.customerCode}`
+                                          : ""}
+                                      </option>
+                                    )
+                                  )}
+                                </select>
+
+                                {getProviderCariOptions(editRole).length === 0 && (
+                                  <p className="mt-1 text-[10px] text-amber-600 dark:text-amber-400">
+                                    Bu role uygun aktif cari bulunamadı.
+                                  </p>
+                                )}
+                              </div>
+                            )}
                             <FinancePermissionEditor
                               role={editRole}
                               selectedPermissions={editFinancePermissions}

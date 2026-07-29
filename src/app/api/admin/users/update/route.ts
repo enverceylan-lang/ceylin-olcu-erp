@@ -40,6 +40,8 @@ type UserRecord = {
   updatedAt: string;
   email: string | null;
   phone: string | null;
+  providerCustomerId: string | null;
+  providerType: "TAILOR" | "INSTALLER" | null;
   tcNo: string | null;
   address: string | null;
   profileCompletedAt: string | null;
@@ -71,7 +73,7 @@ export async function GET(req: NextRequest) {
     const { data: dbUsers, error } = await supabaseServer
       .from("users")
       .select(
-        "id, name, username, role, isActive, email, phone, tcNo, address, permissions, createdAt, updatedAt, profileCompletedAt"
+        "id, name, username, role, isActive, email, phone, tcNo, address, permissions, createdAt, updatedAt, profileCompletedAt, providerCustomerId, providerType"
       )
       .order("name", { ascending: true });
 
@@ -203,6 +205,52 @@ export async function POST(req: NextRequest) {
     const targetRole = String(
       role ?? existingUser?.role ?? "FIELD"
     );
+  const normalizedTargetRole =
+    targetRole.trim().toUpperCase();
+
+  const requestedProviderCustomerId =
+    typeof body.providerCustomerId === "string"
+      ? body.providerCustomerId.trim()
+      : body.providerCustomerId === null
+        ? ""
+        : undefined;
+
+  let resolvedProviderCustomerId:
+    string | null | undefined;
+
+  let resolvedProviderType:
+    "TAILOR" | "INSTALLER" | null | undefined;
+
+  if (
+    normalizedTargetRole === "TAILOR" ||
+    normalizedTargetRole === "PRODUCTION"
+  ) {
+    resolvedProviderCustomerId =
+      requestedProviderCustomerId === undefined
+        ? existingUser?.providerCustomerId ?? undefined
+        : requestedProviderCustomerId || null;
+
+    resolvedProviderType =
+      resolvedProviderCustomerId
+        ? "TAILOR"
+        : null;
+  } else if (
+    normalizedTargetRole === "INSTALLER" ||
+    normalizedTargetRole === "INSTALLATION"
+  ) {
+    resolvedProviderCustomerId =
+      requestedProviderCustomerId === undefined
+        ? existingUser?.providerCustomerId ?? undefined
+        : requestedProviderCustomerId || null;
+
+    resolvedProviderType =
+      resolvedProviderCustomerId
+        ? "INSTALLER"
+        : null;
+  } else {
+    resolvedProviderCustomerId = null;
+    resolvedProviderType = null;
+  }
     let nextPermissions: string[] | null = null;
 
     if (isCreate) {
@@ -386,6 +434,12 @@ export async function POST(req: NextRequest) {
             : null,
 
         // Admin oluşturması profili tamamlamaz.
+        providerCustomerId:
+          resolvedProviderCustomerId ?? null,
+
+        providerType:
+          resolvedProviderType ?? null,
+
         profileCompletedAt: null,
       };
     } else {
@@ -451,6 +505,19 @@ export async function POST(req: NextRequest) {
               ? address.trim()
               : null;
         }
+    if (
+      Object.prototype.hasOwnProperty.call(
+        body,
+        "providerCustomerId"
+      ) ||
+      role !== undefined
+    ) {
+      userRecord.providerCustomerId =
+        resolvedProviderCustomerId ?? null;
+
+      userRecord.providerType =
+        resolvedProviderType ?? null;
+    }
 
         // Admin mevcut profil durumunu değiştirmez.
         userRecord.profileCompletedAt =
@@ -577,7 +644,14 @@ export async function POST(req: NextRequest) {
         phone: userRecord.phone,
         tcNo: userRecord.tcNo,
         address: userRecord.address,
-        profileCompletedAt: userRecord.profileCompletedAt,
+        profileCompletedAt:
+          userRecord.profileCompletedAt,
+
+        providerCustomerId:
+          userRecord.providerCustomerId,
+
+        providerType:
+          userRecord.providerType,
         hasPassword: true,
       },
     });
