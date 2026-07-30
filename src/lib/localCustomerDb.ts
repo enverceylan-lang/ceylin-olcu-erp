@@ -43,6 +43,20 @@ export async function saveLocalCustomer(customer: Customer): Promise<void> {
   }
 }
 
+export async function saveLocalCustomerWithoutSync(customer: Customer): Promise<void> {
+  try {
+    const normalizedCustomer =
+      customer && customer.name
+        ? { ...customer, name: normalizeCariName(customer.name) }
+        : customer;
+
+    await localCustomerDb.customers.put(normalizedCustomer);
+  } catch (err) {
+    console.error('[localCustomerDb] Failed to apply remote customer locally:', err);
+    throw err;
+  }
+}
+
 export async function saveLocalCustomers(customers: Customer[]): Promise<void> {
   try {
     await localCustomerDb.customers.bulkPut(customers);

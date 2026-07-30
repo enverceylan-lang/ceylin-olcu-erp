@@ -1,6 +1,6 @@
 import { useMeasurementStore } from "@/store/measurementStore";
 import { useStore } from "@/store/useStore";
-import { loadLocalCustomers, saveLocalCustomer } from "./localCustomerDb";
+import { loadLocalCustomers, saveLocalCustomerWithoutSync } from "./localCustomerDb";
 import {
   getPendingSyncEvents,
   markSyncEventsSynced,
@@ -244,12 +244,11 @@ async function ensureCustomerStructureForMeasurement(
     updatedAt: new Date().toISOString(),
   };
 
-  await saveLocalCustomer(updatedCustomer);
+  await saveLocalCustomerWithoutSync(updatedCustomer);
   useStore.setState((state) => ({
     customers: state.customers.map((item) =>
       item.id === updatedCustomer.id ? updatedCustomer : item,
     ),
-    syncStatus: "pending",
   }));
 
   return updatedCustomer;
@@ -513,6 +512,12 @@ export async function pullInboundMeasurements(
 ): Promise<{
   success: boolean;
   fetchedCount: number;
+  appliedMeasurements?: number;
+  newInboundItems?: number;
+  updatedInboundItems?: number;
+  alreadyRecorded?: number;
+  ignoredOwnDevice?: number;
+  failed?: number;
   errors: string[];
 }> {
   try {
@@ -662,6 +667,13 @@ export async function pullInboundMeasurements(
       }
     >();
 
+    let appliedMeasurements = 0;
+    let newInboundItems = 0;
+    let updatedInboundItems = 0;
+    let alreadyRecorded = 0;
+    let ignoredOwnDevice = 0;
+    let failed = 0;
+
     for (const change of changes) {
       const patch = change.patch || {};
 
@@ -703,6 +715,7 @@ export async function pullInboundMeasurements(
             console.warn(
               `[DeltaSyncClient] Skipping measurement change ${change.change_id}: ${check.error}`,
             );
+            alreadyRecorded += 1;
           } else {
             const sourceCustomerId = String(
               canonical.customerId || "",
@@ -754,32 +767,33 @@ export async function pullInboundMeasurements(
               await useMeasurementStore
                 .getState()
                 .batchUpsertMeasurements([measurementToPersist]);
+              appliedMeasurements += 1;
+
+              const receipt: TransferReceipt = {
+                transferId: change.change_id,
+                entityType: "MEASUREMENT",
+                entityId: canonical.id,
+                senderUserId,
+                receiverUserId,
+                senderDeviceId,
+                receiverDeviceId,
+                status: "DELIVERED",
+                deliveredAt: now,
+                entityVersion: Number(canonical.version || 1),
+                createdAt: now,
+                updatedAt: now,
+              };
+
+              await saveTransferReceipt(receipt);
+
+              console.log(
+                `[DeltaSyncClient] Successfully applied/upserted MEASUREMENT ${canonical.id}`,
+              );
             } else {
               console.warn(
                 `[DeltaSyncClient] Measurement ${canonical.id} kept in inbound matching because customer is unresolved.`,
               );
             }
-
-            const receipt: TransferReceipt = {
-              transferId: change.change_id,
-              entityType: "MEASUREMENT",
-              entityId: canonical.id,
-              senderUserId,
-              receiverUserId,
-              senderDeviceId,
-              receiverDeviceId,
-              status: "DELIVERED",
-              deliveredAt: now,
-              entityVersion: Number(canonical.version || 1),
-              createdAt: now,
-              updatedAt: now,
-            };
-
-            await saveTransferReceipt(receipt);
-
-            console.log(
-              `[DeltaSyncClient] Successfully applied/upserted MEASUREMENT ${canonical.id}`,
-            );
           }
         } catch (err: unknown) {
           const failedReceipt: TransferReceipt = {
@@ -805,6 +819,7 @@ export async function pullInboundMeasurements(
             "[DeltaSyncClient] Failed to apply MEASUREMENT event",
             err,
           );
+          failed += 1;
         }
 
         continue;
@@ -855,7 +870,14 @@ export async function pullInboundMeasurements(
 
         // Don't import changes produced by this same device back into the pool.
         if (change.device_id !== getDeviceId()) {
-          await saveInboundMeasurement(inbound);
+          const outcome = await saveInboundMeasurement(inbound);
+
+          if (outcome === "INSERTED") newInboundItems += 1;
+          else if (outcome === "UPDATED_OPEN_ITEM") updatedInboundItems += 1;
+          else alreadyRecorded += 1;
+        }
+        else {
+          ignoredOwnDevice += 1;
         }
       }
     }
@@ -892,7 +914,14 @@ export async function pullInboundMeasurements(
       };
 
       if (change.device_id !== getDeviceId()) {
-        await saveInboundMeasurement(inbound);
+        const outcome = await saveInboundMeasurement(inbound);
+
+        if (outcome === "INSERTED") newInboundItems += 1;
+        else if (outcome === "UPDATED_OPEN_ITEM") updatedInboundItems += 1;
+        else alreadyRecorded += 1;
+      }
+      else {
+        ignoredOwnDevice += 1;
       }
     }
 
@@ -903,7 +932,19 @@ export async function pullInboundMeasurements(
       await setSyncCursor("measurement_changes_cursor", maxMeasurementRevision);
     }
 
-    return { success: true, fetchedCount: changes.length, errors: [] };
+    const fetchedCount = appliedMeasurements + newInboundItems;
+
+    return {
+      success: true,
+      fetchedCount,
+      appliedMeasurements,
+      newInboundItems,
+      updatedInboundItems,
+      alreadyRecorded,
+      ignoredOwnDevice,
+      failed,
+      errors: [],
+    };
   } catch (err: unknown) {
     console.error("[DeltaSyncClient] Pull failed:", err);
     return { success: false, fetchedCount: 0, errors: [getErrorMessage(err)] };

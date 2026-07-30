@@ -184,8 +184,36 @@ const [manualRepairingMeasurementId, setManualRepairingMeasurementId] =
     try {
       const res = await pullInboundMeasurements(customers);
       if (res.success) {
-        if (res.fetchedCount > 0) alert(`Havuz güncellendi. ${res.fetchedCount} yeni ölçü alındı.`);
-        else alert('Havuza düşen yeni bir ölçü yok.');
+        const applied = res.appliedMeasurements || 0;
+        const newInbound = res.newInboundItems || 0;
+        const updatedInbound = res.updatedInboundItems || 0;
+        const alreadyRecorded = res.alreadyRecorded || 0;
+        const ignoredOwnDevice = res.ignoredOwnDevice || 0;
+        const failed = res.failed || 0;
+
+        if (applied > 0 || newInbound > 0 || updatedInbound > 0) {
+          const parts: string[] = [];
+
+          if (applied > 0) {
+            parts.push("Doğrudan uygulanan ölçü: " + applied);
+          }
+          if (newInbound > 0) {
+            parts.push("Yeni istisna kaydı: " + newInbound);
+          }
+          if (updatedInbound > 0) {
+            parts.push("Güncellenen istisna: " + updatedInbound);
+          }
+
+          alert("Senkron tamamlandı. " + parts.join(". ") + ".");
+        } else if (failed > 0) {
+          alert("Senkron tamamlanamadı. " + failed + " kayıt yerel olarak uygulanamadı.");
+        } else if (alreadyRecorded > 0) {
+          alert("Yeni kayıt yok. " + alreadyRecorded + " değişiklik daha önce uygulanmış.");
+        } else if (ignoredOwnDevice > 0) {
+          alert("Yeni kayıt yok. " + ignoredOwnDevice + " değişiklik bu cihaz tarafından oluşturulmuş.");
+        } else {
+          alert('Yeni veya güncellenmiş kayıt yok.');
+        }
       } else {
         alert('Çekerken hata: ' + res.errors.join(', '));
       }
@@ -224,10 +252,26 @@ const [manualRepairingMeasurementId, setManualRepairingMeasurementId] =
   };
 
   const handleInboundMerge = async (inbound: InboundMeasurement) => {
-    // Determine the final selected customer
-    // 1. the explicit selection from state
-    // 2. OR the first suggestion if available
-    const selectedCustomerId = inboundSelections[inbound.changeId] || (inbound.suggestedCustomerIds && inbound.suggestedCustomerIds.length > 0 ? inbound.suggestedCustomerIds[0] : null);
+    const sourceCustomerId = String(
+      inbound.entityId ||
+      inbound.patch?.temporaryCustomerId ||
+      inbound.patch?.customerId ||
+      "",
+    ).trim();
+
+    const previouslyLinkedCustomerId = sourceCustomerId
+      ? completedInboundLinks[sourceCustomerId]
+      : undefined;
+
+    const selectedCustomerId =
+      inboundSelections[inbound.changeId] ||
+      previouslyLinkedCustomerId ||
+      (
+        inbound.suggestedCustomerIds &&
+        inbound.suggestedCustomerIds.length > 0
+          ? inbound.suggestedCustomerIds[0]
+          : null
+      );
     
     if (!selectedCustomerId) {
       alert("Lütfen bağlamak için listeden bir cari seçin.");
@@ -753,19 +797,77 @@ const handleManualOrphanRepair = async (
   // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto pb-12">
+    <div className="mx-auto max-w-7xl space-y-6 pb-12">
       {/* Page header */}
-      <div>
-        <h1 className="flex items-center gap-2 text-xl font-bold heading-title sm:text-2xl">
-          <Ruler className="w-6 h-6 text-blue-500" />
-          Ölçüler ve Projeler
-        </h1>
-        <p className="text-sm heading-subtitle">
-          Müşteri bazında alınan saha ölçüleri ve durum takibi.
-        </p>
-      </div>
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="border-b border-slate-100 px-4 py-4 dark:border-slate-800 sm:px-5">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 dark:bg-blue-950/40">
+              <Ruler className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            </div>
 
-      {orphanMeasurements.length > 0 && (
+            <div className="min-w-0">
+              <h1 className="text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">
+                Ölçüler ve Projeler
+              </h1>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Saha ölçülerini, gelen kayıtları ve cari bazlı projeleri tek ekrandan yönetin.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-px bg-slate-200 dark:bg-slate-800 lg:grid-cols-4">
+          <div className="bg-white p-4 dark:bg-slate-900">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                Kayıtlı Cari
+              </span>
+              <Ruler className="h-4 w-4 text-slate-400" />
+            </div>
+            <div className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">
+              {customerStats.length}
+            </div>
+          </div>
+
+          <div className="bg-indigo-50 p-4 dark:bg-indigo-950/20">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">
+                Gelen Ölçü
+              </span>
+              <CloudDownload className="h-4 w-4 text-indigo-500" />
+            </div>
+            <div className="mt-1 text-2xl font-bold text-indigo-800 dark:text-indigo-200">
+              {inboundMeasurements.length}
+            </div>
+          </div>
+
+          <div className="bg-amber-50 p-4 dark:bg-amber-950/20">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+                Yetim Ölçü
+              </span>
+              <AlertCircle className="h-4 w-4 text-amber-500" />
+            </div>
+            <div className="mt-1 text-2xl font-bold text-amber-800 dark:text-amber-200">
+              {orphanMeasurements.length}
+            </div>
+          </div>
+
+          <div className="bg-emerald-50 p-4 dark:bg-emerald-950/20">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                Yerel Taslak
+              </span>
+              <ClipboardList className="h-4 w-4 text-emerald-500" />
+            </div>
+            <div className="mt-1 text-2xl font-bold text-emerald-800 dark:text-emerald-200">
+              {localDrafts.length}
+            </div>
+          </div>
+        </div>
+      </section>
+{orphanMeasurements.length > 0 && (
         <section className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/20">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-300">
@@ -861,19 +963,19 @@ const handleManualOrphanRepair = async (
 
       {/* V1D Inbound Pool Section */}
       {(currentUser?.role === 'ADMIN' || currentUser?.role === 'MODERATOR') && (
-        <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+        <section className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 dark:border-slate-800 dark:bg-slate-900/30">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-slate-100">
               <CloudDownload className="w-5 h-5 text-indigo-500" />
               Gelen Ölçüler Havuzu
-              <span className="text-sm font-semibold bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-2.5 py-0.5 rounded-full">
+              <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-xs font-bold text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300">
                 {inboundMeasurements.length} bekleyen
               </span>
             </h2>
             <button
               onClick={handlePullInbound}
               disabled={isPulling}
-              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium flex items-center gap-2 shadow-sm transition-all"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <RefreshCw className={`w-4 h-4 ${isPulling ? 'animate-spin' : ''}`} />
               {isPulling ? 'Alınıyor...' : 'Gelen Ölçüleri Al'}
@@ -885,24 +987,60 @@ const handleManualOrphanRepair = async (
               <p className="text-sm text-gray-500 dark:text-gray-400">Bekleyen gelen ölçü bulunmamaktadır.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
               {inboundMeasurements.map(inbound => (
-                <div key={inbound.changeId} className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col gap-3">
-                  <div className="flex justify-between items-start">
+                <div key={inbound.changeId} className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-gray-200 bg-white p-3 shadow-sm hover:shadow-md dark:border-gray-700 dark:bg-gray-800">
+                  <div className="flex items-start justify-between gap-3">
                      <div>
-                        <h3 className="font-bold text-gray-900 dark:text-white">{inbound.customerName || 'İsimsiz Müşteri'}</h3>
-                        <p className="text-sm text-gray-500 flex items-center gap-1"><User className="w-3 h-3"/> {inbound.customerPhone || 'Telefon Yok'}</p>
-                        {inbound.customerAddress && <p className="text-xs text-gray-400 truncate max-w-[200px] mt-1">{inbound.customerAddress}</p>}
-                        <p className="text-xs text-gray-400 mt-1">{new Date(inbound.createdAt).toLocaleString('tr-TR')}</p>
+                        <h3 className="line-clamp-2 text-sm font-bold leading-5 text-gray-900 dark:text-white">{inbound.customerName || 'İsimsiz Müşteri'}</h3>
+                        <p className="mt-0.5 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"><User className="w-3 h-3"/> {inbound.customerPhone || 'Telefon Yok'}</p>
+                        {inbound.customerAddress && <p className="mt-1 max-w-[240px] truncate text-xs text-gray-400">{inbound.customerAddress}</p>}
+                        <p className="mt-1 text-[11px] text-gray-400">{new Date(inbound.createdAt).toLocaleString('tr-TR')}</p>
                      </div>
-                     <div className="flex flex-col gap-1 items-end">
-                       <span className="text-xs font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">{inbound.entityType}</span>
-                       <span className="text-xs font-semibold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">YENİ</span>
+                     <div className="flex shrink-0 flex-col items-end gap-1">
+                       <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300">{inbound.entityType}</span>
+                       <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300">YENİ</span>
                      </div>
                   </div>
                   
+                   {(() => {
+                     const sourceCustomerId = String(
+                       inbound.entityId ||
+                       inbound.patch?.temporaryCustomerId ||
+                       inbound.patch?.customerId ||
+                       "",
+                     ).trim();
+
+                     const linkedCustomerId = sourceCustomerId
+                       ? completedInboundLinks[sourceCustomerId]
+                       : undefined;
+
+                     const linkedCustomer = linkedCustomerId
+                       ? customers.find(
+                           (customer) =>
+                             customer.id === linkedCustomerId &&
+                             !customer.isDeleted &&
+                             !customer.isArchived,
+                         )
+                       : undefined;
+
+                     if (!linkedCustomer) return null;
+
+                     return (
+                       <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2.5 text-xs text-emerald-800 dark:border-emerald-800/60 dark:bg-emerald-950/30 dark:text-emerald-300">
+                         <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                         <div className="min-w-0">
+                           <div className="font-bold">Otomatik eşleşti</div>
+                           <div className="mt-0.5 truncate">
+                             Bu kayıt doğrudan {linkedCustomer.name} carisine bağlanacak.
+                           </div>
+                         </div>
+                       </div>
+                     );
+                   })()}
+
                   {inbound.suggestedCustomerIds && inbound.suggestedCustomerIds.length > 0 && (
-                    <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-md p-2">
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 dark:border-amber-800/60 dark:bg-amber-950/30">
                        <p className="text-xs font-bold text-amber-700 dark:text-amber-400 mb-1">Önerilen Eşleşmeler:</p>
                        <div className="space-y-1">
                           {inbound.suggestedCustomerIds.map(id => {
@@ -930,7 +1068,7 @@ const handleManualOrphanRepair = async (
                     </div>
                   )}
 
-                  <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-md p-2">
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-2.5 dark:border-gray-700 dark:bg-gray-900/40">
                     <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Manuel Cari Seçimi:</p>
                     {inboundSelections[inbound.changeId] && (!inbound.suggestedCustomerIds || !inbound.suggestedCustomerIds.includes(inboundSelections[inbound.changeId])) ? (
                         (() => {
@@ -946,7 +1084,7 @@ const handleManualOrphanRepair = async (
                     ) : (
                         <button 
                           onClick={() => setCustomerSearchInboundId(inbound.changeId)}
-                          className="w-full text-xs py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded font-medium hover:bg-gray-50 dark:hover:bg-gray-600 flex justify-center items-center gap-1"
+                          className="flex min-h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-xs font-semibold text-gray-700 transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-indigo-700 dark:hover:bg-indigo-950/30 dark:hover:text-indigo-300"
                         >
                           <Search className="w-3 h-3" />
                           Cari Seç / Rehberi Aç
@@ -954,18 +1092,35 @@ const handleManualOrphanRepair = async (
                     )}
                   </div>
 
-                  <div className="mt-auto pt-3 border-t border-gray-100 dark:border-gray-700 flex flex-wrap gap-2">
+                  <div className="mt-auto grid grid-cols-2 gap-2 border-t border-gray-100 pt-3 dark:border-gray-700">
                      <button 
                        onClick={() => handleInboundMerge(inbound)}
-                       disabled={processingInboundId === inbound.changeId || (!inboundSelections[inbound.changeId] && (!inbound.suggestedCustomerIds || inbound.suggestedCustomerIds.length === 0))}
-                       className="flex-1 px-2 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded text-xs font-semibold hover:bg-green-100 disabled:opacity-50" 
+                       disabled={
+                          processingInboundId === inbound.changeId ||
+                          (
+                            !inboundSelections[inbound.changeId] &&
+                            !completedInboundLinks[
+                              String(
+                                inbound.entityId ||
+                                inbound.patch?.temporaryCustomerId ||
+                                inbound.patch?.customerId ||
+                                "",
+                              ).trim()
+                            ] &&
+                            (
+                              !inbound.suggestedCustomerIds ||
+                              inbound.suggestedCustomerIds.length === 0
+                            )
+                          )
+                        }
+                       className="min-h-10 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-2 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
                      >
                        {processingInboundId === inbound.changeId ? 'İşleniyor...' : 'Mevcut Cariye Bağla'}
                      </button>
                      <button 
                        onClick={() => handleInboundCreateNew(inbound)}
                        disabled={processingInboundId === inbound.changeId}
-                       className="flex-1 px-2 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded text-xs font-semibold hover:bg-blue-100 disabled:opacity-50" 
+                       className="min-h-10 rounded-lg border border-blue-200 bg-blue-50 px-2 py-2 text-xs font-bold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-300"
                      >
                        Yeni Cari Aç
                      </button>
@@ -985,7 +1140,7 @@ const handleManualOrphanRepair = async (
                          }
                        }}
                        disabled={processingInboundId === inbound.changeId}
-                       className="px-2 py-1.5 bg-gray-50 text-gray-700 border border-gray-200 rounded text-xs font-semibold hover:bg-gray-100 disabled:opacity-50"
+                       className="col-span-2 min-h-9 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs font-semibold text-gray-600 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
                      >Atla</button>
                   </div>
                 </div>
@@ -996,7 +1151,7 @@ const handleManualOrphanRepair = async (
       )}
 
       {/* Search bar */}
-      <div className="relative max-w-md">
+      <div className="relative max-w-2xl">
         <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
         <input
           type="text"
@@ -1004,7 +1159,7 @@ const handleManualOrphanRepair = async (
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           placeholder="Müşteri veya telefon ara..."
-          className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-shadow text-sm"
+          className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-4 text-sm font-medium text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-blue-400 focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500 dark:hover:border-slate-600 dark:focus:border-blue-600 dark:focus:ring-blue-950/50"
         />
       </div>
 

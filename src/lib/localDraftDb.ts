@@ -280,18 +280,27 @@ export async function setSyncCursor(key: string, revision: number): Promise<void
   await localDraftDb.syncCursors.put({ key, revision, updatedAt: new Date().toISOString() });
 }
 
-export async function saveInboundMeasurement(inbound: InboundMeasurement): Promise<void> {
+export type SaveInboundMeasurementOutcome =
+  | 'INSERTED'
+  | 'UPDATED_OPEN_ITEM'
+  | 'ALREADY_RECORDED';
+
+export async function saveInboundMeasurement(
+  inbound: InboundMeasurement
+): Promise<SaveInboundMeasurementOutcome> {
   // Idempotency is based only on the immutable event identity.
   const existing = await localDraftDb.inboundMeasurements.get(inbound.changeId);
-  if (existing) return;
+  if (existing) return 'ALREADY_RECORDED';
 
   const all = await localDraftDb.inboundMeasurements.toArray();
-  if (all.some(x => x.latestChangeId === inbound.changeId)) return;
+  if (all.some((item) => item.latestChangeId === inbound.changeId)) {
+    return 'ALREADY_RECORDED';
+  }
 
   const existingEntity = all
-    .filter(x =>
-      x.entityId === inbound.entityId &&
-      x.entityType === inbound.entityType
+    .filter((item) =>
+      item.entityId === inbound.entityId &&
+      item.entityType === inbound.entityType
     )
     .sort((a, b) => b.revision - a.revision)[0];
 
@@ -305,9 +314,16 @@ export async function saveInboundMeasurement(inbound: InboundMeasurement): Promi
       existingEntity.status === 'MATCH_PENDING';
 
     if (isOpenWorkItem) {
-      const mergedPatch = { ...(existingEntity.patch || {}), ...(inbound.patch || {}) };
-      if (Array.isArray(existingEntity.patch?.rooms) && existingEntity.patch.rooms.length > 0 &&
-          (!Array.isArray(inbound.patch?.rooms) || inbound.patch.rooms.length === 0)) {
+      const mergedPatch = {
+        ...(existingEntity.patch || {}),
+        ...(inbound.patch || {})
+      };
+
+      if (
+        Array.isArray(existingEntity.patch?.rooms) &&
+        existingEntity.patch.rooms.length > 0 &&
+        (!Array.isArray(inbound.patch?.rooms) || inbound.patch.rooms.length === 0)
+      ) {
         mergedPatch.rooms = existingEntity.patch.rooms;
       }
 
@@ -320,18 +336,19 @@ export async function saveInboundMeasurement(inbound: InboundMeasurement): Promi
         pendingCustomerId: existingEntity.pendingCustomerId,
         linkedCustomerId: existingEntity.linkedCustomerId,
         createdCustomerId: existingEntity.createdCustomerId,
-        suggestedCustomerIds: existingEntity.suggestedCustomerIds || inbound.suggestedCustomerIds
+        suggestedCustomerIds:
+          existingEntity.suggestedCustomerIds || inbound.suggestedCustomerIds
       });
-      return;
+
+      return 'UPDATED_OPEN_ITEM';
     }
 
-    // The previous work item is complete. Keep its audit/history untouched and
-    // insert the newer immutable event as a fresh pool item.
     await localDraftDb.inboundMeasurements.add(inbound);
-    return;
+    return 'INSERTED';
   }
 
   await localDraftDb.inboundMeasurements.add(inbound);
+  return 'INSERTED';
 }
 
 export async function listInboundMeasurements(status?: InboundMeasurement['status']): Promise<InboundMeasurement[]> {
