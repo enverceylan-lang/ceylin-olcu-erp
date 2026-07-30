@@ -281,10 +281,205 @@ Promise<void> {
   }
 }
 
+async function runPartialFailureRetryReplayTest():
+Promise<void> {
+  const firstTransaction:
+    FinanceTransaction = {
+      ...transaction,
+      id: "finance-transaction-first",
+      transactionId:
+        "finance-transaction-first",
+      idempotencyKey:
+        "finance-transaction-first",
+      sourceDocumentId:
+        "finance-source-first"
+    };
+
+  const secondTransaction:
+    FinanceTransaction = {
+      ...transaction,
+      id: "finance-transaction-second",
+      transactionId:
+        "finance-transaction-second",
+      idempotencyKey:
+        "finance-transaction-second",
+      sourceDocumentId:
+        "finance-source-second"
+    };
+
+  const updates:
+    SalesFinanceOutboxRecord[] = [];
+
+  const postedKeys =
+    new Set<string>();
+
+  let rejectSecondTransaction = true;
+  let financeCommandCallCount = 0;
+
+  const dependencies:
+    SalesFinanceOutboxExecutorDependencies = {
+      projectSaleFinance:
+        () => ({
+          ...projection(),
+          transactions: [
+            firstTransaction,
+            secondTransaction
+          ]
+        }),
+
+      executeFinanceCommand:
+        async currentTransaction => {
+          financeCommandCallCount++;
+
+          if (
+            currentTransaction.idempotencyKey ===
+              secondTransaction.idempotencyKey &&
+            rejectSecondTransaction
+          ) {
+            return {
+              outcome: "REJECT",
+              reason: "INVALID_TRANSACTION"
+            };
+          }
+
+          if (
+            postedKeys.has(
+              currentTransaction.idempotencyKey
+            )
+          ) {
+            return {
+              outcome: "REPLAY",
+              transaction: currentTransaction
+            };
+          }
+
+          postedKeys.add(
+            currentTransaction.idempotencyKey
+          );
+
+          return {
+            outcome: "CREATED",
+            transaction: currentTransaction
+          };
+        },
+
+      updateSalesFinanceOutbox:
+        async updatedRecord => {
+          updates.push({
+            ...updatedRecord
+          });
+        },
+
+      now:
+        (() => {
+          let index = 0;
+
+          const times = [
+            "2026-07-30T13:00:00.000Z",
+            "2026-07-30T13:01:00.000Z",
+            "2026-07-30T13:02:00.000Z",
+            "2026-07-30T13:03:00.000Z",
+            "2026-07-30T13:04:00.000Z",
+            "2026-07-30T13:05:00.000Z"
+          ];
+
+          return () =>
+            times[index++] ||
+            "2026-07-30T13:06:00.000Z";
+        })()
+    };
+
+  const firstResult =
+    await executeSalesFinanceOutboxRecord(
+      record,
+      dependencies
+    );
+
+  assert.equal(
+    firstResult.outcome,
+    "ERROR"
+  );
+
+  assert.equal(
+    postedKeys.size,
+    1
+  );
+
+  if (firstResult.outcome !== "ERROR") {
+    throw new Error(
+      "First execution must end with ERROR."
+    );
+  }
+
+  assert.equal(
+    firstResult.record.retryCount,
+    1
+  );
+
+  assert.equal(
+    firstResult.reason,
+    "FINANCE_COMMAND_REJECTED:INVALID_TRANSACTION"
+  );
+
+  rejectSecondTransaction = false;
+
+  const retryResult =
+    await executeSalesFinanceOutboxRecord(
+      firstResult.record,
+      dependencies
+    );
+
+  assert.equal(
+    retryResult.outcome,
+    "SYNCED"
+  );
+
+  if (retryResult.outcome !== "SYNCED") {
+    throw new Error(
+      "Retry execution must end with SYNCED."
+    );
+  }
+
+  assert.equal(
+    retryResult.createdCount,
+    1
+  );
+
+  assert.equal(
+    retryResult.replayCount,
+    1
+  );
+
+  assert.equal(
+    retryResult.record.retryCount,
+    1
+  );
+
+  assert.equal(
+    postedKeys.size,
+    2
+  );
+
+  assert.equal(
+    financeCommandCallCount,
+    4
+  );
+
+  assert.deepEqual(
+    updates.map(item => item.status),
+    [
+      "PROCESSING",
+      "ERROR",
+      "PROCESSING",
+      "SYNCED"
+    ]
+  );
+}
 async function main(): Promise<void> {
   await runSuccessTest();
   await runRejectTest();
   await runProjectionErrorTest();
+  await runPartialFailureRetryReplayTest();
 
   console.log(
     "salesFinanceOutboxExecutorSuite: PASS"
