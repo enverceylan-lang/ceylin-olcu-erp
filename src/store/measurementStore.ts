@@ -99,6 +99,7 @@ function enrichMeasurement(m: MeasurementRecord): MeasurementRecord {
     );
     return {
       ...item,
+      isActive: item.isActive !== false,
       calculation: calc,
       updatedAt: new Date().toISOString()
     };

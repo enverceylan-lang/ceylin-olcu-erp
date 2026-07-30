@@ -750,9 +750,15 @@ export async function pullInboundMeasurements(
               });
             }
 
-            await useMeasurementStore
-              .getState()
-              .batchUpsertMeasurements([measurementToPersist]);
+            if (localCustomer) {
+              await useMeasurementStore
+                .getState()
+                .batchUpsertMeasurements([measurementToPersist]);
+            } else {
+              console.warn(
+                `[DeltaSyncClient] Measurement ${canonical.id} kept in inbound matching because customer is unresolved.`,
+              );
+            }
 
             const receipt: TransferReceipt = {
               transferId: change.change_id,

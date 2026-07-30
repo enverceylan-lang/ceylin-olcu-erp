@@ -110,7 +110,7 @@ export function buildWhatsAppShortReport(
             measurement.selectedProducts
               ?.filter(
                 (selectedProduct) =>
-                  selectedProduct.isActive,
+                  selectedProduct.isActive !== false,
               ) || [];
 
           const products:

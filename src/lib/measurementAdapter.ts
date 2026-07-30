@@ -446,7 +446,7 @@ export function resolveMeasurementProductType(measurement: MeasurementLike | nul
 
   // 1. Check selectedProducts list first
   if (measurement.selectedProducts && measurement.selectedProducts.length > 0) {
-    const active = measurement.selectedProducts.find((product) => product.isActive);
+    const active = measurement.selectedProducts.find((product) => product.isActive !== false);
     if (active) return normalizeMeasurementProductType(active.productType);
   }
 
