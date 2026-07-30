@@ -20,6 +20,9 @@ import { createDraftSaleFromCustomer } from "@/lib/salesAdapter";
 import { useOperationsStore } from "@/store/useOperationsStore";
 import { useErpRuntimeContext } from "@/lib/useErpRuntimeContext";
 import { getSaleStatusPresentation } from "@/lib/saleStatusPresentation";
+import {
+  executeSalesFinanceOutboxRecord
+} from "@/lib/finance/salesFinanceOutboxExecutor";
 
 export default function SaleDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
@@ -27,7 +30,14 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
 
   const router = useRouter();
   const { customers } = useStore();
-  const { sales, loadSales, updateSale, removeSale, isLoading } = useSalesStore();
+  const {
+    sales,
+    loadSales,
+    updateSale,
+    updateSaleWithFinanceOutbox,
+    removeSale,
+    isLoading
+  } = useSalesStore();
   const currentUser = useAuthStore(state => state.currentUser);
 
   const syncMainOperation =
@@ -348,7 +358,12 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
       }
 
 
-      await updateSale(updatedSale);
+      const financeOutboxRecord =
+        await updateSaleWithFinanceOutbox(
+          updatedSale,
+          scope,
+          "TRY"
+        );
 
 
       const operationResult =
@@ -398,6 +413,29 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
 
       }
 
+
+      const financeResult =
+        await executeSalesFinanceOutboxRecord(
+          financeOutboxRecord
+        );
+
+      if (
+        financeResult.outcome ===
+        "ERROR"
+      ) {
+        console.error(
+          "[Sales Finance] Satış kaydedildi ancak finans kuyruğu tamamlanamadı.",
+          financeResult.reason
+        );
+
+        alert(
+          "Satış kaydedildi ancak merkezi finans kaydı tamamlanamadı. " +
+          "Finans işlemi güvenli kuyrukta bekliyor ve tekrar denenebilir. " +
+          "Kayıt ekranı açık bırakıldı."
+        );
+
+        return;
+      }
 
       router.replace("/satis");
     } catch (error) {

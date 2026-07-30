@@ -1,5 +1,12 @@
 import { create } from 'zustand';
-import { loadLocalSales, saveLocalSale, deleteLocalSale } from '@/lib/localSalesDb';
+import {
+  loadLocalSales,
+  saveLocalSale,
+  saveLocalSaleWithFinanceOutbox,
+  deleteLocalSale,
+  type SalesFinanceOutboxRecord
+} from '@/lib/localSalesDb';
+import type { ErpScope } from '@/lib/erpScope';
 
 export type SaleStatus =
   | 'TASLAK'
@@ -147,6 +154,12 @@ interface SalesState {
   loadSales: () => Promise<void>;
   addSale: (sale: Sale) => Promise<void>;
   updateSale: (sale: Sale) => Promise<void>;
+
+  updateSaleWithFinanceOutbox: (
+    sale: Sale,
+    scope: ErpScope,
+    currency: string
+  ) => Promise<SalesFinanceOutboxRecord>;
   removeSale: (id: string) => Promise<void>;
   transferSales: (sourceCustomerId: string, targetCustomerId: string) => Promise<void>;
   cascadeArchiveCustomer: (customerId: string, batchId: string, username: string) => Promise<void>;
@@ -189,6 +202,48 @@ export const useSalesStore = create<SalesState>((set, get) => ({
       sales: state.sales.map(s => (s.id === sale.id ? sale : s))
     }));
   },
+
+  updateSaleWithFinanceOutbox:
+    async (
+      sale: Sale,
+      scope: ErpScope,
+      currency: string
+    ) => {
+      const outboxRecord =
+        await saveLocalSaleWithFinanceOutbox({
+          sale,
+          scope,
+          currency
+        });
+
+      if (
+        sale.status ===
+        'ÜRETİME_GÖNDERİLDİ'
+      ) {
+        const {
+          syncCentralSaleToTailorProduction
+        } =
+          await import(
+            '@/lib/productionBridge'
+          );
+
+        await syncCentralSaleToTailorProduction(
+          sale
+        );
+      }
+
+      set(state => ({
+        sales:
+          state.sales.map(
+            currentSale =>
+              currentSale.id === sale.id
+                ? sale
+                : currentSale
+          )
+      }));
+
+      return outboxRecord;
+    },
 
   removeSale: async (id: string) => {
     await deleteLocalSale(id);

@@ -1,17 +1,61 @@
 import Dexie, { type Table } from 'dexie';
 import { Sale } from '@/store/salesStore';
 import {
+  validateErpScope,
+  type ErpScope
+} from '@/lib/erpScope';
+import {
   captureSaleDeleteForSync,
   captureSaleSaveForSync
 } from '@/lib/salesSyncQueueBridge';
 
+
+export type SalesFinanceOutboxStatus =
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'SYNCED'
+  | 'ERROR';
+
+export interface SalesFinanceOutboxRecord
+  extends ErpScope {
+  id: string;
+  saleId: string;
+  saleSnapshot: Sale;
+  currency: string;
+  status: SalesFinanceOutboxStatus;
+  retryCount: number;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+  processedAt?: string;
+}
+
+export interface SaveSaleWithFinanceOutboxInput {
+  sale: Sale;
+  scope: ErpScope;
+  currency: string;
+}
 class LocalSalesDatabase extends Dexie {
   sales!: Table<Sale, string>;
+
+  financeOutbox!: Table<
+    SalesFinanceOutboxRecord,
+    string
+  >;
 
   constructor() {
     super('CeylinLocalSalesDb');
     this.version(1).stores({
       sales: 'id, customerId, saleNo, status'
+    });
+
+    this.version(2).stores({
+      sales:
+        'id, customerId, saleNo, status',
+
+      financeOutbox:
+        'id, saleId, status, updatedAt, ' +
+        '[tenantId+companyId+branchId+accountingPeriodId]'
     });
   }
 }
@@ -57,6 +101,161 @@ export async function saveLocalSale(sale: Sale): Promise<void> {
   }
 }
 
+function buildFinanceOutboxId(
+  sale: Sale,
+  scope: ErpScope
+): string {
+  return [
+    'sale-finance-outbox',
+    encodeURIComponent(scope.tenantId),
+    encodeURIComponent(scope.companyId),
+    encodeURIComponent(scope.branchId),
+    encodeURIComponent(
+      scope.accountingPeriodId
+    ),
+    encodeURIComponent(sale.id),
+    encodeURIComponent(sale.updatedAt)
+  ].join(':');
+}
+
+export async function saveLocalSaleWithFinanceOutbox(
+  input: SaveSaleWithFinanceOutboxInput
+): Promise<SalesFinanceOutboxRecord> {
+  const scopeValidation =
+    validateErpScope(input.scope);
+
+  if (!scopeValidation.valid) {
+    throw new Error(
+      `SALES_FINANCE_OUTBOX_SCOPE_REQUIRED:${scopeValidation.missingFields.join(',')}`
+    );
+  }
+
+  const currency =
+    input.currency.trim().toUpperCase();
+
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    throw new Error(
+      'SALES_FINANCE_OUTBOX_CURRENCY_INVALID'
+    );
+  }
+
+  if (!input.sale.id.trim()) {
+    throw new Error(
+      'SALES_FINANCE_OUTBOX_SALE_ID_REQUIRED'
+    );
+  }
+
+  if (!input.sale.customerId.trim()) {
+    throw new Error(
+      'SALES_FINANCE_OUTBOX_CUSTOMER_ID_REQUIRED'
+    );
+  }
+
+  const existing =
+    await localSalesDb.sales.get(
+      input.sale.id
+    );
+
+  const now =
+    new Date().toISOString();
+
+  const storedSale: Sale =
+    existing
+      ? {
+          ...existing,
+          ...input.sale,
+          updatedAt:
+            input.sale.updatedAt || now
+        }
+      : {
+          ...input.sale,
+          createdAt:
+            input.sale.createdAt || now,
+          updatedAt:
+            input.sale.updatedAt || now
+        };
+
+  const outboxRecord:
+    SalesFinanceOutboxRecord = {
+      ...input.scope,
+
+      id:
+        buildFinanceOutboxId(
+          storedSale,
+          input.scope
+        ),
+
+      saleId:
+        storedSale.id,
+
+      saleSnapshot:
+        storedSale,
+
+      currency,
+
+      status:
+        'PENDING',
+
+      retryCount:
+        0,
+
+      createdAt:
+        now,
+
+      updatedAt:
+        now
+    };
+
+  await localSalesDb.transaction(
+    'rw',
+    localSalesDb.sales,
+    localSalesDb.financeOutbox,
+    async () => {
+      await localSalesDb.sales.put(
+        storedSale
+      );
+
+      await localSalesDb.financeOutbox.put(
+        outboxRecord
+      );
+    }
+  );
+
+  try {
+    await captureSaleSaveForSync(
+      storedSale,
+      existing
+    );
+  } catch {
+    console.error(
+      '[localSalesDb] Sale and finance outbox saved, but sync queue capture failed.'
+    );
+  }
+
+  return outboxRecord;
+}
+
+export async function loadPendingSalesFinanceOutbox():
+Promise<SalesFinanceOutboxRecord[]> {
+  return localSalesDb.financeOutbox
+    .where('status')
+    .anyOf([
+      'PENDING',
+      'PROCESSING',
+      'ERROR'
+    ])
+    .sortBy('updatedAt');
+}
+
+export async function updateSalesFinanceOutbox(
+  record: SalesFinanceOutboxRecord
+): Promise<void> {
+  await localSalesDb.financeOutbox.put({
+    ...record,
+    updatedAt:
+      new Date().toISOString()
+  });
+}
 export async function deleteLocalSale(id: string): Promise<void> {
   try {
     const existing = await localSalesDb.sales.get(id);
