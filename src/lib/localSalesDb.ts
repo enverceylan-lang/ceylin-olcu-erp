@@ -8,6 +8,9 @@ import {
   captureSaleDeleteForSync,
   captureSaleSaveForSync
 } from '@/lib/salesSyncQueueBridge';
+import type {
+  SaleStatusTransitionAudit
+} from '@/lib/saleStatusTransitionService';
 
 
 export type SalesFinanceOutboxStatus =
@@ -30,16 +33,29 @@ export interface SalesFinanceOutboxRecord
   processedAt?: string;
 }
 
+export interface SaleStatusTransitionAuditRecord
+  extends SaleStatusTransitionAudit,
+    ErpScope {
+}
+
 export interface SaveSaleWithFinanceOutboxInput {
   sale: Sale;
   scope: ErpScope;
   currency: string;
+  statusAudit?:
+    SaleStatusTransitionAudit;
 }
+
 class LocalSalesDatabase extends Dexie {
   sales!: Table<Sale, string>;
 
   financeOutbox!: Table<
     SalesFinanceOutboxRecord,
+    string
+  >;
+
+  saleStatusAudits!: Table<
+    SaleStatusTransitionAuditRecord,
     string
   >;
 
@@ -56,6 +72,20 @@ class LocalSalesDatabase extends Dexie {
       financeOutbox:
         'id, saleId, status, updatedAt, ' +
         '[tenantId+companyId+branchId+accountingPeriodId]'
+    });
+
+    this.version(3).stores({
+      sales:
+        'id, customerId, saleNo, status',
+
+      financeOutbox:
+        'id, saleId, status, updatedAt, ' +
+        '[tenantId+companyId+branchId+accountingPeriodId]',
+
+      saleStatusAudits:
+        'id, saleId, actorUserId, occurredAt, ' +
+        '[tenantId+companyId+branchId+accountingPeriodId], ' +
+        '[tenantId+companyId+branchId+accountingPeriodId+saleId]'
     });
   }
 }
@@ -206,10 +236,31 @@ export async function saveLocalSaleWithFinanceOutbox(
         now
     };
 
+  let statusAuditRecord:
+    SaleStatusTransitionAuditRecord |
+    undefined;
+
+  if (input.statusAudit) {
+    if (
+      input.statusAudit.saleId !==
+      storedSale.id
+    ) {
+      throw new Error(
+        'SALE_STATUS_AUDIT_SALE_ID_MISMATCH'
+      );
+    }
+
+    statusAuditRecord = {
+      ...input.scope,
+      ...input.statusAudit
+    };
+  }
+
   await localSalesDb.transaction(
     'rw',
     localSalesDb.sales,
     localSalesDb.financeOutbox,
+    localSalesDb.saleStatusAudits,
     async () => {
       await localSalesDb.sales.put(
         storedSale
@@ -218,6 +269,12 @@ export async function saveLocalSaleWithFinanceOutbox(
       await localSalesDb.financeOutbox.put(
         outboxRecord
       );
+
+      if (statusAuditRecord) {
+        await localSalesDb
+          .saleStatusAudits
+          .put(statusAuditRecord);
+      }
     }
   );
 
@@ -233,6 +290,42 @@ export async function saveLocalSaleWithFinanceOutbox(
   }
 
   return outboxRecord;
+}
+
+export async function loadSaleStatusAudits(
+  scope: ErpScope,
+  saleId: string
+): Promise<
+  SaleStatusTransitionAuditRecord[]
+> {
+  const scopeValidation =
+    validateErpScope(scope);
+
+  if (!scopeValidation.valid) {
+    throw new Error(
+      `SALE_STATUS_AUDIT_SCOPE_REQUIRED:${scopeValidation.missingFields.join(',')}`
+    );
+  }
+
+  if (!saleId.trim()) {
+    throw new Error(
+      'SALE_STATUS_AUDIT_SALE_ID_REQUIRED'
+    );
+  }
+
+  return localSalesDb
+    .saleStatusAudits
+    .where(
+      '[tenantId+companyId+branchId+accountingPeriodId+saleId]'
+    )
+    .equals([
+      scope.tenantId,
+      scope.companyId,
+      scope.branchId,
+      scope.accountingPeriodId,
+      saleId
+    ])
+    .sortBy('occurredAt');
 }
 
 export async function loadPendingSalesFinanceOutbox():

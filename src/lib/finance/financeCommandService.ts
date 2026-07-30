@@ -60,6 +60,10 @@ function expectedDirection(
     return "CREDIT";
   }
 
+  if (transaction.transactionType === "REFUND") {
+    return "CREDIT";
+  }
+
   return null;
 }
 
@@ -206,6 +210,97 @@ export async function executeFinanceCommand(
     if (
       transaction.netAmount >
       openBalance + MONEY_EPSILON
+    ) {
+      return {
+        outcome: "REJECT",
+        reason: "OVERPAYMENT"
+      };
+    }
+  }
+
+  if (
+    transaction.transactionType === "REFUND"
+  ) {
+    if (
+      transaction.sourceDocumentType !==
+        "SALE_RETURN" ||
+      transaction.projectionSource !==
+        "SALE_RETURN"
+    ) {
+      return {
+        outcome: "REJECT",
+        reason: "INVALID_TRANSACTION"
+      };
+    }
+
+    const duplicateReturnDocument =
+      existing.some(
+        item =>
+          item.transactionType === "REFUND" &&
+          item.sourceDocumentType ===
+            "SALE_RETURN" &&
+          item.sourceDocumentId ===
+            transaction.sourceDocumentId &&
+          item.status === "POSTED" &&
+          item.archivedAt === null
+      );
+
+    if (duplicateReturnDocument) {
+      return {
+        outcome: "REJECT",
+        reason:
+          "DUPLICATE_SOURCE_DOCUMENT"
+      };
+    }
+
+    const postedSaleChargeTotal =
+      roundMoney(
+        existing
+          .filter(
+            item =>
+              item.transactionType ===
+                "SALE_CHARGE" &&
+              item.direction === "DEBIT" &&
+              item.status === "POSTED" &&
+              item.archivedAt === null
+          )
+          .reduce(
+            (total, item) =>
+              total + item.netAmount,
+            0
+          )
+      );
+
+    const postedRefundTotal =
+      roundMoney(
+        existing
+          .filter(
+            item =>
+              item.transactionType ===
+                "REFUND" &&
+              item.direction === "CREDIT" &&
+              item.sourceDocumentType ===
+                "SALE_RETURN" &&
+              item.status === "POSTED" &&
+              item.archivedAt === null
+          )
+          .reduce(
+            (total, item) =>
+              total + item.netAmount,
+            0
+          )
+      );
+
+    const remainingReturnableAmount =
+      roundMoney(
+        postedSaleChargeTotal -
+        postedRefundTotal
+      );
+
+    if (
+      transaction.netAmount >
+      remainingReturnableAmount +
+        MONEY_EPSILON
     ) {
       return {
         outcome: "REJECT",

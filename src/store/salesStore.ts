@@ -7,6 +7,12 @@ import {
   type SalesFinanceOutboxRecord
 } from '@/lib/localSalesDb';
 import type { ErpScope } from '@/lib/erpScope';
+import type {
+  SaleStatusTransitionAudit
+} from '@/lib/saleStatusTransitionService';
+import {
+  assertSaleCanBeDeleted
+} from '@/lib/saleDeletionPolicy';
 
 export type SaleStatus =
   | 'TASLAK'
@@ -158,7 +164,9 @@ interface SalesState {
   updateSaleWithFinanceOutbox: (
     sale: Sale,
     scope: ErpScope,
-    currency: string
+    currency: string,
+    statusAudit?:
+      SaleStatusTransitionAudit
   ) => Promise<SalesFinanceOutboxRecord>;
   removeSale: (id: string) => Promise<void>;
   transferSales: (sourceCustomerId: string, targetCustomerId: string) => Promise<void>;
@@ -207,13 +215,16 @@ export const useSalesStore = create<SalesState>((set, get) => ({
     async (
       sale: Sale,
       scope: ErpScope,
-      currency: string
+      currency: string,
+      statusAudit?:
+        SaleStatusTransitionAudit
     ) => {
       const outboxRecord =
         await saveLocalSaleWithFinanceOutbox({
           sale,
           scope,
-          currency
+          currency,
+          statusAudit
         });
 
       if (
@@ -246,9 +257,28 @@ export const useSalesStore = create<SalesState>((set, get) => ({
     },
 
   removeSale: async (id: string) => {
+    const existingSale =
+      get().sales.find(
+        sale => sale.id === id
+      );
+
+    if (!existingSale) {
+      throw new Error(
+        'SALE_NOT_FOUND'
+      );
+    }
+
+    assertSaleCanBeDeleted(
+      existingSale.status
+    );
+
     await deleteLocalSale(id);
+
     set(state => ({
-      sales: state.sales.filter(s => s.id !== id)
+      sales:
+        state.sales.filter(
+          sale => sale.id !== id
+        )
     }));
   },
 

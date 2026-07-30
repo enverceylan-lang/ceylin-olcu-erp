@@ -10,6 +10,7 @@ import { useStore } from "@/store/useStore";
 import { useSalesStore, Sale, SaleStatus, SaleItem, PaymentMethod } from "@/store/salesStore";
 import InstallmentPlanPanel from "@/components/sales/InstallmentPlanPanel";
 import PaymentTrackingPanel from "@/components/sales/PaymentTrackingPanel";
+import SaleReturnPanel from "@/components/sales/SaleReturnPanel";
 import { generateSalesPdfFile, openSalesPdfPreview } from "@/lib/salesPdfGenerator";
 import { prepareSaleForApproval } from "@/lib/salesApproval";
 import { getSaleRemainingBalance } from "@/lib/salesFinance";
@@ -23,6 +24,15 @@ import { getSaleStatusPresentation } from "@/lib/saleStatusPresentation";
 import {
   executeSalesFinanceOutboxRecord
 } from "@/lib/finance/salesFinanceOutboxExecutor";
+import {
+  APPROVED_SALE_DELETE_ERROR,
+  canDeleteSale
+} from "@/lib/saleDeletionPolicy";
+import {
+  getAllowedSaleStatusTransitions,
+  requestSaleStatusTransition,
+  type SaleStatusTransitionAudit
+} from "@/lib/saleStatusTransitionService";
 
 export default function SaleDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
@@ -345,6 +355,59 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
       }
 
 
+      let statusTransitionAuditForSave:
+        SaleStatusTransitionAudit |
+        undefined;
+
+      const persistedSaleForSave =
+        sales.find(
+          currentSale =>
+            currentSale.id === sale.id
+        );
+
+      if (!persistedSaleForSave) {
+        alert(
+          "Satışın kayıtlı önceki hali bulunamadı."
+        );
+
+        return;
+      }
+
+      if (
+        persistedSaleForSave.status !==
+        updatedSale.status
+      ) {
+        const transitionResult =
+          requestSaleStatusTransition({
+            saleId: updatedSale.id,
+            fromStatus:
+              persistedSaleForSave.status,
+            toStatus:
+              updatedSale.status,
+            actorUserId:
+              currentUser.id,
+            occurredAt:
+              updatedSale.updatedAt
+          });
+
+        if (
+          transitionResult.outcome ===
+          "REJECTED"
+        ) {
+          const transitionMessage =
+            transitionResult.reason ===
+            "APPROVED_SALE_REQUIRES_RETURN"
+              ? "Onaylanan satış iptal edilemez. İade süreci başlatılmalıdır."
+              : "Bu satış durum geçişine izin verilmiyor.";
+
+          alert(transitionMessage);
+          return;
+        }
+
+        statusTransitionAuditForSave =
+          transitionResult.audit;
+      }
+
       if (updatedSale.items.length === 0) {
 
         alert(
@@ -362,7 +425,8 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
         await updateSaleWithFinanceOutbox(
           updatedSale,
           scope,
-          "TRY"
+          "TRY",
+          statusTransitionAuditForSave
         );
 
 
@@ -551,10 +615,122 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
       );
     }
   };
+  const persistedSale =
+    sales.find(
+      currentSale =>
+        currentSale.id === sale.id
+    ) || sale;
+
+  const allowedStatusOptions:
+    SaleStatus[] = [
+      persistedSale.status,
+      ...getAllowedSaleStatusTransitions(
+        persistedSale.status
+      )
+    ].filter(
+      (
+        status,
+        index,
+        statuses
+      ) =>
+        statuses.indexOf(status) ===
+        index
+    );
+
+  const handleStatusChange = (
+    nextStatus: SaleStatus
+  ) => {
+    if (
+      nextStatus ===
+      persistedSale.status
+    ) {
+      setSale({
+        ...sale,
+        status:
+          persistedSale.status
+      });
+
+      return;
+    }
+
+    if (!currentUser?.id) {
+      alert(
+        "Aktif kullanıcı bilgisi bulunamadı."
+      );
+
+      return;
+    }
+
+    const transitionResult =
+      requestSaleStatusTransition({
+        saleId: sale.id,
+        fromStatus:
+          persistedSale.status,
+        toStatus: nextStatus,
+        actorUserId:
+          currentUser.id,
+        occurredAt:
+          new Date().toISOString()
+      });
+
+    if (
+      transitionResult.outcome ===
+      "REJECTED"
+    ) {
+      const transitionMessage =
+        transitionResult.reason ===
+        "APPROVED_SALE_REQUIRES_RETURN"
+          ? "Onaylanan satış iptal edilemez. İade süreci başlatılmalıdır."
+          : "Bu satış durum geçişine izin verilmiyor.";
+
+      alert(transitionMessage);
+      return;
+    }
+
+    setSale({
+      ...sale,
+      status: nextStatus
+    });
+  };
+
   const handleDelete = async () => {
-    if (confirm("Bu satış kaydını silmek istediğinize emin misiniz?")) {
+    if (
+      !canDeleteSale(
+        persistedSale.status
+      )
+    ) {
+      alert(
+        "Onaylanan satış silinemez. İade süreci başlatılmalıdır."
+      );
+
+      return;
+    }
+
+    if (
+      !confirm(
+        "Bu satış kaydını silmek istediğinize emin misiniz?"
+      )
+    ) {
+      return;
+    }
+
+    try {
       await removeSale(sale.id);
       router.push("/satis");
+    } catch (error) {
+      console.error(
+        "[Sales] Satış silinemedi.",
+        error
+      );
+
+      const deleteMessage =
+        error instanceof Error &&
+        error.message ===
+          APPROVED_SALE_DELETE_ERROR
+          ? "Onaylanan satış silinemez. İade süreci başlatılmalıdır."
+          : "Satış kaydı silinemedi.";
+
+      alert(deleteMessage);
     }
   };
 
@@ -611,14 +787,18 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
             <FileDown className="w-4 h-4 shrink-0" />
             <span>PDF Görüntüle</span>
           </button>
-          <button
-            type="button"
-            onClick={handleDelete}
-            className="inline-flex min-h-10 items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-950/30 dark:hover:bg-red-900/40 dark:text-red-400 font-bold shadow-sm transition-colors text-xs"
-          >
-            <Trash2 className="w-4 h-4 shrink-0" />
-            <span>Sil</span>
-          </button>
+          {canDeleteSale(
+            persistedSale.status
+          ) && (
+            <button
+              type="button"
+              onClick={handleDelete}
+              className="inline-flex min-h-10 items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-950/30 dark:hover:bg-red-900/40 dark:text-red-400 font-bold shadow-sm transition-colors text-xs"
+            >
+              <Trash2 className="w-4 h-4 shrink-0" />
+              <span>Sil</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={handleSave}
@@ -862,19 +1042,64 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
              <h2 className="font-semibold text-gray-900 dark:text-white mb-4">Durum</h2>
              <select
                 value={sale.status}
-                onChange={e => setSale({...sale, status: e.target.value as SaleStatus})}
+                onChange={event =>
+                  handleStatusChange(
+                    event.target.value as
+                      SaleStatus
+                  )
+                }
                 className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded-lg p-2.5"
              >
-                <option value="TASLAK">Taslak</option>
-                <option value="TEKLİF">Teklif</option>
-                <option value="ONAYLANDI">Onaylandı</option>
-                <option value="SİPARİŞ">Sipariş</option>
-                <option value="ÜRETİME_GÖNDERİLDİ">Üretime Gönderildi</option>
-                <option value="MONTAJA_GÖNDERİLDİ">Montaja Gönderildi</option>
-                <option value="TAMAMLANDI">Tamamlandı</option>
-                <option value="İPTAL">İptal</option>
+                {allowedStatusOptions.map(
+                  status => (
+                    <option
+                      key={status}
+                      value={status}
+                    >
+                      {
+                        getSaleStatusPresentation(
+                          status
+                        ).label
+                      }
+                    </option>
+                  )
+                )}
              </select>
+
+             {!canDeleteSale(
+               persistedSale.status
+             ) && (
+               <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">
+                 Onaylanan satış iptal edilemez veya silinemez.
+                 Müşteri vazgeçerse iade süreci başlatılmalıdır.
+               </p>
+             )}
           </div>
+
+          {
+            scope &&
+            currentUser?.id &&
+            !canDeleteSale(
+              persistedSale.status
+            ) && (
+              <SaleReturnPanel
+                scope={scope}
+                saleId={
+                  persistedSale.id
+                }
+                customerId={
+                  persistedSale.customerId
+                }
+                saleStatus={
+                  persistedSale.status
+                }
+                currency="TRY"
+                actorUserId={
+                  currentUser.id
+                }
+              />
+            )
+          }
         </div>
       </div>
       {isInstallmentModalOpen && (

@@ -46,6 +46,7 @@ export type FinanceTransactionStatus =
 export type FinanceSourceDocumentType =
   | "SALE"
   | "SALE_PAYMENT"
+  | "SALE_RETURN"
   | "LEGACY_DOWN_PAYMENT"
   | "EXPENSE"
   | "CHEQUE"
@@ -57,6 +58,7 @@ export type FinanceSourceDocumentType =
 export type FinanceProjectionSource =
   | "SALE_CHARGE"
   | "SALE_PAYMENT"
+  | "SALE_RETURN"
   | "LEGACY_DOWN_PAYMENT";
 
 export interface FinanceAccount extends ErpScope {
