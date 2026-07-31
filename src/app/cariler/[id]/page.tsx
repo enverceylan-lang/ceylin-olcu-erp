@@ -1133,7 +1133,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
   const renderMeasurementForm = (room: Room, window: WindowItem, isInlineEdit = false) => {
     return (
-      <div key={isInlineEdit ? editingMeasurementId : "new"} className={`mt-4 border-2 border-blue-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-lg ${isInlineEdit ? "" : "ml-6"} relative`}>
+      <div key={isInlineEdit ? editingMeasurementId : "new"} className={`mt-4 overflow-hidden rounded-xl border-2 border-blue-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800 ${isInlineEdit ? "" : "ml-0 sm:ml-6"} relative`}>
                               <div className="bg-blue-50 dark:bg-gray-900 p-3 border-b border-blue-100 dark:border-gray-700 flex justify-between items-center">
                                 <h5 className="font-bold text-blue-900 dark:text-gray-100">
                                   {editingMeasurementId ? "Saha Ölçüsü Düzenleme Formu" : "Saha Ölçü Formu"}
@@ -1152,14 +1152,14 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                 </button>
                               </div>
 
-                              <div className="p-4 space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
+                              <div className="space-y-4 p-3 sm:p-4">
+                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
                                   <div>
                                     <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Ölçüm Şablonu</label>
                                     <select
                                       value={selectedTemplate}
                                       onChange={(e) => { setSelectedTemplate(e.target.value); setRawValues({}); }}
-                                      className="w-full p-2 border rounded-lg bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                      className="min-h-11 w-full rounded-lg border bg-gray-50 px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                                     >
                                       {Object.values(MEASUREMENT_TEMPLATES).map(t => (
                                         <option key={t.type} value={t.type}>{getTemplateLabel(t.type)}</option>
@@ -1173,7 +1173,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                       <select
                                         value={overrideMeasuredById}
                                         onChange={(e) => setOverrideMeasuredById(e.target.value)}
-                                        className="w-full p-2 border rounded-lg bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                        className="min-h-11 w-full rounded-lg border bg-gray-50 px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                                       >
                                         {measurementEmployees.map(u => <option key={u.id} value={u.id}>{u.name} ({(ROLE_PERMISSIONS[u.role] || { label: u.role }).label})</option>)}
                                       </select>
@@ -1224,7 +1224,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                           <select
                                             value={String(rawValues[f.key] !== undefined ? rawValues[f.key] : (f.options && f.options.length > 0 ? f.options[0] : ''))}
                                             onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
-                                            className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
+                                            className="min-h-11 w-full rounded border px-3 py-2.5 text-base transition-shadow outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
                                           >
                                             {f.options?.map(opt => (
                                               <option key={opt} value={opt}>{opt}</option>
@@ -1235,7 +1235,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                             placeholder={f.label}
                                             value={String(rawValues[f.key] !== undefined ? rawValues[f.key] : (f.defaultValue !== undefined ? f.defaultValue : ''))}
                                             onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
-                                            className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow resize-y"
+                                            className="min-h-24 w-full resize-y rounded border px-3 py-2.5 text-base transition-shadow outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-900 dark:text-white dark:placeholder-gray-600"
                                             rows={2}
                                           />
                                         ) : (
@@ -1245,7 +1245,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                             placeholder={f.label}
                                             value={String(rawValues[f.key] !== undefined ? rawValues[f.key] : (f.defaultValue !== undefined ? f.defaultValue : ''))}
                                             onChange={(e) => setRawValues({...rawValues, [f.key]: e.target.value})}
-                                            className="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-900 dark:text-white dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
+                                            className="min-h-11 w-full rounded border px-3 py-2.5 text-base transition-shadow outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-900 dark:text-white dark:placeholder-gray-600"
                                           />
                                         )}
                                       </div>
@@ -1259,14 +1259,14 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                     value={measurementNotes}
                                     placeholder="Herhangi bir engel veya not var mı?"
                                     onChange={(e) => setMeasurementNotes(e.target.value)}
-                                    className="w-full p-2 border dark:border-gray-700 rounded bg-white dark:bg-gray-900 dark:text-white dark:placeholder-gray-600 focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-shadow"
+                                    className="min-h-24 w-full resize-y rounded border px-3 py-2.5 text-base transition-shadow outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:placeholder-gray-600"
                                     rows={2}
                                   />
                                 </div>
 
-                                <button onClick={() => handleSaveMeasurement(room.id, window.id)} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow-md transition-colors text-sm">
+                                <div className="sticky bottom-2 z-10 rounded-xl bg-white/95 p-1 shadow-lg backdrop-blur dark:bg-gray-800/95 sm:static sm:bg-transparent sm:p-0 sm:shadow-none"><button onClick={() => handleSaveMeasurement(room.id, window.id)} className="min-h-12 w-full rounded-lg bg-blue-600 px-4 py-3 text-base font-bold text-white shadow-md transition-colors hover:bg-blue-700">
                                   {editingMeasurementId ? "Değişiklikleri Kaydet" : "Ölçüyü Kaydet"}
-                                </button>
+                                </button></div>
                               </div>
                             </div>
     );
