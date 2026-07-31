@@ -98,7 +98,7 @@ function sanitizeMediaArray(arr: unknown[]): unknown[] {
   return arr
     .map((item) => {
       if (typeof item === "string") {
-        // Raw base64 or data-url â€” drop entirely for local storage
+        // Raw base64 or data-url — drop entirely for local storage
         if (item.startsWith("data:") || item.length > 2000) return null;
         return item;
       }
@@ -532,7 +532,7 @@ async function persistAndVerifyMeasurements(
 ): Promise<void> {
   if (measurements.length === 0) {
     throw new Error(
-      "Bu gelen kayda ait geÃ§erli ölçü bulunamadı. Cari iÅŸlemi durduruldu.",
+      "Bu gelen kayda ait geçerli ölçü bulunamadı. Cari işlemi durduruldu.",
     );
   }
 
@@ -541,7 +541,7 @@ async function persistAndVerifyMeasurements(
     const openingId = measurement.openingId || measurement.windowId;
     if (!measurement.id || !measurement.customerId || !measurement.roomId || !openingId) {
       throw new Error(
-        `GeÃ§ersiz ölçü bağlantısı: ${measurement.id || "kimliksiz ölçü"}`,
+        `Geçersiz ölçü bağlantısı: ${measurement.id || "kimliksiz ölçü"}`,
       );
     }
 
@@ -553,9 +553,9 @@ async function persistAndVerifyMeasurements(
     };
   });
 
-  // Kimlik mutabakatÄ± (geÃ§ici cari -> gerÃ§ek cari) normal senkron sÃ¼rÃ¼m
-  // karÅŸÄ±laÅŸtÄ±rmasÄ±na takÄ±lmamalÄ±. AynÄ± ölçü kimliÄŸiyle doÄŸrudan IndexedDB Ã¼zerinde
-  // atomik olarak gÃ¼ncellenir; bu iÅŸlem yeni/kopya ölçü Ã¼retmez.
+  // Kimlik mutabakatı (geçici cari -> gerçek cari) normal senkron sürüm
+  // karşılaştırmasına takılmamalı. Aynı ölçü kimliğiyle doğrudan IndexedDB üzerinde
+  // atomik olarak güncellenir; bu işlem yeni/kopya ölçü üretmez.
   await localMeasurementDb.transaction(
     "rw",
     localMeasurementDb.measurements,
@@ -564,7 +564,7 @@ async function persistAndVerifyMeasurements(
     },
   );
 
-  // Zustand belleÄŸini IndexedDB'nin kesin son haliyle eÅŸitle.
+  // Zustand belleğini IndexedDB'nin kesin son haliyle eşitle.
   await useMeasurementStore.getState().loadMeasurements();
 
   const persisted = await localMeasurementDb.measurements.bulkGet(
@@ -592,7 +592,7 @@ async function persistAndVerifyMeasurements(
 
   if (invalid.length > 0) {
     throw new Error(
-      `Ölçü baÄŸlantÄ± doÄŸrulamasÄ± baÅŸarÄ±sÄ±z: ${invalid.map((m) => m.id).join(", ")}`,
+      `Ölçü bağlantı doğrulaması başarısız: ${invalid.map((m) => m.id).join(", ")}`,
     );
   }
 }
@@ -642,7 +642,7 @@ export async function processAsNewCustomer(
     patchData.customerName ||
     patch.name ||
     patchData.name ||
-    "Ä°simsiz MÃ¼ÅŸteri"
+    "İsimsiz Müşteri"
   ).trim();
   const customerPhone = (
     inbound.customerPhone ||
@@ -682,7 +682,7 @@ export async function processAsNewCustomer(
 
   if (sourceMeasurements.length === 0) {
     throw new Error(
-      "Bu gelen cari kaydÄ±na baÄŸlÄ± ölçü bulunamadı. Cari oluÅŸturulmadÄ±; kayÄ±t havuzda korunuyor.",
+      "Bu gelen cari kaydına bağlı ölçü bulunamadı. Cari oluşturulmadı; kayıt havuzda korunuyor.",
     );
   }
 
@@ -690,7 +690,7 @@ export async function processAsNewCustomer(
   const structuralRooms = mergeRoomStructures(patchRooms, derivedRooms);
   if (structuralRooms.length === 0) {
     throw new Error(
-      "Ölçüler bulundu ancak oda/aÃ§Ä±klÄ±k bağlantısı oluÅŸturulamadÄ±. Cari oluÅŸturulmadÄ±.",
+      "Ölçüler bulundu ancak oda/açıklık bağlantısı oluşturulamadı. Cari oluşturulmadı.",
     );
   }
 
@@ -786,7 +786,7 @@ export async function processAsMerge(
   const customers = await loadLocalCustomers();
   const targetCustomer = customers.find((c) => c.id === customerId);
   if (!targetCustomer) {
-    throw new Error("Hedef mÃ¼ÅŸteri bulunamadı.");
+    throw new Error("Hedef müşteri bulunamadı.");
   }
 
   const patch = (inbound.patch || {}) as InboundPatch;
@@ -811,7 +811,7 @@ export async function processAsMerge(
 
   if (sourceMeasurements.length === 0) {
     throw new Error(
-      "Bu gelen kayda baÄŸlÄ± ölçü bulunamadı. Cari bağlantısı yapÄ±lmadÄ±; kayÄ±t havuzda korunuyor.",
+      "Bu gelen kayda bağlı ölçü bulunamadı. Cari bağlantısı yapılmadı; kayıt havuzda korunuyor.",
     );
   }
 
@@ -819,7 +819,7 @@ export async function processAsMerge(
   const incomingStructures = mergeRoomStructures(patchRooms, derivedRooms);
   if (incomingStructures.length === 0) {
     throw new Error(
-      "Ölçüler bulundu ancak oda/aÃ§Ä±klÄ±k bağlantısı oluÅŸturulamadÄ±. Cari bağlantısı yapÄ±lmadÄ±.",
+      "Ölçüler bulundu ancak oda/açıklık bağlantısı oluşturulamadı. Cari bağlantısı yapılmadı.",
     );
   }
 
