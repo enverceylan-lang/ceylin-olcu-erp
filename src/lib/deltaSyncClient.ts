@@ -678,9 +678,12 @@ export async function pullInboundMeasurements(
     for (const change of changes) {
       const patch = change.patch || {};
 
-      // DRAFT events require approval; MEASUREMENT events are applied above.
+      // Allow DRAFT, CUSTOMER, ROOM, OPENING, MEASUREMENT events
       const isDraftEvent =
         change.entity_type === "DRAFT" &&
+        (change.operation === "INSERT" || change.operation === "UPDATE");
+      const isMeasurementEvent =
+        ["CUSTOMER", "ROOM", "OPENING"].includes(change.entity_type) &&
         (change.operation === "INSERT" || change.operation === "UPDATE");
 
       if (
@@ -824,7 +827,7 @@ export async function pullInboundMeasurements(
         continue;
       }
 
-      if (isDraftEvent) {
+      if (isDraftEvent || isMeasurementEvent) {
         // Safety check: if this is a DRAFT event and it lacks rooms/measurements and also lacks a customerName,
         // and is essentially just a status-only patch, do not process it into the inbound pool.
         if (isDraftEvent) {

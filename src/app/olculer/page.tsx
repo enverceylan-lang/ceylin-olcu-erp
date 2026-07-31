@@ -157,14 +157,7 @@ const [manualRepairingMeasurementId, setManualRepairingMeasurementId] =
   const loadInbound = async () => {
     try {
       const data = await listInboundMeasurements();
-      setInboundMeasurements(
-      data.filter(
-        (item) =>
-          (item.status === "NEW" || item.status === "MATCH_PENDING") &&
-          (item.entityType === "DRAFT" ||
-            item.entityType === "MEASUREMENT_GROUP"),
-      ),
-    );
+      setInboundMeasurements(data.filter(d => d.status === 'NEW' || d.status === 'MATCH_PENDING'));
 
       const links: Record<string, string> = {};
       data
