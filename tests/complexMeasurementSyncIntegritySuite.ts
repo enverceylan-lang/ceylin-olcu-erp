@@ -30,27 +30,99 @@ function baseMeasurement(
   };
 }
 
+function normalizeSignaturePart(
+  value: unknown,
+): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  return String(value)
+    .trim()
+    .replaceAll("|", "%7C")
+    .replaceAll("~", "%7E");
+}
+
+function buildArraySignature(
+  value: unknown,
+  keys: string[],
+): string {
+  if (!Array.isArray(value)) return "";
+
+  return value
+    .map((item) => {
+      if (
+        typeof item !== "object" ||
+        item === null ||
+        Array.isArray(item)
+      ) {
+        return "!INVALID";
+      }
+
+      const record =
+        item as Record<string, unknown>;
+
+      return keys
+        .map((key) =>
+          normalizeSignaturePart(
+            record[key],
+          ),
+        )
+        .join("|");
+    })
+    .join("~");
+}
+
 function fullIntegrity(
   measurement: MeasurementRecord,
 ): NonNullable<MeasurementRecord["syncIntegrity"]> {
   const rawValues =
     measurement.rawValues || {};
 
+  const facadeSegments =
+    rawValues.facadeSegments;
+
+  const plicellCamListesi =
+    rawValues.plicellCamListesi;
+
+  const selectedProducts =
+    measurement.selectedProducts;
+
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     completeness: "FULL",
     facadeSegmentCount:
-      Array.isArray(rawValues.facadeSegments)
-        ? rawValues.facadeSegments.length
+      Array.isArray(facadeSegments)
+        ? facadeSegments.length
         : 0,
     plicellGlassCount:
-      Array.isArray(rawValues.plicellCamListesi)
-        ? rawValues.plicellCamListesi.length
+      Array.isArray(plicellCamListesi)
+        ? plicellCamListesi.length
         : 0,
     selectedProductCount:
-      Array.isArray(measurement.selectedProducts)
-        ? measurement.selectedProducts.length
+      Array.isArray(selectedProducts)
+        ? selectedProducts.length
         : 0,
+    facadeShapeSignature:
+      buildArraySignature(
+        facadeSegments,
+        ["id", "type", "widthCm"],
+      ),
+    plicellShapeSignature:
+      buildArraySignature(
+        plicellCamListesi,
+        [
+          "id",
+          "widthCm",
+          "heightCm",
+          "sourceMode",
+        ],
+      ),
+    selectedProductSignature:
+      buildArraySignature(
+        selectedProducts,
+        ["productType", "isActive"],
+      ),
   };
 }
 
@@ -206,6 +278,103 @@ assert.equal(
   2,
 );
 
+
+const sameCountBrokenPlicell =
+  baseMeasurement({
+    rawValues: {
+      camAdedi: 8,
+      plicellCamListesi: [
+        { id: "dup", widthCm: "40", heightCm: 150, sourceMode: "PIECE_BASED" },
+        { id: "dup", widthCm: "", heightCm: 151, sourceMode: "PIECE_BASED" },
+        { id: "p3", widthCm: "42", heightCm: 0, sourceMode: "PIECE_BASED" },
+        { id: "c1", widthCm: "50", heightCm: 170, sourceMode: "COMMON_HEIGHT" },
+        { id: "c2", widthCm: "51", heightCm: 170, sourceMode: "COMMON_HEIGHT" },
+        { id: "c3", widthCm: "52", heightCm: 170, sourceMode: "COMMON_HEIGHT" },
+        { id: "c4", widthCm: "53", heightCm: 170, sourceMode: "COMMON_HEIGHT" },
+        { id: "c5", widthCm: "54", heightCm: 170, sourceMode: "BROKEN" },
+      ],
+    },
+  });
+
+sameCountBrokenPlicell.syncIntegrity =
+  fullIntegrity(sameCountBrokenPlicell);
+
+const protectedSameCountPlicell =
+  mergeMeasurementForSync(
+    existingPlicell,
+    sameCountBrokenPlicell,
+  );
+
+assert.equal(
+  protectedSameCountPlicell.rawValues
+    .plicellCamListesi[0].id,
+  "p1",
+);
+
+assert.equal(
+  protectedSameCountPlicell.rawValues
+    .plicellCamListesi.length,
+  8,
+);
+
+const sameCountBrokenFacade =
+  baseMeasurement({
+    templateType: "CURTAIN_DETAIL",
+    rawValues: {
+      facadeSegments: [
+        { id: "s1", widthCm: 100, type: "WINDOW" },
+        { id: "s1", widthCm: 0, type: "DOOR" },
+        { id: "", widthCm: 120, type: "WINDOW" },
+      ],
+    },
+  });
+
+sameCountBrokenFacade.syncIntegrity =
+  fullIntegrity(sameCountBrokenFacade);
+
+const protectedSameCountFacade =
+  mergeMeasurementForSync(
+    existingFacade,
+    sameCountBrokenFacade,
+  );
+
+assert.equal(
+  protectedSameCountFacade.rawValues
+    .facadeSegments[1].id,
+  "s2",
+);
+
+const signatureMismatchPlicell =
+  baseMeasurement({
+    rawValues: {
+      camAdedi: 8,
+      plicellCamListesi: [
+        { id: "p1", widthCm: "40", heightCm: 150, sourceMode: "PIECE_BASED" },
+        { id: "p2", widthCm: "41", heightCm: 151, sourceMode: "PIECE_BASED" },
+        { id: "p3", widthCm: "42", heightCm: 152, sourceMode: "PIECE_BASED" },
+        { id: "c1", widthCm: "50", heightCm: 170, sourceMode: "COMMON_HEIGHT" },
+        { id: "c2", widthCm: "51", heightCm: 170, sourceMode: "COMMON_HEIGHT" },
+        { id: "c3", widthCm: "52", heightCm: 170, sourceMode: "COMMON_HEIGHT" },
+        { id: "c4", widthCm: "53", heightCm: 170, sourceMode: "COMMON_HEIGHT" },
+        { id: "c5", widthCm: "999", heightCm: 170, sourceMode: "COMMON_HEIGHT" },
+      ],
+    },
+  });
+
+signatureMismatchPlicell.syncIntegrity =
+  fullIntegrity(existingPlicell);
+
+const protectedSignatureMismatch =
+  mergeMeasurementForSync(
+    existingPlicell,
+    signatureMismatchPlicell,
+  );
+
+assert.equal(
+  protectedSignatureMismatch.rawValues
+    .plicellCamListesi[7].widthCm,
+  "54",
+);
 console.log(
   "[PASS] partialPlicellCannotShrinkFullMeasurement",
 );
@@ -217,6 +386,15 @@ console.log(
 );
 console.log(
   "[PASS] partialSelectedProductsCannotEraseProducts",
+);
+console.log(
+  "[PASS] sameCountBrokenPlicellCannotReplaceFullList",
+);
+console.log(
+  "[PASS] sameCountBrokenFacadeCannotReplaceFullSegments",
+);
+console.log(
+  "[PASS] signatureMismatchCannotReplaceFullMeasurement",
 );
 console.log(
   "[PASS] complexMeasurementSyncIntegritySuite completed",

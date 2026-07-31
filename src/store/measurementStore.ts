@@ -40,11 +40,14 @@ export interface MeasurementRecord extends ProductMeasurement {
    * Eski/eksik cihaz payloadları karmaşık alanları sessizce küçültemez.
    */
   syncIntegrity?: {
-    schemaVersion: 1;
+    schemaVersion: 2;
     completeness: "FULL";
     facadeSegmentCount: number;
     plicellGlassCount: number;
     selectedProductCount: number;
+    facadeShapeSignature: string;
+    plicellShapeSignature: string;
+    selectedProductSignature: string;
   };
 }
 
@@ -93,6 +96,122 @@ function countArray(
     : 0;
 }
 
+function normalizeSignaturePart(
+  value: unknown,
+): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  return String(value)
+    .trim()
+    .replaceAll("|", "%7C")
+    .replaceAll("~", "%7E");
+}
+
+function buildArraySignature(
+  value: unknown,
+  keys: string[],
+): string {
+  if (!Array.isArray(value)) return "";
+
+  return value
+    .map((item) => {
+      if (!isPlainRecord(item)) {
+        return "!INVALID";
+      }
+
+      return keys
+        .map((key) =>
+          normalizeSignaturePart(item[key]),
+        )
+        .join("|");
+    })
+    .join("~");
+}
+
+function hasUniqueNonEmptyIds(
+  value: unknown,
+): boolean {
+  if (!Array.isArray(value)) return true;
+
+  const ids = value.map((item) =>
+    isPlainRecord(item)
+      ? String(item.id || "").trim()
+      : "",
+  );
+
+  return (
+    ids.every(Boolean) &&
+    new Set(ids).size === ids.length
+  );
+}
+
+function hasValidPositiveNumber(
+  value: unknown,
+): boolean {
+  const normalized =
+    typeof value === "string"
+      ? value.replace(",", ".").trim()
+      : value;
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed > 0;
+}
+
+function isValidPlicellGlassList(
+  value: unknown,
+): boolean {
+  if (!Array.isArray(value)) return true;
+  if (!hasUniqueNonEmptyIds(value)) return false;
+
+  return value.every((item) => {
+    if (!isPlainRecord(item)) return false;
+
+    const sourceMode = String(
+      item.sourceMode || "",
+    ).trim();
+
+    return (
+      hasValidPositiveNumber(item.widthCm) &&
+      hasValidPositiveNumber(item.heightCm) &&
+      (
+        sourceMode === "" ||
+        sourceMode === "PIECE_BASED" ||
+        sourceMode === "COMMON_HEIGHT"
+      )
+    );
+  });
+}
+
+function isValidFacadeSegmentList(
+  value: unknown,
+): boolean {
+  if (!Array.isArray(value)) return true;
+  if (!hasUniqueNonEmptyIds(value)) return false;
+
+  return value.every((item) => {
+    if (!isPlainRecord(item)) return false;
+
+    return hasValidPositiveNumber(
+      item.widthCm,
+    );
+  });
+}
+
+function isValidSelectedProducts(
+  value: unknown,
+): boolean {
+  if (!Array.isArray(value)) return true;
+
+  return value.every(
+    (item) =>
+      isPlainRecord(item) &&
+      String(item.productType || "").trim()
+        .length > 0,
+  );
+}
+
 function hasValidFullIntegrity(
   measurement: MeasurementRecord,
 ): boolean {
@@ -101,7 +220,7 @@ function hasValidFullIntegrity(
 
   if (
     !integrity ||
-    integrity.schemaVersion !== 1 ||
+    integrity.schemaVersion !== 2 ||
     integrity.completeness !== "FULL"
   ) {
     return false;
@@ -112,13 +231,56 @@ function hasValidFullIntegrity(
       ? measurement.rawValues
       : {};
 
+  const facadeSegments =
+    rawValues.facadeSegments;
+
+  const plicellCamListesi =
+    rawValues.plicellCamListesi;
+
+  const selectedProducts =
+    measurement.selectedProducts;
+
+  if (
+    !isValidFacadeSegmentList(
+      facadeSegments,
+    ) ||
+    !isValidPlicellGlassList(
+      plicellCamListesi,
+    ) ||
+    !isValidSelectedProducts(
+      selectedProducts,
+    )
+  ) {
+    return false;
+  }
+
   return (
     integrity.facadeSegmentCount ===
-      countArray(rawValues.facadeSegments) &&
+      countArray(facadeSegments) &&
     integrity.plicellGlassCount ===
-      countArray(rawValues.plicellCamListesi) &&
+      countArray(plicellCamListesi) &&
     integrity.selectedProductCount ===
-      countArray(measurement.selectedProducts)
+      countArray(selectedProducts) &&
+    integrity.facadeShapeSignature ===
+      buildArraySignature(
+        facadeSegments,
+        ["id", "type", "widthCm"],
+      ) &&
+    integrity.plicellShapeSignature ===
+      buildArraySignature(
+        plicellCamListesi,
+        [
+          "id",
+          "widthCm",
+          "heightCm",
+          "sourceMode",
+        ],
+      ) &&
+    integrity.selectedProductSignature ===
+      buildArraySignature(
+        selectedProducts,
+        ["productType", "isActive"],
+      )
   );
 }
 
@@ -146,6 +308,26 @@ function mergeProtectedArray<T>(
   return incoming;
 }
 
+function mergeIntegrityProtectedArray<T>(
+  existing: T[] | undefined,
+  incoming: T[] | undefined,
+  allowDestructiveReplace: boolean,
+): T[] | undefined {
+  if (allowDestructiveReplace) {
+    return Array.isArray(incoming)
+      ? incoming
+      : existing;
+  }
+
+  if (Array.isArray(existing)) {
+    return existing;
+  }
+
+  return Array.isArray(incoming)
+    ? incoming
+    : undefined;
+}
+
 function mergeRecordValues(
   existing: Record<string, unknown> | undefined,
   incoming: Record<string, unknown> | undefined,
@@ -170,7 +352,7 @@ function mergeRecordValues(
       Array.isArray(existingValue) ||
       Array.isArray(incomingValue)
     ) {
-      merged[key] = mergeProtectedArray(
+      merged[key] = mergeIntegrityProtectedArray(
         Array.isArray(existingValue)
           ? existingValue
           : undefined,
@@ -240,7 +422,7 @@ export function mergeMeasurementForSync(
       ),
 
     selectedProducts:
-      mergeProtectedArray(
+      mergeIntegrityProtectedArray(
         existing.selectedProducts,
         incoming.selectedProducts,
         allowDestructiveReplace,

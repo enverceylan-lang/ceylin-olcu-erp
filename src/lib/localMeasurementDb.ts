@@ -60,6 +60,49 @@ function deepSyncSanitize(obj: unknown): unknown {
 }
 
 
+function normalizeSignaturePart(
+  value: unknown,
+): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  return String(value)
+    .trim()
+    .replaceAll("|", "%7C")
+    .replaceAll("~", "%7E");
+}
+
+function buildArraySignature(
+  value: unknown,
+  keys: string[],
+): string {
+  if (!Array.isArray(value)) return "";
+
+  return value
+    .map((item) => {
+      if (
+        typeof item !== "object" ||
+        item === null ||
+        Array.isArray(item)
+      ) {
+        return "!INVALID";
+      }
+
+      const record =
+        item as Record<string, unknown>;
+
+      return keys
+        .map((key) =>
+          normalizeSignaturePart(
+            record[key],
+          ),
+        )
+        .join("|");
+    })
+    .join("~");
+}
+
 function buildMeasurementSyncIntegrity(
   measurement: MeasurementRecord,
 ): NonNullable<MeasurementRecord["syncIntegrity"]> {
@@ -70,21 +113,50 @@ function buildMeasurementSyncIntegrity(
       ? measurement.rawValues
       : {};
 
+  const facadeSegments =
+    rawValues.facadeSegments;
+
+  const plicellCamListesi =
+    rawValues.plicellCamListesi;
+
+  const selectedProducts =
+    measurement.selectedProducts;
+
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     completeness: "FULL",
     facadeSegmentCount:
-      Array.isArray(rawValues.facadeSegments)
-        ? rawValues.facadeSegments.length
+      Array.isArray(facadeSegments)
+        ? facadeSegments.length
         : 0,
     plicellGlassCount:
-      Array.isArray(rawValues.plicellCamListesi)
-        ? rawValues.plicellCamListesi.length
+      Array.isArray(plicellCamListesi)
+        ? plicellCamListesi.length
         : 0,
     selectedProductCount:
-      Array.isArray(measurement.selectedProducts)
-        ? measurement.selectedProducts.length
+      Array.isArray(selectedProducts)
+        ? selectedProducts.length
         : 0,
+    facadeShapeSignature:
+      buildArraySignature(
+        facadeSegments,
+        ["id", "type", "widthCm"],
+      ),
+    plicellShapeSignature:
+      buildArraySignature(
+        plicellCamListesi,
+        [
+          "id",
+          "widthCm",
+          "heightCm",
+          "sourceMode",
+        ],
+      ),
+    selectedProductSignature:
+      buildArraySignature(
+        selectedProducts,
+        ["productType", "isActive"],
+      ),
   };
 }
 class LocalMeasurementDatabase extends Dexie {
