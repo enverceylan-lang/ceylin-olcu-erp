@@ -69,6 +69,7 @@ interface InboundSyncPatch {
   rooms?: InboundPatchRoom[];
   temporaryCustomerId?: string;
   sourceMeasurementChangeId?: string;
+  measurements?: unknown[];
 }
 
 export interface FieldMeasurementDraft {
@@ -327,6 +328,48 @@ export async function saveInboundMeasurement(
         mergedPatch.rooms = existingEntity.patch.rooms;
       }
 
+
+      if (
+        Array.isArray(existingEntity.patch?.measurements) ||
+        Array.isArray(inbound.patch?.measurements)
+      ) {
+        const mergedMeasurements = new Map<string, unknown>();
+
+        const addMeasurements = (items: unknown[]): void => {
+          items.forEach((item, index) => {
+            if (!item || typeof item !== 'object') {
+              console.warn(
+                "[Inbound] Object olmayan measurement kaydı korumaya alınamadı.",
+                item,
+              );
+              return;
+            }
+
+            const record = item as { id?: unknown };
+            const id =
+              typeof record.id === 'string' && record.id.trim().length > 0
+                ? record.id
+                : "__missing_id_" + index + "_" + mergedMeasurements.size;
+
+            mergedMeasurements.set(id, item);
+          });
+        };
+
+        addMeasurements(
+          Array.isArray(existingEntity.patch?.measurements)
+            ? existingEntity.patch.measurements
+            : [],
+        );
+        addMeasurements(
+          Array.isArray(inbound.patch?.measurements)
+            ? inbound.patch.measurements
+            : [],
+        );
+
+        mergedPatch.measurements = Array.from(
+          mergedMeasurements.values(),
+        );
+      }
       await localDraftDb.inboundMeasurements.update(existingEntity.changeId, {
         ...inbound,
         changeId: existingEntity.changeId,

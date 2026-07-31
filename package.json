@@ -129,7 +129,8 @@
                     "test:pos-finance-execution-service-suite":  "tsx tests/posFinanceExecutionServiceSuite.ts",
                     "test:pos-operations-service-suite":  "tsx tests/posOperationsServiceSuite.ts",
                     "test:sale-finance-projection-suite":  "tsx tests/saleFinanceProjectionSuite.ts",
-                    "test:server-finance-access-guard-suite":  "tsx tests/serverFinanceAccessGuardSuite.ts"
+                    "test:server-finance-access-guard-suite":  "tsx tests/serverFinanceAccessGuardSuite.ts",
+                    "test:inbound-measurement-group":  "tsx tests/inboundMeasurementGroupSuite.ts"
                 },
     "dependencies":  {
                          "@prisma/client":  "^7.8.0",

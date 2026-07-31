@@ -664,6 +664,7 @@ export async function pullInboundMeasurements(
         customerName?: string;
         customerPhone?: string;
         customerAddress?: string;
+        measurements: CanonicalMeasurement[];
       }
     >();
 
@@ -758,9 +759,25 @@ export async function pullInboundMeasurements(
               }
             } else if (sourceCustomerId) {
               const meta = getInboundCustomerMeta(change, canonical);
+              const existingGroup =
+                unmatchedMeasurementGroups.get(sourceCustomerId);
+              const measurementsById = new Map(
+                (existingGroup?.measurements || []).map((measurement) => [
+                  measurement.id,
+                  measurement,
+                ]),
+              );
+              measurementsById.set(canonical.id, canonical);
+
               unmatchedMeasurementGroups.set(sourceCustomerId, {
                 latestChange: change,
-                ...meta,
+                customerName:
+                  existingGroup?.customerName || meta.customerName,
+                customerPhone:
+                  existingGroup?.customerPhone || meta.customerPhone,
+                customerAddress:
+                  existingGroup?.customerAddress || meta.customerAddress,
+                measurements: Array.from(measurementsById.values()),
               });
             }
 
@@ -908,6 +925,7 @@ export async function pullInboundMeasurements(
           customerId: sourceCustomerId,
           temporaryCustomerId: sourceCustomerId,
           sourceMeasurementChangeId: change.change_id,
+          measurements: group.measurements,
         },
         senderId: change.user_id,
         createdAt: new Date().toISOString(),

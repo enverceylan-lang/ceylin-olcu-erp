@@ -81,6 +81,7 @@ interface InboundPatch {
   generalNote?: string;
   rooms?: IncomingRoom[];
   customer?: InboundCustomerPatch;
+  measurements?: MeasurementPayload[];
   data?: InboundPatch;
 }
 
@@ -256,6 +257,93 @@ async function loadMeasurementsForInbound(
   });
 
   return Array.from(byId.values());
+}
+
+function extractStandaloneMeasurementsFromPatch(
+  patch: InboundPatch,
+): LocalMeasurement[] {
+  const candidates = [
+    patch.measurements,
+    patch.data?.measurements,
+  ];
+  const rawMeasurements =
+    candidates.find((value): value is MeasurementPayload[] =>
+      Array.isArray(value),
+    ) || [];
+
+  return rawMeasurements
+    .map((measurement) => normalizeStandaloneMeasurement(measurement))
+    .filter(
+      (measurement): measurement is LocalMeasurement =>
+        measurement !== null,
+    );
+}
+
+function mergeMeasurementsById(
+  ...measurementSets: LocalMeasurement[][]
+): LocalMeasurement[] {
+  const byId = new Map<string, LocalMeasurement>();
+
+  measurementSets.forEach((measurements) => {
+    measurements.forEach((measurement) => {
+      byId.set(measurement.id, measurement);
+    });
+  });
+
+  return Array.from(byId.values());
+}
+
+async function loadRelatedMeasurementGroups(
+  sourceCustomerIds: string[],
+): Promise<{
+  groups: InboundMeasurement[];
+  measurements: LocalMeasurement[];
+}> {
+  const sourceIdSet = new Set(
+    sourceCustomerIds
+      .map((value) => String(value || "").trim())
+      .filter(Boolean),
+  );
+  const rows = await localDraftDb.inboundMeasurements.toArray();
+  const groups = rows.filter((item) => {
+    if (item.entityType !== "MEASUREMENT_GROUP") return false;
+    if (item.status !== "NEW" && item.status !== "MATCH_PENDING") {
+      return false;
+    }
+
+    const patch = (item.patch || {}) as InboundPatch;
+    const groupSourceIds = normalizeSourceCustomerIds(item, patch);
+    return groupSourceIds.some((sourceId) => sourceIdSet.has(sourceId));
+  });
+
+  const measurements = groups.flatMap((group) =>
+    extractStandaloneMeasurementsFromPatch(
+      (group.patch || {}) as InboundPatch,
+    ),
+  );
+
+  return {
+    groups,
+    measurements: mergeMeasurementsById(measurements),
+  };
+}
+
+async function completeRelatedMeasurementGroups(
+  groups: InboundMeasurement[],
+  status: "CREATED_CUSTOMER" | "LINKED_TO_CUSTOMER",
+  targetCustomerId: string,
+  excludedChangeId: string,
+): Promise<void> {
+  for (const group of groups) {
+    if (group.changeId === excludedChangeId) continue;
+
+    await localDraftDb.inboundMeasurements.update(group.changeId, {
+      status,
+      ...(status === "CREATED_CUSTOMER"
+        ? { createdCustomerId: targetCustomerId }
+        : { linkedCustomerId: targetCustomerId }),
+    });
+  }
 }
 
 function firstTransferredName(
@@ -579,9 +667,17 @@ export async function processAsNewCustomer(
     patchRooms,
     sourceCustomerIds[0] || inbound.entityId,
   );
-  const sourceMeasurements = await loadMeasurementsForInbound(
-    sourceCustomerIds,
-    nestedMeasurements,
+  const standaloneMeasurements =
+    extractStandaloneMeasurementsFromPatch(patch);
+  const relatedMeasurementGroups =
+    await loadRelatedMeasurementGroups(sourceCustomerIds);
+  const sourceMeasurements = mergeMeasurementsById(
+    await loadMeasurementsForInbound(
+      sourceCustomerIds,
+      nestedMeasurements,
+    ),
+    standaloneMeasurements,
+    relatedMeasurementGroups.measurements,
   );
 
   if (sourceMeasurements.length === 0) {
@@ -654,6 +750,12 @@ export async function processAsNewCustomer(
     status: "CREATED_CUSTOMER",
     createdCustomerId: structuralCustomer.id,
   });
+  await completeRelatedMeasurementGroups(
+    relatedMeasurementGroups.groups,
+    "CREATED_CUSTOMER",
+    structuralCustomer.id,
+    inbound.changeId,
+  );
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("local-customers-updated"));
@@ -694,9 +796,17 @@ export async function processAsMerge(
     patchRooms,
     sourceCustomerIds[0] || inbound.entityId,
   );
-  const sourceMeasurements = await loadMeasurementsForInbound(
-    sourceCustomerIds,
-    nestedMeasurements,
+  const standaloneMeasurements =
+    extractStandaloneMeasurementsFromPatch(patch);
+  const relatedMeasurementGroups =
+    await loadRelatedMeasurementGroups(sourceCustomerIds);
+  const sourceMeasurements = mergeMeasurementsById(
+    await loadMeasurementsForInbound(
+      sourceCustomerIds,
+      nestedMeasurements,
+    ),
+    standaloneMeasurements,
+    relatedMeasurementGroups.measurements,
   );
 
   if (sourceMeasurements.length === 0) {
@@ -739,6 +849,12 @@ export async function processAsMerge(
     status: "LINKED_TO_CUSTOMER",
     linkedCustomerId: structuralUpdatedCustomer.id,
   });
+  await completeRelatedMeasurementGroups(
+    relatedMeasurementGroups.groups,
+    "LINKED_TO_CUSTOMER",
+    structuralUpdatedCustomer.id,
+    inbound.changeId,
+  );
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("local-customers-updated"));
