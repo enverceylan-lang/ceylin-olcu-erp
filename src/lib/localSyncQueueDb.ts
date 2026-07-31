@@ -143,49 +143,46 @@ export async function enqueueSyncEventDetailed(
     const deviceId = getDeviceId();
     const sanitizedPatch = sanitizePatch(patch);
 
-    if (entityType === 'MEASUREMENT') {
-      const comparableSignature =
-        getComparablePatchSignature(sanitizedPatch);
+    const comparableSignature =
+      getComparablePatchSignature(sanitizedPatch);
 
-      const priorEvents = await localSyncQueueDb.pendingSyncEvents
-        .where('entityId')
-        .equals(entityId)
-        .filter((event) =>
-          event.entityType === entityType &&
-          event.operation === operation &&
-          event.deviceId === deviceId
-        )
-        .toArray();
+    const priorEvents = await localSyncQueueDb.pendingSyncEvents
+      .where('entityId')
+      .equals(entityId)
+      .filter((event) =>
+        event.entityType === entityType &&
+        event.operation === operation &&
+        event.deviceId === deviceId
+      )
+      .toArray();
 
-      const equivalentEvent = priorEvents
-        .sort((a, b) =>
-          String(b.updatedAt || b.createdAt).localeCompare(
-            String(a.updatedAt || a.createdAt)
-          )
-        )
-        .find((event) =>
-          getComparablePatchSignature(event.patch) === comparableSignature
+    const latestEvent = priorEvents.sort((a, b) =>
+      String(b.updatedAt || b.createdAt).localeCompare(
+        String(a.updatedAt || a.createdAt)
+      )
+    )[0];
+
+    if (
+      latestEvent &&
+      getComparablePatchSignature(latestEvent.patch) === comparableSignature
+    ) {
+      if (latestEvent.syncStatus === 'ERROR') {
+        await localSyncQueueDb.pendingSyncEvents.update(
+          latestEvent.changeId,
+          {
+            syncStatus: 'PENDING',
+            updatedAt: now
+          }
         );
-
-      if (equivalentEvent) {
-        if (equivalentEvent.syncStatus === 'ERROR') {
-          await localSyncQueueDb.pendingSyncEvents.update(
-            equivalentEvent.changeId,
-            {
-              syncStatus: 'PENDING',
-              updatedAt: now
-            }
-          );
-        }
-
-        return {
-          success: true,
-          changeId: equivalentEvent.changeId,
-          deviceId: equivalentEvent.deviceId,
-          userId: equivalentEvent.userId,
-          createdAt: equivalentEvent.createdAt
-        };
       }
+
+      return {
+        success: true,
+        changeId: latestEvent.changeId,
+        deviceId: latestEvent.deviceId,
+        userId: latestEvent.userId,
+        createdAt: latestEvent.createdAt
+      };
     }
 
     const changeId =
@@ -260,7 +257,55 @@ export async function getPendingSyncEvents(limit: number = 50): Promise<SyncEven
       .anyOf(['PENDING', 'ERROR'])
       .sortBy('createdAt');
 
-    const selectedEvents = retryableEvents.slice(0, limit);
+    const latestBySignature = new Map<string, SyncEvent>();
+    const duplicateChangeIds: string[] = [];
+
+    for (const event of retryableEvents) {
+      const duplicateKey = [
+        event.entityType,
+        event.entityId,
+        event.operation,
+        event.deviceId,
+        getComparablePatchSignature(event.patch)
+      ].join('|');
+
+      const existing = latestBySignature.get(duplicateKey);
+
+      if (!existing) {
+        latestBySignature.set(duplicateKey, event);
+        continue;
+      }
+
+      const existingTime = String(existing.updatedAt || existing.createdAt);
+      const eventTime = String(event.updatedAt || event.createdAt);
+
+      if (eventTime > existingTime) {
+        duplicateChangeIds.push(existing.changeId);
+        latestBySignature.set(duplicateKey, event);
+      } else {
+        duplicateChangeIds.push(event.changeId);
+      }
+    }
+
+    if (duplicateChangeIds.length > 0) {
+      const now = new Date().toISOString();
+
+      await localSyncQueueDb.pendingSyncEvents.bulkUpdate(
+        duplicateChangeIds.map((changeId) => ({
+          key: changeId,
+          changes: {
+            syncStatus: 'SYNCED',
+            updatedAt: now
+          }
+        }))
+      );
+    }
+
+    const compactedEvents = Array.from(latestBySignature.values()).sort(
+      (a, b) => String(a.createdAt).localeCompare(String(b.createdAt))
+    );
+
+    const selectedEvents = compactedEvents.slice(0, limit);
     const errorEvents = selectedEvents.filter(
       (event) => event.syncStatus === 'ERROR',
     );

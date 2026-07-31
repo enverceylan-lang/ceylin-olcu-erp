@@ -673,6 +673,7 @@ export async function pullInboundMeasurements(
     let alreadyRecorded = 0;
     let ignoredOwnDevice = 0;
     let failed = 0;
+    let measurementCursorAdvanceBlocked = false;
 
     for (const change of changes) {
       const patch = change.patch || {};
@@ -820,6 +821,7 @@ export async function pullInboundMeasurements(
             err,
           );
           failed += 1;
+          measurementCursorAdvanceBlocked = true;
         }
 
         continue;
@@ -928,7 +930,7 @@ export async function pullInboundMeasurements(
     if (maxDraftRevision > draftCursor) {
       await setSyncCursor("draft_changes_cursor", maxDraftRevision);
     }
-    if (maxMeasurementRevision > measurementCursor) {
+    if (!measurementCursorAdvanceBlocked && maxMeasurementRevision > measurementCursor) {
       await setSyncCursor("measurement_changes_cursor", maxMeasurementRevision);
     }
 

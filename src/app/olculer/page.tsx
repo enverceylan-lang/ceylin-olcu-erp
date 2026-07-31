@@ -320,6 +320,67 @@ const [manualRepairingMeasurementId, setManualRepairingMeasurementId] =
     return () => window.clearTimeout(initializationTimer);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    let pullRunning = false;
+
+    const runAutomaticPull = async () => {
+      if (cancelled || pullRunning || !navigator.onLine) return;
+
+      pullRunning = true;
+
+      try {
+        const result = await pullInboundMeasurements(customers);
+
+        if (!cancelled && result.success) {
+          await loadInbound();
+
+          if ((result.appliedMeasurements || 0) > 0) {
+            await useMeasurementStore.getState().loadMeasurements();
+          }
+        }
+      } catch (error) {
+        console.error(
+          "[AutomaticDeltaSync] Gelen ölçü senkronu başarısız:",
+          error,
+        );
+      } finally {
+        pullRunning = false;
+      }
+    };
+
+    const handleOnline = () => {
+      void runAutomaticPull();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void runAutomaticPull();
+      }
+    };
+
+    const initialTimer = window.setTimeout(() => {
+      void runAutomaticPull();
+    }, 1500);
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void runAutomaticPull();
+      }
+    }, 30000);
+
+    window.addEventListener("online", handleOnline);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(initialTimer);
+      window.clearInterval(intervalId);
+      window.removeEventListener("online", handleOnline);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [customers]);
+
   if (!mounted) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
 
   // ─── Derived data ────────────────────────────────────────────────────────────
