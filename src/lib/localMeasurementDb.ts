@@ -1,4 +1,4 @@
-﻿import Dexie, { type Table } from 'dexie';
+import Dexie, { type Table } from 'dexie';
 import { MeasurementRecord } from '@/store/measurementStore';
 import {
   enqueueSyncEvent,
@@ -59,6 +59,34 @@ function deepSyncSanitize(obj: unknown): unknown {
   return result;
 }
 
+
+function buildMeasurementSyncIntegrity(
+  measurement: MeasurementRecord,
+): NonNullable<MeasurementRecord["syncIntegrity"]> {
+  const rawValues =
+    measurement.rawValues &&
+    typeof measurement.rawValues === "object" &&
+    !Array.isArray(measurement.rawValues)
+      ? measurement.rawValues
+      : {};
+
+  return {
+    schemaVersion: 1,
+    completeness: "FULL",
+    facadeSegmentCount:
+      Array.isArray(rawValues.facadeSegments)
+        ? rawValues.facadeSegments.length
+        : 0,
+    plicellGlassCount:
+      Array.isArray(rawValues.plicellCamListesi)
+        ? rawValues.plicellCamListesi.length
+        : 0,
+    selectedProductCount:
+      Array.isArray(measurement.selectedProducts)
+        ? measurement.selectedProducts.length
+        : 0,
+  };
+}
 class LocalMeasurementDatabase extends Dexie {
   measurements!: Table<MeasurementRecord, string>;
 
@@ -108,6 +136,11 @@ export async function saveLocalMeasurementWithSync(
     const normalizedMeasurement = normalizeMeasurementLinks(measurement);
     await localMeasurementDb.measurements.put(normalizedMeasurement);
 
+    const sanitizedMeasurement =
+      deepSyncSanitize(
+        normalizedMeasurement,
+      ) as MeasurementRecord;
+
     const payload = {
       id: normalizedMeasurement.id,
       customerId: normalizedMeasurement.customerId,
@@ -115,7 +148,13 @@ export async function saveLocalMeasurementWithSync(
       openingId: normalizedMeasurement.openingId,
       windowId: normalizedMeasurement.windowId,
       entity: 'measurement',
-      data: deepSyncSanitize(normalizedMeasurement),
+      data: {
+        ...sanitizedMeasurement,
+        syncIntegrity:
+          buildMeasurementSyncIntegrity(
+            normalizedMeasurement,
+          ),
+      },
       timestamp: new Date().toISOString()
     };
 

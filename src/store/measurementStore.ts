@@ -34,6 +34,18 @@ export interface MeasurementRecord extends ProductMeasurement {
   archiveBatchId?: string;
   deleteBatchId?: string;
   version?: number;
+
+  /**
+   * Senkron payloadının tam ölçü anlık görüntüsü olduğunu kanıtlayan meta.
+   * Eski/eksik cihaz payloadları karmaşık alanları sessizce küçültemez.
+   */
+  syncIntegrity?: {
+    schemaVersion: 1;
+    completeness: "FULL";
+    facadeSegmentCount: number;
+    plicellGlassCount: number;
+    selectedProductCount: number;
+  };
 }
 
 interface MeasurementState {
@@ -62,6 +74,200 @@ interface MeasurementState {
   cascadeRestoreFromTrash: (customerId: string, batchId: string) => Promise<void>;
 }
 
+
+function isPlainRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value)
+  );
+}
+
+function countArray(
+  value: unknown,
+): number {
+  return Array.isArray(value)
+    ? value.length
+    : 0;
+}
+
+function hasValidFullIntegrity(
+  measurement: MeasurementRecord,
+): boolean {
+  const integrity =
+    measurement.syncIntegrity;
+
+  if (
+    !integrity ||
+    integrity.schemaVersion !== 1 ||
+    integrity.completeness !== "FULL"
+  ) {
+    return false;
+  }
+
+  const rawValues =
+    isPlainRecord(measurement.rawValues)
+      ? measurement.rawValues
+      : {};
+
+  return (
+    integrity.facadeSegmentCount ===
+      countArray(rawValues.facadeSegments) &&
+    integrity.plicellGlassCount ===
+      countArray(rawValues.plicellCamListesi) &&
+    integrity.selectedProductCount ===
+      countArray(measurement.selectedProducts)
+  );
+}
+
+function mergeProtectedArray<T>(
+  existing: T[] | undefined,
+  incoming: T[] | undefined,
+  allowDestructiveReplace: boolean,
+): T[] | undefined {
+  if (!Array.isArray(incoming)) {
+    return existing;
+  }
+
+  if (allowDestructiveReplace) {
+    return incoming;
+  }
+
+  if (!Array.isArray(existing)) {
+    return incoming;
+  }
+
+  if (incoming.length < existing.length) {
+    return existing;
+  }
+
+  return incoming;
+}
+
+function mergeRecordValues(
+  existing: Record<string, unknown> | undefined,
+  incoming: Record<string, unknown> | undefined,
+  allowDestructiveReplace: boolean,
+): Record<string, unknown> | undefined {
+  if (!incoming) return existing;
+  if (!existing) return incoming;
+
+  const merged: Record<string, unknown> = {
+    ...existing,
+    ...incoming,
+  };
+
+  for (const key of [
+    "facadeSegments",
+    "plicellCamListesi",
+  ]) {
+    const existingValue = existing[key];
+    const incomingValue = incoming[key];
+
+    if (
+      Array.isArray(existingValue) ||
+      Array.isArray(incomingValue)
+    ) {
+      merged[key] = mergeProtectedArray(
+        Array.isArray(existingValue)
+          ? existingValue
+          : undefined,
+        Array.isArray(incomingValue)
+          ? incomingValue
+          : undefined,
+        allowDestructiveReplace,
+      );
+    }
+  }
+
+  return merged;
+}
+
+export function mergeMeasurementForSync(
+  existing: MeasurementRecord | undefined,
+  incoming: MeasurementRecord,
+): MeasurementRecord {
+  if (!existing) return incoming;
+
+  const allowDestructiveReplace =
+    hasValidFullIntegrity(incoming);
+
+  const templateChanged =
+    Boolean(existing.templateType) &&
+    Boolean(incoming.templateType) &&
+    existing.templateType !==
+      incoming.templateType;
+
+  const existingRaw =
+    isPlainRecord(existing.rawValues)
+      ? existing.rawValues
+      : undefined;
+
+  const incomingRaw =
+    isPlainRecord(incoming.rawValues)
+      ? incoming.rawValues
+      : undefined;
+
+  const existingDetails =
+    isPlainRecord(existing.details)
+      ? existing.details
+      : undefined;
+
+  const incomingDetails =
+    isPlainRecord(incoming.details)
+      ? incoming.details
+      : undefined;
+
+  return {
+    ...existing,
+    ...incoming,
+
+    rawValues: templateChanged
+      ? incoming.rawValues
+      : mergeRecordValues(
+          existingRaw,
+          incomingRaw,
+          allowDestructiveReplace,
+        ) || {},
+
+    details:
+      mergeRecordValues(
+        existingDetails,
+        incomingDetails,
+        allowDestructiveReplace,
+      ),
+
+    selectedProducts:
+      mergeProtectedArray(
+        existing.selectedProducts,
+        incoming.selectedProducts,
+        allowDestructiveReplace,
+      ),
+
+    notesHistory:
+      mergeProtectedArray(
+        existing.notesHistory,
+        incoming.notesHistory,
+        allowDestructiveReplace,
+      ) || [],
+
+    photos:
+      mergeProtectedArray(
+        existing.photos,
+        incoming.photos,
+        false,
+      ) || [],
+
+    videos:
+      mergeProtectedArray(
+        existing.videos,
+        incoming.videos,
+        false,
+      ) || [],
+  };
+}
 function enrichMeasurement(m: MeasurementRecord): MeasurementRecord {
   const copy = normalizeMeasurementIdentity(m);
 
@@ -261,12 +467,53 @@ export const useMeasurementStore = create<MeasurementState>((set, get) => ({
   },
 
   batchUpsertMeasurements: async (newMeasurements) => {
-    const enrichedList = newMeasurements.map(enrichMeasurement);
-    await batchSaveLocalMeasurements(enrichedList);
-    set(state => {
-      const existingMap = new Map(state.measurements.map(m => [m.id, m]));
-      enrichedList.forEach(nm => existingMap.set(nm.id, nm));
-      return { measurements: Array.from(existingMap.values()) };
+    const existingById = new Map(
+      useMeasurementStore
+        .getState()
+        .measurements
+        .map((measurement) => [
+          measurement.id,
+          measurement,
+        ]),
+    );
+
+    const mergedList = newMeasurements.map(
+      (incoming) =>
+        mergeMeasurementForSync(
+          existingById.get(incoming.id),
+          incoming,
+        ),
+    );
+
+    const enrichedList =
+      mergedList.map(enrichMeasurement);
+
+    await batchSaveLocalMeasurements(
+      enrichedList,
+    );
+
+    set((state) => {
+      const existingMap = new Map(
+        state.measurements.map(
+          (measurement) => [
+            measurement.id,
+            measurement,
+          ],
+        ),
+      );
+
+      enrichedList.forEach(
+        (measurement) =>
+          existingMap.set(
+            measurement.id,
+            measurement,
+          ),
+      );
+
+      return {
+        measurements:
+          Array.from(existingMap.values()),
+      };
     });
   },
 
