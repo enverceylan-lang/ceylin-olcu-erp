@@ -17,7 +17,12 @@ export default function Home() {
   useEffect(() => {
     loadSales();
     localDraftDb.inboundMeasurements.toArray().then(items => {
-      const pending = items.filter(i => i.status === 'NEW' || i.status === 'MATCH_PENDING');
+      const pending = items.filter(
+        (item) =>
+          (item.status === "NEW" || item.status === "MATCH_PENDING") &&
+          (item.entityType === "DRAFT" ||
+            item.entityType === "MEASUREMENT_GROUP"),
+      );
       setInboundCount(pending.length);
     }).catch(err => {
       console.error("Failed to load inbound measurements for dashboard", err);
