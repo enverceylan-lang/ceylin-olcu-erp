@@ -176,6 +176,42 @@ async function main(): Promise<void> {
   );
 
   await runTest(
+    "deltaSyncClientRejectsEmptyMeasurementGroups",
+    async () => {
+      const source = await readFile(
+        path.join(
+          process.cwd(),
+          "src",
+          "lib",
+          "deltaSyncClient.ts",
+        ),
+        "utf8",
+      );
+
+      assert(
+        source.includes(
+          "if (!Array.isArray(group.measurements) || group.measurements.length === 0)",
+        ),
+        "Empty measurement-group guard is missing",
+      );
+      assert(
+        source.includes(
+          "Empty measurement group was not added to inbound pool",
+        ),
+        "Empty measurement-group diagnostic is missing",
+      );
+      assert(
+        source.includes("alreadyRecorded += 1;"),
+        "Empty measurement-group outcome counter is missing",
+      );
+      assert(
+        source.includes("continue;"),
+        "Empty measurement-group guard does not stop pool insertion",
+      );
+    },
+  );
+
+  await runTest(
     "inboundProcessorContainsBothApprovalPaths",
     async () => {
       const source = await readFile(

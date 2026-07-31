@@ -902,6 +902,14 @@ export async function pullInboundMeasurements(
     }
 
     for (const [sourceCustomerId, group] of unmatchedMeasurementGroups) {
+      if (!Array.isArray(group.measurements) || group.measurements.length === 0) {
+        console.warn(
+          `[DeltaSyncClient] Empty measurement group was not added to inbound pool: ${sourceCustomerId}`,
+        );
+        alreadyRecorded += 1;
+        continue;
+      }
+
       const change = group.latestChange;
       const suggested = suggestCustomers(
         {
