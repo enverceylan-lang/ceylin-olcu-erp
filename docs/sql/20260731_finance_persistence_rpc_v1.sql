@@ -43,6 +43,8 @@ declare
   v_branch_id text;
   v_accounting_period_id text;
   v_payload_hash text;
+  v_constraint_name text;
+  v_conflict_reason text;
 begin
   if p_transaction is null or
      jsonb_typeof(p_transaction) <> 'object' then
@@ -270,11 +272,36 @@ begin
     );
   exception
     when unique_violation then
+      get stacked diagnostics
+        v_constraint_name = constraint_name;
+
+      v_conflict_reason =
+        case v_constraint_name
+          when 'finance_transactions_pk' then
+            'TRANSACTION_ID_CONFLICT'
+          when 'finance_transactions_transaction_id_uq' then
+            'TRANSACTION_ID_CONFLICT'
+          when 'finance_transactions_idempotency_uq' then
+            'IDEMPOTENCY_PAYLOAD_CONFLICT'
+          when 'finance_transactions_source_document_uq' then
+            'SOURCE_DOCUMENT_CONFLICT'
+          when 'finance_transaction_audits_pk' then
+            'TRANSACTION_ID_CONFLICT'
+          when 'finance_transaction_audits_event_uq' then
+            'TRANSACTION_ID_CONFLICT'
+          else
+            null
+        end;
+
+      if v_conflict_reason is null then
+        raise;
+      end if;
+
       return query
       select
         'CONFLICT'::text,
         v_transaction_id,
-        'SOURCE_DOCUMENT_CONFLICT'::text;
+        v_conflict_reason;
 
       return;
   end;
