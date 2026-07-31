@@ -845,7 +845,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
           : measurementNotes;
 
       if (editingMeasurementId) {
-        updateProductMeasurement(customer.id, roomId, windowId, editingMeasurementId, {
+        await updateProductMeasurement(customer.id, roomId, windowId, editingMeasurementId, {
           templateType: selectedTemplate,
           rawValues: parsedRawValues,
           notes: savedMeasurementNotes,
@@ -854,7 +854,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
           updatedAt: now,
         });
       } else {
-        addProductMeasurement(customer.id, roomId, windowId, {
+        await addProductMeasurement(customer.id, roomId, windowId, {
           templateType: selectedTemplate,
           rawValues: parsedRawValues,
           notes: savedMeasurementNotes,

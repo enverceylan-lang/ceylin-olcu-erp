@@ -1232,6 +1232,32 @@ export const useStore = create<AppState>()(
       },
 
       addProductMeasurement: async (customerId, roomId, windowId, measurement) => {
+        const state = get();
+        const targetCustomer = state.customers.find(
+          customer => customer.id === customerId
+        );
+        const targetRoom = targetCustomer?.rooms.find(
+          room => room.id === roomId
+        );
+        const targetOpening = targetRoom?.windows.find(
+          opening => opening.id === windowId
+        );
+
+        const roomName = String(targetRoom?.name || '').trim();
+        const openingName = String(targetOpening?.name || '').trim();
+
+        if (!targetCustomer || !targetRoom || !targetOpening) {
+          throw new Error(
+            'Ölçü oda/açıklık bağlantısı çözülemedi. Kayıt oluşturulmadı.'
+          );
+        }
+
+        if (!roomName || !openingName) {
+          throw new Error(
+            'Oda ve açıklık adı zorunludur. Ölçü kaydı oluşturulmadı.'
+          );
+        }
+
         const now = new Date().toISOString();
         const newMeas: ProductMeasurement = {
           ...measurement,
@@ -1240,36 +1266,83 @@ export const useStore = create<AppState>()(
           updatedAt: now
         };
 
-        // Single-write: write to new independent store only
+        // Single-write: bağımsız ölçü deposuna yapısal adlarla yaz.
         const { useMeasurementStore } = await import('@/store/measurementStore');
         await useMeasurementStore.getState().addMeasurement({
           ...newMeas,
           customerId,
           roomId,
           openingId: windowId,
-          windowId
+          windowId,
+          roomName,
+          roomLabel: roomName,
+          openingName,
+          openingLabel: openingName,
+          windowName: openingName
         }, measurement.createdById || 'SYSTEM');
-        // No longer writing to Customer tree
+        // Customer ağacına ikinci kez ölçü yazılmaz.
       },
 
 
 
       updateProductMeasurement: async (customerId, roomId, windowId, measurementId, data) => {
-        const now = new Date().toISOString();
+        const state = get();
+        const targetCustomer = state.customers.find(
+          customer => customer.id === customerId
+        );
+        const targetRoom = targetCustomer?.rooms.find(
+          room => room.id === roomId
+        );
+        const targetOpening = targetRoom?.windows.find(
+          opening => opening.id === windowId
+        );
 
-        // Single-write: update in independent store only
-        const { useMeasurementStore } = await import('@/store/measurementStore');
+        const roomName = String(targetRoom?.name || '').trim();
+        const openingName = String(targetOpening?.name || '').trim();
 
-        // We need the existing measurement to merge
-        const existing = useMeasurementStore.getState().measurements.find(m => m.id === measurementId);
-        if (existing) {
-          const updatedMeas = { ...existing, ...data, updatedAt: now };
-          await useMeasurementStore.getState().updateMeasurement(
-            updatedMeas,
-            data.createdById || existing.createdById || 'SYSTEM'
+        if (!targetCustomer || !targetRoom || !targetOpening) {
+          throw new Error(
+            'Ölçü oda/açıklık bağlantısı çözülemedi. Güncelleme yapılmadı.'
           );
         }
-        // No longer writing to Customer tree
+
+        if (!roomName || !openingName) {
+          throw new Error(
+            'Oda ve açıklık adı zorunludur. Ölçü güncellenmedi.'
+          );
+        }
+
+        const now = new Date().toISOString();
+        const { useMeasurementStore } = await import('@/store/measurementStore');
+        const existing = useMeasurementStore
+          .getState()
+          .measurements
+          .find(measurement => measurement.id === measurementId);
+
+        if (!existing) {
+          throw new Error('Güncellenecek ölçü bulunamadı.');
+        }
+
+        const updatedMeas = {
+          ...existing,
+          ...data,
+          customerId,
+          roomId,
+          openingId: windowId,
+          windowId,
+          roomName,
+          roomLabel: roomName,
+          openingName,
+          openingLabel: openingName,
+          windowName: openingName,
+          updatedAt: now
+        };
+
+        await useMeasurementStore.getState().updateMeasurement(
+          updatedMeas,
+          data.createdById || existing.createdById || 'SYSTEM'
+        );
+        // Customer ağacına ikinci kez ölçü yazılmaz.
       },
 
 
