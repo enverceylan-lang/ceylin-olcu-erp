@@ -491,6 +491,29 @@ export function buildWhatsAppShortReport(
                 product.rawValues
                   ?.facadeSegments;
 
+              const hasFacadeSegments =
+                Array.isArray(facadeSegments) &&
+                facadeSegments.some(
+                  (segment: unknown) =>
+                    Number(
+                      asRecord(segment).widthCm,
+                    ) > 0,
+                );
+
+              if (!hasFacadeSegments) {
+                const dimensions =
+                  getMeasurementDimensions(
+                    product,
+                  );
+
+                if (
+                  dimensions.structuralWidth <= 0 &&
+                  dimensions.structuralHeight <= 0
+                ) {
+                  return;
+                }
+              }
+
               roomLines.push(
                 `• ${openingPrefix}${productLabel}`,
               );

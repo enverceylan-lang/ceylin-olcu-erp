@@ -5,6 +5,7 @@ import {
   localSyncQueueDb
 } from './localSyncQueueDb';
 import { loadLocalCustomers, saveLocalCustomer, localCustomerDb } from './localCustomerDb';
+import { validateMeasurementTransferTree, type MeasurementValidationIssue } from './measurementValidationEngine';
 
 export interface InboundMeasurement {
   changeId: string;
@@ -19,12 +20,21 @@ export interface InboundMeasurement {
   patch: InboundSyncPatch;
   senderId?: string;
   createdAt: string;
-  status: 'NEW' | 'MATCH_PENDING' | 'LINKED_TO_CUSTOMER' | 'CREATED_CUSTOMER' | 'SKIPPED';
+  status: 'NEW' | 'MATCH_PENDING' | 'LINKED_TO_CUSTOMER' | 'CREATED_CUSTOMER' | 'SKIPPED' | 'QUARANTINE';
   suggestedCustomerIds?: string[];
   linkedCustomerId?: string;
   createdCustomerId?: string;
   pendingCustomerId?: string;
   latestChangeId?: string;
+
+  validationIssues?: MeasurementValidationIssue[];
+  quarantineAt?: string;
+  measurementId?: string;
+  measuredBy?: string;
+  measuredById?: string;
+  roomName?: string;
+  openingName?: string;
+  sourceDeviceId?: string;
 }
 
 export interface SyncCursor {
@@ -375,10 +385,30 @@ export async function saveInboundMeasurement(
         changeId: existingEntity.changeId,
         latestChangeId: inbound.changeId,
         patch: mergedPatch,
-        status: 'NEW',
+        status:
+          existingEntity.status === 'QUARANTINE' ||
+          inbound.status === 'QUARANTINE'
+            ? 'QUARANTINE'
+            : 'NEW',
         pendingCustomerId: existingEntity.pendingCustomerId,
         linkedCustomerId: existingEntity.linkedCustomerId,
         createdCustomerId: existingEntity.createdCustomerId,
+        validationIssues:
+          inbound.validationIssues || existingEntity.validationIssues,
+        quarantineAt:
+          inbound.quarantineAt || existingEntity.quarantineAt,
+        measurementId:
+          inbound.measurementId || existingEntity.measurementId,
+        measuredBy:
+          inbound.measuredBy || existingEntity.measuredBy,
+        measuredById:
+          inbound.measuredById || existingEntity.measuredById,
+        roomName:
+          inbound.roomName || existingEntity.roomName,
+        openingName:
+          inbound.openingName || existingEntity.openingName,
+        sourceDeviceId:
+          inbound.sourceDeviceId || existingEntity.sourceDeviceId,
         suggestedCustomerIds:
           existingEntity.suggestedCustomerIds || inbound.suggestedCustomerIds
       });
@@ -417,7 +447,6 @@ export async function createMeasurementDraft(draft: Omit<FieldMeasurementDraft, 
     updatedAt: now
   };
   await localDraftDb.measurementDrafts.add(newDraft);
-  await enqueueSyncEvent('DRAFT', newDraft.id, 'INSERT', newDraft);
   return newDraft.id;
 }
 
@@ -427,11 +456,7 @@ export async function updateMeasurementDraft(id: string, updates: Partial<Omit<F
     ...updates,
     updatedAt: now
   });
-  
-  const updated = await localDraftDb.measurementDrafts.get(id);
-  if (updated) {
-    await enqueueSyncEvent('DRAFT', id, 'UPDATE', updated);
-  }
+  // Taslak düzenlemeleri cihazda kalır; sync yalnız SOURCE_EXIT sonrasında açılır.
 }
 
 export async function listMeasurementDrafts(createdBy?: string, syncStatus?: FieldMeasurementDraft['syncStatus']): Promise<FieldMeasurementDraft[]> {
@@ -526,7 +551,38 @@ export async function addDraftMedia(media: Omit<DraftMediaFile, 'createdAt'>): P
 export async function markDraftReadyToTransfer(id: string, type: 'MEASUREMENT' | 'INSTALLATION'): Promise<void> {
   const now = new Date().toISOString();
   if (type === 'MEASUREMENT') {
-    await localDraftDb.measurementDrafts.update(id, { syncStatus: 'READY_TO_TRANSFER', updatedAt: now });
+    const currentDraft = await localDraftDb.measurementDrafts.get(id);
+
+    if (!currentDraft) {
+      throw new Error("Gönderilecek ölçü taslağı bulunamadı.");
+    }
+
+    const validation = validateMeasurementTransferTree(
+      currentDraft.rooms,
+      "SOURCE_EXIT",
+    );
+
+    if (!validation.valid) {
+      const issueText = validation.issues
+        .map(issue => `${issue.code}: ${issue.message}`)
+        .join("\n");
+
+      console.warn(
+        "[MeasurementValidation] SOURCE_EXIT rejected:",
+        validation.issues,
+      );
+
+      throw new Error(
+        issueText
+          ? `Ölçüler gönderilemedi. ${issueText}`
+          : "Ölçüler gönderilemedi. Eksik veya geçersiz ölçü bulundu.",
+      );
+    }
+
+    await localDraftDb.measurementDrafts.update(id, {
+      syncStatus: 'READY_TO_TRANSFER',
+      updatedAt: now,
+    });
     const updated = await localDraftDb.measurementDrafts.get(id);
     
       if (updated) {

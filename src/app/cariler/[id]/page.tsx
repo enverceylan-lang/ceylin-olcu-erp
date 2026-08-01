@@ -34,6 +34,25 @@ const measurementOpeningId = (measurement: { openingId?: string; windowId?: stri
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
+const getMeasurementUserShortCode = (name: string | undefined): string => {
+  const clean = String(name || "").trim();
+  if (!clean) return "?";
+  if (/^\d+$/.test(clean)) return clean.slice(0, 6);
+
+  const parts = clean
+    .split(/\s+/)
+    .map(part => part.trim())
+    .filter(Boolean);
+
+  const initials = parts
+    .slice(0, 3)
+    .map(part => part.charAt(0))
+    .join("")
+    .toLocaleUpperCase("tr-TR");
+
+  return initials || clean.slice(0, 4).toLocaleUpperCase("tr-TR");
+};
+
 type DeleteConfirmation =
   | { type: "room"; data: { customerId: string; roomId: string; roomName: string } }
   | { type: "window"; data: { customerId: string; roomId: string; windowId: string; windowName: string } }
@@ -714,6 +733,20 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       return true;
     }
 
+    if (selectedTemplate === 'CURTAIN_DETAIL') {
+      const hasFacadeWidth =
+        facadeSegments.some(
+          segment =>
+            isRecord(segment) &&
+            positiveNumber(segment.widthCm)
+        ) ||
+        positiveNumber(rawValues.windowWidth);
+
+      if (!hasFacadeWidth) {
+        return false;
+      }
+    }
+
     const templateFields =
       MEASUREMENT_TEMPLATES[
         selectedTemplate
@@ -994,12 +1027,8 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       };
 
       await localDraftDb.measurementDrafts.put(draftData);
-
-      // Fix: V1A Queue - Add to sync queue for push
-      const { enqueueSyncEvent } = await import('@/lib/localSyncQueueDb');
-      await enqueueSyncEvent('DRAFT', draftData.id, existing ? 'UPDATE' : 'INSERT', draftData);
-
-      showToast("Saha taslağı telefona kaydedildi.");
+      // Taslak yalnız cihazda korunur. Sync kuyruğuna ancak SOURCE_EXIT doğrulamasından sonra alınır.
+showToast("Saha taslağı telefona kaydedildi.");
     } catch (err) {
       console.error(err);
       showToast("Taslak kaydedilemedi.");
@@ -1135,9 +1164,17 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     return (
       <div key={isInlineEdit ? editingMeasurementId : "new"} className={`mt-4 overflow-hidden rounded-xl border-2 border-blue-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800 ${isInlineEdit ? "" : "ml-0 sm:ml-6"} relative`}>
                               <div className="bg-blue-50 dark:bg-gray-900 p-3 border-b border-blue-100 dark:border-gray-700 flex justify-between items-center">
-                                <h5 className="font-bold text-blue-900 dark:text-gray-100">
-                                  {editingMeasurementId ? "Saha Ölçüsü Düzenleme Formu" : "Saha Ölçü Formu"}
-                                </h5>
+                                <div className="flex min-w-0 items-center gap-2">
+                                  <h5 className="truncate font-bold text-blue-900 dark:text-gray-100">
+                                    {editingMeasurementId ? "Saha Ölçüsü Düzenleme Formu" : "Saha Ölçü Formu"}
+                                  </h5>
+                                  <span
+                                    className="ml-auto max-w-[72px] truncate rounded-md border border-blue-200 bg-white/80 px-2 py-0.5 text-[10px] font-black tracking-wide text-blue-700 sm:hidden dark:border-blue-800 dark:bg-gray-800 dark:text-blue-300"
+                                    title={currentUser?.name || "Bilinmiyor"}
+                                  >
+                                    {getMeasurementUserShortCode(currentUser?.name)}
+                                  </span>
+                                </div>
                                 <button
                                   type="button"
                                   aria-label="Ölçü formunu kapat"
@@ -1166,7 +1203,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                       ))}
                                     </select>
                                   </div>
-                                  <div>
+                                  <div className="hidden sm:block">
                                     <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Ölçüyü Alan</label>
                                     {permissions.canOverrideMeasuredBy ? (
                                       /* ADMIN/SALES can select who measured */
@@ -2359,8 +2396,32 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
                                 <div className="bg-gray-50 dark:bg-gray-900 p-3 rounded mb-3 border border-gray-200 dark:border-gray-700">
                                   {(p.templateType === 'CURTAIN_DETAIL' || p.templateType === 'CURTAIN') ? (
                                     <>
-                                      <div className="text-[10px] font-bold uppercase tracking-wide text-blue-600 dark:text-blue-400 mb-2">
-                                        AÇIKLIK EN ÖLÇÜLERİ
+                                      <div className="flex items-center justify-between gap-2">
+                                        <div className="text-[10px] font-bold uppercase tracking-wide text-blue-600 dark:text-blue-400 mb-2">
+                                          AÇIKLIK EN ÖLÇÜLERİ
+                                        </div>
+                                        {(() => {
+                                          const facadeTotalWidth = (
+                                            Array.isArray(p.rawValues?.facadeSegments)
+                                              ? p.rawValues.facadeSegments
+                                              : []
+                                          ).reduce(
+                                            (sum: number, segment: unknown) =>
+                                              sum +
+                                              (
+                                                isRecord(segment)
+                                                  ? Number(segment.widthCm || 0)
+                                                  : 0
+                                              ),
+                                            0,
+                                          );
+
+                                          return facadeTotalWidth > 0 ? (
+                                            <div className="mb-2 whitespace-nowrap text-xs font-black text-blue-600 dark:text-blue-300">
+                                              Toplam En: {facadeTotalWidth} cm
+                                            </div>
+                                          ) : null;
+                                        })()}
                                       </div>
                                       <div className="flex flex-wrap items-center gap-2">
                                         {(Array.isArray(p.rawValues?.facadeSegments) ? p.rawValues.facadeSegments : [])

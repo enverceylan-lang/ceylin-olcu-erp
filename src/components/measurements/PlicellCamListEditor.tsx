@@ -497,7 +497,7 @@ export function PlicellCamListEditor({
 
         <div
           data-plicell-entry-mode
-          className="mb-4 grid grid-cols-1 gap-2 min-[420px]:grid-cols-2"
+          className="mb-4 grid grid-cols-2 gap-2"
         >
           <button
             type="button"

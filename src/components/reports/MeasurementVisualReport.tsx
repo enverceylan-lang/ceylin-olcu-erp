@@ -1,4 +1,5 @@
 import React from 'react';
+import { buildWhatsAppShortReport } from "@/lib/reportFormatters";
 import { X, Printer, Share2, Loader2, ZoomIn, ZoomOut, RotateCcw, Move } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -2199,7 +2200,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
           files: [pdfFile]
         });
       } else {
-        fallbackWhatsApp(pdfFile);
+        await fallbackWhatsApp(pdfFile);
       }
     } catch (error) {
       if (
@@ -2215,7 +2216,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
       );
 
       try {
-        fallbackWhatsApp(pdfFile);
+        await fallbackWhatsApp(pdfFile);
       } catch (fallbackError) {
         console.error(
           'PDF fallback share error:',
@@ -2230,26 +2231,62 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
     }
   };
 
-  const fallbackWhatsApp = (file: File) => {
+  const fallbackWhatsApp = async (file: File) => {
     if (typeof window === 'undefined') return;
-    const wpUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(
-      `CEYLİN PERDE & ÇEYİZ - ${customer.name} ölçü raporu hazır.`
-    )}`;
-    window.open(wpUrl, '_blank');
 
-    // Also trigger local download as fallback
+    const reportText = buildWhatsAppShortReport(
+      customer,
+      [],
+      activeMeasurements,
+    );
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `${customer.name} Ölçü Raporu`,
+          text: reportText,
+        });
+        return;
+      } catch (error) {
+        if (
+          error instanceof DOMException &&
+          error.name === 'AbortError'
+        ) {
+          return;
+        }
+
+        console.error(
+          '[VisualReport] Native text share failed:',
+          error,
+        );
+      }
+    }
+
+    const wpUrl =
+      `https://wa.me/?text=${encodeURIComponent(reportText)}`;
+
+    const opened = window.open(
+      wpUrl,
+      '_blank',
+      'noopener,noreferrer',
+    );
+
+    if (opened) return;
+
     if (file) {
       const url = URL.createObjectURL(file);
       const a = document.createElement('a');
       a.href = url;
-      a.download = file.name;
+      a.download =
+        `CEYLIN-OLCU-RAPORU-${customer.name || 'MUSTERI'}.pdf`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      alert("Bu cihaz PDF dosya paylaşımını doğrudan desteklemiyor. PDF indirildi, WhatsApp'tan dosya olarak gönderebilirsiniz.");
-    } else {
-      alert("PDF oluşturulamadı.");
+
+      alert(
+        "WhatsApp doğrudan açılamadı. Ayrıntılı ölçü metni paylaşım için hazırlandı; PDF ayrıca indirildi."
+      );
     }
   };
 

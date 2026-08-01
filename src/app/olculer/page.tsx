@@ -116,6 +116,8 @@ export default function OlculerPage() {
   const [draftFilter, setDraftFilter] = useState<FilterKey>("ALL");
 
   const [inboundMeasurements, setInboundMeasurements] = useState<InboundMeasurement[]>([]);
+  const [quarantinedMeasurements, setQuarantinedMeasurements] =
+    useState<InboundMeasurement[]>([]);
   const [isPulling, setIsPulling] = useState(false);
   const [inboundSelections, setInboundSelections] = useState<Record<string, string>>({});
   const [processingInboundId, setProcessingInboundId] = useState<string | null>(null);
@@ -157,9 +159,19 @@ const [manualRepairingMeasurementId, setManualRepairingMeasurementId] =
   const loadInbound = async () => {
     try {
       const data = await listInboundMeasurements();
-      setInboundMeasurements(data.filter(d => d.status === 'NEW' || d.status === 'MATCH_PENDING'));
+      setInboundMeasurements(
+        data.filter(
+          d =>
+            (d.status === 'NEW' || d.status === 'MATCH_PENDING') &&
+            d.entityType !== 'MEASUREMENT_GROUP'
+        )
+      );
 
-      const links: Record<string, string> = {};
+
+      setQuarantinedMeasurements(
+        data.filter(d => d.status === 'QUARANTINE')
+      );
+const links: Record<string, string> = {};
       data
         .filter((item) =>
           (item.status === "LINKED_TO_CUSTOMER" || item.status === "CREATED_CUSTOMER") &&
@@ -830,6 +842,11 @@ const handleManualOrphanRepair = async (
       await loadDrafts();
     } catch (err) {
       console.error("[DraftReady] Durum değiştirilemedi:", err);
+      alert(
+        err instanceof Error
+          ? err.message
+          : "Ölçüler gönderilemedi. Eksik veya geçersiz ölçü bulundu."
+      );
     }
   };
 
@@ -1041,7 +1058,67 @@ const handleManualOrphanRepair = async (
               <RefreshCw className={`w-4 h-4 ${isPulling ? 'animate-spin' : ''}`} />
               {isPulling ? 'Alınıyor...' : 'Gelen Ölçüleri Al'}
             </button>
-          </div>
+          </div>          {quarantinedMeasurements.length > 0 && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+              <div className="mb-3">
+                <h3 className="flex items-center gap-2 text-sm font-black text-amber-900 dark:text-amber-200">
+                  <AlertCircle className="h-4 w-4" />
+                  Ölçü Sağlığı / Düzeltme Bekleyenler
+                  <span className="rounded-full bg-amber-200 px-2 py-0.5 text-[11px] font-black text-amber-900 dark:bg-amber-900 dark:text-amber-100">
+                    {quarantinedMeasurements.length}
+                  </span>
+                </h3>
+                <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
+                  Merkez doğrulamasından geçemeyen ölçüler kalıcı ölçü listesine yazılmadı.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+                {quarantinedMeasurements.map(item => (
+                  <div
+                    key={item.changeId}
+                    className="rounded-lg border border-amber-200 bg-white p-3 text-xs shadow-sm dark:border-amber-800/70 dark:bg-slate-900"
+                  >
+                    <div className="font-black text-slate-900 dark:text-white">
+                      {item.customerName || "Cari adı bulunamadı"}
+                    </div>
+                    <div className="mt-1 text-slate-600 dark:text-slate-300">
+                      {item.roomName || "Oda bilinmiyor"} &gt; {item.openingName || "Açıklık bilinmiyor"}
+                    </div>
+                    <div className="mt-2 space-y-1 text-slate-600 dark:text-slate-300">
+                      <div>
+                        <span className="font-bold">Ölçüyü Alan:</span>{" "}
+                        {item.measuredBy || item.measuredById || item.senderId || "Bilinmiyor"}
+                      </div>
+                      <div>
+                        <span className="font-bold">Kaynak:</span>{" "}
+                        {item.sourceTable === "measurement_changes"
+                          ? "Telefon / Ölçü Senkronu"
+                          : item.sourceTable}
+                      </div>
+                      <div>
+                        <span className="font-bold">Durum:</span>{" "}
+                        DÜZELTME BEKLİYOR
+                      </div>
+                    </div>
+
+                    <div className="mt-2 space-y-1">
+                      {(item.validationIssues || []).map(issue => (
+                        <div
+                          key={`${item.changeId}-${issue.code}-${issue.measurementId || ""}`}
+                          className="rounded-md border border-red-200 bg-red-50 p-2 font-semibold text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300"
+                        >
+                          {issue.code} — {issue.message}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+
 
           {inboundMeasurements.length === 0 ? (
             <div className="rounded-xl border border-dashed border-gray-300 bg-white p-3 text-center dark:border-gray-700 dark:bg-gray-800">

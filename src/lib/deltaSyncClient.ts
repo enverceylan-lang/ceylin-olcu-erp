@@ -18,6 +18,7 @@ import {
   type InboundMeasurement,
   type TransferReceipt,
 } from "./localDraftDb";
+import { validateMeasurementRecord } from "@/lib/measurementValidationEngine";
 import { useAuthStore } from "@/store/useAuthStore";
 import { getDeviceId } from "./deviceIdentity";
 
@@ -740,6 +741,97 @@ export async function pullInboundMeasurements(
             };
 
             if (localCustomer) {
+              const validationIssues = validateMeasurementRecord(
+                measurementToPersist,
+                {
+                  roomId: measurementToPersist.roomId,
+                  roomName:
+                    measurementToPersist.roomName ||
+                    measurementToPersist.roomLabel,
+                  openingId,
+                  openingName:
+                    measurementToPersist.openingName ||
+                    measurementToPersist.windowName ||
+                    measurementToPersist.openingLabel,
+                },
+              );
+
+              if (validationIssues.length > 0) {
+                const quarantine: InboundMeasurement = {
+                  changeId: `quarantine-${change.change_id}`,
+                  revision: change.revision,
+                  entityType: "MEASUREMENT_QUARANTINE",
+                  entityId: canonical.id,
+                  operation: change.operation,
+                  sourceTable: change.sourceTable,
+                  customerName: localCustomer.name,
+                  customerPhone: localCustomer.phone,
+                  customerAddress: localCustomer.address,
+                  patch: {
+                    customerId: resolvedCustomerId,
+                    temporaryCustomerId: sourceCustomerId,
+                    sourceMeasurementChangeId: change.change_id,
+                    measurements: [measurementToPersist],
+                  },
+                  senderId: change.user_id,
+                  createdAt: now,
+                  status: "QUARANTINE",
+                  validationIssues,
+                  quarantineAt: now,
+                  measurementId: canonical.id,
+                  measuredBy: measurementToPersist.measuredBy,
+                  measuredById: measurementToPersist.measuredById,
+                  roomName:
+                    measurementToPersist.roomName ||
+                    measurementToPersist.roomLabel,
+                  openingName:
+                    measurementToPersist.openingName ||
+                    measurementToPersist.windowName ||
+                    measurementToPersist.openingLabel,
+                  sourceDeviceId: senderDeviceId,
+                };
+
+                const outcome = await saveInboundMeasurement(quarantine);
+
+                if (outcome === "INSERTED") {
+                  newInboundItems += 1;
+                }
+                if (outcome === "UPDATED_OPEN_ITEM") {
+                  updatedInboundItems += 1;
+                }
+                if (
+                  outcome !== "INSERTED" &&
+                  outcome !== "UPDATED_OPEN_ITEM"
+                ) {
+                  alreadyRecorded += 1;
+                }
+
+                const quarantineReceipt: TransferReceipt = {
+                  transferId: change.change_id,
+                  entityType: "MEASUREMENT",
+                  entityId: canonical.id,
+                  senderUserId,
+                  receiverUserId,
+                  senderDeviceId,
+                  receiverDeviceId,
+                  status: "FAILED",
+                  failedAt: now,
+                  failureReason: "VALIDATION_QUARANTINED",
+                  entityVersion: Number(canonical.version || 1),
+                  createdAt: now,
+                  updatedAt: now,
+                };
+
+                await saveTransferReceipt(quarantineReceipt);
+
+                console.warn(
+                  `[DeltaSyncClient] Measurement ${canonical.id} quarantined by CENTRAL_INBOUND validation.`,
+                  validationIssues,
+                );
+
+                continue;
+              }
+
               const updatedCustomer =
                 await ensureCustomerStructureForMeasurement(
                   localCustomer,
