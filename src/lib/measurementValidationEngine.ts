@@ -11,7 +11,9 @@ export type MeasurementValidationIssueCode =
   | "OLC-CMP-001"
   | "OLC-CMP-002"
   | "OLC-VAL-001"
-  | "OLC-VAL-002";
+  | "OLC-VAL-002"
+  | "OLC-VAL-003"
+  | "OLC-VAL-004";
 
 export interface MeasurementValidationIssue {
   code: MeasurementValidationIssueCode;
@@ -35,6 +37,10 @@ interface MeasurementLike {
   templateType?: string;
   rawValues?: Record<string, unknown>;
   isDeleted?: boolean;
+  width?: number;
+  height?: number;
+  calculatedWidth?: number;
+  calculatedHeight?: number;
 }
 
 interface OpeningLike {
@@ -97,23 +103,6 @@ function hasCurtainWidth(
   );
 }
 
-function hasCurtainHeight(
-  rawValues: Record<string, unknown>,
-): boolean {
-  const keys = [
-    "solYukseklikCm",
-    "ortaYukseklikCm",
-    "sagYukseklikCm",
-    "windowHeight",
-    "height",
-    "camIciCm",
-    "kaloriferMermerBoyuCm",
-    "camAltiCm",
-  ];
-
-  return keys.some(key => positiveNumber(rawValues[key]));
-}
-
 export function validateMeasurementRecord(
   measurement: MeasurementLike,
   context?: {
@@ -123,52 +112,188 @@ export function validateMeasurementRecord(
     openingName?: string;
   },
 ): MeasurementValidationIssue[] {
-  const templateType = String(measurement.templateType || "").trim();
+  const templateType = String(
+    measurement.templateType || "",
+  ).trim();
 
-  if (
-    templateType !== "CURTAIN_DETAIL" &&
-    templateType !== "CURTAIN"
-  ) {
-    return [];
-  }
-
-  const rawValues = isRecord(measurement.rawValues)
+  const rawValues = isRecord(
+    measurement.rawValues,
+  )
     ? measurement.rawValues
     : {};
 
   const issues: MeasurementValidationIssue[] = [];
 
-  if (!hasCurtainWidth(rawValues)) {
+  const pushWidthIssue = (): void => {
     issues.push({
-      code: "OLC-VAL-001",
+      code: "OLC-VAL-003",
       severity: "ERROR",
       message:
-        "Perde ölçüsünde en az bir geçerli en / cephe ölçüsü girilmelidir.",
+        "Ölçünün kaydedilebilmesi için geçerli bir EN ölçüsü girilmelidir.",
       roomId: context?.roomId,
       roomName: context?.roomName,
       openingId: context?.openingId,
       openingName: context?.openingName,
       measurementId: measurement.id,
     });
+  };
+
+  const pushHeightIssue = (
+    detail = false,
+  ): void => {
+    issues.push({
+      code: "OLC-VAL-004",
+      severity: "ERROR",
+      message: detail
+        ? "Detay ölçüde Sol Boy, Orta Boy, Sağ Boy veya Kalorifer / Mermer Boşluğu alanlarından en az biri girilmelidir."
+        : "Ölçünün kaydedilebilmesi için geçerli bir BOY ölçüsü girilmelidir.",
+      roomId: context?.roomId,
+      roomName: context?.roomName,
+      openingId: context?.openingId,
+      openingName: context?.openingName,
+      measurementId: measurement.id,
+    });
+  };
+
+  if (
+    templateType === "CURTAIN_DETAIL" ||
+    templateType === "CURTAIN"
+  ) {
+    if (!hasCurtainWidth(rawValues)) {
+      issues.push({
+        code: "OLC-VAL-001",
+        severity: "ERROR",
+        message:
+          "Detay ölçüde geçerli bir EN / cephe ölçüsü girilmelidir.",
+        roomId: context?.roomId,
+        roomName: context?.roomName,
+        openingId: context?.openingId,
+        openingName: context?.openingName,
+        measurementId: measurement.id,
+      });
+    }
+
+    const detailHeightKeys = [
+      "solYukseklikCm",
+      "ortaYukseklikCm",
+      "sagYukseklikCm",
+      "kaloriferMermerBoyuCm",
+    ];
+
+    const hasDetailHeight =
+      detailHeightKeys.some(
+        key => positiveNumber(rawValues[key]),
+      ) ||
+      (
+        templateType === "CURTAIN" &&
+        positiveNumber(rawValues.windowHeight)
+      );
+
+    if (!hasDetailHeight) {
+      issues.push({
+        code: "OLC-VAL-002",
+        severity: "ERROR",
+        message:
+          "Detay ölçüde Sol Boy, Orta Boy, Sağ Boy veya Kalorifer / Mermer Boşluğu alanlarından en az biri girilmelidir.",
+        roomId: context?.roomId,
+        roomName: context?.roomName,
+        openingId: context?.openingId,
+        openingName: context?.openingName,
+        measurementId: measurement.id,
+      });
+    }
+
+    return issues;
   }
 
-  if (!hasCurtainHeight(rawValues)) {
-    issues.push({
-      code: "OLC-VAL-002",
-      severity: "ERROR",
-      message:
-        "Perde ölçüsünü kaydetmek için en az bir boy ölçüsü veya kalorifer / mermer boy ölçüsü girilmelidir.",
-      roomId: context?.roomId,
-      roomName: context?.roomName,
-      openingId: context?.openingId,
-      openingName: context?.openingName,
-      measurementId: measurement.id,
-    });
+  if (
+    templateType === "SIMPLE_WIDTH_HEIGHT" ||
+    templateType === "mechanical_curtain"
+  ) {
+    if (!positiveNumber(rawValues.width)) {
+      pushWidthIssue();
+    }
+
+    if (!positiveNumber(rawValues.height)) {
+      pushHeightIssue();
+    }
+
+    return issues;
+  }
+
+  if (templateType === "PLICELL") {
+    const plicellList = Array.isArray(
+      rawValues.plicellCamListesi,
+    )
+      ? rawValues.plicellCamListesi.filter(isRecord)
+      : [];
+
+    if (plicellList.length > 0) {
+      const commonHeight =
+        positiveNumber(rawValues.ortakCamBoyuCm);
+
+      const allWidthsValid =
+        plicellList.every(
+          glass => positiveNumber(glass.widthCm),
+        );
+
+      const allHeightsValid =
+        commonHeight ||
+        plicellList.every(
+          glass => positiveNumber(glass.heightCm),
+        );
+
+      if (!allWidthsValid) {
+        pushWidthIssue();
+      }
+
+      if (!allHeightsValid) {
+        pushHeightIssue();
+      }
+
+      return issues;
+    }
+
+    if (!positiveNumber(rawValues.glassWidth)) {
+      pushWidthIssue();
+    }
+
+    if (!positiveNumber(rawValues.glassHeight)) {
+      pushHeightIssue();
+    }
+
+    return issues;
+  }
+
+  /*
+   * Fail-closed fallback:
+   * Yeni/legacy bir ölçü şablonu özel validator kazanana kadar
+   * en ve boy olmadan operasyonel ölçü sayılamaz.
+   */
+  const genericWidth =
+    positiveNumber(rawValues.width) ||
+    positiveNumber(rawValues.glassWidth) ||
+    positiveNumber(rawValues.windowWidth) ||
+    positiveNumber(measurement.width) ||
+    positiveNumber(measurement.calculatedWidth);
+
+  const genericHeight =
+    positiveNumber(rawValues.height) ||
+    positiveNumber(rawValues.glassHeight) ||
+    positiveNumber(rawValues.windowHeight) ||
+    positiveNumber(measurement.height) ||
+    positiveNumber(measurement.calculatedHeight);
+
+  if (!genericWidth) {
+    pushWidthIssue();
+  }
+
+  if (!genericHeight) {
+    pushHeightIssue();
   }
 
   return issues;
 }
-
 export function validateMeasurementTransferTree(
   rooms: RoomLike[] | undefined,
   stage: MeasurementValidationStage,
