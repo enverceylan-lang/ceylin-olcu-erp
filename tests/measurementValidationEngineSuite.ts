@@ -114,6 +114,7 @@ function curtainDetailAcceptsFacadeWidth(): void {
       id: "measurement-2",
       templateType: "CURTAIN_DETAIL",
       rawValues: {
+        solYukseklikCm: 275,
         facadeSegments: [
           {
             widthCm: 751,
@@ -124,7 +125,7 @@ function curtainDetailAcceptsFacadeWidth(): void {
 
   assert(
     issues.length === 0,
-    "CURTAIN_DETAIL with facade width must pass",
+    "CURTAIN_DETAIL with facade width and one height must pass",
   );
 
   console.log(

@@ -1,6 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 import { getDeviceId } from './deviceIdentity';
 import { useAuthStore } from '@/store/useAuthStore';
+import { validateCustomerMeasurementExit } from './measurementValidationEngine';
 
 export interface SyncPatchProduct {
   rawValues?: Record<string, unknown>;
@@ -40,7 +41,7 @@ export interface SyncEvent {
   userId: string;
   createdAt: string;
   updatedAt: string;
-  syncStatus: 'PENDING' | 'SYNCED' | 'ERROR';
+  syncStatus: 'PENDING' | 'SYNCED' | 'ERROR' | 'BLOCKED';
   retryCount: number;
 }
 
@@ -139,6 +140,23 @@ export async function enqueueSyncEventDetailed(
   patch: SyncPatch
 ): Promise<EnqueueSyncResult> {
   try {
+    if (
+      entityType === 'CUSTOMER' &&
+      operation !== 'SOFT_DELETE'
+    ) {
+      const validation = validateCustomerMeasurementExit(
+        patch,
+        "SOURCE_EXIT",
+      );
+
+      if (!validation.valid) {
+        console.warn(
+          "[MeasurementPassport] CUSTOMER SOURCE_EXIT rejected",
+          validation.issues,
+        );
+        return { success: false };
+      }
+    }
     const now = new Date().toISOString();
     const deviceId = getDeviceId();
     const sanitizedPatch = sanitizePatch(patch);
@@ -306,7 +324,40 @@ export async function getPendingSyncEvents(limit: number = 50): Promise<SyncEven
     );
 
     const selectedEvents = compactedEvents.slice(0, limit);
-    const errorEvents = selectedEvents.filter(
+    const sendableEvents: SyncEvent[] = [];
+
+    for (const event of selectedEvents) {
+      if (
+        event.entityType === 'CUSTOMER' &&
+        event.operation !== 'SOFT_DELETE'
+      ) {
+        const validation = validateCustomerMeasurementExit(
+          event.patch,
+          "SOURCE_EXIT",
+        );
+
+        if (!validation.valid) {
+          await localSyncQueueDb.pendingSyncEvents.update(
+            event.changeId,
+            {
+              syncStatus: 'BLOCKED',
+              updatedAt: new Date().toISOString(),
+            },
+          );
+
+          console.warn(
+            "[MeasurementPassport] Existing queued CUSTOMER event blocked",
+            event.changeId,
+            validation.issues,
+          );
+          continue;
+        }
+      }
+
+      sendableEvents.push(event);
+    }
+
+    const errorEvents = sendableEvents.filter(
       (event) => event.syncStatus === 'ERROR',
     );
 
@@ -323,7 +374,7 @@ export async function getPendingSyncEvents(limit: number = 50): Promise<SyncEven
         })),
       );
 
-      return selectedEvents.map((event) =>
+      return sendableEvents.map((event) =>
         event.syncStatus === 'ERROR'
           ? {
               ...event,
@@ -334,7 +385,7 @@ export async function getPendingSyncEvents(limit: number = 50): Promise<SyncEven
       );
     }
 
-    return selectedEvents;
+    return sendableEvents;
   } catch (err: unknown) {
     if (typeof window !== 'undefined') {
       alert(`[DEBUG] getPendingSyncEvents failed: ${getErrorMessage(err)}`);

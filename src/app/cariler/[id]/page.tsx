@@ -27,6 +27,7 @@ import { PlicellCamListEditor } from "@/components/measurements/PlicellCamListEd
 import { FieldTaskAssignButton } from "@/components/FieldTaskAssignButton";
 import { hasSlopedFacadeHeight } from "@/lib/facadeHeight";
 import { CustomerFinancePanel } from "@/components/finance/CustomerFinancePanel";
+import { validateMeasurementRecord } from "@/lib/measurementValidationEngine";
 
 const measurementOpeningId = (measurement: { openingId?: string; windowId?: string }) =>
   measurement.openingId || measurement.windowId || "";
@@ -478,6 +479,54 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     );
   };
 
+  const openRoomPreparation = (room: Customer["rooms"][number]) => {
+    const activeOpenings = (room.windows || []).filter(
+      opening => !opening.isDeleted,
+    );
+
+    if (activeOpenings.length === 0) {
+      showToast(
+        `${room.name} odasında ölçü açıklığı bulunmuyor. Satışa Hazırlık açılamaz.`,
+      );
+      return;
+    }
+
+    for (const opening of activeOpenings) {
+      const openingMeasurements = (opening.products || []).filter(
+        measurement => !measurement.isDeleted,
+      );
+
+      if (openingMeasurements.length === 0) {
+        showToast(
+          `${room.name} > ${opening.name || "Açıklık"} için ölçü kaydedilmeden Satışa Hazırlık açılamaz.`,
+        );
+        return;
+      }
+
+      for (const measurement of openingMeasurements) {
+        const issues = validateMeasurementRecord(
+          measurement,
+          {
+            roomId: room.id,
+            roomName: room.name,
+            openingId: opening.id,
+            openingName: opening.name,
+          },
+        );
+
+        if (issues.length > 0) {
+          console.warn(
+            "[MeasurementValidation] Satışa Hazırlık kapısı",
+            issues,
+          );
+          showToast(issues[0].message);
+          return;
+        }
+      }
+    }
+
+    openRoomPreparation(room);
+  };
   const toggleRoom = (roomId: string) => {
     setExpandedRooms(prev => ({ ...prev, [roomId]: !prev[roomId] }));
   };
@@ -797,6 +846,29 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
   const handleSaveMeasurement = async (roomId: string, windowId: string) => {
     if (isSaving) return;
+    const measurementIssues = validateMeasurementRecord(
+      {
+        templateType: selectedTemplate,
+        rawValues,
+      },
+      {
+        roomId,
+        roomName: customer.rooms.find(room => room.id === roomId)?.name,
+        openingId: windowId,
+        openingName: customer.rooms
+          .find(room => room.id === roomId)
+          ?.windows?.find(opening => opening.id === windowId)?.name,
+      },
+    );
+
+    if (measurementIssues.length > 0) {
+      console.warn(
+        "[MeasurementValidation] Ölçü kayıt kapısı",
+        measurementIssues,
+      );
+      showToast(measurementIssues[0].message);
+      return;
+    }
 
     if (!hasMeaningfulMeasurementInput()) {
       showToast(
@@ -1898,8 +1970,7 @@ showToast("Saha taslağı telefona kaydedildi.");
                         <span
                           onClick={(e) => {
                             e.stopPropagation();
-                            setSelectedRoomForPrep(room);
-                            setIsPrepModalOpen(true);
+                            openRoomPreparation(room);
                           }}
                           className="cursor-pointer hover:underline text-blue-600 dark:text-blue-400"
                           title="Satışa Hazırlık ve Ürün Seçimi"
@@ -1912,8 +1983,7 @@ showToast("Saha taslağı telefona kaydedildi.");
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          setSelectedRoomForPrep(room);
-                          setIsPrepModalOpen(true);
+                          openRoomPreparation(room);
                         }}
                         className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 cursor-pointer font-bold text-xs border border-emerald-250 bg-emerald-50 dark:bg-emerald-950/30 dark:border-emerald-800/50 px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1"
                         title="Oda Ürün Seçimleri ve Satışa Hazırlık"

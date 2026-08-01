@@ -10,7 +10,8 @@ export type MeasurementValidationDecision =
 export type MeasurementValidationIssueCode =
   | "OLC-CMP-001"
   | "OLC-CMP-002"
-  | "OLC-VAL-001";
+  | "OLC-VAL-001"
+  | "OLC-VAL-002";
 
 export interface MeasurementValidationIssue {
   code: MeasurementValidationIssueCode;
@@ -33,8 +34,7 @@ interface MeasurementLike {
   id?: string;
   templateType?: string;
   rawValues?: Record<string, unknown>;
-  calculatedWidth?: number;
-  calculatedHeight?: number;
+  isDeleted?: boolean;
 }
 
 interface OpeningLike {
@@ -53,35 +53,65 @@ interface RoomLike {
   openings?: OpeningLike[];
 }
 
+interface CustomerTreeLike {
+  rooms?: RoomLike[];
+}
+
 const isRecord = (
   value: unknown,
 ): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
 const positiveNumber = (value: unknown): boolean =>
-  Number.isFinite(Number(value)) &&
-  Number(value) > 0;
+  Number.isFinite(Number(value)) && Number(value) > 0;
 
 function finalize(
   stage: MeasurementValidationStage,
   issues: MeasurementValidationIssue[],
 ): MeasurementValidationResult {
   if (issues.length === 0) {
-    return {
-      valid: true,
-      decision: "VALID",
-      issues: [],
-    };
+    return { valid: true, decision: "VALID", issues: [] };
   }
 
   return {
     valid: false,
-    decision:
-      stage === "SOURCE_EXIT"
-        ? "REJECT"
-        : "QUARANTINE",
+    decision: stage === "SOURCE_EXIT" ? "REJECT" : "QUARANTINE",
     issues,
   };
+}
+
+function hasCurtainWidth(
+  rawValues: Record<string, unknown>,
+): boolean {
+  const facadeSegments = Array.isArray(rawValues.facadeSegments)
+    ? rawValues.facadeSegments
+    : [];
+
+  return (
+    facadeSegments.some(
+      segment =>
+        isRecord(segment) &&
+        positiveNumber(segment.widthCm),
+    ) ||
+    positiveNumber(rawValues.windowWidth)
+  );
+}
+
+function hasCurtainHeight(
+  rawValues: Record<string, unknown>,
+): boolean {
+  const keys = [
+    "solYukseklikCm",
+    "ortaYukseklikCm",
+    "sagYukseklikCm",
+    "windowHeight",
+    "height",
+    "camIciCm",
+    "kaloriferMermerBoyuCm",
+    "camAltiCm",
+  ];
+
+  return keys.some(key => positiveNumber(rawValues[key]));
 }
 
 export function validateMeasurementRecord(
@@ -93,9 +123,7 @@ export function validateMeasurementRecord(
     openingName?: string;
   },
 ): MeasurementValidationIssue[] {
-  const templateType = String(
-    measurement.templateType || "",
-  ).trim();
+  const templateType = String(measurement.templateType || "").trim();
 
   if (
     templateType !== "CURTAIN_DETAIL" &&
@@ -104,43 +132,41 @@ export function validateMeasurementRecord(
     return [];
   }
 
-  const rawValues = isRecord(
-    measurement.rawValues,
-  )
+  const rawValues = isRecord(measurement.rawValues)
     ? measurement.rawValues
     : {};
 
-  const facadeSegments = Array.isArray(
-    rawValues.facadeSegments,
-  )
-    ? rawValues.facadeSegments
-    : [];
+  const issues: MeasurementValidationIssue[] = [];
 
-  const hasFacadeWidth =
-    facadeSegments.some(
-      segment =>
-        isRecord(segment) &&
-        positiveNumber(segment.widthCm),
-    ) ||
-    positiveNumber(rawValues.windowWidth);
-
-  if (hasFacadeWidth) {
-    return [];
-  }
-
-  return [
-    {
+  if (!hasCurtainWidth(rawValues)) {
+    issues.push({
       code: "OLC-VAL-001",
       severity: "ERROR",
       message:
-        "Detay Perde ölçüsünde en az bir geçerli cephe eni bulunmalıdır.",
+        "Perde ölçüsünde en az bir geçerli en / cephe ölçüsü girilmelidir.",
       roomId: context?.roomId,
       roomName: context?.roomName,
       openingId: context?.openingId,
       openingName: context?.openingName,
       measurementId: measurement.id,
-    },
-  ];
+    });
+  }
+
+  if (!hasCurtainHeight(rawValues)) {
+    issues.push({
+      code: "OLC-VAL-002",
+      severity: "ERROR",
+      message:
+        "Perde ölçüsünü kaydetmek için en az bir boy ölçüsü veya kalorifer / mermer boy ölçüsü girilmelidir.",
+      roomId: context?.roomId,
+      roomName: context?.roomName,
+      openingId: context?.openingId,
+      openingName: context?.openingName,
+      measurementId: measurement.id,
+    });
+  }
+
+  return issues;
 }
 
 export function validateMeasurementTransferTree(
@@ -148,23 +174,14 @@ export function validateMeasurementTransferTree(
   stage: MeasurementValidationStage,
 ): MeasurementValidationResult {
   const issues: MeasurementValidationIssue[] = [];
-
   const activeRooms = Array.isArray(rooms)
     ? rooms.filter(room => !room?.isDeleted)
     : [];
 
   for (const room of activeRooms) {
     const openings = [
-      ...(
-        Array.isArray(room.windows)
-          ? room.windows
-          : []
-      ),
-      ...(
-        Array.isArray(room.openings)
-          ? room.openings
-          : []
-      ),
+      ...(Array.isArray(room.windows) ? room.windows : []),
+      ...(Array.isArray(room.openings) ? room.openings : []),
     ].filter(opening => !opening?.isDeleted);
 
     if (openings.length === 0) {
@@ -181,17 +198,13 @@ export function validateMeasurementTransferTree(
 
     for (const opening of openings) {
       const measurements = [
-        ...(
-          Array.isArray(opening.measurements)
-            ? opening.measurements
-            : []
-        ),
-        ...(
-          Array.isArray(opening.products)
-            ? opening.products
-            : []
-        ),
-      ];
+        ...(Array.isArray(opening.measurements)
+          ? opening.measurements
+          : []),
+        ...(Array.isArray(opening.products)
+          ? opening.products
+          : []),
+      ].filter(measurement => !measurement?.isDeleted);
 
       if (measurements.length === 0) {
         issues.push({
@@ -209,19 +222,31 @@ export function validateMeasurementTransferTree(
 
       for (const measurement of measurements) {
         issues.push(
-          ...validateMeasurementRecord(
-            measurement,
-            {
-              roomId: room.id,
-              roomName: room.name,
-              openingId: opening.id,
-              openingName: opening.name,
-            },
-          ),
+          ...validateMeasurementRecord(measurement, {
+            roomId: room.id,
+            roomName: room.name,
+            openingId: opening.id,
+            openingName: opening.name,
+          }),
         );
       }
     }
   }
 
   return finalize(stage, issues);
+}
+
+export function validateCustomerMeasurementExit(
+  customer: CustomerTreeLike,
+  stage: MeasurementValidationStage = "SOURCE_EXIT",
+): MeasurementValidationResult {
+  const activeRooms = Array.isArray(customer?.rooms)
+    ? customer.rooms.filter(room => !room?.isDeleted)
+    : [];
+
+  if (activeRooms.length === 0) {
+    return finalize(stage, []);
+  }
+
+  return validateMeasurementTransferTree(activeRooms, stage);
 }
