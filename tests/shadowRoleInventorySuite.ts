@@ -11,15 +11,16 @@ const rows = buildShadowRoleInventory();
 const summary = summarizeShadowRoleInventory(rows);
 
 assert.equal(SHADOW_INVENTORY_ROLES.length, 7);
-assert.equal(SHADOW_INVENTORY_PACKAGES.length, 3);
-assert.equal(rows.length, 7 * 3 * 16);
-assert.equal(summary.rowCount, 336);
+assert.equal(SHADOW_INVENTORY_PACKAGES.length, 4);
+assert.equal(rows.length, 7 * 4 * 16);
+assert.equal(summary.rowCount, 448);
 assert.equal(summary.byPackage.ECO.rowCount, 112);
-assert.equal(summary.byPackage.NORMAL.rowCount, 112);
+assert.equal(summary.byPackage.PRO.rowCount, 112);
 assert.equal(summary.byPackage.PLUS.rowCount, 112);
+assert.equal(summary.byPackage.ELITE.rowCount, 112);
 assert.equal(summary.byPackage.PLUS.differenceCount, 0);
 assert.equal(summary.byPackage.ECO.differenceCount > 0, true);
-assert.equal(summary.byPackage.NORMAL.differenceCount > 0, true);
+assert.equal(summary.byPackage.PRO.differenceCount > 0, true);
 
 assert.equal(PENDING_ACCESS_DECISIONS.length, 6);
 assert.equal(

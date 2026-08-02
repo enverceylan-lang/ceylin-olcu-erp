@@ -70,7 +70,7 @@ assert.deepEqual(
   validUpdate,
   {
     valid: true,
-    normalizedPackage: "NORMAL"
+    normalizedPackage: "PRO"
   }
 );
 
@@ -139,7 +139,7 @@ const record:
     companySlug: "ceylinperde",
     companyName: "Ceylin Perde",
 
-    package: "NORMAL",
+    package: "PRO",
 
     licenseActive: true,
 
@@ -166,12 +166,12 @@ const view =
 
 assert.equal(
   view.package,
-  "NORMAL"
+  "PRO"
 );
 
 assert.equal(
   view.packageLabel,
-  "STANDARD"
+  "PRO"
 );
 
 assert.equal(
@@ -200,7 +200,7 @@ assert.doesNotThrow(() =>
         tenantId: "tenant-1",
         companyId: "company-1",
         companyName: "Ceylin Perde",
-        package: "NORMAL",
+        package: "PRO",
         licenseActive: true
       }
     ]

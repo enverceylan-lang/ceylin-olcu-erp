@@ -112,4 +112,26 @@ assert.deepEqual(
   }
 );
 
+
+assert.deepEqual(
+  resolveShadowErpContext({
+    scopeRow,
+    licenseRow: {
+      ...licenseRow,
+      package_code: "NORMAL",
+    },
+    now,
+  }),
+  {
+    ready: true,
+    scope: {
+      tenantId: "tenant-uuid",
+      companyId: "company-uuid",
+      branchId: "branch-uuid",
+      accountingPeriodId: "period-uuid",
+    },
+    package: "PRO",
+    featureOverrides: {},
+  }
+);
 console.log("[PASS] server ERP shadow context");

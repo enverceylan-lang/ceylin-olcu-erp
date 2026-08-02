@@ -16,7 +16,7 @@ function request(
   overrides: Partial<FinanceAccessRequest> = {},
 ): FinanceAccessRequest {
   return {
-    packageType: "NORMAL",
+    packageType: "PRO",
     permissions: ["customerFinance.view"],
     scope,
     requestedCapability: "CUSTOMER_FINANCE",
@@ -57,7 +57,7 @@ const ecoCustomer = decideFinanceAccess(
 assert.equal(ecoCustomer.allowed, false);
 
 assert.equal(
-  decideFinanceAccess(request({ packageType: "NORMAL" })).allowed,
+  decideFinanceAccess(request({ packageType: "PRO" })).allowed,
   true,
 );
 assert.equal(

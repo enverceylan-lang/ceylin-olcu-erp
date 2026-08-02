@@ -43,7 +43,7 @@ function sale(overrides: Partial<Sale> = {}): Sale {
 
 function select(overrides: Parameters<typeof selectFinanceReadModel>[0] = {
   scope,
-  packageType: "NORMAL",
+  packageType: "PRO",
   permissions: ["customerFinance.view"],
   requestedCapability: "CUSTOMER_FINANCE",
   sales: [sale()],
@@ -55,7 +55,7 @@ function select(overrides: Parameters<typeof selectFinanceReadModel>[0] = {
 
 const baseInput = {
   scope,
-  packageType: "NORMAL" as const,
+  packageType: "PRO" as const,
   permissions: ["customerFinance.view"] as const,
   requestedCapability: "CUSTOMER_FINANCE" as const,
   sales: [sale()],

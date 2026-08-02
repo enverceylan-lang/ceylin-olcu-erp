@@ -499,8 +499,6 @@ export async function POST(
       adminEmail || null,
     company_admin_phone:
       adminPhone || null,
-    changed_by_user_id:
-      access.actor.id,
   };
 
   const { data, error } =
@@ -508,6 +506,8 @@ export async function POST(
       "provision_platform_company_v1",
       {
         p_request: rpcRequest,
+        p_actor_user_id:
+          access.actor.id,
       },
     );
 

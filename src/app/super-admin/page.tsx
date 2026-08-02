@@ -61,8 +61,8 @@ export default function SuperAdminPage() {
     );
 
   const [packageValue, setPackageValue] =
-    useState<"ECO" | "STANDARD" | "PLUS">(
-      "STANDARD"
+    useState<"ECO" | "PRO" | "PLUS" | "ELITE">(
+      "PRO"
     );
   const [licenseActive, setLicenseActive] =
     useState(true);
@@ -550,7 +550,7 @@ export default function SuperAdminPage() {
             {draftPanel === "license" && selectedCompany && (
               <form className="grid gap-4 p-5 sm:grid-cols-2" onSubmit={event => { event.preventDefault(); handlePreview(); }}>
                 <div className="rounded-lg bg-cyan-50 p-3 text-sm text-cyan-950 sm:col-span-2 dark:bg-cyan-500/10 dark:text-cyan-100"><strong>{selectedCompany.companyName}</strong><p className="mt-1 text-xs opacity-75">Canlı sunucu yazımı kapalıdır.</p></div>
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Paket<select value={packageValue} onChange={event => setPackageValue(event.target.value as "ECO" | "STANDARD" | "PLUS")} className={fieldClassName}><option value="ECO">ECO</option><option value="STANDARD">STANDARD</option><option value="PLUS">PLUS</option></select></label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Paket<select value={packageValue} onChange={event => setPackageValue(event.target.value as "ECO" | "PRO" | "PLUS" | "ELITE")} className={fieldClassName}><option value="ECO">ECO</option><option value="PRO">PRO</option><option value="PLUS">PLUS</option><option value="ELITE">ELITE</option></select></label>
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Kullanıcı Limiti<input type="number" min={1} value={userLimit} onChange={event => setUserLimit(Number(event.target.value))} className={fieldClassName} /></label>
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Şube Limiti<input type="number" min={1} value={branchLimit} onChange={event => setBranchLimit(Number(event.target.value))} className={fieldClassName} /></label>
                 <label className="flex items-end"><span className="flex h-10 w-full items-center justify-between rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-700 dark:border-slate-700 dark:text-slate-300">Lisans aktif<input type="checkbox" checked={licenseActive} onChange={event => setLicenseActive(event.target.checked)} className="h-4 w-4 accent-cyan-600" /></span></label>

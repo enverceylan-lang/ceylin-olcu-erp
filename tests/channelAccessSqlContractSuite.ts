@@ -56,9 +56,33 @@ assert.match(
 
 assert.match(
   sql,
-  /New provisioned companies are MOBILE-first and WEB-by-permission/i,
+  /New provisioned companies start with WEB and MOBILE enabled; DESKTOP remains disabled/i,
 );
 
+assert.match(
+  sql,
+  /\(v_license_id,\s*'WEB',\s*TRUE\)/,
+);
+assert.match(
+  sql,
+  /\(v_license_id,\s*'MOBILE',\s*TRUE\)/,
+);
+assert.match(
+  sql,
+  /\(v_license_id,\s*'DESKTOP',\s*FALSE\)/,
+);
+assert.match(
+  sql,
+  /\(v_user_scope_id,\s*'WEB',\s*TRUE\)/,
+);
+assert.match(
+  sql,
+  /\(v_user_scope_id,\s*'MOBILE',\s*TRUE\)/,
+);
+assert.match(
+  sql,
+  /\(v_user_scope_id,\s*'DESKTOP',\s*FALSE\)/,
+);
 assert.match(
   sql,
   /ENABLE ROW LEVEL SECURITY/,

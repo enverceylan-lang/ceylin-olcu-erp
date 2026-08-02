@@ -28,7 +28,7 @@ const views =
       companyCode: "ALFA",
       companySlug: "alfaperde",
       companyName: "Alfa Perde",
-      package: "NORMAL",
+      package: "PRO",
       licenseActive: true,
       licenseStartsAt:
         "2026-01-01T00:00:00.000Z",
@@ -53,7 +53,7 @@ assert.equal(
 
 assert.equal(
   views[0].packageLabel,
-  "STANDARD"
+  "PRO"
 );
 
 assert.throws(
@@ -65,7 +65,7 @@ assert.throws(
           companyId: "company-1",
           companyCode: "ALFA",
           companyName: "Alfa Perde",
-          package: "NORMAL",
+          package: "PRO",
           licenseActive: true,
           licenseStartsAt:
             "2026-01-01T00:00:00.000Z",

@@ -16,8 +16,9 @@ export const SHADOW_INVENTORY_ROLES: readonly ShadowAccessRole[] = [
 
 export const SHADOW_INVENTORY_PACKAGES: readonly ErpPackage[] = [
   "ECO",
-  "NORMAL",
+  "PRO",
   "PLUS",
+  "ELITE",
 ];
 
 export interface ShadowRoleInventoryRow {
@@ -153,8 +154,9 @@ export function summarizeShadowRoleInventory(
     differenceCount: rows.filter((row) => row.differs).length,
     byPackage: {
       ECO: packageSummary("ECO"),
-      NORMAL: packageSummary("NORMAL"),
+      PRO: packageSummary("PRO"),
       PLUS: packageSummary("PLUS"),
+      ELITE: packageSummary("ELITE"),
     },
   };
 }

@@ -52,6 +52,15 @@ assert.match(
 
 assert.match(
   source,
+  /p_actor_user_id:\s*[\r\n\s]*access\.actor\.id/,
+);
+
+assert.doesNotMatch(
+  source,
+  /changed_by_user_id\s*:/,
+);
+assert.match(
+  source,
   /assertPlatformMetadataOnly/,
 );
 

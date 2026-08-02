@@ -47,8 +47,9 @@ export interface PlatformCompanyLicenseView {
   package: ErpPackage;
   packageLabel:
     | "ECO"
-    | "STANDARD"
+    | "PRO"
     | "PLUS"
+    | "ELITE"
     | "PAKET TANIMSIZ";
 
   licenseActive: boolean;
@@ -68,6 +69,7 @@ export interface PlatformLicenseUpdateRequest {
 
   package:
     | ErpPackage
+    | "NORMAL"
     | "STANDARD";
 
   licenseActive: boolean;

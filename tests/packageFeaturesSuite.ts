@@ -15,9 +15,9 @@ const allFeatures = Object.keys(PACKAGE_FEATURES.PLUS) as ErpFeature[];
 assert.equal(hasPackageFeature("ECO", "measurement"), true);
 assert.equal(hasPackageFeature("ECO", "sales"), true);
 assert.equal(hasPackageFeature("ECO", "stockLots"), false);
-assert.equal(hasPackageFeature("NORMAL", "stockLots"), true);
+assert.equal(hasPackageFeature("PRO", "stockLots"), true);
 assert.equal(
-  hasPackageFeature("NORMAL", "advancedCutOptimization"),
+  hasPackageFeature("PRO", "advancedCutOptimization"),
   false
 );
 assert.equal(hasPackageFeature("PLUS", "advancedCutOptimization"), true);
@@ -25,12 +25,12 @@ assert.equal(hasPackageFeature("PLUS", "advancedCutOptimization"), true);
 for (const feature of allFeatures) {
   if (PACKAGE_FEATURES.ECO[feature]) {
     assert.equal(
-      PACKAGE_FEATURES.NORMAL[feature],
+      PACKAGE_FEATURES.PRO[feature],
       true,
       `Normal paket Eco özelliğini kaybetti: ${feature}`
     );
   }
-  if (PACKAGE_FEATURES.NORMAL[feature]) {
+  if (PACKAGE_FEATURES.PRO[feature]) {
     assert.equal(
       PACKAGE_FEATURES.PLUS[feature],
       true,
@@ -58,7 +58,7 @@ assert.deepEqual(licenseDenied, {
 });
 
 const roleDenied = decideFeatureAccess({
-  package: "NORMAL",
+  package: "PRO",
   feature: "stockLots",
   roleAllows: false,
   userAllows: true,
@@ -77,7 +77,7 @@ assert.deepEqual(userCannotOverrideRole, {
 });
 
 const userDenied = decideFeatureAccess({
-  package: "NORMAL",
+  package: "PRO",
   feature: "stockLots",
   roleAllows: true,
   userAllows: false,
@@ -85,7 +85,7 @@ const userDenied = decideFeatureAccess({
 assert.deepEqual(userDenied, { allowed: false, reason: "USER_DENIED" });
 
 const scopeDenied = decideFeatureAccess({
-  package: "NORMAL",
+  package: "PRO",
   feature: "stockLots",
   roleAllows: true,
   actorScope: scope,
@@ -94,7 +94,7 @@ const scopeDenied = decideFeatureAccess({
 assert.deepEqual(scopeDenied, { allowed: false, reason: "SCOPE_DENIED" });
 
 const ownershipDenied = decideFeatureAccess({
-  package: "NORMAL",
+  package: "PRO",
   feature: "tailorWorkOrders",
   roleAllows: true,
   actorScope: scope,
@@ -110,7 +110,7 @@ assert.deepEqual(ownershipDenied, {
 
 assert.deepEqual(
   decideFeatureAccess({
-    package: "NORMAL",
+    package: "PRO",
     feature: "tailorWorkOrders",
     roleAllows: true,
     actorScope: scope,
@@ -122,25 +122,38 @@ assert.deepEqual(
   { allowed: true }
 );
 
+
+assert.equal(normalizeErpPackage("ELITE"), "ELITE");
+assert.equal(getPackageDisplayLabel("ELITE"), "ELITE");
+
+for (const feature of allFeatures) {
+  if (PACKAGE_FEATURES.PLUS[feature]) {
+    assert.equal(
+      PACKAGE_FEATURES.ELITE[feature],
+      true,
+      `Elite paket Plus özelliğini kaybetti: ${feature}`
+    );
+  }
+}
 console.log("[PASS] package features and access order");
 assert.equal(
   normalizeErpPackage("STANDARD"),
-  "NORMAL"
+  "PRO"
 );
 
 assert.equal(
   normalizeErpPackage("NORMAL"),
-  "NORMAL"
+  "PRO"
 );
 
 assert.equal(
   getPackageDisplayLabel("NORMAL"),
-  "STANDARD"
+  "PRO"
 );
 
 assert.equal(
   getPackageDisplayLabel("STANDARD"),
-  "STANDARD"
+  "PRO"
 );
 
 assert.equal(

@@ -3,7 +3,10 @@ import {
   validateErpScope,
   type ErpScope,
 } from "./erpScope";
-import type { ErpPackage } from "./packageFeatures";
+import {
+  normalizeErpPackage,
+  type ErpPackage,
+} from "./packageFeatures";
 
 export type ShadowErpContextFailureReason =
   | "USER_SCOPE_NOT_FOUND"
@@ -42,9 +45,6 @@ export interface PackageLicenseRow {
   feature_overrides: unknown;
 }
 
-function isErpPackage(value: string): value is ErpPackage {
-  return value === "ECO" || value === "NORMAL" || value === "PLUS";
-}
 
 function normalizeOverrides(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -90,9 +90,12 @@ export function resolveShadowErpContext(input: {
     ? new Date(input.licenseRow.ends_at)
     : null;
 
+  const normalizedPackage =
+    normalizeErpPackage(input.licenseRow.package_code);
+
   if (
     !input.licenseRow.is_active ||
-    !isErpPackage(input.licenseRow.package_code) ||
+    !normalizedPackage ||
     Number.isNaN(startsAt.getTime()) ||
     startsAt > input.now ||
     (endsAt !== null &&
@@ -104,7 +107,7 @@ export function resolveShadowErpContext(input: {
   return {
     ready: true,
     scope,
-    package: input.licenseRow.package_code,
+    package: normalizedPackage,
     featureOverrides: normalizeOverrides(
       input.licenseRow.feature_overrides
     ),

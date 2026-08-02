@@ -55,6 +55,35 @@ assert.match(
 
 assert.match(
   sql,
+  /provision_platform_company_v1\s*\(\s*p_request JSONB,\s*p_actor_user_id TEXT\s*\)/,
+);
+
+assert.match(
+  sql,
+  /p_request \? 'changed_by_user_id'/,
+);
+
+assert.match(
+  sql,
+  /auth\.role\(\)[\s\S]*service_role/,
+);
+
+assert.match(
+  sql,
+  /COALESCE\(\s*p_actor_user_id/,
+);
+
+assert.doesNotMatch(
+  sql,
+  /p_request ->> 'changed_by_user_id'/,
+);
+
+assert.match(
+  sql,
+  /provision_platform_company_v1\(JSONB, TEXT\)/,
+);
+assert.match(
+  sql,
   /'PLATFORM_SUPER_ADMIN'/,
 );
 

@@ -1,4 +1,4 @@
-export type ErpPackage = "ECO" | "NORMAL" | "PLUS";
+export type ErpPackage = "ECO" | "PRO" | "PLUS" | "ELITE";
 
 export type ErpFeature =
   | "measurement"
@@ -47,7 +47,7 @@ const ECO_FEATURES: PackageFeatureMap = {
   operationWhatsApp: false,
 };
 
-const NORMAL_FEATURES: PackageFeatureMap = {
+const PRO_FEATURES: PackageFeatureMap = {
   ...ECO_FEATURES,
   customerFinance: true,
   stockTracking: true,
@@ -63,17 +63,22 @@ const NORMAL_FEATURES: PackageFeatureMap = {
 };
 
 const PLUS_FEATURES: PackageFeatureMap = {
-  ...NORMAL_FEATURES,
+  ...PRO_FEATURES,
   advancedCutOptimization: true,
   multiBranch: true,
   multiWarehouse: true,
   capacityPlanning: true,
 };
 
+const ELITE_FEATURES: PackageFeatureMap = {
+  ...PLUS_FEATURES,
+};
+
 export const PACKAGE_FEATURES: Record<ErpPackage, PackageFeatureMap> = {
   ECO: ECO_FEATURES,
-  NORMAL: NORMAL_FEATURES,
+  PRO: PRO_FEATURES,
   PLUS: PLUS_FEATURES,
+  ELITE: ELITE_FEATURES,
 };
 
 export type ErpRecordScope = ErpScope;
@@ -149,6 +154,7 @@ export function decideFeatureAccess(
 
 export type ErpPackageInput =
   | ErpPackage
+  | "NORMAL"
   | "STANDARD";
 
 export function normalizeErpPackage(
@@ -157,14 +163,18 @@ export function normalizeErpPackage(
   const normalized =
     value?.trim().toUpperCase();
 
-  if (normalized === "STANDARD") {
-    return "NORMAL";
+  if (
+    normalized === "STANDARD" ||
+    normalized === "NORMAL"
+  ) {
+    return "PRO";
   }
 
   if (
     normalized === "ECO" ||
-    normalized === "NORMAL" ||
-    normalized === "PLUS"
+    normalized === "PRO" ||
+    normalized === "PLUS" ||
+    normalized === "ELITE"
   ) {
     return normalized;
   }
@@ -174,12 +184,12 @@ export function normalizeErpPackage(
 
 export function getPackageDisplayLabel(
   value: string | null | undefined
-): "ECO" | "STANDARD" | "PLUS" | "PAKET TANIMSIZ" {
+): "ECO" | "PRO" | "PLUS" | "ELITE" | "PAKET TANIMSIZ" {
   const normalized =
     normalizeErpPackage(value);
 
-  if (normalized === "NORMAL") {
-    return "STANDARD";
+  if (normalized === "PRO") {
+    return "PRO";
   }
 
   if (normalized === "ECO") {
@@ -188,6 +198,10 @@ export function getPackageDisplayLabel(
 
   if (normalized === "PLUS") {
     return "PLUS";
+  }
+
+  if (normalized === "ELITE") {
+    return "ELITE";
   }
 
   return "PAKET TANIMSIZ";

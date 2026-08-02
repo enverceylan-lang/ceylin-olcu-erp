@@ -99,7 +99,7 @@ $$;
 --   Effective access requires BOTH to allow the requested channel.
 --
 -- Existing records retain current access until enforcement rollout.
--- New provisioned companies are MOBILE-first and WEB-by-permission.
+-- New provisioned companies start with WEB and MOBILE enabled; DESKTOP remains disabled.
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS public.erp_access_channels (
@@ -276,7 +276,7 @@ BEGIN
         is_enabled
     )
     VALUES
-        (v_license_id, 'WEB', FALSE),
+        (v_license_id, 'WEB', TRUE),
         (v_license_id, 'MOBILE', TRUE),
         (v_license_id, 'DESKTOP', FALSE)
     ON CONFLICT (license_id, channel_code)
@@ -290,7 +290,7 @@ BEGIN
         is_enabled
     )
     VALUES
-        (v_user_scope_id, 'WEB', FALSE),
+        (v_user_scope_id, 'WEB', TRUE),
         (v_user_scope_id, 'MOBILE', TRUE),
         (v_user_scope_id, 'DESKTOP', FALSE)
     ON CONFLICT (user_scope_id, channel_code)
@@ -362,7 +362,8 @@ CREATE INDEX IF NOT EXISTS
 
 CREATE OR REPLACE FUNCTION
 public.provision_platform_company_v1(
-    p_request JSONB
+    p_request JSONB,
+    p_actor_user_id TEXT
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -489,7 +490,7 @@ DECLARE
     v_actor_user_id TEXT :=
         BTRIM(
             COALESCE(
-                p_request ->> 'changed_by_user_id',
+                p_actor_user_id,
                 ''
             )
         );
@@ -512,6 +513,21 @@ BEGIN
        OR jsonb_typeof(p_request) <> 'object' THEN
         RAISE EXCEPTION
             'PLATFORM_PROVISION_INVALID:REQUEST';
+    END IF;
+
+    IF p_request ? 'changed_by_user_id' THEN
+        RAISE EXCEPTION
+            'PLATFORM_PROVISION_INVALID:ACTOR_IN_REQUEST';
+    END IF;
+
+    IF COALESCE(auth.role(), '') <> 'service_role' THEN
+        RAISE EXCEPTION
+            'PLATFORM_PROVISION_FORBIDDEN:CALLER_ROLE';
+    END IF;
+
+    IF v_actor_user_id = '' THEN
+        RAISE EXCEPTION
+            'PLATFORM_PROVISION_FORBIDDEN:ACTOR_REQUIRED';
     END IF;
 
     SELECT role
@@ -550,8 +566,9 @@ BEGIN
 
     IF v_package_code NOT IN (
         'ECO',
-        'NORMAL',
-        'PLUS'
+        'PRO',
+        'PLUS',
+        'ELITE'
     ) THEN
         RAISE EXCEPTION
             'PLATFORM_PROVISION_INVALID:PACKAGE';
@@ -867,12 +884,12 @@ $$;
 
 REVOKE ALL
     ON FUNCTION
-    public.provision_platform_company_v1(JSONB)
+    public.provision_platform_company_v1(JSONB, TEXT)
     FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE
     ON FUNCTION
-    public.provision_platform_company_v1(JSONB)
+    public.provision_platform_company_v1(JSONB, TEXT)
     TO service_role;
 
 COMMIT;
