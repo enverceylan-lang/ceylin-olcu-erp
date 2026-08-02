@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  useCallback,
+  useEffect,
   useMemo,
   useState
 } from "react";
@@ -55,6 +57,10 @@ export default function SuperAdminPage() {
     usePlatformAdminStore(
       state => state.selectCompany
     );
+  const replaceCompanies =
+    usePlatformAdminStore(
+      state => state.replaceCompanies
+    );
   const previewLicenseUpdate =
     usePlatformAdminStore(
       state => state.previewLicenseUpdate
@@ -86,17 +92,268 @@ export default function SuperAdminPage() {
     );
   const [companyDraft, setCompanyDraft] =
     useState({
+      tenantCode: "",
+      tenantName: "",
       name: "",
       code: "",
       slug: "",
-      status: "active"
+      branchCode: "",
+      branchName: "",
+      periodCode: "",
+      periodName: "",
+      periodStartsOn: "",
+      periodEndsOn: "",
+      adminName: "",
+      adminUsername: "",
+      adminPassword: "",
+      adminEmail: "",
+      adminPhone: ""
     });
+  const [loadingCompanies, setLoadingCompanies] =
+    useState(true);
+  const [creatingCompany, setCreatingCompany] =
+    useState(false);
   const [adminDraft, setAdminDraft] =
     useState({
       fullName: "",
       email: "",
       phone: ""
     });
+
+  const loadCompanies = useCallback(
+    async (): Promise<void> => {
+      setLoadingCompanies(true);
+
+      try {
+        const response = await fetch(
+          "/api/platform/companies",
+          {
+            method: "GET",
+            cache: "no-store",
+            credentials: "same-origin"
+          }
+        );
+
+        const payload =
+          await response.json() as {
+            success?: boolean;
+            companies?: unknown[];
+          };
+
+        if (
+          !response.ok ||
+          payload.success !== true ||
+          !Array.isArray(payload.companies)
+        ) {
+          setNotice(
+            "Platform şirket listesi yüklenemedi."
+          );
+          return;
+        }
+
+        replaceCompanies(
+          payload.companies as Parameters<
+            typeof replaceCompanies
+          >[0]
+        );
+      } catch {
+        setNotice(
+          "Platform şirket API bağlantısı kurulamadı."
+        );
+      } finally {
+        setLoadingCompanies(false);
+      }
+    },
+    [replaceCompanies]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void fetch(
+      "/api/platform/companies",
+      {
+        method: "GET",
+        cache: "no-store",
+        credentials: "same-origin"
+      }
+    )
+      .then(async response => {
+        const payload =
+          await response.json() as {
+            success?: boolean;
+            companies?: unknown[];
+          };
+
+        if (cancelled) {
+          return;
+        }
+
+        if (
+          !response.ok ||
+          payload.success !== true ||
+          !Array.isArray(payload.companies)
+        ) {
+          setNotice(
+            "Platform şirket listesi yüklenemedi."
+          );
+          return;
+        }
+
+        replaceCompanies(
+          payload.companies as Parameters<
+            typeof replaceCompanies
+          >[0]
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setNotice(
+            "Platform şirket API bağlantısı kurulamadı."
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingCompanies(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [replaceCompanies]);
+
+  async function handleCreateCompany(): Promise<void> {
+    if (creatingCompany) {
+      return;
+    }
+
+    if (
+      !companyDraft.periodStartsOn ||
+      !companyDraft.periodEndsOn ||
+      !startsAt
+    ) {
+      setNotice(
+        "Dönem ve lisans başlangıç tarihleri zorunludur."
+      );
+      return;
+    }
+
+    if (
+      companyDraft.adminPassword === "123" ||
+      companyDraft.adminPassword.length < 8
+    ) {
+      setNotice(
+        "İlk yönetici şifresi en az 8 karakter olmalı ve 123 olamaz."
+      );
+      return;
+    }
+
+    setCreatingCompany(true);
+    setNotice(null);
+
+    try {
+      const response = await fetch(
+        "/api/platform/companies",
+        {
+          method: "POST",
+          credentials: "same-origin",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            tenantCode: companyDraft.tenantCode,
+            tenantName: companyDraft.tenantName,
+            companyCode: companyDraft.code,
+            companySlug: companyDraft.slug,
+            companyName: companyDraft.name,
+            branchCode: companyDraft.branchCode,
+            branchName: companyDraft.branchName,
+            periodCode: companyDraft.periodCode,
+            periodName: companyDraft.periodName,
+            periodStartsOn:
+              companyDraft.periodStartsOn,
+            periodEndsOn:
+              companyDraft.periodEndsOn,
+            package: packageValue,
+            licenseStartsAt:
+              new Date(startsAt).toISOString(),
+            licenseEndsAt: endsAt
+              ? new Date(endsAt).toISOString()
+              : "",
+            branchLimit,
+            userLimit,
+            featureOverrides: {},
+            companyAdmin: {
+              name: companyDraft.adminName,
+              username:
+                companyDraft.adminUsername,
+              password:
+                companyDraft.adminPassword,
+              email: companyDraft.adminEmail,
+              phone: companyDraft.adminPhone
+            }
+          })
+        }
+      );
+
+      const payload =
+        await response.json() as {
+          success?: boolean;
+          code?: string;
+        };
+
+      if (!response.ok || payload.success !== true) {
+        setNotice(
+          payload.code ===
+            "PLATFORM_PROVISION_CONFLICT"
+            ? "Şirket oluşturulamadı: şirket kodu, slug veya yönetici kullanıcı adı mevcut bir kayıtla çakışıyor."
+            : payload.code ===
+                "ADMIN_PASSWORD_WEAK"
+              ? "Şirket oluşturulamadı: yönetici şifresi güvenlik kuralını karşılamıyor."
+              : payload.code ===
+                  "PROVISION_REQUEST_INVALID"
+                ? "Şirket oluşturulamadı: zorunlu alanlardan biri geçersiz."
+                : "Şirket oluşturma işlemi başarısız oldu."
+        );
+        return;
+      }
+
+      setCompanyDraft({
+        tenantCode: "",
+        tenantName: "",
+        name: "",
+        code: "",
+        slug: "",
+        branchCode: "",
+        branchName: "",
+        periodCode: "",
+        periodName: "",
+        periodStartsOn: "",
+        periodEndsOn: "",
+        adminName: "",
+        adminUsername: "",
+        adminPassword: "",
+        adminEmail: "",
+        adminPhone: ""
+      });
+      setStartsAt("");
+      setEndsAt("");
+      setDraftPanel(null);
+      setNotice(
+        "Şirket, ilk şube, dönem, lisans ve şirket yöneticisi başarıyla oluşturuldu."
+      );
+
+      await loadCompanies();
+    } catch {
+      setNotice(
+        "Şirket oluşturma sırasında platform API bağlantısı kurulamadı."
+      );
+    } finally {
+      setCreatingCompany(false);
+    }
+  }
 
   const selectedCompany = useMemo(
     () =>
@@ -363,8 +620,8 @@ export default function SuperAdminPage() {
             <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <p className="text-xs font-semibold text-slate-900 dark:text-white">API Durumu</p>
-              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-400/10 dark:text-amber-300">Bağlantı Bekliyor</span>
-              <p className="w-full text-xs text-slate-500 dark:text-slate-400">Şirket/lisans canlı yazma servisi henüz bağlı değil.</p>
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-400/10 dark:text-emerald-300">Bağlı</span>
+              <p className="w-full text-xs text-slate-500 dark:text-slate-400">Şirket listeleme ve güvenli provisioning API hattı bağlıdır.</p>
             </div>
           </div>
         </div>
@@ -414,8 +671,14 @@ export default function SuperAdminPage() {
               <span className="rounded-xl bg-slate-100 p-3 text-slate-400 dark:bg-slate-950/70 dark:text-slate-500">
                 <Building2 className="h-6 w-6" />
               </span>
-              <h3 className="mt-4 font-semibold text-slate-900 dark:text-slate-100">Henüz şirket verisi yüklenmedi.</h3>
-              <p className="mt-1 max-w-sm text-sm leading-6 text-slate-500 dark:text-slate-400">Platform şirket API’si bağlandığında şirket hesapları burada listelenecek.</p>
+              <h3 className="mt-4 font-semibold text-slate-900 dark:text-slate-100">
+                {loadingCompanies ? "Şirketler yükleniyor..." : "Henüz şirket kaydı yok."}
+              </h3>
+              <p className="mt-1 max-w-sm text-sm leading-6 text-slate-500 dark:text-slate-400">
+                {loadingCompanies
+                  ? "Platform şirket kayıtları güvenli API üzerinden alınıyor."
+                  : "Yeni Şirket ile ilk şirket kaydını oluşturabilirsiniz."}
+              </p>
               <button
                 type="button"
                 onClick={openCompanyDraft}
@@ -535,15 +798,119 @@ export default function SuperAdminPage() {
                 className="grid gap-4 p-5 sm:grid-cols-2"
                 onSubmit={event => {
                   event.preventDefault();
-                  setNotice("Canlı şirket oluşturma servisi henüz bağlı değildir. Bu işlem şu anda yalnız taslak olarak hazırlanabilir.");
-                  setDraftPanel(null);
+                  void handleCreateCompany();
                 }}
               >
-                <label className="text-sm font-medium text-slate-700 sm:col-span-2 dark:text-slate-300">Şirket Adı<input required value={companyDraft.name} onChange={event => setCompanyDraft({...companyDraft, name: event.target.value})} className={fieldClassName} /></label>
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Şirket Kodu<input required value={companyDraft.code} onChange={event => setCompanyDraft({...companyDraft, code: event.target.value})} className={fieldClassName} /></label>
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Slug<input required value={companyDraft.slug} onChange={event => setCompanyDraft({...companyDraft, slug: event.target.value})} className={fieldClassName} /></label>
-                <label className="text-sm font-medium text-slate-700 sm:col-span-2 dark:text-slate-300">Durum<select value={companyDraft.status} onChange={event => setCompanyDraft({...companyDraft, status: event.target.value})} className={fieldClassName}><option value="active">Aktif</option><option value="passive">Pasif</option></select></label>
-                <div className="mt-2 flex justify-end gap-2 border-t border-slate-200 pt-4 sm:col-span-2 dark:border-slate-800"><button type="button" onClick={() => setDraftPanel(null)} className="rounded-lg px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:text-slate-300 dark:hover:bg-slate-800">İptal</button><button type="submit" className="rounded-lg bg-cyan-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-cyan-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500">Taslağı Hazırla</button></div>
+                <div className="rounded-lg bg-cyan-50 p-3 text-sm text-cyan-950 sm:col-span-2 dark:bg-cyan-500/10 dark:text-cyan-100">
+                  Tek işlemde tenant, şirket, ilk şube, muhasebe dönemi, lisans ve ilk şirket yöneticisi oluşturulur.
+                </div>
+
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Tenant Kodu
+                  <input required value={companyDraft.tenantCode} onChange={event => setCompanyDraft({...companyDraft, tenantCode: event.target.value})} className={fieldClassName} />
+                </label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Tenant Adı
+                  <input required value={companyDraft.tenantName} onChange={event => setCompanyDraft({...companyDraft, tenantName: event.target.value})} className={fieldClassName} />
+                </label>
+
+                <label className="text-sm font-medium text-slate-700 sm:col-span-2 dark:text-slate-300">
+                  Şirket Adı
+                  <input required value={companyDraft.name} onChange={event => setCompanyDraft({...companyDraft, name: event.target.value})} className={fieldClassName} />
+                </label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Şirket Kodu
+                  <input required value={companyDraft.code} onChange={event => setCompanyDraft({...companyDraft, code: event.target.value})} className={fieldClassName} />
+                </label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Slug
+                  <input required minLength={3} value={companyDraft.slug} onChange={event => setCompanyDraft({...companyDraft, slug: event.target.value})} className={fieldClassName} />
+                </label>
+
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  İlk Şube Kodu
+                  <input required value={companyDraft.branchCode} onChange={event => setCompanyDraft({...companyDraft, branchCode: event.target.value})} className={fieldClassName} />
+                </label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  İlk Şube Adı
+                  <input required value={companyDraft.branchName} onChange={event => setCompanyDraft({...companyDraft, branchName: event.target.value})} className={fieldClassName} />
+                </label>
+
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Dönem Kodu
+                  <input required value={companyDraft.periodCode} onChange={event => setCompanyDraft({...companyDraft, periodCode: event.target.value})} className={fieldClassName} />
+                </label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Dönem Adı
+                  <input required value={companyDraft.periodName} onChange={event => setCompanyDraft({...companyDraft, periodName: event.target.value})} className={fieldClassName} />
+                </label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Dönem Başlangıcı
+                  <input required type="date" value={companyDraft.periodStartsOn} onChange={event => setCompanyDraft({...companyDraft, periodStartsOn: event.target.value})} className={fieldClassName} />
+                </label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Dönem Bitişi
+                  <input required type="date" value={companyDraft.periodEndsOn} onChange={event => setCompanyDraft({...companyDraft, periodEndsOn: event.target.value})} className={fieldClassName} />
+                </label>
+
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Paket
+                  <select value={packageValue} onChange={event => setPackageValue(event.target.value as "ECO" | "PRO" | "PLUS" | "ELITE")} className={fieldClassName}>
+                    <option value="ECO">ECO</option>
+                    <option value="PRO">PRO</option>
+                    <option value="PLUS">PLUS</option>
+                    <option value="ELITE">ELITE</option>
+                  </select>
+                </label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Kullanıcı Limiti
+                  <input required type="number" min={1} max={100000} value={userLimit} onChange={event => setUserLimit(Number(event.target.value))} className={fieldClassName} />
+                </label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Şube Limiti
+                  <input required type="number" min={1} max={1000} value={branchLimit} onChange={event => setBranchLimit(Number(event.target.value))} className={fieldClassName} />
+                </label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Lisans Başlangıcı
+                  <input required type="datetime-local" value={startsAt} onChange={event => setStartsAt(event.target.value)} className={fieldClassName} />
+                </label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Lisans Bitişi
+                  <input type="datetime-local" value={endsAt} onChange={event => setEndsAt(event.target.value)} className={fieldClassName} />
+                </label>
+
+                <div className="border-t border-slate-200 pt-4 sm:col-span-2 dark:border-slate-800">
+                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">İlk Şirket Yöneticisi</p>
+                </div>
+                <label className="text-sm font-medium text-slate-700 sm:col-span-2 dark:text-slate-300">
+                  Ad Soyad
+                  <input required value={companyDraft.adminName} onChange={event => setCompanyDraft({...companyDraft, adminName: event.target.value})} className={fieldClassName} />
+                </label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Kullanıcı Adı
+                  <input required autoComplete="off" value={companyDraft.adminUsername} onChange={event => setCompanyDraft({...companyDraft, adminUsername: event.target.value})} className={fieldClassName} />
+                </label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  İlk Şifre
+                  <input required minLength={8} type="password" autoComplete="new-password" value={companyDraft.adminPassword} onChange={event => setCompanyDraft({...companyDraft, adminPassword: event.target.value})} className={fieldClassName} />
+                </label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  E-posta
+                  <input type="email" value={companyDraft.adminEmail} onChange={event => setCompanyDraft({...companyDraft, adminEmail: event.target.value})} className={fieldClassName} />
+                </label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Telefon
+                  <input type="tel" value={companyDraft.adminPhone} onChange={event => setCompanyDraft({...companyDraft, adminPhone: event.target.value})} className={fieldClassName} />
+                </label>
+
+                <div className="mt-2 flex justify-end gap-2 border-t border-slate-200 pt-4 sm:col-span-2 dark:border-slate-800">
+                  <button type="button" disabled={creatingCompany} onClick={() => setDraftPanel(null)} className="rounded-lg px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:text-slate-300 dark:hover:bg-slate-800">
+                    İptal
+                  </button>
+                  <button type="submit" disabled={creatingCompany} className="rounded-lg bg-cyan-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500">
+                    {creatingCompany ? "Oluşturuluyor..." : "Şirketi Oluştur"}
+                  </button>
+                </div>
               </form>
             )}
 
