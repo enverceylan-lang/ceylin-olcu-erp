@@ -64,6 +64,13 @@ function getAuthVersion(user: { updatedAt?: string | null; createdAt?: string | 
   return String(user.updatedAt || user.createdAt || "");
 }
 
+function genericUnauthorized() {
+  return NextResponse.json(
+    { success: false, error: "Kullanıcı adı veya şifre hatalı." },
+    { status: 401 },
+  );
+}
+
 export async function POST(req: NextRequest) {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -85,7 +92,6 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const cleanUsername = normalizeUsername(body?.username);
     const cleanPassword = String(body?.password || "").trim();
-    const rememberMe = body?.rememberMe === true;
 
     if (!cleanUsername || !cleanPassword) {
       return NextResponse.json(
@@ -107,43 +113,16 @@ export async function POST(req: NextRequest) {
     const user = data as LoginUserRecord | null;
 
     if (error || !user) {
-      return NextResponse.json(
-        { success: false, error: "Kullanıcı adı veya şifre hatalı." },
-        { status: 401 },
-      );
+      return genericUnauthorized();
     }
 
-    if (!user.isActive) {
-      return NextResponse.json(
-        { success: false, error: "Bu hesap aktif değil." },
-        { status: 401 },
-      );
-    }
-
-    if (!user.password || String(user.password).trim() === "") {
-      return NextResponse.json(
-        { success: false, error: "Şifre tanımlanmamış." },
-        { status: 401 },
-      );
-    }
-
-    const defaultHashes = [
-      "737cca8746ba4b84c7898f055c9f5c251016bd006f32ddf4be6fc2adde15fe72fa6167ed96001110725115f7308da9763712a5fa0924faf3329f301fc6e20382",
-      hashPassword("123"),
-    ];
-
-    const isDefaultAdminCredentials =
-      (user.username === "admin" || user.id === "user-admin") &&
-      (cleanPassword === "123" || defaultHashes.includes(user.password));
-
-    if (isDefaultAdminCredentials) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Güvenlik nedeniyle varsayılan şifreyle giriş yapılamaz. Lütfen şifrenizi güncelleyin veya yöneticinizle iletişime geçin.",
-        },
-        { status: 401 },
-      );
+    if (
+      !user.isActive ||
+      !user.password ||
+      String(user.password).trim() === "" ||
+      user.role !== "PLATFORM_SUPER_ADMIN"
+    ) {
+      return genericUnauthorized();
     }
 
     const localDevUsername = normalizeUsername(
@@ -174,17 +153,16 @@ export async function POST(req: NextRequest) {
         storedLocal.length === suppliedLocal.length &&
         crypto.timingSafeEqual(storedLocal, suppliedLocal);
     }
+
     const hashedPassword = hashPassword(cleanPassword);
     const stored = Buffer.from(String(user.password), "utf8");
     const supplied = Buffer.from(hashedPassword, "utf8");
     const passwordMatches =
-      stored.length === supplied.length && crypto.timingSafeEqual(stored, supplied);
+      stored.length === supplied.length &&
+      crypto.timingSafeEqual(stored, supplied);
 
     if (!passwordMatches && !localPasswordMatches) {
-      return NextResponse.json(
-        { success: false, error: "Kullanıcı adı veya şifre hatalı." },
-        { status: 401 },
-      );
+      return genericUnauthorized();
     }
 
     const nowSeconds = Math.floor(Date.now() / 1000);
@@ -197,7 +175,9 @@ export async function POST(req: NextRequest) {
       expectedPermissionVersion: LEGACY_FINANCE_PERMISSION_VERSION,
       applyRoleDefaults: true,
     });
-    const sessionLifetimeSeconds = rememberMe ? 30 * 24 * 60 * 60 : 12 * 60 * 60;
+
+    const sessionLifetimeSeconds = 12 * 60 * 60;
+
     const sessionPayload: SessionPayload = {
       sub: String(user.id),
       username: String(user.username),
@@ -230,10 +210,10 @@ export async function POST(req: NextRequest) {
         permissionVersion: LEGACY_FINANCE_PERMISSION_VERSION,
         email: user.email || null,
         phone: user.phone || null,
-      providerCustomerId:
-        user.providerCustomerId || null,
-      providerType:
-        user.providerType || null,
+        providerCustomerId:
+          user.providerCustomerId || null,
+        providerType:
+          user.providerType || null,
         tcNo: user.tcNo || null,
         address: user.address || null,
         profileCompletedAt: user.profileCompletedAt || null,
@@ -241,7 +221,7 @@ export async function POST(req: NextRequest) {
       session: {
         token: sessionToken,
         expiresAt: new Date(sessionPayload.exp * 1000).toISOString(),
-        rememberMe,
+        rememberMe: false,
         permissionVersion: LEGACY_FINANCE_PERMISSION_VERSION,
       },
     });

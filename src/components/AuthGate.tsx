@@ -4,11 +4,16 @@ import { useState, useEffect, useSyncExternalStore } from "react";
 import { useAuthStore, normalizeRole, canViewModule, normalizeUser } from "@/store/useAuthStore";
 import { usePathname, useRouter } from "next/navigation";
 import { ShieldAlert, Lock, User, KeyRound, ArrowRight } from "lucide-react";
+import {
+  normalizeCompanyAppPath,
+  withCompanyPrefix,
+} from "@/lib/companyRouting";
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const { currentUser: rawCurrentUser, login } = useAuthStore();
   const pathname = usePathname();
   const router = useRouter();
+  const appPathname = normalizeCompanyAppPath(pathname);
   
   const mounted = useSyncExternalStore(
     () => () => {},
@@ -75,15 +80,15 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (mounted && currentUser) {
       const normRole = normalizeRole(currentUser.role);
-      if (pathname === "/") {
+      if (appPathname === "/") {
         if (normRole === "TAILOR") {
-          router.replace("/uretim");
+          router.replace(withCompanyPrefix(pathname, "/uretim"));
         } else if (normRole === "INSTALLER") {
-          router.replace("/montaj");
+          router.replace(withCompanyPrefix(pathname, "/montaj"));
         }
       }
     }
-  }, [mounted, currentUser, pathname, router]);
+  }, [mounted, currentUser, appPathname, pathname, router]);
 
   // Session expiry is handled by the auth store. Plain passwords are never stored.
 
@@ -275,11 +280,11 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           // Role specific redirect
           const normRole = normalizeRole(currentUser.role);
           if (normRole === "TAILOR") {
-            router.replace("/uretim");
+            router.replace(withCompanyPrefix(pathname, "/uretim"));
           } else if (normRole === "INSTALLER") {
-            router.replace("/montaj");
+            router.replace(withCompanyPrefix(pathname, "/montaj"));
           } else {
-            router.replace("/");
+            router.replace(withCompanyPrefix(pathname, "/"));
           }
         }
       }).catch(() => {
@@ -408,15 +413,15 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   // 2. Render Unauthorized warning if page access is denied
-  if (!canViewModule(currentUser.role, pathname)) {
+  if (!canViewModule(currentUser.role, appPathname)) {
     const handleReturnClick = () => {
       const normRole = normalizeRole(currentUser.role);
       if (normRole === "TAILOR") {
-        router.push("/uretim");
+        router.push(withCompanyPrefix(pathname, "/uretim"));
       } else if (normRole === "INSTALLER") {
-        router.push("/montaj");
+        router.push(withCompanyPrefix(pathname, "/montaj"));
       } else {
-        router.push("/");
+        router.push(withCompanyPrefix(pathname, "/"));
       }
     };
 

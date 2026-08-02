@@ -20,6 +20,7 @@ export interface PlatformCompanyLicenseRecord {
   companyId: string;
 
   companyCode: string;
+  companySlug: string;
   companyName: string;
 
   package: ErpPackage;
@@ -40,6 +41,7 @@ export interface PlatformCompanyLicenseView {
   companyId: string;
 
   companyCode: string;
+  companySlug: string;
   companyName: string;
 
   package: ErpPackage;
@@ -340,6 +342,7 @@ export function buildPlatformCompanyLicenseView(
     companyId: record.companyId,
 
     companyCode: record.companyCode,
+    companySlug: record.companySlug,
     companyName: record.companyName,
 
     package: record.package,

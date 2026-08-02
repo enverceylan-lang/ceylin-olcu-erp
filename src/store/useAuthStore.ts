@@ -27,7 +27,9 @@ export type UserRole =
   | 'FIELD' | 'MEASUREMENT' 
   | 'TAILOR' | 'PRODUCTION' 
   | 'INSTALLER' | 'INSTALLATION'
-  | 'ACCOUNTING';
+  | 'ACCOUNTING'
+  | 'COMPANY_ADMIN'
+  | 'PLATFORM_SUPER_ADMIN';
 
 export interface MockUser {
   id: string;
@@ -53,8 +55,22 @@ export interface MockUser {
   hasPassword?: boolean;
 }
 
-export function normalizeRole(role: UserRole | undefined): 'ADMIN' | 'MODERATOR' | 'OFFICE' | 'FIELD' | 'TAILOR' | 'INSTALLER' | 'ACCOUNTING' {
+export type NormalizedUserRole =
+  | 'ADMIN'
+  | 'MODERATOR'
+  | 'OFFICE'
+  | 'FIELD'
+  | 'TAILOR'
+  | 'INSTALLER'
+  | 'ACCOUNTING'
+  | 'PLATFORM_SUPER_ADMIN';
+
+export function normalizeRole(
+  role: UserRole | undefined
+): NormalizedUserRole {
   if (!role) return 'ADMIN';
+  if (role === 'COMPANY_ADMIN') return 'ADMIN';
+  if (role === 'PLATFORM_SUPER_ADMIN') return 'PLATFORM_SUPER_ADMIN';
   if (role === 'SALES') return 'OFFICE';
   if (role === 'MEASUREMENT') return 'FIELD';
   if (role === 'PRODUCTION') return 'TAILOR';
@@ -213,6 +229,8 @@ export const ROLE_PERMISSIONS: Record<string, { label: string; canOverrideMeasur
   PRODUCTION: { label: 'Terzi / Üretici', canOverrideMeasuredBy: false, canAccessOfficeMode: false },
   INSTALLER: { label: 'Montaj Ekibi', canOverrideMeasuredBy: false, canAccessOfficeMode: false },
   INSTALLATION: { label: 'Montaj Ekibi', canOverrideMeasuredBy: false, canAccessOfficeMode: false },
+  COMPANY_ADMIN: { label: 'Şirket Yöneticisi', canOverrideMeasuredBy: true, canAccessOfficeMode: true },
+  PLATFORM_SUPER_ADMIN: { label: 'Platform Yöneticisi', canOverrideMeasuredBy: false, canAccessOfficeMode: false },
 };
 
 export const INITIAL_USERS: MockUser[] = [

@@ -1,5 +1,5 @@
 "use client";
-import PlatformSuperAdminLink from "@/components/PlatformSuperAdminLink";
+
 
 
 import Link from "next/link";
@@ -24,6 +24,10 @@ import { useUiStore } from "@/store/useUiStore";
 import { useState, useSyncExternalStore } from "react";
 import { decideFinanceAccess } from "@/lib/finance/financeAccessPolicy";
 import { useFinanceRuntimeContext } from "@/lib/finance/useFinanceRuntimeContext";
+import {
+  normalizeCompanyAppPath,
+  withCompanyPrefix,
+} from "@/lib/companyRouting";
 
 const subscribeToHydration = () => () => {};
 const getClientSnapshot = () => true;
@@ -57,6 +61,7 @@ const ROLE_COLORS: Record<string, string> = {
 
 export function Sidebar() {
   const pathname = usePathname();
+  const appPathname = normalizeCompanyAppPath(pathname);
   const { currentUser: rawCurrentUser, switchUser, users, logout } = useAuthStore();
   const { isMobileMenuOpen, setMobileMenuOpen } = useUiStore();
   const [showUserPicker, setShowUserPicker] = useState(false);
@@ -111,7 +116,7 @@ export function Sidebar() {
         <div className="p-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400">
-              CEYLİN ERP
+              ENVERP
             </h1>
             <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
               V1.0 SAHA PİLOT
@@ -129,11 +134,11 @@ export function Sidebar() {
 
       <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
         {visibleMenuItems.map((item) => {
-          const isActive = pathname === item.href || (pathname.startsWith(item.href) && item.href !== "/");
+          const isActive = appPathname === item.href || (appPathname.startsWith(item.href) && item.href !== "/");
           return (
 <Link
               key={item.name}
-              href={item.href}
+              href={withCompanyPrefix(pathname, item.href)}
               onClick={() => setMobileMenuOpen(false)}
               className={twMerge(
                 clsx(
@@ -150,7 +155,7 @@ export function Sidebar() {
           );
         })}
               <Link
-          href="/operasyonlar"
+          href={withCompanyPrefix(pathname, "/operasyonlar")}
           className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
         >
           <span aria-hidden="true">🧰</span>
@@ -164,7 +169,7 @@ export function Sidebar() {
         {(normalizeRole(currentUser.role) === "TAILOR" ||
           normalizeRole(currentUser.role) === "INSTALLER") ? (
           <Link
-            href="/hakedislerim"
+            href={withCompanyPrefix(pathname, "/hakedislerim")}
             className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
           >
             <span aria-hidden="true">
@@ -180,7 +185,7 @@ export function Sidebar() {
         {(normalizeRole(currentUser.role) === "ADMIN" ||
           normalizeRole(currentUser.role) === "ACCOUNTING") ? (
           <Link
-            href="/bekleyen-hakedisler"
+            href={withCompanyPrefix(pathname, "/bekleyen-hakedisler")}
             onClick={() => setMobileMenuOpen(false)}
             className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
           >
@@ -194,13 +199,13 @@ export function Sidebar() {
           </Link>
         ) : null}
         <Link
-          href="/ajanda"
+          href={withCompanyPrefix(pathname, "/ajanda")}
           className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
         >
           <span aria-hidden="true">📅</span>
           <span>Ajanda</span>
         </Link>
-        <PlatformSuperAdminLink />
+
 </nav>
 
       {/* User Switcher / Profile */}

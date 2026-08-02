@@ -136,6 +136,7 @@ const record:
     companyId: "company-1",
 
     companyCode: "CEYLIN",
+    companySlug: "ceylinperde",
     companyName: "Ceylin Perde",
 
     package: "NORMAL",
