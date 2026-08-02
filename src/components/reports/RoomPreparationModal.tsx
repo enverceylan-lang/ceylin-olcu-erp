@@ -10,6 +10,11 @@ import {
   getTemplateLabel,
   resolveMeasurementProductType
 } from '@/lib/measurementAdapter';
+import {
+  getRoomPreparationLockedProductType,
+  isRoomPreparationProductAllowed,
+  isRoomPreparationProductLocked
+} from '@/lib/roomPreparationProductPolicy';
 
 interface RoomPreparationModalProps {
   isOpen: boolean;
@@ -134,6 +139,57 @@ function measurementContainsDoor(
   );
 }
 
+const ROOM_MECHANICAL_PRODUCT_TYPES = new Set<string>([
+  'STOR',
+  'ZEBRA',
+  'DIKEY_STOR',
+  'DIKEY_TUL',
+  'AHSAP_JALUZI',
+  'JALUZI',
+  'PICASSO',
+  'PLICELL'
+]);
+
+function roomPrepProductConflicts(
+  selectedProductType: string,
+  existingProductType: string
+): boolean {
+  if (selectedProductType === existingProductType) {
+    return false;
+  }
+
+  const selectedMechanical =
+    ROOM_MECHANICAL_PRODUCT_TYPES.has(
+      selectedProductType
+    );
+
+  const existingMechanical =
+    ROOM_MECHANICAL_PRODUCT_TYPES.has(
+      existingProductType
+    );
+
+  if (
+    selectedMechanical &&
+    existingMechanical
+  ) {
+    return true;
+  }
+
+  const selectedVertical =
+    selectedProductType === 'DIKEY_STOR' ||
+    selectedProductType === 'DIKEY_TUL';
+
+  const existingVertical =
+    existingProductType === 'DIKEY_STOR' ||
+    existingProductType === 'DIKEY_TUL';
+
+  return (
+    (selectedVertical &&
+      existingProductType === 'TUL') ||
+    (existingVertical &&
+      selectedProductType === 'TUL')
+  );
+}
 export function RoomPreparationModal({
   isOpen,
   onClose,
@@ -168,12 +224,15 @@ export function RoomPreparationModal({
     );
 
     roomMeasurements.forEach(measurement => {
+      const lockedProductType =
+        getRoomPreparationLockedProductType(measurement);
+
       const activeProducts =
         measurement.selectedProducts?.filter(product => {
           if (!product.isActive) return false;
 
-          if (measurement.templateType === 'PLICELL') {
-            return product.productType === 'PLICELL';
+          if (lockedProductType) {
+            return product.productType === lockedProductType;
           }
 
           return product.productType !== 'PLICELL';
@@ -200,6 +259,7 @@ export function RoomPreparationModal({
         });
       } else {
         const fallbackType =
+          lockedProductType ||
           resolveMeasurementProductType(measurement);
 
         initialSelections[measurement.id] =
@@ -252,31 +312,116 @@ export function RoomPreparationModal({
     measurementId: string,
     productType: string
   ) => {
+    const sourceMeasurement =
+      roomMeasurements.find(
+        measurement =>
+          measurement.id === measurementId
+      );
+
+    if (!sourceMeasurement) {
+      return;
+    }
+
+    const sourceIsPlicell =
+      sourceMeasurement.templateType ===
+      'PLICELL';
+
+    /*
+     * Satışa Hazırlık oda kapsamındadır.
+     * Seçilen ürün odadaki bütün uyumlu açıklıklara yayılır.
+     *
+     * Oda başına tek mekanik perde ailesi aktif kalır.
+     * Tül + Fon + Rustik + Tavan Rustik + tek mekanik
+     * perde gibi uyumlu kombinasyonlar korunur.
+     *
+     * Dikey Stor / Dikey Tül ile normal Tül birlikte
+     * aktif kalamaz.
+     *
+     * Kapı/Fon Evet-Hayır ve 1/2 kanat seçenekleri
+     * measurement bazındaki localOptions içinde kalır.
+     */
+    const compatibleMeasurements =
+      roomMeasurements.filter(
+        measurement =>
+          (
+            measurement.templateType ===
+            'PLICELL'
+          ) === sourceIsPlicell
+      );
+
     const current =
       localSelections[measurementId] || [];
 
-    const updated = current.includes(productType)
-      ? current.filter(type => type !== productType)
-      : [...current, productType];
+    const shouldSelect =
+      !current.includes(productType);
 
-    setLocalSelections(previous => ({
-      ...previous,
-      [measurementId]: updated
-    }));
+    setLocalSelections(previous => {
+      const next = {
+        ...previous
+      };
 
-    if (!current.includes(productType)) {
-      const key = optionKey(measurementId, productType);
+      compatibleMeasurements.forEach(
+        measurement => {
+          const measurementSelections =
+            previous[measurement.id] || [];
 
-      setLocalOptions(previous => ({
-        ...previous,
-        [key]: {
-          ...defaultOptions(productType),
-          ...(previous[key] || {})
+          if (!shouldSelect) {
+            next[measurement.id] =
+              measurementSelections.filter(
+                type =>
+                  type !== productType
+              );
+
+            return;
+          }
+
+          const withoutConflicts =
+            measurementSelections.filter(
+              type =>
+                !roomPrepProductConflicts(
+                  productType,
+                  type
+                )
+            );
+
+          next[measurement.id] =
+            withoutConflicts.includes(productType)
+              ? withoutConflicts
+              : [
+                  ...withoutConflicts,
+                  productType
+                ];
         }
-      }));
+      );
+
+      return next;
+    });
+
+    if (shouldSelect) {
+      setLocalOptions(previous => {
+        const next = {
+          ...previous
+        };
+
+        compatibleMeasurements.forEach(
+          measurement => {
+            const key =
+              optionKey(
+                measurement.id,
+                productType
+              );
+
+            next[key] = {
+              ...defaultOptions(productType),
+              ...(previous[key] || {})
+            };
+          }
+        );
+
+        return next;
+      });
     }
   };
-
   const getHeightSources = (measurement: MeasurementRecord) => {
     const raw = measurement.rawValues || {};
 
@@ -1003,11 +1148,12 @@ export function RoomPreparationModal({
           const requestedTypes =
             localSelections[measurement.id] || [];
 
+          const lockedProductType =
+            getRoomPreparationLockedProductType(measurement);
+
           const baseSelectedTypes =
-            measurement.templateType === 'PLICELL'
-              ? requestedTypes.filter(
-                  productType => productType === 'PLICELL'
-                )
+            lockedProductType
+              ? [lockedProductType]
               : requestedTypes.filter(
                   productType => productType !== 'PLICELL'
                 );
@@ -1155,7 +1301,7 @@ export function RoomPreparationModal({
               return (
                 <div
                   key={measurement.id}
-                  className="space-y-4 rounded-xl border border-slate-800 bg-slate-950/40 p-5"
+                  className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/40 p-3.5 sm:p-5"
                 >
                   <div className="border-b border-slate-800 pb-3">
                     <span className="text-xs font-bold uppercase tracking-wider text-blue-400">
@@ -1204,12 +1350,13 @@ export function RoomPreparationModal({
                   </div>
 
                   {(activeTabs[measurement.id] || 'PRODUCTS') === 'PRODUCTS' ? (
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
                     {PRODUCT_TYPES_OPTIONS
                       .filter(option =>
-                        measurement.templateType === 'PLICELL'
-                          ? option.type === 'PLICELL'
-                          : option.type !== 'PLICELL'
+                        isRoomPreparationProductAllowed(
+                          measurement,
+                          option.type
+                        )
                       )
                       .map(option => {
                       const checked =
@@ -1220,7 +1367,7 @@ export function RoomPreparationModal({
                           key={option.type}
                           className={
                             checked
-                              ? 'rounded-lg border border-blue-500/40 bg-blue-600/10 p-3 text-blue-300'
+                              ? 'rounded-lg border border-blue-500/50 bg-blue-600/10 p-3 text-blue-200 shadow-sm'
                               : 'rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-slate-400'
                           }
                         >
@@ -1228,13 +1375,18 @@ export function RoomPreparationModal({
                             <input
                               type="checkbox"
                               checked={checked}
+                              disabled={
+                                isRoomPreparationProductLocked(
+                                  measurement
+                                )
+                              }
                               onChange={() =>
                                 handleToggle(
                                   measurement.id,
                                   option.type
                                 )
                               }
-                              className="h-4 w-4 cursor-pointer"
+                              className="h-4 w-4 cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
                             />
                             <span>{option.label}</span>
                           </label>
@@ -1274,12 +1426,12 @@ export function RoomPreparationModal({
           )}
         </div>
 
-        <div className="flex flex-col justify-end gap-3 border-t border-slate-800 p-6 sm:flex-row">
+        <div className="sticky bottom-0 flex flex-col-reverse justify-end gap-2 border-t border-slate-800 bg-slate-950/95 p-3 backdrop-blur sm:static sm:flex-row sm:p-5">
           <button
             type="button"
             onClick={onClose}
             disabled={isSaving}
-            className="cursor-pointer rounded-xl bg-slate-800 px-5 py-2.5 text-sm font-semibold text-slate-300 hover:bg-slate-700"
+            className="min-h-11 cursor-pointer rounded-xl border border-slate-700 bg-slate-800 px-5 py-2.5 text-sm font-semibold text-slate-300 hover:bg-slate-700"
           >
             İptal
           </button>
@@ -1288,7 +1440,7 @@ export function RoomPreparationModal({
             type="button"
             onClick={() => handleSaveClick(false)}
             disabled={isSaving}
-            className="flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50"
+            className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50"
           >
             <Save className="h-4 w-4" />
             {isSaving ? 'Kaydediliyor...' : 'Kaydet'}
@@ -1309,7 +1461,7 @@ export function RoomPreparationModal({
               disabled={isSaving}
 
 
-              className="cursor-pointer rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-black text-white hover:bg-emerald-500 disabled:opacity-50"
+              className="min-h-11 cursor-pointer rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-black text-white hover:bg-emerald-500 disabled:opacity-50"
 
 
             >

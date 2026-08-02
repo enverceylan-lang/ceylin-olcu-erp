@@ -19,6 +19,9 @@ import { canViewSale } from "@/lib/salesVisibility";
 import OpenMeasurementsNotice from "@/components/sales/OpenMeasurementsNotice";
 import { createDraftSaleFromCustomer } from "@/lib/salesAdapter";
 import { useOperationsStore } from "@/store/useOperationsStore";
+import {
+  shouldSyncMainOperationForSaleStatus
+} from "@/lib/saleOperationEligibility";
 import { useErpRuntimeContext } from "@/lib/useErpRuntimeContext";
 import { getSaleStatusPresentation } from "@/lib/saleStatusPresentation";
 import {
@@ -33,6 +36,9 @@ import {
   requestSaleStatusTransition,
   type SaleStatusTransitionAudit
 } from "@/lib/saleStatusTransitionService";
+import {
+  canApproveSpecificSale
+} from "@/lib/saleApprovalAccess";
 
 export default function SaleDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
@@ -374,6 +380,25 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
       }
 
       if (
+        updatedSale.status === "ONAYLANDI" &&
+        (
+          persistedSaleForSave.status === "TASLAK" ||
+          persistedSaleForSave.status === "TEKLİF"
+        ) &&
+        !canApproveSpecificSale(
+          currentUser,
+          persistedSaleForSave
+        )
+      ) {
+        alert(
+          persistedSaleForSave.createdByUserId === currentUser.id
+            ? "Maker-checker kuralı gereği kendi hazırladığınız satış taslağını kendiniz onaylayamazsınız."
+            : "Bu kullanıcı satış onaylama yetkisine sahip değil."
+        );
+        return;
+      }
+
+      if (
         persistedSaleForSave.status !==
         updatedSale.status
       ) {
@@ -421,84 +446,80 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
       }
 
 
+      /*
+       * TEKLIF / TASLAK finansal borç doğurmaz.
+       * Merkezi finans omurgasına SALE_CHARGE yalnız ONAYLANDI
+       * satış için gönderilir. Sonraki operasyon durumlarında da
+       * aynı satış borcu yeniden üretilmez.
+       */
       const financeOutboxRecord =
-        await updateSaleWithFinanceOutbox(
-          updatedSale,
-          scope,
-          "TRY",
-          statusTransitionAuditForSave
-        );
+        updatedSale.status === "ONAYLANDI"
+          ? await updateSaleWithFinanceOutbox(
+              updatedSale,
+              scope,
+              "TRY",
+              statusTransitionAuditForSave
+            )
+          : null;
 
-
-      const operationResult =
-
-        syncMainOperation({
-
-          scope,
-
-          sale: updatedSale,
-
-          customer: {
-
-            id: customer.id,
-
-            name: customer.name,
-
-            phone: customer.phone || "",
-
-            address: customer.address || ""
-
-          },
-
-          createdByUserId:
-
-            currentUser.id
-
-        });
-
-
-      if (
-
-        operationResult.outcome ===
-
-        "REJECTED"
-
-      ) {
-
-        throw new Error(
-
-          `MAIN_OPERATION_REJECTED:${
-
-            operationResult.reason
-
-          }`
-
-        );
-
+      if (!financeOutboxRecord) {
+        await updateSale(updatedSale);
       }
 
-
-      const financeResult =
-        await executeSalesFinanceOutboxRecord(
-          financeOutboxRecord
-        );
-
       if (
-        financeResult.outcome ===
-        "ERROR"
+        shouldSyncMainOperationForSaleStatus(
+          updatedSale.status
+        )
       ) {
-        console.error(
-          "[Sales Finance] Satış kaydedildi ancak finans kuyruğu tamamlanamadı.",
-          financeResult.reason
-        );
+        const operationResult =
+          syncMainOperation({
+            scope,
+            sale: updatedSale,
+            customer: {
+              id: customer.id,
+              name: customer.name,
+              phone: customer.phone || "",
+              address: customer.address || ""
+            },
+            createdByUserId:
+              currentUser.id
+          });
 
-        alert(
-          "Satış kaydedildi ancak merkezi finans kaydı tamamlanamadı. " +
-          "Finans işlemi güvenli kuyrukta bekliyor ve tekrar denenebilir. " +
-          "Kayıt ekranı açık bırakıldı."
-        );
+        if (
+          operationResult.outcome ===
+          "REJECTED"
+        ) {
+          throw new Error(
+            `MAIN_OPERATION_REJECTED:${
+              operationResult.reason
+            }`
+          );
+        }
+      }
 
-        return;
+      if (financeOutboxRecord) {
+        const financeResult =
+          await executeSalesFinanceOutboxRecord(
+            financeOutboxRecord
+          );
+
+        if (
+          financeResult.outcome ===
+          "ERROR"
+        ) {
+          console.error(
+            "[Sales Finance] Satış kaydedildi ancak finans kuyruğu tamamlanamadı.",
+            financeResult.reason
+          );
+
+          alert(
+            "Satış kaydedildi ancak merkezi finans kaydı tamamlanamadı. " +
+            "Finans işlemi güvenli kuyrukta bekliyor ve tekrar denenebilir. " +
+            "Kayıt ekranı açık bırakıldı."
+          );
+
+          return;
+        }
       }
 
       router.replace("/satis");
@@ -547,8 +568,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
     const previewWindow =
       window.open(
         '',
-        '_blank',
-        'noopener,noreferrer'
+        '_blank'
       );
 
     if (!previewWindow) {
@@ -557,6 +577,8 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
       );
       return;
     }
+
+    previewWindow.opener = null;
 
     previewWindow.document.write(
       '<!doctype html>' +
@@ -635,6 +657,17 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
       ) =>
         statuses.indexOf(status) ===
         index
+    ).filter(
+      status =>
+        status !== "ONAYLANDI" ||
+        (
+          persistedSale.status !== "TASLAK" &&
+          persistedSale.status !== "TEKLİF"
+        ) ||
+        canApproveSpecificSale(
+          currentUser,
+          persistedSale
+        )
     );
 
   const handleStatusChange = (
@@ -658,6 +691,25 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
         "Aktif kullanıcı bilgisi bulunamadı."
       );
 
+      return;
+    }
+
+    if (
+      nextStatus === "ONAYLANDI" &&
+      (
+        persistedSale.status === "TASLAK" ||
+        persistedSale.status === "TEKLİF"
+      ) &&
+      !canApproveSpecificSale(
+        currentUser,
+        persistedSale
+      )
+    ) {
+      alert(
+        persistedSale.createdByUserId === currentUser.id
+          ? "Maker-checker kuralı gereği kendi hazırladığınız satış taslağını kendiniz onaylayamazsınız."
+          : "Bu kullanıcı satış onaylama yetkisine sahip değil."
+      );
       return;
     }
 
@@ -735,7 +787,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-24">
+    <div className="mx-auto max-w-7xl space-y-5 pb-24">
       {customer && (
         <OpenMeasurementsNotice
           customerId={customer.id}
@@ -766,15 +818,15 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
                 {getSaleStatusPresentation(sale.status).label}
               </span>
             </div>
-            <p className="mt-1 text-sm heading-subtitle text-gray-500 dark:text-gray-400">Teklif / Satış No: {sale.saleNo}</p>
+            <p className="mt-1 text-sm heading-subtitle text-gray-500 dark:text-gray-400">Taslak / Satış No: {sale.saleNo}</p>
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 w-full md:w-auto">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:flex-wrap md:w-auto">
           <button
             type="button"
             onClick={handleSendApprovalWhatsApp}
-            className="inline-flex min-h-10 items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/40 dark:text-emerald-400 font-bold shadow-sm transition-colors text-xs"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-xs font-bold text-emerald-700 shadow-sm transition-colors hover:bg-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-400 dark:hover:bg-emerald-900/40"
           >
             <MessageCircle className="w-4 h-4 shrink-0" />
             <span>WhatsApp Onay</span>
@@ -782,7 +834,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
           <button
             type="button"
             onClick={handlePreviewPdf}
-            className="inline-flex min-h-10 items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 dark:bg-purple-950/30 dark:hover:bg-purple-900/40 dark:text-purple-400 font-bold shadow-sm transition-colors text-xs"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-purple-50 px-3 py-2.5 text-xs font-bold text-purple-700 shadow-sm transition-colors hover:bg-purple-100 dark:bg-purple-950/30 dark:text-purple-400 dark:hover:bg-purple-900/40"
           >
             <FileDown className="w-4 h-4 shrink-0" />
             <span>PDF Görüntüle</span>
@@ -802,7 +854,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
           <button
             type="button"
             onClick={handleSave}
-            className="inline-flex min-h-10 items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-700 dark:hover:bg-blue-600 font-bold shadow-sm transition-colors text-xs"
+            className="col-span-2 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm transition-colors hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600 sm:col-span-1"
           >
             <Save className="w-4 h-4 shrink-0" />
             <span>Kaydet ve Çık</span>
@@ -813,11 +865,11 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Main Content: Sale Items */}
         <div className="lg:col-span-3 space-y-6">
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden shadow-sm p-6">
+          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
             <h2 className="font-semibold text-gray-900 dark:text-white mb-4">Ürün Kalemleri</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm whitespace-nowrap">
-                <thead className="bg-gray-50 dark:bg-gray-800/50 text-gray-500 dark:text-gray-400 font-medium border-b border-gray-200 dark:border-gray-800">
+            <div>
+              <table className="block w-full text-left text-sm sm:table sm:whitespace-nowrap">
+                <thead className="hidden border-b border-gray-200 bg-gray-50 font-medium text-gray-500 dark:border-gray-800 dark:bg-gray-800/50 dark:text-gray-400 sm:table-header-group">
                   <tr>
                     <th className="px-4 py-3">Oda / Pencere</th>
                     <th className="px-4 py-3">Ürün</th>
@@ -828,19 +880,21 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
                     <th className="px-4 py-3 text-right">Tutar</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                <tbody className="block space-y-3 sm:table-row-group sm:space-y-0 sm:divide-y sm:divide-gray-100 dark:sm:divide-gray-800">
                   {sale.items.map((item, idx) => (
-                    <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-                      <td className="px-4 py-3">
+                    <tr key={item.id} className="block rounded-xl border border-gray-200 p-3 transition-colors hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800/50 sm:table-row sm:rounded-none sm:border-0 sm:p-0">
+                      <td className="block px-1 py-2 sm:table-cell sm:px-4 sm:py-3">
                         <div className="font-medium text-gray-900 dark:text-white">{item.roomName}</div>
                         <div className="text-xs text-gray-500">{item.windowName}</div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="flex items-center justify-between px-1 py-2 sm:table-cell sm:px-4 sm:py-3">
+                        <span className="text-xs font-semibold text-gray-400 sm:hidden">Ürün</span>
                         <span className="inline-block bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-2 py-1 rounded text-xs font-semibold">
                           {item.productType || item.productGroup || 'Ürün'}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="flex items-center justify-between px-1 py-2 text-right sm:table-cell sm:px-4 sm:py-3">
+                        <span className="text-xs font-semibold text-gray-400 sm:hidden">Birim</span>
                         <input
                           type="number"
                           step="0.01"
@@ -849,7 +903,8 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
                           className="w-16 text-right border border-gray-300 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-800"
                         />
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="flex items-center justify-between px-1 py-2 text-right sm:table-cell sm:px-4 sm:py-3">
+                        <span className="text-xs font-semibold text-gray-400 sm:hidden">Miktar</span>
                         <input
                           type="number"
                           value={item.quantity}
@@ -857,7 +912,8 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
                           className="w-16 text-right border border-gray-300 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-800"
                         />
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="flex items-center justify-between px-1 py-2 text-right sm:table-cell sm:px-4 sm:py-3">
+                        <span className="text-xs font-semibold text-gray-400 sm:hidden">Birim Fiyat</span>
                         <input
                           type="number"
                           value={item.unitPrice}
@@ -865,7 +921,8 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
                           className="w-20 text-right border border-gray-300 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-800"
                         />
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="flex items-center justify-between px-1 py-2 text-right sm:table-cell sm:px-4 sm:py-3">
+                        <span className="text-xs font-semibold text-gray-400 sm:hidden">İskonto</span>
                         <input
                           type="number"
                           value={item.discount}
@@ -873,7 +930,8 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
                           className="w-20 text-right border border-gray-300 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-800 text-red-600"
                         />
                       </td>
-                      <td className="px-4 py-3 text-right font-bold text-gray-900 dark:text-white">
+                      <td className="flex items-center justify-between border-t border-gray-100 px-1 pt-3 text-right font-bold text-gray-900 dark:border-gray-800 dark:text-white sm:table-cell sm:border-0 sm:px-4 sm:py-3">
+                        <span className="text-xs font-semibold text-gray-400 sm:hidden">Tutar</span>
                         {item.rowTotal.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' })}
                       </td>
                     </tr>

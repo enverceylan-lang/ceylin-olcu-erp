@@ -3,6 +3,7 @@
 
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { LayoutDashboard,
   Users,
@@ -113,14 +114,26 @@ export function Sidebar() {
           )
         )}
       >
-        <div className="p-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400">
-              ENVERP
-            </h1>
-            <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
-              V1.0 SAHA PİLOT
-            </span>
+        <div className="flex items-center justify-between border-b border-gray-100 px-4 py-4 dark:border-gray-800">
+          <div className="flex min-w-0 items-center gap-3">
+            <Image
+              src="/brand/enverp-icon.png"
+              alt="ENVerp"
+              width={44}
+              height={44}
+              className="h-11 w-11 shrink-0 rounded-xl shadow-sm"
+            />
+            <div className="min-w-0">
+              <h1 className="text-xl font-black tracking-tight text-slate-900 dark:text-white">
+                ENVerp
+              </h1>
+              <p className="truncate text-[10px] font-semibold tracking-wide text-slate-500 dark:text-slate-400">
+                Entegre Net Veri
+              </p>
+              <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                V1.0 SAHA PİLOT
+              </span>
+            </div>
           </div>
           <button
             onClick={() => setMobileMenuOpen(false)}
@@ -132,7 +145,7 @@ export function Sidebar() {
         </div>
 
 
-      <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
+      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-3">
         {visibleMenuItems.map((item) => {
           const isActive = appPathname === item.href || (appPathname.startsWith(item.href) && item.href !== "/");
           return (
@@ -142,9 +155,9 @@ export function Sidebar() {
               onClick={() => setMobileMenuOpen(false)}
               className={twMerge(
                 clsx(
-                  "flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm font-medium",
+                  "flex min-h-10 items-center gap-3 rounded-xl px-3 py-2 text-sm font-semibold transition-colors",
                   isActive
-                    ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                    ? "bg-blue-50 text-blue-700 shadow-sm ring-1 ring-blue-100 dark:bg-blue-900/30 dark:text-blue-300 dark:ring-blue-900/40"
                     : "text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
                 )
               )}

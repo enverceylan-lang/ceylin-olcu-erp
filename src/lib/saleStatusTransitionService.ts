@@ -45,7 +45,10 @@ const NEXT_STATUSES:
     SaleStatus,
     readonly SaleStatus[]
   >> = {
-    TASLAK: [],
+    TASLAK: [
+      "ONAYLANDI",
+      "İPTAL"
+    ],
 
     TEKLİF: [
       "ONAYLANDI",
@@ -140,16 +143,6 @@ export function requestSaleStatusTransition(
     };
   }
 
-  if (
-    request.fromStatus === "TASLAK" ||
-    request.toStatus === "TASLAK"
-  ) {
-    return {
-      outcome: "REJECTED",
-      reason:
-        "LEGACY_DRAFT_STATUS_NOT_ALLOWED"
-    };
-  }
 
   if (
     request.toStatus === "İPTAL" &&

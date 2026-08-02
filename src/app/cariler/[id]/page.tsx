@@ -492,8 +492,24 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     }
 
     for (const opening of activeOpenings) {
-      const openingMeasurements = (opening.products || []).filter(
+      const nestedOpeningMeasurements = (opening.products || []).filter(
         measurement => !measurement.isDeleted,
+      );
+
+      const canonicalOpeningMeasurements = measurementStore.measurements.filter(
+        measurement =>
+          measurement.customerId === customer.id &&
+          measurementOpeningId(measurement) === opening.id &&
+          !measurement.isDeleted,
+      );
+
+      const openingMeasurements = Array.from(
+        new Map(
+          [
+            ...nestedOpeningMeasurements,
+            ...canonicalOpeningMeasurements,
+          ].map(measurement => [measurement.id, measurement]),
+        ).values(),
       );
 
       if (openingMeasurements.length === 0) {
@@ -525,7 +541,8 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       }
     }
 
-    openRoomPreparation(room);
+    setSelectedRoomForPrep(room);
+    setIsPrepModalOpen(true);
   };
   const toggleRoom = (roomId: string) => {
     setExpandedRooms(prev => ({ ...prev, [roomId]: !prev[roomId] }));
@@ -1234,8 +1251,8 @@ showToast("Saha taslağı telefona kaydedildi.");
 
   const renderMeasurementForm = (room: Room, window: WindowItem, isInlineEdit = false) => {
     return (
-      <div key={isInlineEdit ? editingMeasurementId : "new"} className={`mt-4 overflow-hidden rounded-xl border-2 border-blue-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800 ${isInlineEdit ? "" : "ml-0 sm:ml-6"} relative`}>
-                              <div className="bg-blue-50 dark:bg-gray-900 p-3 border-b border-blue-100 dark:border-gray-700 flex justify-between items-center">
+      <div key={isInlineEdit ? editingMeasurementId : "new"} className={`relative mt-3 overflow-hidden rounded-2xl border border-blue-200 bg-white shadow-md dark:border-gray-700 dark:bg-gray-900 ${isInlineEdit ? "" : "ml-0 sm:ml-6"}`}>
+                              <div className="flex items-center justify-between border-b border-blue-100 bg-blue-50/80 px-3 py-2.5 dark:border-gray-700 dark:bg-gray-950/70 sm:px-4">
                                 <div className="flex min-w-0 items-center gap-2">
                                   <h5 className="truncate font-bold text-blue-900 dark:text-gray-100">
                                     {editingMeasurementId ? "Saha Ölçüsü Düzenleme Formu" : "Saha Ölçü Formu"}
@@ -1261,7 +1278,7 @@ showToast("Saha taslağı telefona kaydedildi.");
                                 </button>
                               </div>
 
-                              <div className="space-y-4 p-3 sm:p-4">
+                              <div className="space-y-4 p-3 sm:p-5">
                                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
                                   <div>
                                     <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Ölçüm Şablonu</label>
@@ -1320,7 +1337,7 @@ showToast("Saha taslağı telefona kaydedildi.");
                                   </div>
                                 )}
 
-                                <div className={`grid gap-3 bg-gray-50 dark:bg-gray-800/50 p-3 rounded border dark:border-gray-700 ${selectedTemplate === 'CURTAIN_DETAIL' ? 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
+                                <div className={`grid gap-3 rounded-xl border border-gray-200 bg-gray-50/70 p-3 dark:border-gray-700 dark:bg-gray-800/40 sm:p-4 ${selectedTemplate === 'CURTAIN_DETAIL' ? 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
                                   {selectedTemplate === 'CURTAIN_DETAIL' && (
                                     <div className="col-span-1 sm:col-span-2 md:col-span-3 text-sm font-bold text-gray-700 dark:text-gray-300 mb-2 border-b pb-1 dark:border-gray-700">Yükseklik Bilgileri</div>
                                   )}
@@ -1373,7 +1390,7 @@ showToast("Saha taslağı telefona kaydedildi.");
                                   />
                                 </div>
 
-                                <div className="sticky bottom-2 z-10 rounded-xl bg-white/95 p-1 shadow-lg backdrop-blur dark:bg-gray-800/95 sm:static sm:bg-transparent sm:p-0 sm:shadow-none"><button onClick={() => handleSaveMeasurement(room.id, window.id)} className="min-h-12 w-full rounded-lg bg-blue-600 px-4 py-3 text-base font-bold text-white shadow-md transition-colors hover:bg-blue-700">
+                                <div className="sticky bottom-2 z-10 rounded-xl border border-blue-100 bg-white/95 p-1.5 shadow-lg backdrop-blur dark:border-gray-700 dark:bg-gray-900/95 sm:static sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none"><button onClick={() => handleSaveMeasurement(room.id, window.id)} className="min-h-12 w-full rounded-xl bg-blue-600 px-4 py-3 text-base font-bold text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
                                   {editingMeasurementId ? "Değişiklikleri Kaydet" : "Ölçüyü Kaydet"}
                                 </button></div>
                               </div>
@@ -1382,7 +1399,7 @@ showToast("Saha taslağı telefona kaydedildi.");
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-24">
+    <div className="mx-auto max-w-7xl space-y-5 pb-24">
 {customer.isArchived && !customer.isDeleted && (
   <div className="bg-yellow-100 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-400 px-4 py-3 rounded-xl mb-6">
     <div className="flex items-center justify-between">
@@ -1414,7 +1431,7 @@ showToast("Saha taslağı telefona kaydedildi.");
   </div>
 )}
       {/* Header & Mode Toggle */}
-      <div className="flex flex-col lg:flex-row items-start justify-between gap-5">
+      <div className="flex flex-col items-start justify-between gap-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-5 lg:flex-row">
         <div className="flex items-center gap-4">
           <Link href="/cariler" className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
             <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-300" />
@@ -1425,7 +1442,7 @@ showToast("Saha taslağı telefona kaydedildi.");
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5 w-full lg:max-w-3xl">
+        <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3 lg:max-w-3xl xl:grid-cols-4">
           {currentUser?.role === 'ADMIN' && (
             <button
               onClick={handleTargetRecover}

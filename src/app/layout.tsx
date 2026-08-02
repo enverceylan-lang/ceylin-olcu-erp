@@ -30,16 +30,16 @@ const geistMono = Geist_Mono({
 
 export const metadata:
   Metadata = {
-    title: "ENVERP",
+    title: "ENVerp",
     description:
-      "ENVERP iş ve operasyon yönetim platformu",
+      "ENVerp — Entegre Net Veri iş ve operasyon yönetim platformu",
     manifest:
       "/manifest.json",
     applicationName:
-      "ENVERP",
+      "ENVerp",
     appleWebApp: {
       capable: true,
-      title: "ENVERP",
+      title: "ENVerp",
       statusBarStyle:
         "default",
     },
@@ -69,7 +69,7 @@ export const metadata:
 
 export const viewport:
   Viewport = {
-    themeColor: "#0a0a0a",
+    themeColor: "#071327",
     width: "device-width",
     initialScale: 1,
     maximumScale: 1,

@@ -2,6 +2,7 @@ import { Customer, ProductMeasurement } from '@/store/useStore';
 import { useMeasurementStore, MeasurementRecord } from '@/store/measurementStore';
 import { Sale, SaleItem } from '@/store/salesStore';
 import { getMeasurementDimensions, resolveMeasurementProductGroup, resolveMeasurementProductLabel } from '@/lib/measurementAdapter';
+import { resolveSaleStockItemId } from '@/lib/saleStockIdentity';
 
 import {
   CALCULATION_ENGINE_VERSION,
@@ -63,6 +64,12 @@ function createSaleItemFromMeasurement(
     selectedType ||
     p.productType ||
     '';
+
+  const stockItemId =
+    resolveSaleStockItemId(
+      p.selectedProducts,
+      selectedProductType
+    );
 
   const group = resolveMeasurementProductGroup({
     ...p,
@@ -199,6 +206,7 @@ function createSaleItemFromMeasurement(
     windowName,
     productType: label,
     productGroup: group,
+    stockItemId,
 
     width: w,
     height: h,
@@ -786,6 +794,7 @@ export function createDraftSaleFromCustomer(
       normalizeSaleGroupKeyPart(item.roomName),
       normalizeSaleGroupKeyPart(item.productType),
       normalizeSaleGroupKeyPart(item.metricUnit),
+      normalizeSaleGroupKeyPart(item.stockItemId || ''),
       item.isJumboComponent ? 'JUMBO' : 'NORMAL',
       normalizeSaleGroupKeyPart(
         item.parentProductRelation || ''
@@ -1007,7 +1016,8 @@ export async function syncOrCreateDraftSale(
       normalizeKeyPart(item.productType),
       normalizeKeyPart(item.roomName),
       normalizeKeyPart(item.windowName),
-      item.metricUnit
+      item.metricUnit,
+      normalizeKeyPart(item.stockItemId || '')
     ].join('|');
 
   /*

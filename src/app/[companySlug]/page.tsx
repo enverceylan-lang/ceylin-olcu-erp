@@ -7,8 +7,8 @@ import {
   useParams,
   useRouter,
 } from "next/navigation";
+import Image from "next/image";
 import {
-  Building2,
   KeyRound,
   LogIn,
   UserRound,
@@ -252,16 +252,14 @@ export default function CompanyGatewayPage() {
     };
 
   return (
-    <div className="min-h-screen w-full bg-slate-950 text-white flex items-center justify-center p-4">
-      <div className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900/90 shadow-2xl p-7 sm:p-9">
-        <div className="flex items-center gap-3 mb-8">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-500/15 text-indigo-300 flex items-center justify-center">
-            <Building2 className="w-6 h-6" />
-          </div>
+    <div className="flex min-h-screen w-full items-center justify-center bg-slate-100 p-4 text-slate-950 dark:bg-slate-950 dark:text-white">
+      <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900/90 sm:p-9">
+        <div className="mb-7 flex items-center gap-3">
+          <Image src="/brand/enverp-icon.png" alt="ENVerp" width={56} height={56} className="h-14 w-14 rounded-2xl shadow-sm" />
 
           <div>
             <div className="text-xs tracking-[0.22em] uppercase text-slate-400 font-semibold">
-              ENVERP
+              ENVerp · Entegre Net Veri
             </div>
 
             <h1 className="text-xl font-bold">
@@ -270,12 +268,12 @@ export default function CompanyGatewayPage() {
           </div>
         </div>
 
-        <div className="mb-6 rounded-2xl border border-slate-800 bg-slate-950/50 px-4 py-3">
+        <div className="mb-6 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/50">
           <div className="text-xs text-slate-500">
             Şirket
           </div>
 
-          <div className="font-semibold text-slate-200 break-all">
+          <div className="break-all font-semibold text-slate-800 dark:text-slate-200">
             {companySlug}
           </div>
         </div>
@@ -287,11 +285,11 @@ export default function CompanyGatewayPage() {
           className="space-y-4"
         >
           <label className="block">
-            <span className="text-sm font-medium text-slate-300">
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
               Kullanıcı adı
             </span>
 
-            <div className="mt-2 flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3">
+            <div className="mt-2 flex min-h-11 items-center gap-2 rounded-xl border border-slate-300 bg-slate-50 px-3 focus-within:ring-2 focus-within:ring-blue-500 dark:border-slate-700 dark:bg-slate-950">
               <UserRound className="w-4 h-4 text-slate-500" />
 
               <input
@@ -312,11 +310,11 @@ export default function CompanyGatewayPage() {
           </label>
 
           <label className="block">
-            <span className="text-sm font-medium text-slate-300">
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
               Şifre
             </span>
 
-            <div className="mt-2 flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3">
+            <div className="mt-2 flex min-h-11 items-center gap-2 rounded-xl border border-slate-300 bg-slate-50 px-3 focus-within:ring-2 focus-within:ring-blue-500 dark:border-slate-700 dark:bg-slate-950">
               <KeyRound className="w-4 h-4 text-slate-500" />
 
               <input
@@ -348,7 +346,7 @@ export default function CompanyGatewayPage() {
             disabled={
               isSubmitting
             }
-            className="w-full rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-wait py-3 font-semibold flex items-center justify-center gap-2 transition-colors"
+            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3 font-semibold text-white transition-colors hover:bg-blue-500 disabled:cursor-wait disabled:opacity-60"
           >
             <LogIn className="w-4 h-4" />
 
@@ -359,7 +357,7 @@ export default function CompanyGatewayPage() {
         </form>
 
         <p className="mt-6 text-center text-xs text-slate-500">
-          Bu giriş yalnız bu şirket için tanımlı ENVERP kullanıcılarına açıktır.
+          Bu giriş yalnız bu şirket için tanımlı ENVerp kullanıcılarına açıktır.
         </p>
       </div>
     </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { Users, Ruler, Package, ShoppingCart } from "lucide-react";
+import Image from "next/image";
 import { useStore } from "@/store/useStore";
 import { useSalesStore } from "@/store/salesStore";
 import { useEffect, useState } from "react";
@@ -39,32 +40,36 @@ export default function Home() {
   ];
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-bold heading-title sm:text-2xl">Ana Sayfa</h1>
-        <p className="text-sm heading-subtitle">Curtain ERP sistemine hoş geldiniz.</p>
+    <div className="mx-auto max-w-7xl space-y-5">
+      <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:flex-row sm:items-center sm:p-5">
+        <Image src="/brand/enverp-icon.png" alt="ENVerp" width={56} height={56} className="h-14 w-14 rounded-2xl shadow-sm" />
+        <div>
+          <h1 className="text-xl font-black tracking-tight text-slate-950 dark:text-white sm:text-2xl">Ana Sayfa</h1>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400"><span className="font-semibold text-blue-700 dark:text-blue-300">ENVerp</span> · Entegre Net Veri</p>
+        </div>
+        <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 sm:ml-auto">V1.0 SAHA PİLOT</span>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {stats.map((stat) => (
-          <div key={stat.name} className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-800 flex items-center gap-4">
-            <div className={`p-4 rounded-full ${stat.color}`}>
-              <stat.icon className="w-6 h-6" />
+          <div key={stat.name} className="flex min-w-0 items-center gap-3 rounded-xl border border-gray-100 bg-white p-3.5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-4">
+            <div className={`shrink-0 rounded-xl p-2.5 ${stat.color}`}>
+              <stat.icon className="h-5 w-5" />
             </div>
             <div>
-              <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{stat.name}</p>
-              <h3 className="text-2xl font-bold text-gray-900 dark:text-white">{stat.value}</h3>
+              <p className="truncate text-xs font-semibold text-gray-500 dark:text-gray-400 sm:text-sm">{stat.name}</p>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{stat.value}</h3>
             </div>
           </div>
         ))}
       </div>
       
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-        <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-800 h-96 flex items-center justify-center">
-          <p className="text-gray-500 dark:text-gray-400">Satış Grafiği (Çok Yakında)</p>
+      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="flex min-h-40 items-center justify-center rounded-xl border border-dashed border-gray-200 bg-white p-6 text-center dark:border-gray-800 dark:bg-gray-900">
+          <p className="text-sm text-gray-500 dark:text-gray-400"><span className="block font-semibold text-gray-700 dark:text-gray-300">Satış görünümü</span><span className="mt-1 block text-xs">Veri kaynağı hazır olduğunda burada gösterilecek.</span></p>
         </div>
-        <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-800 h-96 flex items-center justify-center">
-          <p className="text-gray-500 dark:text-gray-400">Son İşlemler (Çok Yakında)</p>
+        <div className="flex min-h-40 items-center justify-center rounded-xl border border-dashed border-gray-200 bg-white p-6 text-center dark:border-gray-800 dark:bg-gray-900">
+          <p className="text-sm text-gray-500 dark:text-gray-400"><span className="block font-semibold text-gray-700 dark:text-gray-300">Son işlemler</span><span className="mt-1 block text-xs">Gerçek işlem kaynağı hazır olduğunda burada listelenecek.</span></p>
         </div>
       </div>
     </div>

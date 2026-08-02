@@ -1041,7 +1041,7 @@ const handleManualOrphanRepair = async (
 
       {/* V1D Inbound Pool Section */}
       {(currentUser?.role === 'ADMIN' || currentUser?.role === 'MODERATOR') && (
-        <section className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 dark:border-slate-800 dark:bg-slate-900/30">
+        <section className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-3.5 dark:border-slate-800 dark:bg-slate-900/30 sm:p-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-slate-100">
               <CloudDownload className="w-5 h-5 text-indigo-500" />
@@ -1053,7 +1053,7 @@ const handleManualOrphanRepair = async (
             <button
               onClick={handlePullInbound}
               disabled={isPulling}
-              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
             >
               <RefreshCw className={`w-4 h-4 ${isPulling ? 'animate-spin' : ''}`} />
               {isPulling ? 'Alınıyor...' : 'Gelen Ölçüleri Al'}
@@ -1073,7 +1073,7 @@ const handleManualOrphanRepair = async (
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
                 {quarantinedMeasurements.map(item => (
                   <div
                     key={item.changeId}
@@ -1127,7 +1127,7 @@ const handleManualOrphanRepair = async (
           ) : (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
               {inboundMeasurements.map(inbound => (
-                <div key={inbound.changeId} className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-gray-200 bg-white p-3 shadow-sm hover:shadow-md dark:border-gray-700 dark:bg-gray-800">
+                <div key={inbound.changeId} className="flex min-w-0 flex-col gap-3 rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm transition hover:border-indigo-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-800 dark:hover:border-indigo-800">
                   <div className="flex items-start justify-between gap-3">
                      <div>
                         <h3 className="line-clamp-2 text-sm font-bold leading-5 text-gray-900 dark:text-white">{inbound.customerName || 'İsimsiz Müşteri'}</h3>
@@ -1230,7 +1230,7 @@ const handleManualOrphanRepair = async (
                     )}
                   </div>
 
-                  <div className="mt-auto grid grid-cols-2 gap-2 border-t border-gray-100 pt-3 dark:border-gray-700">
+                  <div className="mt-auto grid grid-cols-1 gap-2 border-t border-gray-100 pt-3 dark:border-gray-700 sm:grid-cols-2">
                      <button 
                        onClick={() => handleInboundMerge(inbound)}
                        disabled={
@@ -1278,7 +1278,7 @@ const handleManualOrphanRepair = async (
                          }
                        }}
                        disabled={processingInboundId === inbound.changeId}
-                       className="col-span-2 min-h-9 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs font-semibold text-gray-600 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+                        className="min-h-10 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs font-semibold text-gray-600 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 sm:col-span-2"
                      >Atla</button>
                   </div>
                 </div>

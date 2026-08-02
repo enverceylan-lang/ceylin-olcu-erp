@@ -1,13 +1,13 @@
 {
-  "name": "CEYLİN ERP",
-  "short_name": "CEYLİN ERP",
-  "description": "Ceylin saha cari ve perde ölçü uygulaması",
+  "name": "ENVerp — Entegre Net Veri",
+  "short_name": "ENVerp",
+  "description": "ENVerp iş, saha ve operasyon yönetim platformu",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0a0a0a",
-  "theme_color": "#0a0a0a",
+  "background_color": "#071327",
+  "theme_color": "#071327",
   "lang": "tr-TR",
   "dir": "ltr",
   "icons": [

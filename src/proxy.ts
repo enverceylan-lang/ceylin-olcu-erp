@@ -9,7 +9,12 @@ import {
   getCompanySlugFromPath,
   isCompanyInternalPath,
   isValidCompanySlug,
-} from "./src/lib/companyRouting";
+} from "./lib/companyRouting";
+import {
+  decideLocalSurfaceRequest,
+  normalizeLocalCompanySlug,
+  normalizeLocalSurface,
+} from "./lib/localSurface";
 
 const COMPANY_SLUG_COOKIE =
   "enverp_company_slug";
@@ -71,16 +76,73 @@ export function proxy(
       request,
     );
 
+  const localSurface =
+    normalizeLocalSurface(
+      process.env.ENVERP_LOCAL_SURFACE,
+    );
+
+  const localCompanySlug =
+    normalizeLocalCompanySlug(
+      process.env
+        .ENVERP_LOCAL_COMPANY_SLUG,
+    );
+
+  const pathCompanySlug =
+    getCompanySlugFromPath(
+      pathname,
+    );
+
+  const localDecision =
+    decideLocalSurfaceRequest({
+      surface: localSurface,
+      pathname,
+      localCompanySlug,
+      hasActiveCompanySlug:
+        Boolean(activeCompanySlug),
+      hasCompanySlugInPath:
+        Boolean(pathCompanySlug),
+    });
+
+  if (
+    localDecision.action ===
+      "FORBID"
+  ) {
+    return NextResponse.json(
+      {
+        success: false,
+        code: localDecision.code,
+      },
+      {
+        status: 403,
+        headers: {
+          "Cache-Control":
+            "no-store, max-age=0",
+        },
+      },
+    );
+  }
+
+  if (
+    localDecision.action ===
+      "REDIRECT"
+  ) {
+    const redirectUrl =
+      request.nextUrl.clone();
+
+    redirectUrl.pathname =
+      localDecision.pathname;
+    redirectUrl.search = "";
+
+    return NextResponse.redirect(
+      redirectUrl,
+    );
+  }
+
   if (
     isCompanyInternalPath(
       pathname,
     )
   ) {
-    const pathCompanySlug =
-      getCompanySlugFromPath(
-        pathname,
-      );
-
     if (
       !pathCompanySlug ||
       activeCompanySlug !==
@@ -158,6 +220,7 @@ export function proxy(
 
 export const config = {
   matcher: [
-    "/((?!api|_next/static|_next/image|favicon.ico|manifest.json|sw.js|icons|apple-touch-icon.png).*)",
+    "/api/:path*",
+    "/((?!_next/static|_next/image|favicon.ico|manifest.json|sw.js|icons|apple-touch-icon.png).*)",
   ],
 };

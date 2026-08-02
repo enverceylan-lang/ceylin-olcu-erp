@@ -13,6 +13,9 @@ import type {
 import {
   assertSaleCanBeDeleted
 } from '@/lib/saleDeletionPolicy';
+import {
+  shouldPublishTailorPlanning
+} from '@/lib/tailorPlanningEligibility';
 
 export type SaleStatus =
   | 'TASLAK'
@@ -93,6 +96,7 @@ export interface SaleItem {
   windowName: string;
   productType: string;
   productGroup: string;
+  stockItemId?: string;
   width: number;
   height: number;
   calcWidth: number;
@@ -199,7 +203,7 @@ export const useSalesStore = create<SalesState>((set, get) => ({
   updateSale: async (sale: Sale) => {
     await saveLocalSale(sale);
 
-    if (sale.status === 'ÜRETİME_GÖNDERİLDİ') {
+    if (shouldPublishTailorPlanning(sale.status)) {
       const { syncCentralSaleToTailorProduction } =
         await import('@/lib/productionBridge');
 
@@ -228,8 +232,9 @@ export const useSalesStore = create<SalesState>((set, get) => ({
         });
 
       if (
-        sale.status ===
-        'ÜRETİME_GÖNDERİLDİ'
+        shouldPublishTailorPlanning(
+          sale.status
+        )
       ) {
         const {
           syncCentralSaleToTailorProduction

@@ -3,7 +3,8 @@
 import { useState, useEffect, useSyncExternalStore } from "react";
 import { useAuthStore, normalizeRole, canViewModule, normalizeUser } from "@/store/useAuthStore";
 import { usePathname, useRouter } from "next/navigation";
-import { ShieldAlert, Lock, User, KeyRound, ArrowRight } from "lucide-react";
+import Image from "next/image";
+import { ShieldAlert, User, KeyRound, ArrowRight } from "lucide-react";
 import {
   normalizeCompanyAppPath,
   withCompanyPrefix,
@@ -143,18 +144,18 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     };
 
     return (
-      <div className="min-h-screen w-full bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden">
+      <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-slate-100 p-4 dark:bg-slate-950">
         {/* Soft decorative background glow */}
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-indigo-650/10 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="w-full max-w-md bg-slate-900/80 border border-slate-800/80 rounded-2xl p-8 shadow-2xl backdrop-blur-md relative z-10 space-y-6">
+        <div className="relative z-10 w-full max-w-md space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900/90 sm:p-8">
           <div className="text-center space-y-2">
-            <div className="w-12 h-12 bg-indigo-600/20 text-indigo-400 rounded-2xl flex items-center justify-center mx-auto border border-indigo-500/20">
-              <Lock className="w-6 h-6" />
-            </div>
-            <h2 className="text-2xl font-bold text-white">CEYLİN ERP Giriş</h2>
-            <p className="text-xs text-slate-400">Saha pilot sürümüne erişmek için kimliğinizi doğrulayın.</p>
+            <Image src="/brand/enverp-icon.png" alt="ENVerp" width={72} height={72} className="mx-auto h-[72px] w-[72px] rounded-2xl shadow-md" />
+            <h2 className="text-2xl font-black tracking-tight text-slate-950 dark:text-white">ENVerp</h2>
+            <p className="text-sm font-semibold text-blue-700 dark:text-blue-300">Entegre Net Veri</p>
+            <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">V1.0 SAHA PİLOT</span>
+            <p className="pt-1 text-xs text-slate-500 dark:text-slate-400">Giriş yapmak için kimliğinizi doğrulayın.</p>
           </div>
 
           <form onSubmit={handleLoginSubmit} className="space-y-4">
@@ -166,7 +167,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             )}
 
             <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">Kullanıcı Adı</label>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">Kullanıcı Adı</label>
               <div className="relative">
                 <User className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
@@ -175,13 +176,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="Kullanıcı adınız..."
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-800 bg-slate-950 text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow placeholder-slate-600"
+                  className="min-h-11 w-full rounded-xl border border-slate-300 bg-slate-50 py-2.5 pl-10 pr-4 text-sm text-slate-950 outline-none transition-shadow placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500 dark:border-slate-800 dark:bg-slate-950 dark:text-white dark:placeholder:text-slate-600"
                 />
               </div>
             </div>
 
             <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">PIN / Şifre</label>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">PIN / Şifre</label>
               <div className="relative">
                 <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
@@ -190,12 +191,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Giriş şifreniz..."
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-800 bg-slate-950 text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow placeholder-slate-600"
+                  className="min-h-11 w-full rounded-xl border border-slate-300 bg-slate-50 py-2.5 pl-10 pr-4 text-sm text-slate-950 outline-none transition-shadow placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500 dark:border-slate-800 dark:bg-slate-950 dark:text-white dark:placeholder:text-slate-600"
                 />
               </div>
             </div>
 
-            <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer select-none">
+            <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
               <input
                 type="checkbox"
                 checked={rememberMe}
@@ -207,7 +208,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
             <button
               type="submit"
-              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl text-sm transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/25 cursor-pointer"
+              className="flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 py-3 text-sm font-bold text-white shadow-lg shadow-blue-500/20 transition-colors hover:bg-blue-500"
             >
               Giriş Yap <ArrowRight className="w-4 h-4" />
             </button>

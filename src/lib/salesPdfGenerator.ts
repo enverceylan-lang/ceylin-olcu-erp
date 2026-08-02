@@ -207,8 +207,7 @@ export function openSalesPdfPreview(
       ? previewWindow
       : window.open(
           '',
-          '_blank',
-          'noopener,noreferrer'
+          '_blank'
         );
 
   if (!targetWindow) {
@@ -219,6 +218,7 @@ export function openSalesPdfPreview(
     );
   }
 
+  targetWindow.opener = null;
   targetWindow.location.href = url;
 
   window.setTimeout(

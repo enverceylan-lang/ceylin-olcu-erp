@@ -10,7 +10,7 @@ const proxySource =
   readFileSync(
     resolve(
       process.cwd(),
-      "proxy.ts",
+      "src/proxy.ts",
     ),
     "utf8",
   );
@@ -85,7 +85,7 @@ assert.match(
 
 assert.match(
   sidebarSource,
-  />\s*ENVERP\s*</,
+  />\s*ENVerp\s*</,
 );
 
 assert.doesNotMatch(

@@ -78,28 +78,28 @@ firstStatus: ${result.debug.firstStatus}
   const currentUser = normalizeUser(rawCurrentUser);
 
   return (
-    <header className="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-4 lg:px-8">
-      <div className="flex items-center gap-4">
+    <header className="flex h-16 items-center justify-between gap-2 border-b border-gray-200 bg-white px-3 dark:border-gray-800 dark:bg-gray-900 sm:px-4 lg:px-6">
+      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         
               {/* Global Kurtar button disabled per user request */}
 <button 
           onClick={toggleMobileMenu}
-          className="md:hidden p-2 rounded-md text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+          className="min-h-10 min-w-10 rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 md:hidden"
           aria-label="Menüyü Aç"
         >
           <Menu className="w-5 h-5" />
         </button>
 
         {mounted && (
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-              Giriş: <span className="font-bold text-gray-900 dark:text-white">{currentUser.name}</span>
+          <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+            <span className="hidden min-w-0 text-sm font-medium text-gray-700 dark:text-gray-300 lg:block">
+              <span className="truncate font-bold text-gray-900 dark:text-white">{currentUser.name}</span>
             </span>
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ROLE_BADGE_COLORS[currentUser.role] || 'bg-gray-150 text-gray-700'}`}>
+            <span className={`hidden rounded-full px-2 py-0.5 text-[10px] font-bold xl:inline-flex ${ROLE_BADGE_COLORS[currentUser.role] || 'bg-gray-150 text-gray-700'}`}>
               {(ROLE_PERMISSIONS[currentUser.role] || { label: currentUser.role }).label}
             </span>
 
-            <div className="flex items-center gap-1.5 border-l border-gray-200 dark:border-gray-800 pl-3 ml-1">
+            <div className="flex items-center gap-1 border-l border-gray-200 pl-2 dark:border-gray-800 sm:ml-1 sm:pl-3">
               {CLOUD_SYNC_DISABLED && (
                 <span className="flex items-center gap-1 text-xs font-medium text-slate-500 dark:text-slate-400" title="Ana bulut senkronizasyonu kapalı; veriler bu cihazda korunuyor">
                   <CloudOff className="w-3.5 h-3.5" />
@@ -134,7 +134,7 @@ firstStatus: ${result.debug.firstStatus}
               <button
                 onClick={handleManualPush}
                 disabled={isPushing}
-                className={`flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md border ml-2 transition-colors ${
+                className={`ml-1 flex min-h-10 items-center gap-1 rounded-lg border px-2 text-xs font-semibold transition-colors sm:ml-2 ${
                   isPushing 
                     ? 'bg-gray-200 text-gray-500 border-gray-300 cursor-wait'
                     : 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50'
@@ -142,23 +142,24 @@ firstStatus: ${result.debug.firstStatus}
                 title="Bekleyen yerel ölçüleri merkeze gönder"
               >
                 <RefreshCw className={`w-3 h-3 ${isPushing ? 'animate-spin text-gray-500' : 'text-indigo-600 dark:text-indigo-400'}`} />
-                <span>{isPushing ? 'Gönderiliyor...' : 'Ölçüleri Gönder'}</span>
+                <span className="hidden sm:inline">{isPushing ? 'Gönderiliyor...' : 'Ölçüleri Gönder'}</span>
               </button>
             </div>
           </div>
         )}
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex shrink-0 items-center gap-1 sm:gap-2">
         <ErpScopeSelector />
-        <button className="p-2 rounded-md text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+        <button aria-label="Bildirimler" className="hidden min-h-10 min-w-10 rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 sm:inline-flex sm:items-center sm:justify-center">
           <Bell className="w-5 h-5" />
         </button>
         
         {mounted && (
           <button
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            className="p-2 rounded-md text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            aria-label="Tema değiştir"
+            className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
           >
             {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
           </button>

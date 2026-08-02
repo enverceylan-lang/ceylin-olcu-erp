@@ -37,6 +37,7 @@ const RESERVED_ROOT_SEGMENTS =
     "montaj",
     "olculer",
     "operasyonlar",
+    "platform",
     "raporlar",
     "satis",
     "stok",
@@ -74,6 +75,21 @@ function isCompanyLoginGateway(
   );
 }
 
+function isPlatformRoute(
+  pathname: string,
+): boolean {
+  return (
+    pathname === "/platform" ||
+    pathname.startsWith(
+      "/platform/",
+    ) ||
+    pathname === "/super-admin" ||
+    pathname.startsWith(
+      "/super-admin/",
+    )
+  );
+}
+
 export function AppRouteShell({
   children,
 }: Readonly<{
@@ -84,6 +100,9 @@ export function AppRouteShell({
 
   if (
     isCompanyLoginGateway(
+      pathname,
+    ) ||
+    isPlatformRoute(
       pathname,
     )
   ) {
