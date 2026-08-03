@@ -26,8 +26,6 @@ import { twMerge } from "tailwind-merge";
 import { useAuthStore, ROLE_PERMISSIONS, canViewModule, normalizeUser, normalizeRole } from "@/store/useAuthStore";
 import { useUiStore } from "@/store/useUiStore";
 import { useState, useSyncExternalStore } from "react";
-import { decideFinanceAccess } from "@/lib/finance/financeAccessPolicy";
-import { useFinanceRuntimeContext } from "@/lib/finance/useFinanceRuntimeContext";
 import {
   normalizeCompanyAppPath,
   withCompanyPrefix,
@@ -72,7 +70,6 @@ export function Sidebar() {
   const { currentUser: rawCurrentUser, switchUser, users, logout } = useAuthStore();
   const { isMobileMenuOpen, setMobileMenuOpen } = useUiStore();
   const [showUserPicker, setShowUserPicker] = useState(false);
-  const financeRuntime = useFinanceRuntimeContext();
   const mounted = useSyncExternalStore(
     subscribeToHydration,
     getClientSnapshot,
@@ -85,25 +82,12 @@ export function Sidebar() {
   const currentUser = normalizeUser(rawCurrentUser);
 
   const permissions = ROLE_PERMISSIONS[currentUser.role] || { label: 'Kullanıcı' };
-  const financeAccess =
-    financeRuntime.state === "ready"
-      ? decideFinanceAccess({
-          packageType: financeRuntime.packageType,
-          permissions: financeRuntime.permissions,
-          scope: financeRuntime.scope,
-          requestedCapability: "BASIC_FINANCE",
-          financeContext: { scope: financeRuntime.scope },
-        })
-      : null;
 
   const visibleMenuItems = menuItems.filter((item) => {
     const role = normalizeRole(currentUser.role);
 
     if (item.href === "/finans") {
-      return (
-        role === "ADMIN" &&
-        financeAccess?.allowed === true
-      );
+      return role === "ADMIN";
     }
 
     if (item.href === "/operasyonlar") {
