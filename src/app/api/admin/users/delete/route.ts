@@ -1,126 +1,264 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { verifyAuth } from "@/lib/authHelper";
+import {
+  NextRequest,
+  NextResponse,
+} from "next/server";
+import {
+  createClient,
+} from "@supabase/supabase-js";
 
-const supabaseUrl =
-  process.env.SUPABASE_URL ||
-  process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  "https://placeholder-project.supabase.co";
+import {
+  requireCompanySession,
+} from "@/lib/companySessionGuard";
+import {
+  isUserInCompany,
+} from "@/lib/companyUserScopeGuard";
 
-const supabaseServiceKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  "placeholder-service-key";
+function getServerClient() {
+  const url =
+    process.env.SUPABASE_URL ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const supabaseServer = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
+  if (!url || !key) {
+    return null;
+  }
 
-export async function POST(req: NextRequest) {
+  return createClient(
+    url,
+    key,
+    {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    },
+  );
+}
+
+export async function POST(
+  req: NextRequest,
+) {
   try {
-    const caller = await verifyAuth(req);
-
-    if (!caller || caller.role?.toLowerCase() !== "admin") {
-      return NextResponse.json(
-        { success: false, error: "Yetkisiz erişim." },
-        { status: 401 }
+    const companySession =
+      await requireCompanySession(
+        req,
+        "WEB",
       );
-    }
 
-    const body = await req.json();
-    const { id } = body;
-
-    if (!id || id === "user-admin") {
-      return NextResponse.json(
-        { success: false, error: "Geçersiz kullanıcı ID." },
-        { status: 400 }
-      );
-    }
-
-    const { count: measurementCount, error: measError } =
-      await supabaseServer
-        .from("measurements")
-        .select("*", { count: "exact", head: true })
-        .or(`createdById.eq.${id},measuredById.eq.${id}`);
-
-    if (measError) {
-      console.error("Error checking measurements link:", measError);
-    }
-
-    const { count: customerCount, error: custError } =
-      await supabaseServer
-        .from("customers")
-        .select("*", { count: "exact", head: true })
-        .or(
-          `createdById.eq.${id},assignedSalesId.eq.${id},assignedMeasureId.eq.${id},assignedTailorId.eq.${id},assignedInstallerId.eq.${id}`
-        );
-
-    if (custError) {
-      console.error("Error checking customers link:", custError);
-    }
-
-    const linkedMeasurements = measurementCount || 0;
-    const linkedCustomers = customerCount || 0;
-    const totalLinked = linkedMeasurements + linkedCustomers;
-
-    if (totalLinked > 0) {
+    if (!companySession.allowed) {
       return NextResponse.json(
         {
           success: false,
-          code: "USER_HAS_LINKED_RECORDS",
-          error:
-            "Bu kullanıcıya bağlı kayıtlar bulunduğu için silinemez. Pasife alın.",
-          linkedCounts: {
-            measurements: linkedMeasurements,
-            customers: linkedCustomers,
-          },
+          error: companySession.code,
         },
-        { status: 409 }
+        {
+          status: companySession.status,
+        },
       );
     }
 
-    const { data: deletedUsers, error: deleteError } =
-      await supabaseServer
+    const caller =
+      companySession.actor;
+
+    if (
+      caller.role?.toLowerCase() !==
+      "admin"
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Yetkisiz erişim.",
+        },
+        {
+          status: 403,
+        },
+      );
+    }
+
+    const body =
+      await req.json();
+
+    const id =
+      String(
+        body?.id || "",
+      ).trim();
+
+    if (
+      !id ||
+      id === caller.id
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Geçersiz kullanıcı ID.",
+        },
+        {
+          status: 400,
+        },
+      );
+    }
+
+    const supabase =
+      getServerClient();
+
+    if (!supabase) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "SERVER_CONFIGURATION_MISSING",
+        },
+        {
+          status: 500,
+        },
+      );
+    }
+
+    const targetInCompany =
+      await isUserInCompany(
+        supabase,
+        companySession.session,
+        id,
+      );
+
+    if (!targetInCompany) {
+      return NextResponse.json(
+        {
+          success: false,
+          code:
+            "USER_OUTSIDE_COMPANY_SCOPE",
+          error:
+            "Hedef kullanıcı bu şirket kapsamında değil.",
+        },
+        {
+          status: 403,
+        },
+      );
+    }
+
+    const {
+      data: deactivatedScopes,
+      error: scopeError,
+    } = await supabase
+      .from("erp_user_scopes")
+      .update({
+        is_active: false,
+      })
+      .eq("user_id", id)
+      .eq(
+        "tenant_id",
+        companySession.session.tenantId,
+      )
+      .eq(
+        "company_id",
+        companySession.session.companyId,
+      )
+      .eq("is_active", true)
+      .select("user_scope_id");
+
+    if (
+      scopeError ||
+      !deactivatedScopes ||
+      deactivatedScopes.length < 1
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          code:
+            "USER_SCOPE_NOT_DEACTIVATED",
+          error:
+            "Kullanıcı şirket kapsamından çıkarılamadı.",
+        },
+        {
+          status: 500,
+        },
+      );
+    }
+
+    const {
+      count: remainingActiveScopeCount,
+      error: remainingScopeError,
+    } = await supabase
+      .from("erp_user_scopes")
+      .select(
+        "*",
+        {
+          count: "exact",
+          head: true,
+        },
+      )
+      .eq("user_id", id)
+      .eq("is_active", true);
+
+    if (remainingScopeError) {
+      return NextResponse.json(
+        {
+          success: false,
+          code:
+            "USER_SCOPE_RECHECK_FAILED",
+          error:
+            "Kullanıcı kapsamı yeniden doğrulanamadı.",
+        },
+        {
+          status: 500,
+        },
+      );
+    }
+
+    if (
+      (remainingActiveScopeCount || 0) === 0
+    ) {
+      const {
+        error: userDeactivateError,
+      } = await supabase
         .from("users")
-        .delete()
-        .eq("id", id)
-        .select("id");
+        .update({
+          isActive: false,
+          updatedAt:
+            new Date().toISOString(),
+        })
+        .eq("id", id);
 
-    if (deleteError) {
-      console.error("Real delete user failed:", deleteError);
-
-      return NextResponse.json(
-        { success: false, error: "Kullanıcı silinemedi." },
-        { status: 500 }
-      );
-    }
-
-    if (!deletedUsers || deletedUsers.length !== 1) {
-      return NextResponse.json(
-        {
-          success: false,
-          code: "USER_NOT_DELETED",
-          error:
-            "Kullanıcı veritabanından silinemedi veya kullanıcı bulunamadı.",
-        },
-        { status: 404 }
-      );
+      if (userDeactivateError) {
+        return NextResponse.json(
+          {
+            success: false,
+            code:
+              "USER_DEACTIVATE_FAILED",
+            error:
+              "Kullanıcı hesabı pasife alınamadı.",
+          },
+          {
+            status: 500,
+          },
+        );
+      }
     }
 
     return NextResponse.json({
       success: true,
-      action: "DELETED",
-      userId: deletedUsers[0].id,
+      action:
+        "REMOVED_FROM_COMPANY",
+      userId: id,
+      companyId:
+        companySession.session.companyId,
     });
-  } catch (error: unknown) {
+  }
+  catch (error: unknown) {
     const message =
-      error instanceof Error ? error.message : "Internal server error";
+      error instanceof Error
+        ? error.message
+        : "Internal server error";
 
     return NextResponse.json(
-      { success: false, error: message },
-      { status: 500 }
+      {
+        success: false,
+        error: message,
+      },
+      {
+        status: 500,
+      },
     );
   }
 }

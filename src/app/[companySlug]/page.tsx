@@ -18,6 +18,9 @@ import {
   normalizeUser,
   useAuthStore,
 } from "@/store/useAuthStore";
+import {
+  COMPANY_HOME_SEGMENT,
+} from "@/lib/companyRouting";
 
 type CompanyLoginResponse = {
   success?: boolean;
@@ -238,7 +241,9 @@ export default function CompanyGatewayPage() {
           },
         );
 
-        router.replace("/");
+        router.replace(
+          `/${companySlug}/${COMPANY_HOME_SEGMENT}`,
+        );
         router.refresh();
       }
       catch {

@@ -139,6 +139,39 @@ export function proxy(
   }
 
   if (
+    localSurface === "SHARED" &&
+    pathname === "/"
+  ) {
+    const platformUrl =
+      request.nextUrl.clone();
+
+    platformUrl.pathname =
+      "/platform";
+    platformUrl.search = "";
+
+    return NextResponse.redirect(
+      platformUrl,
+    );
+  }
+
+  if (
+    localSurface === "SHARED" &&
+    !activeCompanySlug &&
+    isLegacyInternalPath(pathname)
+  ) {
+    const platformUrl =
+      request.nextUrl.clone();
+
+    platformUrl.pathname =
+      "/platform";
+    platformUrl.search = "";
+
+    return NextResponse.redirect(
+      platformUrl,
+    );
+  }
+
+  if (
     isCompanyInternalPath(
       pathname,
     )

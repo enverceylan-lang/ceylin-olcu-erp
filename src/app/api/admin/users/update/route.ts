@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { hashPassword, verifyAuth } from "@/lib/authHelper";
+import { hashPassword } from "@/lib/authHelper";
+import { requireCompanySession } from "@/lib/companySessionGuard";
+import {
+  createCompanyUserScope,
+  findCompanyUsernameConflict,
+  isUserInCompany,
+  listCompanyUserIds,
+} from "@/lib/companyUserScopeGuard";
 import { normalizeUsername } from "@/lib/usernameHelper";
 import {
   isKnownFinanceLikePermission,
@@ -52,16 +59,27 @@ function isValidEmail(value: string): boolean {
 
 export async function GET(req: NextRequest) {
   try {
-    const caller = await verifyAuth(req);
+    const companySession =
+      await requireCompanySession(
+        req,
+        "WEB",
+      );
 
-    if (!caller) {
+    if (!companySession.allowed) {
       return NextResponse.json(
-        { success: false, error: "Yetkisiz erişim." },
-        { status: 401 }
+        {
+          success: false,
+          error: companySession.code,
+        },
+        {
+          status: companySession.status,
+        },
       );
     }
 
-    const isAdmin = caller.role?.toLowerCase() === "admin";
+    const caller = companySession.actor;
+    const isAdmin =
+      caller.role?.toLowerCase() === "admin";
 
     if (!isAdmin) {
       return NextResponse.json(
@@ -70,11 +88,32 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    const companyUserIds =
+      await listCompanyUserIds(
+        supabaseServer,
+        companySession.session,
+      );
+
+    if (companyUserIds === null) {
+      return NextResponse.json(
+        { success: false, error: "Şirket kullanıcı kapsamı okunamadı." },
+        { status: 500 },
+      );
+    }
+
+    if (companyUserIds.length === 0) {
+      return NextResponse.json({
+        success: true,
+        users: [],
+      });
+    }
+
     const { data: dbUsers, error } = await supabaseServer
       .from("users")
       .select(
         "id, name, username, role, isActive, email, phone, tcNo, address, permissions, createdAt, updatedAt, profileCompletedAt, providerCustomerId, providerType"
       )
+      .in("id", companyUserIds)
       .order("name", { ascending: true });
 
     if (error) {
@@ -105,15 +144,25 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const caller = await verifyAuth(req);
+    const companySession =
+      await requireCompanySession(
+        req,
+        "WEB",
+      );
 
-    if (!caller) {
+    if (!companySession.allowed) {
       return NextResponse.json(
-        { success: false, error: "Yetkisiz erişim." },
-        { status: 401 }
+        {
+          success: false,
+          error: companySession.code,
+        },
+        {
+          status: companySession.status,
+        },
       );
     }
 
+    const caller = companySession.actor;
     const body = await req.json();
 
     const {
@@ -164,6 +213,27 @@ export async function POST(req: NextRequest) {
     }
 
     const isCreate = !existingUser;
+
+    if (!isCreate) {
+      const targetInCompany =
+        await isUserInCompany(
+          supabaseServer,
+          companySession.session,
+          targetId,
+        );
+
+      if (!targetInCompany) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: "USER_OUTSIDE_COMPANY_SCOPE",
+            error: "Hedef kullanıcı bu şirket kapsamında değil.",
+          },
+          { status: 403 },
+        );
+      }
+    }
+
     const isAdmin = caller.role?.toLowerCase() === "admin";
     const isSelfUpdate = !isCreate && targetId === caller.id;
     const hasFinancePermissionUpdate =
@@ -376,18 +446,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Kullanıcı adı benzersiz olmalıdır.
+    // Kullanıcı adı yalnız aynı şirket kapsamında benzersiz olmalıdır.
     if (cleanUsername) {
-      const { data: duplicateUser, error: dupError } = await supabaseServer
-        .from("users")
-        .select("id")
-        .eq("username", cleanUsername)
-        .neq("id", targetId)
-        .maybeSingle();
+      const duplicateUser =
+        await findCompanyUsernameConflict(
+          supabaseServer,
+          companySession.session,
+          cleanUsername,
+          targetId,
+        );
 
-      if (dupError) {
-        console.error("Error checking duplicate username:", dupError);
-
+      if (duplicateUser === "READ_FAILED") {
         return NextResponse.json(
           { success: false, error: "Kullanıcı adı kontrol edilemedi." },
           { status: 500 }
@@ -399,7 +468,7 @@ export async function POST(req: NextRequest) {
           {
             success: false,
             code: "USERNAME_EXISTS",
-            error: "Bu kullanıcı adı zaten kullanımda.",
+            error: "Bu kullanıcı adı bu şirkette zaten kullanımda.",
           },
           { status: 409 }
         );
@@ -613,6 +682,38 @@ export async function POST(req: NextRequest) {
         },
         { status: 500 }
       );
+    }
+
+    if (isCreate) {
+      const scopeCreated =
+        await createCompanyUserScope(
+          supabaseServer,
+          companySession.session,
+          userRecord.id,
+        );
+
+      if (!scopeCreated) {
+        const { error: rollbackError } =
+          await supabaseServer
+            .from("users")
+            .delete()
+            .eq("id", userRecord.id);
+
+        if (rollbackError) {
+          console.error(
+            "User create scope rollback failed.",
+          );
+        }
+
+        return NextResponse.json(
+          {
+            success: false,
+            code: "USER_SCOPE_CREATE_FAILED",
+            error: "Kullanıcı şirket kapsamına bağlanamadı.",
+          },
+          { status: 500 },
+        );
+      }
     }
 
     console.log("User updated/created status:", {
