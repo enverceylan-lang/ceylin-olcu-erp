@@ -523,10 +523,20 @@ const productLegendItems =
           ) *
           drawW;
 
-        const groupedPanelTotalWidthCm =
+        /*
+         * Mekanik uygulama plani, cephe segment dagilimini tekrar
+         * hesaplamaz. Panel genislikleri sahadan gelen Gercek En
+         * (panel.widthCm) degerlerine gore tum mekanik katmanda
+         * oransal cizilir.
+         *
+         * Ornek: 150 : 157 : 92 : 165 oranlari gorselde de aynen
+         * korunur. Ust cephe teknik krokisi ham segment olcusunu
+         * gostermeye devam eder.
+         */
+        const allPanelTotalWidthCm =
           Math.max(
             1,
-            sameGroupPanels.reduce(
+            mechanicalPanels.reduce(
               (sum, item) =>
                 sum +
                 Math.max(
@@ -537,9 +547,9 @@ const productLegendItems =
             )
           );
 
-        const groupedPanelPreviousWidthCm =
-          sameGroupPanels
-            .slice(0, safePanelOrder)
+        const previousPanelWidthCm =
+          mechanicalPanels
+            .slice(0, panelIndex)
             .reduce(
               (sum, item) =>
                 sum +
@@ -550,68 +560,35 @@ const productLegendItems =
               0
             );
 
-        const groupedSpanStartX =
-          Math.min(
-            ...fallbackSpans.map(span => span.x)
-          );
+        const mechanicalPlanStartX =
+          startX + 3;
 
-        const groupedSpanEndX =
-          Math.max(
-            ...fallbackSpans.map(
-              span => span.x + span.width
-            )
-          );
-
-        const groupedSpanWidth =
+        const mechanicalPlanWidth =
           Math.max(
             22,
-            groupedSpanEndX - groupedSpanStartX
+            drawW - 6
           );
 
-        const groupedPanelX =
-          groupedSpanStartX +
-          (
-            groupedPanelPreviousWidthCm /
-            groupedPanelTotalWidthCm
-          ) *
-          groupedSpanWidth;
-
-        const groupedPanelWidth =
-          (
-            Math.max(
-              1,
-              Number(panel.widthCm || 0)
-            ) /
-            groupedPanelTotalWidthCm
-          ) *
-          groupedSpanWidth;
-
-        const useGroupedPanelPlacement =
-          sameGroupPanels.length > 1;
-
         const panelX =
-          useGroupedPanelPlacement
-            ? groupedPanelX + 3
-            : hasCalculatedPosition
-              ? calculatedPanelX
-              : targetSpan.x + 3;
+          mechanicalPlanStartX +
+          (
+            previousPanelWidthCm /
+            allPanelTotalWidthCm
+          ) *
+          mechanicalPlanWidth;
 
         const panelWidth =
-          useGroupedPanelPlacement
-            ? Math.max(
-                22,
-                groupedPanelWidth - 6
-              )
-            : hasCalculatedPosition
-              ? Math.max(
-                  22,
-                  calculatedPanelWidth
-                )
-              : Math.max(
-                  22,
-                  targetSpan.width - 6
-                );
-
+          Math.max(
+            22,
+            (
+              Math.max(
+                1,
+                Number(panel.widthCm || 0)
+              ) /
+              allPanelTotalWidthCm
+            ) *
+            mechanicalPlanWidth
+          );
         const panelY =
           panelLayerTop +
           (

@@ -15,6 +15,9 @@ import { LayoutDashboard,
   Wrench,
   FileText,
   Settings,
+  CalendarDays,
+  BriefcaseBusiness,
+  ReceiptText,
   ChevronDown,
   X,
   LogOut, ClipboardList } from "lucide-react";
@@ -36,15 +39,18 @@ const getServerSnapshot = () => false;
 
 const menuItems = [
   { name: "Ana Sayfa", href: "/", icon: LayoutDashboard },
-  { name: "Cariler", href: "/cariler", icon: Users },
-  { name: "Ölçüler", href: "/olculer", icon: Ruler },
+  { name: "Cari", href: "/cariler", icon: Users },
+  { name: "Ölçü", href: "/olculer", icon: Ruler },
   { name: "Görevler", href: "/gorevler", icon: ClipboardList },
   { name: "Stok", href: "/stok", icon: Package },
   { name: "Satış", href: "/satis", icon: ShoppingCart },
   { name: "Finans", href: "/finans", icon: Landmark },
+  { name: "Operasyonlar", href: "/operasyonlar", icon: BriefcaseBusiness },
   { name: "Üretim", href: "/uretim", icon: Factory },
   { name: "Montaj", href: "/montaj", icon: Wrench },
+  { name: "Bekleyen Hakedişler", href: "/bekleyen-hakedisler", icon: ReceiptText },
   { name: "Raporlar", href: "/raporlar", icon: FileText },
+  { name: "Ajanda", href: "/ajanda", icon: CalendarDays },
   { name: "Ayarlar", href: "/ayarlar", icon: Settings },
 ];
 
@@ -89,11 +95,40 @@ export function Sidebar() {
           financeContext: { scope: financeRuntime.scope },
         })
       : null;
-  const visibleMenuItems = menuItems.filter((item) =>
-    item.href === "/finans"
-      ? financeAccess?.allowed === true
-      : canViewModule(currentUser.role, item.href)
-  );
+
+  const visibleMenuItems = menuItems.filter((item) => {
+    const role = normalizeRole(currentUser.role);
+
+    if (item.href === "/finans") {
+      return (
+        role === "ADMIN" &&
+        financeAccess?.allowed === true
+      );
+    }
+
+    if (item.href === "/operasyonlar") {
+      return (
+        role === "ADMIN" ||
+        role === "MODERATOR" ||
+        role === "OFFICE" ||
+        role === "TAILOR" ||
+        role === "INSTALLER"
+      );
+    }
+
+    if (item.href === "/bekleyen-hakedisler") {
+      return (
+        role === "ADMIN" ||
+        role === "ACCOUNTING"
+      );
+    }
+
+    if (item.href === "/ajanda") {
+      return role !== "PLATFORM_SUPER_ADMIN";
+    }
+
+    return canViewModule(currentUser.role, item.href);
+  });
 
   return (
     <>
@@ -167,58 +202,6 @@ export function Sidebar() {
             </Link>
           );
         })}
-              <Link
-          href={withCompanyPrefix(pathname, "/operasyonlar")}
-          className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-        >
-          <span aria-hidden="true">🧰</span>
-          <span>
-            {normalizeRole(currentUser.role) === "TAILOR" ||
-            normalizeRole(currentUser.role) === "INSTALLER"
-              ? "Benim İşlerim"
-              : "Operasyonlar"}
-          </span>
-        </Link>
-        {(normalizeRole(currentUser.role) === "TAILOR" ||
-          normalizeRole(currentUser.role) === "INSTALLER") ? (
-          <Link
-            href={withCompanyPrefix(pathname, "/hakedislerim")}
-            className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-          >
-            <span aria-hidden="true">
-              💰
-            </span>
-
-            <span>
-              Benim Hakedişlerim
-            </span>
-          </Link>
-        ) : null}
-
-        {(normalizeRole(currentUser.role) === "ADMIN" ||
-          normalizeRole(currentUser.role) === "ACCOUNTING") ? (
-          <Link
-            href={withCompanyPrefix(pathname, "/bekleyen-hakedisler")}
-            onClick={() => setMobileMenuOpen(false)}
-            className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-          >
-            <span aria-hidden="true">
-              🧾
-            </span>
-
-            <span>
-              Bekleyen Hakedişler
-            </span>
-          </Link>
-        ) : null}
-        <Link
-          href={withCompanyPrefix(pathname, "/ajanda")}
-          className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-        >
-          <span aria-hidden="true">📅</span>
-          <span>Ajanda</span>
-        </Link>
-
 </nav>
 
       {/* User Switcher / Profile */}
