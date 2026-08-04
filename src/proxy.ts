@@ -142,15 +142,51 @@ export function proxy(
     localSurface === "SHARED" &&
     pathname === "/"
   ) {
-    const platformUrl =
-      request.nextUrl.clone();
+    if (activeCompanySlug) {
+      const companyHomeUrl =
+        request.nextUrl.clone();
 
-    platformUrl.pathname =
-      "/platform";
-    platformUrl.search = "";
+      companyHomeUrl.pathname =
+        `/${activeCompanySlug}/${COMPANY_HOME_SEGMENT}`;
+      companyHomeUrl.search = "";
 
-    return NextResponse.redirect(
-      platformUrl,
+      return NextResponse.redirect(
+        companyHomeUrl,
+      );
+    }
+
+    return new NextResponse(
+      "Not Found",
+      {
+        status: 404,
+        headers: {
+          "Cache-Control":
+            "no-store, max-age=0",
+        },
+      },
+    );
+  }
+
+  if (
+    localSurface === "SHARED" &&
+    (
+      pathname === "/platform" ||
+      pathname.startsWith("/platform/") ||
+      pathname === "/super-admin" ||
+      pathname.startsWith("/super-admin/") ||
+      pathname === "/api/auth/login" ||
+      pathname.startsWith("/api/platform/")
+    )
+  ) {
+    return new NextResponse(
+      "Not Found",
+      {
+        status: 404,
+        headers: {
+          "Cache-Control":
+            "no-store, max-age=0",
+        },
+      },
     );
   }
 
@@ -159,15 +195,15 @@ export function proxy(
     !activeCompanySlug &&
     isLegacyInternalPath(pathname)
   ) {
-    const platformUrl =
-      request.nextUrl.clone();
-
-    platformUrl.pathname =
-      "/platform";
-    platformUrl.search = "";
-
-    return NextResponse.redirect(
-      platformUrl,
+    return new NextResponse(
+      "Not Found",
+      {
+        status: 404,
+        headers: {
+          "Cache-Control":
+            "no-store, max-age=0",
+        },
+      },
     );
   }
 
