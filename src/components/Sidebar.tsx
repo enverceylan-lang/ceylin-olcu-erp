@@ -64,7 +64,11 @@ const ROLE_COLORS: Record<string, string> = {
   INSTALLATION: 'bg-green-600',
 };
 
-export function Sidebar() {
+export function Sidebar({
+  pilotFieldV1 = false,
+}: {
+  pilotFieldV1?: boolean;
+}) {
   const pathname = usePathname();
   const appPathname = normalizeCompanyAppPath(pathname);
   const { currentUser: rawCurrentUser, switchUser, users, logout } = useAuthStore();
@@ -85,6 +89,10 @@ export function Sidebar() {
 
   const visibleMenuItems = menuItems.filter((item) => {
     const role = normalizeRole(currentUser.role);
+
+    if (pilotFieldV1) {
+      return true;
+    }
 
     if (item.href === "/finans") {
       return role === "ADMIN";

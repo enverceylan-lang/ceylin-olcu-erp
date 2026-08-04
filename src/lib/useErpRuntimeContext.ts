@@ -14,6 +14,10 @@ import {
 import {
   useAuthStore
 } from "@/store/useAuthStore";
+import {
+  isPilotFieldV1Override,
+  setPilotFieldV1RuntimeEnabled
+} from "./pilotFieldV1";
 
 interface ReadyErpContextResponse {
   success: true;
@@ -21,6 +25,7 @@ interface ReadyErpContextResponse {
   context: {
     scope: ErpScope;
     package?: string;
+    featureOverrides?: Record<string, unknown>;
   };
 }
 
@@ -38,6 +43,7 @@ type ErpContextResponse =
 export interface ErpRuntimeContextState {
   scope: ErpScope | null;
   packageName: string | null;
+  featureOverrides: Record<string, unknown>;
   loading: boolean;
   error: string | null;
   reload(): Promise<void>;
@@ -55,6 +61,11 @@ export function useErpRuntimeContext():
   const [packageName, setPackageName] =
     useState<string | null>(null);
 
+  const [
+    featureOverrides,
+    setFeatureOverrides
+  ] = useState<Record<string, unknown>>({});
+
   const [loading, setLoading] =
     useState(true);
 
@@ -66,6 +77,8 @@ export function useErpRuntimeContext():
     setError(null);
     setScope(null);
     setPackageName(null);
+    setFeatureOverrides({});
+    setPilotFieldV1RuntimeEnabled(false);
 
     if (!sessionToken) {
       setError("ERP_CONTEXT_SESSION_REQUIRED");
@@ -130,9 +143,20 @@ export function useErpRuntimeContext():
         return;
       }
 
+      const nextFeatureOverrides =
+        body.context.featureOverrides ?? {};
+
       setScope(body.context.scope);
       setPackageName(
         body.context.package ?? null
+      );
+      setFeatureOverrides(
+        nextFeatureOverrides
+      );
+      setPilotFieldV1RuntimeEnabled(
+        isPilotFieldV1Override(
+          nextFeatureOverrides
+        )
       );
     } catch {
       setError(
@@ -156,6 +180,7 @@ export function useErpRuntimeContext():
   return {
     scope,
     packageName,
+    featureOverrides,
     loading,
     error,
     reload

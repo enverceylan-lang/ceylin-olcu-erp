@@ -2,6 +2,9 @@ import {
   normalizeRole,
   type MockUser
 } from "@/store/useAuthStore";
+import {
+  isPilotFieldV1RuntimeEnabled
+} from "@/lib/pilotFieldV1";
 
 export const SALE_APPROVE_PERMISSION =
   "SALE_APPROVE";
@@ -18,6 +21,10 @@ type ApprovalSale = {
 export function canApproveSale(
   user: ApprovalUser | null | undefined,
 ): boolean {
+  if (isPilotFieldV1RuntimeEnabled()) {
+    return false;
+  }
+
   if (!user || user.isActive === false) {
     return false;
   }

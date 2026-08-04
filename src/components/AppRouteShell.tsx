@@ -22,6 +22,16 @@ import {
 import {
   Topbar,
 } from "@/components/Topbar";
+import {
+  normalizeCompanyAppPath,
+} from "@/lib/companyRouting";
+import {
+  isPilotFieldV1Override,
+  isPilotFieldV1PlaceholderPath,
+} from "@/lib/pilotFieldV1";
+import {
+  useErpRuntimeContext,
+} from "@/lib/useErpRuntimeContext";
 
 const RESERVED_ROOT_SEGMENTS =
   new Set([
@@ -90,6 +100,71 @@ function isPlatformRoute(
   );
 }
 
+function CompanyAppShell({
+  children,
+  pathname,
+}: Readonly<{
+  children: React.ReactNode;
+  pathname: string;
+}>) {
+  const {
+    featureOverrides,
+  } = useErpRuntimeContext();
+
+  const pilotFieldV1 =
+    isPilotFieldV1Override(
+      featureOverrides
+    );
+
+  const appPathname =
+    normalizeCompanyAppPath(
+      pathname
+    );
+
+  const showPilotPlaceholder =
+    pilotFieldV1 &&
+    isPilotFieldV1PlaceholderPath(
+      appPathname
+    );
+
+  return (
+    <>
+      <FieldTaskNotifier />
+
+      <PWAController />
+
+      <AuthGate>
+        <Sidebar
+          pilotFieldV1={pilotFieldV1}
+        />
+
+        <SaleDueNotifier />
+
+        <div className="flex-1 flex flex-col min-h-screen max-w-full overflow-hidden">
+          <Topbar />
+
+          <main className="flex-1 p-4 lg:p-8 overflow-auto">
+            {showPilotPlaceholder ? (
+              <div className="mx-auto flex min-h-[55vh] max-w-2xl items-center justify-center">
+                <div className="w-full rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-2xl font-black text-slate-900 dark:text-white">
+                    Çok kısa zamanda sizlerle :)
+                  </p>
+                  <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
+                    Bu bölüm ENVerp pilot geliştirme programında hazırlanıyor.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              children
+            )}
+          </main>
+        </div>
+      </AuthGate>
+    </>
+  );
+}
+
 export function AppRouteShell({
   children,
 }: Readonly<{
@@ -114,24 +189,10 @@ export function AppRouteShell({
   }
 
   return (
-    <>
-      <FieldTaskNotifier />
-
-      <PWAController />
-
-      <AuthGate>
-        <Sidebar />
-
-        <SaleDueNotifier />
-
-        <div className="flex-1 flex flex-col min-h-screen max-w-full overflow-hidden">
-          <Topbar />
-
-          <main className="flex-1 p-4 lg:p-8 overflow-auto">
-            {children}
-          </main>
-        </div>
-      </AuthGate>
-    </>
+    <CompanyAppShell
+      pathname={pathname}
+    >
+      {children}
+    </CompanyAppShell>
   );
 }

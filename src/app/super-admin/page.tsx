@@ -130,7 +130,10 @@ export default function SuperAdminPage() {
           {
             method: "GET",
             cache: "no-store",
-            credentials: "same-origin"
+            credentials: "same-origin",
+            headers: {
+              Authorization: `Bearer ${useAuthStore.getState().sessionToken || ""}`
+            }
           }
         );
 
@@ -175,7 +178,10 @@ export default function SuperAdminPage() {
       {
         method: "GET",
         cache: "no-store",
-        credentials: "same-origin"
+        credentials: "same-origin",
+        headers: {
+          Authorization: `Bearer ${useAuthStore.getState().sessionToken || ""}`
+        }
       }
     )
       .then(async response => {
@@ -260,6 +266,7 @@ export default function SuperAdminPage() {
           method: "POST",
           credentials: "same-origin",
           headers: {
+            Authorization: `Bearer ${useAuthStore.getState().sessionToken || ""}`,
             "Content-Type": "application/json"
           },
           body: JSON.stringify({

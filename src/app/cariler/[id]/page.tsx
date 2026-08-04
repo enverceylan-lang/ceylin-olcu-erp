@@ -8,6 +8,7 @@ import Image from "next/image";
 import { useStore, Customer, Room, WindowItem, MEASUREMENT_TEMPLATES, ProductMeasurement } from "@/store/useStore";
 import { useMeasurementStore } from "@/store/measurementStore";
 import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer, canViewCustomerWorkflowReport, canViewCustomerContactFields, canViewCariCard, canEditCari, canMergeCari, canArchiveCari, canMoveMeasurementBetweenCustomers, canTransferMeasurementToSale } from "@/store/useAuthStore";
+import { isPilotFieldV1RuntimeEnabled } from "@/lib/pilotFieldV1";
 import { getMeasurementDimensions, getTemplateLabel, getGoogleMapsUrl, getWorkflowStatusLabel, getWorkflowStatusColorClass, WORKFLOW_STATUS_LABELS } from "@/lib/measurementAdapter";
 import { fileToDataUrl } from "@/lib/fileStorage";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
@@ -732,6 +733,13 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   };
 
   const handleFileUpload = (type: 'photo' | 'video', callback: (url: string) => void) => {
+    if (isPilotFieldV1RuntimeEnabled()) {
+      alert(
+        "Pilot kullanımında fotoğraf ve video yükleme henüz aktif değildir."
+      );
+      return;
+    }
+
     setMediaUploadType(type);
     setMediaUploadCallback(() => callback);
   };
