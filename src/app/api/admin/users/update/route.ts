@@ -7,6 +7,7 @@ import {
   findCompanyUsernameConflict,
   isUserInCompany,
   listCompanyUserIds,
+  updateCompanyScopeUsername,
 } from "@/lib/companyUserScopeGuard";
 import { normalizeUsername } from "@/lib/usernameHelper";
 import {
@@ -684,12 +685,38 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (
+      !isCreate &&
+      isAdmin &&
+      username !== undefined &&
+      userRecord.username !== existingUser?.username
+    ) {
+      const scopeUsernameUpdated =
+        await updateCompanyScopeUsername(
+          supabaseServer,
+          companySession.session,
+          userRecord.id,
+          userRecord.username,
+        );
+
+      if (!scopeUsernameUpdated) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: "USER_SCOPE_USERNAME_UPDATE_FAILED",
+            error: "Kullanıcı adı şirket kapsamına yazılamadı.",
+          },
+          { status: 500 },
+        );
+      }
+    }
     if (isCreate) {
       const scopeCreated =
         await createCompanyUserScope(
           supabaseServer,
           companySession.session,
           userRecord.id,
+          userRecord.username,
         );
 
       if (!scopeCreated) {

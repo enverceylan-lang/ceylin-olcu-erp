@@ -67,8 +67,10 @@ type CompanyRow = {
 
 type UserScopeRow = {
   user_scope_id: string;
+  user_id: string;
   tenant_id: string;
   company_id: string;
+  username: string;
   is_default: boolean;
   is_active: boolean;
 };
@@ -261,72 +263,12 @@ export async function POST(
     }
 
     const {
-      data: userData,
-      error: userError,
-    } = await supabase
-      .from("users")
-      .select(
-        [
-          "id",
-          "name",
-          "username",
-          "password",
-          "role",
-          "isActive",
-          "permissions",
-          "email",
-          "phone",
-          "tcNo",
-          "address",
-          "profileCompletedAt",
-          "createdAt",
-          "updatedAt",
-          "providerCustomerId",
-          "providerType",
-        ].join(","),
-      )
-      .eq(
-        "username",
-        username,
-      )
-      .maybeSingle();
-
-    const user =
-      userData as
-        | LoginUserRecord
-        | null;
-
-    if (
-      userError ||
-      !user ||
-      !user.isActive ||
-      !user.password ||
-      user.role ===
-        "PLATFORM_SUPER_ADMIN"
-    ) {
-      return genericUnauthorized();
-    }
-
-    if (
-      !safePasswordMatches(
-        user.password,
-        password,
-      )
-    ) {
-      return genericUnauthorized();
-    }
-
-    const {
       data: scopeData,
       error: scopeError,
     } = await supabase
       .from("erp_user_scopes")
       .select(
-        "user_scope_id,tenant_id,company_id,is_default,is_active",
-      )
-      .eq(
-        "user_id",
-        user.id,
+        "user_scope_id,user_id,tenant_id,company_id,username,is_default,is_active",
       )
       .eq(
         "tenant_id",
@@ -335,6 +277,10 @@ export async function POST(
       .eq(
         "company_id",
         company.company_id,
+      )
+      .eq(
+        "username",
+        username,
       )
       .eq(
         "is_active",
@@ -361,7 +307,65 @@ export async function POST(
       scope.tenant_id !==
         company.tenant_id ||
       scope.company_id !==
-        company.company_id
+        company.company_id ||
+      scope.username !== username
+    ) {
+      return genericUnauthorized();
+    }
+
+    const {
+      data: userData,
+      error: userError,
+    } = await supabase
+      .from("users")
+      .select(
+        [
+          "id",
+          "name",
+          "username",
+          "password",
+          "role",
+          "isActive",
+          "permissions",
+          "email",
+          "phone",
+          "tcNo",
+          "address",
+          "profileCompletedAt",
+          "createdAt",
+          "updatedAt",
+          "providerCustomerId",
+          "providerType",
+        ].join(","),
+      )
+      .eq(
+        "id",
+        scope.user_id,
+      )
+      .maybeSingle();
+
+    const user =
+      userData as
+        | LoginUserRecord
+        | null;
+
+    if (
+      userError ||
+      !user ||
+      user.id !== scope.user_id ||
+      !user.isActive ||
+      !user.password ||
+      user.role ===
+        "PLATFORM_SUPER_ADMIN"
+    ) {
+      return genericUnauthorized();
+    }
+
+    if (
+      !safePasswordMatches(
+        user.password,
+        password,
+      )
     ) {
       return genericUnauthorized();
     }

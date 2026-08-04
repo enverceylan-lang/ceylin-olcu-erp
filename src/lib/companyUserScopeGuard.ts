@@ -65,28 +65,17 @@ export async function findCompanyUsernameConflict(
   username: string,
   excludeUserId: string,
 ): Promise<{ id: string } | null | "READ_FAILED"> {
-  const companyUserIds = await listCompanyUserIds(
-    supabase,
-    session,
-  );
-
-  if (companyUserIds === null) {
-    return "READ_FAILED";
-  }
-
-  if (companyUserIds.length === 0) {
-    return null;
-  }
-
   let query = supabase
-    .from("users")
-    .select("id")
+    .from("erp_user_scopes")
+    .select("user_id")
+    .eq("tenant_id", session.tenantId)
+    .eq("company_id", session.companyId)
     .eq("username", username)
-    .in("id", companyUserIds)
+    .eq("is_active", true)
     .limit(1);
 
   if (excludeUserId) {
-    query = query.neq("id", excludeUserId);
+    query = query.neq("user_id", excludeUserId);
   }
 
   const { data, error } = await query.maybeSingle();
@@ -95,13 +84,16 @@ export async function findCompanyUsernameConflict(
     return "READ_FAILED";
   }
 
-  return data ? { id: String(data.id) } : null;
+  return data
+    ? { id: String(data.user_id) }
+    : null;
 }
 
 export async function createCompanyUserScope(
   supabase: SupabaseClient,
   session: CompanySessionPayload,
   userId: string,
+  username: string,
 ): Promise<boolean> {
   const { data: actorScopeData, error: actorScopeError } =
     await supabase
@@ -128,6 +120,7 @@ export async function createCompanyUserScope(
       user_scope_id: crypto.randomUUID(),
       user_id: userId,
       tenant_id: actorScope.tenant_id,
+      username,
       company_id: actorScope.company_id,
       branch_id: actorScope.branch_id,
       accounting_period_id:
@@ -137,4 +130,20 @@ export async function createCompanyUserScope(
     });
 
   return !insertError;
+}
+export async function updateCompanyScopeUsername(
+  supabase: SupabaseClient,
+  session: CompanySessionPayload,
+  userId: string,
+  username: string,
+): Promise<boolean> {
+  const { error } = await supabase
+    .from("erp_user_scopes")
+    .update({ username })
+    .eq("user_id", userId)
+    .eq("tenant_id", session.tenantId)
+    .eq("company_id", session.companyId)
+    .eq("is_active", true);
+
+  return !error;
 }
