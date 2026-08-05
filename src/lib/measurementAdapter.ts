@@ -1450,24 +1450,46 @@ export function calculateSelectedProduct(
       const mGroups = groupFacadeSegmentsForMechanical(facadeSegments, rawValues, height);
       groupsData = mGroups.map((g, idx) => {
         const realW = g.realWidthCm;
-        const realH = g.realHeightCm;
+
+        const generatedItemId =
+          `${currentProduct?.id || 'gen'}-${idx}`;
 
         /*
-         * Parça hesabı groupFacadeSegmentsForMechanical içinde
-         * merkezi mekanik kasa tarafından zaten yapılmıştır.
-         * Burada ikinci kez hesaplanmaz.
+         * Sales Preparation boy source-truth:
+         * parça override -> ürün override -> normal mekanik fallback.
          */
+        const configuredHeightValues = {
+          ...rawValues,
+          ...overrides,
+          partHeightOverrides:
+            overrides.partHeightOverrides || {}
+        };
+
+        const realH =
+          resolveConfiguredProductHeight(
+            configuredHeightValues,
+            g.realHeightCm,
+            generatedItemId
+          );
+
+        const configuredArea =
+          calculateMechanicalCurtain(
+            realW,
+            realH,
+            q
+          );
+
         const calcW =
-          Number(g.calculatedWidthCm || 0);
+          configuredArea.billingWidthCm;
 
         const calcH =
-          Number(g.calculatedHeightCm || 0);
+          configuredArea.billingHeightCm;
 
         const unitM2 =
-          Number(g.unitM2 || 0);
+          configuredArea.unitM2;
 
         const totalM2 =
-          Number(g.totalM2 || 0);
+          configuredArea.totalM2;
 
         /*
          * Picasso jumbo kararı boy üzerinden verilir.
@@ -1526,7 +1548,7 @@ export function calculateSelectedProduct(
         }
 
         return {
-          generatedItemId: `${currentProduct?.id || 'gen'}-${idx}`,
+          generatedItemId,
           groupType: g.groupType,
           sourceSegments: g.sourceSegments,
           realWidthCm: realW,
