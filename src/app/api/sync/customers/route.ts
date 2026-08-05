@@ -241,7 +241,11 @@ export async function POST(req: NextRequest) {
       for (const del of pendingDeletes) {
         // Only allow hard deleting child structures related to sync
         if (["rooms", "openings", "measurements"].includes(del.table)) {
-          const { error } = await supabaseServer.from(del.table).delete().eq("id", del.id);
+          const { error } = await supabaseServer
+            .from(del.table)
+            .delete()
+            .eq("id", del.id)
+            .match(scopeColumns);
           if (error) {
             console.error(`[Sync Server Delete Error] Failed to delete from ${del.table} (id: ${del.id}):`, error.message);
           }
@@ -254,9 +258,43 @@ export async function POST(req: NextRequest) {
     const { data: remoteRooms, error: errRooms } = await supabaseServer.from("rooms").select("*").match(scopeColumns);
     const { data: remoteOpenings, error: errOpenings } = await supabaseServer.from("openings").select("*").match(scopeColumns);
     const { data: remoteMeasurements, error: errMeasurements } = await supabaseServer.from("measurements").select("*").match(scopeColumns);
-    const { data: remoteUsers, error: errUsers } = await supabaseServer.from("users").select("*");
+    const {
+      data: scopedUserRows,
+      error: errUserScopes,
+    } = await supabaseServer
+      .from("erp_user_scopes")
+      .select("user_id")
+      .match(scopeColumns)
+      .eq("is_active", true);
 
-    const fetchError = errCustomers || errRooms || errOpenings || errMeasurements || errUsers;
+    const scopedUserIds = Array.from(
+      new Set(
+        (scopedUserRows || [])
+          .map((row) => String(row.user_id || "").trim())
+          .filter(Boolean),
+      ),
+    );
+
+    const remoteUsersResult =
+      scopedUserIds.length > 0
+        ? await supabaseServer
+            .from("users")
+            .select("*")
+            .in("id", scopedUserIds)
+        : { data: [], error: null };
+
+    const {
+      data: remoteUsers,
+      error: errUsers,
+    } = remoteUsersResult;
+
+    const fetchError =
+      errCustomers ||
+      errRooms ||
+      errOpenings ||
+      errMeasurements ||
+      errUserScopes ||
+      errUsers;
     if (fetchError) {
       console.error("[Sync Server Fetch Error] Database fetch failed:", fetchError.message);
       return NextResponse.json(

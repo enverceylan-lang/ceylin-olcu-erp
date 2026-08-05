@@ -32,6 +32,7 @@ import {
 import {
   usePlatformAdminStore
 } from "@/store/usePlatformAdminStore";
+import PlatformSupportPanel from "@/components/platform/PlatformSupportPanel";
 
 type DraftPanel =
   | "company"
@@ -84,6 +85,8 @@ export default function SuperAdminPage() {
     useState<DraftPanel>(null);
   const [notice, setNotice] =
     useState<string | null>(null);
+  const [supportOpen, setSupportOpen] =
+    useState(false);
   const [searchValue, setSearchValue] =
     useState("");
   const [statusFilter, setStatusFilter] =
@@ -149,7 +152,7 @@ export default function SuperAdminPage() {
           !Array.isArray(payload.companies)
         ) {
           setNotice(
-            "Platform şirket listesi yüklenemedi."
+            "Platform ┼şirket listesi y├╝klenemedi."
           );
           return;
         }
@@ -161,7 +164,7 @@ export default function SuperAdminPage() {
         );
       } catch {
         setNotice(
-          "Platform şirket API bağlantısı kurulamadı."
+          "Platform ┼şirket API ba─şlant─▒s─▒ kurulamad─▒."
         );
       } finally {
         setLoadingCompanies(false);
@@ -201,7 +204,7 @@ export default function SuperAdminPage() {
           !Array.isArray(payload.companies)
         ) {
           setNotice(
-            "Platform şirket listesi yüklenemedi."
+            "Platform ┼şirket listesi y├╝klenemedi."
           );
           return;
         }
@@ -215,7 +218,7 @@ export default function SuperAdminPage() {
       .catch(() => {
         if (!cancelled) {
           setNotice(
-            "Platform şirket API bağlantısı kurulamadı."
+            "Platform ┼şirket API ba─şlant─▒s─▒ kurulamad─▒."
           );
         }
       })
@@ -241,7 +244,7 @@ export default function SuperAdminPage() {
       !startsAt
     ) {
       setNotice(
-        "Dönem ve lisans başlangıç tarihleri zorunludur."
+        "D├Ânem ve lisans ba┼şlang─▒├ğ tarihleri zorunludur."
       );
       return;
     }
@@ -251,7 +254,7 @@ export default function SuperAdminPage() {
       companyDraft.adminPassword.length < 8
     ) {
       setNotice(
-        "İlk yönetici şifresi en az 8 karakter olmalı ve 123 olamaz."
+        "─░lk y├Ânetici ┼şifresi en az 8 karakter olmal─▒ ve 123 olamaz."
       );
       return;
     }
@@ -315,14 +318,14 @@ export default function SuperAdminPage() {
         setNotice(
           payload.code ===
             "PLATFORM_PROVISION_CONFLICT"
-            ? "Şirket oluşturulamadı: şirket kodu, slug veya yönetici kullanıcı adı mevcut bir kayıtla çakışıyor."
+            ? "┼Şirket olu┼şturulamad─▒: ┼şirket kodu, slug veya y├Ânetici kullan─▒c─▒ ad─▒ mevcut bir kay─▒tla ├ğak─▒┼ş─▒yor."
             : payload.code ===
                 "ADMIN_PASSWORD_WEAK"
-              ? "Şirket oluşturulamadı: yönetici şifresi güvenlik kuralını karşılamıyor."
+              ? "┼Şirket olu┼şturulamad─▒: y├Ânetici ┼şifresi g├╝venlik kural─▒n─▒ kar┼ş─▒lam─▒yor."
               : payload.code ===
                   "PROVISION_REQUEST_INVALID"
-                ? "Şirket oluşturulamadı: zorunlu alanlardan biri geçersiz."
-                : "Şirket oluşturma işlemi başarısız oldu."
+                ? "┼Şirket olu┼şturulamad─▒: zorunlu alanlardan biri ge├ğersiz."
+                : "┼Şirket olu┼şturma i┼şlemi ba┼şar─▒s─▒z oldu."
         );
         return;
       }
@@ -349,13 +352,13 @@ export default function SuperAdminPage() {
       setEndsAt("");
       setDraftPanel(null);
       setNotice(
-        "Şirket, ilk şube, dönem, lisans ve şirket yöneticisi başarıyla oluşturuldu."
+        "┼Şirket, ilk ┼şube, d├Ânem, lisans ve ┼şirket y├Âneticisi ba┼şar─▒yla olu┼şturuldu."
       );
 
       await loadCompanies();
     } catch {
       setNotice(
-        "Şirket oluşturma sırasında platform API bağlantısı kurulamadı."
+        "┼Şirket olu┼şturma s─▒ras─▒nda platform API ba─şlant─▒s─▒ kurulamad─▒."
       );
     } finally {
       setCreatingCompany(false);
@@ -414,11 +417,11 @@ export default function SuperAdminPage() {
       <main className="mx-auto max-w-4xl p-4 md:p-6">
         <section className="rounded-xl border border-red-200 bg-red-50 p-6">
           <h1 className="text-xl font-bold text-red-900">
-            Erişim reddedildi
+            Eri┼şim reddedildi
           </h1>
           <p className="mt-2 text-sm text-red-700">
-            Bu alan yalnız PLATFORM_SUPER_ADMIN
-            rolüne açıktır.
+            Bu alan yaln─▒z PLATFORM_SUPER_ADMIN
+            rol├╝ne a├ğ─▒kt─▒r.
           </p>
         </section>
       </main>
@@ -436,8 +439,8 @@ export default function SuperAdminPage() {
     if (!selectedCompany) {
       setNotice(
         panel === "license"
-          ? "Lisans yönetimi için önce bir şirket seçin."
-          : "Yönetici atamak için önce bir şirket seçin."
+          ? "Lisans y├Ânetimi i├ğin ├Ânce bir ┼şirket se├ğin."
+          : "Y├Ânetici atamak i├ğin ├Ânce bir ┼şirket se├ğin."
       );
       return;
     }
@@ -449,7 +452,7 @@ export default function SuperAdminPage() {
   function handlePreview(): void {
     if (!currentUser || !selectedCompany) {
       setNotice(
-        "Lisans yönetimi için önce bir şirket seçin."
+        "Lisans y├Ânetimi i├ğin ├Ânce bir ┼şirket se├ğin."
       );
       setDraftPanel(null);
       return;
@@ -472,36 +475,36 @@ export default function SuperAdminPage() {
 
     if (!result.valid) {
       setNotice(
-        `Lisans taslağı geçersiz: ${result.reason}`
+        `Lisans tasla─ş─▒ ge├ğersiz: ${result.reason}`
       );
       return;
     }
 
     setNotice(
-      `Taslak doğrulandı (${result.normalizedPackage}). Canlı lisans yazma servisi henüz bağlı değildir; sunucuya kayıt yapılmadı.`
+      `Taslak do─şruland─▒ (${result.normalizedPackage}). Canl─▒ lisans yazma servisi hen├╝z ba─şl─▒ de─şildir; sunucuya kay─▒t yap─▒lmad─▒.`
     );
     setDraftPanel(null);
   }
 
   const summaryCards = [
     {
-      label: "Toplam Şirket",
-      description: "Platforma bağlı şirketler",
+      label: "Toplam ┼Şirket",
+      description: "Platforma ba─şl─▒ ┼şirketler",
       icon: Building2
     },
     {
       label: "Aktif Lisans",
-      description: "Geçerli abonelikler",
+      description: "Ge├ğerli abonelikler",
       icon: ShieldCheck
     },
     {
-      label: "WEB Açık",
-      description: "WEB kanal erişimi",
+      label: "WEB A├ğ─▒k",
+      description: "WEB kanal eri┼şimi",
       icon: Monitor
     },
     {
-      label: "MOBILE Açık",
-      description: "Mobil kanal erişimi",
+      label: "MOBILE A├ğ─▒k",
+      description: "Mobil kanal eri┼şimi",
       icon: Smartphone
     }
   ];
@@ -526,26 +529,33 @@ export default function SuperAdminPage() {
               </span>
             </div>
             <h2 className="mt-3 text-xl font-semibold text-slate-100 md:text-2xl">
-              Platform Yönetimi
+              Platform Y├Ânetimi
             </h2>
             <p className="mt-1 text-xs font-semibold tracking-[0.16em] text-cyan-400">
               Entegre Net Veri
             </p>
             <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-300 md:text-base">
-              Şirketler, lisanslar, kanal erişimleri
-              ve platform kullanım sınırlarını merkezi
-              olarak yönetin.
+              ┼Şirketler, lisanslar, kanal eri┼şimleri
+              ve platform kullan─▒m s─▒n─▒rlar─▒n─▒ merkezi
+              olarak y├Ânetin.
             </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
+              onClick={() => setSupportOpen(value => !value)}
+              className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/50 bg-cyan-500/10 px-4 py-2.5 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+            >
+              Destek
+            </button>
+            <button
+              type="button"
               onClick={openCompanyDraft}
               className="inline-flex items-center gap-2 rounded-lg bg-cyan-500 px-4 py-2.5 text-sm font-bold text-slate-950 transition hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
             >
               <Plus className="h-4 w-4" />
-              Yeni Şirket
+              Yeni ┼Şirket
             </button>
             <button
               type="button"
@@ -553,7 +563,7 @@ export default function SuperAdminPage() {
               className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-4 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-cyan-500/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
             >
               <KeyRound className="h-4 w-4" />
-              Lisans Yönet
+              Lisans Y├Ânet
             </button>
             <button
               type="button"
@@ -561,11 +571,15 @@ export default function SuperAdminPage() {
               className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-4 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-cyan-500/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
             >
               <UserRoundPlus className="h-4 w-4" />
-              Yönetici Ata
+              Y├Ânetici Ata
             </button>
           </div>
         </div>
       </header>
+
+      {supportOpen && (
+        <PlatformSupportPanel />
+      )}
 
       {notice && (
         <div
@@ -587,7 +601,7 @@ export default function SuperAdminPage() {
         </div>
       )}
 
-      <section aria-label="Platform özeti" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <section aria-label="Platform ├Âzeti" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {summaryCards.map(card => {
           const Icon = card.icon;
           return (
@@ -603,7 +617,7 @@ export default function SuperAdminPage() {
                   <p className="text-sm font-semibold text-slate-900 dark:text-white">
                     {card.label}
                   </p>
-                  <span className="text-xl font-bold text-slate-400">—</span>
+                  <span className="text-xl font-bold text-slate-400">ÔÇö</span>
                 </div>
                 <p className="truncate text-xs text-slate-500 dark:text-slate-400">
                   {card.description}
@@ -619,16 +633,16 @@ export default function SuperAdminPage() {
           <div className="flex items-start gap-3 md:pr-4">
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-cyan-600 dark:text-cyan-300" />
             <div>
-              <p className="text-xs font-semibold text-slate-900 dark:text-white">Veri İzolasyonu</p>
-              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">Bu panel operasyonel finans verisi göstermez.</p>
+              <p className="text-xs font-semibold text-slate-900 dark:text-white">Veri ─░zolasyonu</p>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">Bu panel operasyonel finans verisi g├Âstermez.</p>
             </div>
           </div>
           <div className="flex items-start gap-3 md:pl-4">
             <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <p className="text-xs font-semibold text-slate-900 dark:text-white">API Durumu</p>
-              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-400/10 dark:text-emerald-300">Bağlı</span>
-              <p className="w-full text-xs text-slate-500 dark:text-slate-400">Şirket listeleme ve güvenli provisioning API hattı bağlıdır.</p>
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-400/10 dark:text-emerald-300">Ba─şl─▒</span>
+              <p className="w-full text-xs text-slate-500 dark:text-slate-400">┼Şirket listeleme ve g├╝venli provisioning API hatt─▒ ba─şl─▒d─▒r.</p>
             </div>
           </div>
         </div>
@@ -639,22 +653,22 @@ export default function SuperAdminPage() {
           <div className="border-b border-slate-200 p-5 dark:border-slate-800">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Şirketler</h2>
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">ENVERP platformuna bağlı şirket hesapları</p>
+                <h2 className="text-lg font-semibold text-slate-950 dark:text-white">┼Şirketler</h2>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">ENVERP platformuna ba─şl─▒ ┼şirket hesaplar─▒</p>
               </div>
               <span className="rounded-full border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                {companies.length === 0 ? "—" : companies.length} kayıt
+                {companies.length === 0 ? "ÔÇö" : companies.length} kay─▒t
               </span>
             </div>
             <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_8rem]">
               <label className="relative block">
-                <span className="sr-only">Şirket ara</span>
+                <span className="sr-only">┼Şirket ara</span>
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input
                   type="search"
                   value={searchValue}
                   onChange={event => setSearchValue(event.target.value)}
-                  placeholder="Şirket adı, kodu veya slug ara"
+                  placeholder="┼Şirket ad─▒, kodu veya slug ara"
                   className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 dark:border-slate-700 dark:bg-slate-950/60 dark:text-white"
                 />
               </label>
@@ -665,7 +679,7 @@ export default function SuperAdminPage() {
                   onChange={event => setStatusFilter(event.target.value as "all" | "active" | "passive")}
                   className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-600 outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300"
                 >
-                  <option value="all">Tümü</option>
+                  <option value="all">T├╝m├╝</option>
                   <option value="active">Aktif</option>
                   <option value="passive">Pasif</option>
                 </select>
@@ -679,12 +693,12 @@ export default function SuperAdminPage() {
                 <Building2 className="h-6 w-6" />
               </span>
               <h3 className="mt-4 font-semibold text-slate-900 dark:text-slate-100">
-                {loadingCompanies ? "Şirketler yükleniyor..." : "Henüz şirket kaydı yok."}
+                {loadingCompanies ? "┼Şirketler y├╝kleniyor..." : "Hen├╝z ┼şirket kayd─▒ yok."}
               </h3>
               <p className="mt-1 max-w-sm text-sm leading-6 text-slate-500 dark:text-slate-400">
                 {loadingCompanies
-                  ? "Platform şirket kayıtları güvenli API üzerinden alınıyor."
-                  : "Yeni Şirket ile ilk şirket kaydını oluşturabilirsiniz."}
+                  ? "Platform ┼şirket kay─▒tlar─▒ g├╝venli API ├╝zerinden al─▒n─▒yor."
+                  : "Yeni ┼Şirket ile ilk ┼şirket kayd─▒n─▒ olu┼şturabilirsiniz."}
               </p>
               <button
                 type="button"
@@ -692,11 +706,11 @@ export default function SuperAdminPage() {
                 className="mt-4 inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-cyan-500 hover:text-cyan-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:border-slate-700 dark:text-slate-200 dark:hover:text-cyan-300"
               >
                 <Plus className="h-4 w-4" />
-                Yeni Şirket
+                Yeni ┼Şirket
               </button>
             </div>
           ) : filteredCompanies.length === 0 ? (
-            <div className="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400">Arama ve filtre ölçütlerine uygun şirket bulunamadı.</div>
+            <div className="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400">Arama ve filtre ├Âl├ğ├╝tlerine uygun ┼şirket bulunamad─▒.</div>
           ) : (
             <div className="space-y-2 p-4">
               {filteredCompanies.map(company => (
@@ -713,7 +727,7 @@ export default function SuperAdminPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="font-semibold text-slate-900 dark:text-white">{company.companyName}</div>
-                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{company.companySlug} · {company.companyCode}</div>
+                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{company.companySlug} ┬À {company.companyCode}</div>
                     </div>
                     <div className="flex flex-wrap justify-end gap-1.5">
                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${company.licenseActive ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"}`}>{company.licenseActive ? "Aktif" : "Pasif"}</span>
@@ -728,36 +742,36 @@ export default function SuperAdminPage() {
 
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="border-b border-slate-200 p-5 dark:border-slate-800">
-            <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Şirket Detayı</h2>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Paket, erişim kanalları ve kullanım sınırları</p>
+            <h2 className="text-lg font-semibold text-slate-950 dark:text-white">┼Şirket Detay─▒</h2>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Paket, eri┼şim kanallar─▒ ve kullan─▒m s─▒n─▒rlar─▒</p>
           </div>
 
           {!selectedCompany ? (
             <div className="flex min-h-64 flex-col items-center justify-center px-6 py-10 text-center">
               <ShieldCheck className="h-7 w-7 text-slate-400 dark:text-slate-500" />
-              <h3 className="mt-3 font-semibold text-slate-900 dark:text-slate-100">Bir şirket seçin</h3>
-              <p className="mt-1 max-w-sm text-sm text-slate-500 dark:text-slate-400">Lisans, kanal ve kullanım limitleri burada görüntülenecek.</p>
+              <h3 className="mt-3 font-semibold text-slate-900 dark:text-slate-100">Bir ┼şirket se├ğin</h3>
+              <p className="mt-1 max-w-sm text-sm text-slate-500 dark:text-slate-400">Lisans, kanal ve kullan─▒m limitleri burada g├Âr├╝nt├╝lenecek.</p>
             </div>
           ) : (
             <div className="space-y-6 p-5">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Genel</p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <div><p className="text-xs text-slate-500 dark:text-slate-400">Şirket</p><p className="mt-1 font-semibold text-slate-900 dark:text-white">{selectedCompany.companyName}</p></div>
+                  <div><p className="text-xs text-slate-500 dark:text-slate-400">┼Şirket</p><p className="mt-1 font-semibold text-slate-900 dark:text-white">{selectedCompany.companyName}</p></div>
                   <div><p className="text-xs text-slate-500 dark:text-slate-400">Durum</p><p className="mt-1 font-semibold text-slate-900 dark:text-white">{selectedCompany.licenseActive ? "Aktif" : "Pasif"}</p></div>
                 </div>
               </div>
               <div className="border-t border-slate-200 pt-5 dark:border-slate-800">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Lisans</p>
-                  <button type="button" onClick={() => openCompanyPanel("license")} className="text-xs font-semibold text-cyan-700 hover:text-cyan-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:text-cyan-300">Yönet</button>
+                  <button type="button" onClick={() => openCompanyPanel("license")} className="text-xs font-semibold text-cyan-700 hover:text-cyan-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:text-cyan-300">Y├Ânet</button>
                 </div>
                 <dl className="mt-3 grid gap-x-5 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
                   <div><dt className="text-xs text-slate-500 dark:text-slate-400">Paket</dt><dd className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{getPackageDisplayLabel(selectedCompany.package)}</dd></div>
-                  <div><dt className="text-xs text-slate-500 dark:text-slate-400">Kullanıcı limiti</dt><dd className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{selectedCompany.userLimit}</dd></div>
-                  <div><dt className="text-xs text-slate-500 dark:text-slate-400">Şube limiti</dt><dd className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{selectedCompany.branchLimit}</dd></div>
-                  <div><dt className="text-xs text-slate-500 dark:text-slate-400">Başlangıç</dt><dd className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{selectedCompany.licenseStartsAt}</dd></div>
-                  <div><dt className="text-xs text-slate-500 dark:text-slate-400">Bitiş</dt><dd className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{selectedCompany.licenseEndsAt || "—"}</dd></div>
+                  <div><dt className="text-xs text-slate-500 dark:text-slate-400">Kullan─▒c─▒ limiti</dt><dd className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{selectedCompany.userLimit}</dd></div>
+                  <div><dt className="text-xs text-slate-500 dark:text-slate-400">┼Şube limiti</dt><dd className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{selectedCompany.branchLimit}</dd></div>
+                  <div><dt className="text-xs text-slate-500 dark:text-slate-400">Ba┼şlang─▒├ğ</dt><dd className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{selectedCompany.licenseStartsAt}</dd></div>
+                  <div><dt className="text-xs text-slate-500 dark:text-slate-400">Biti┼ş</dt><dd className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{selectedCompany.licenseEndsAt || "ÔÇö"}</dd></div>
                   <div><dt className="text-xs text-slate-500 dark:text-slate-400">Lisans durumu</dt><dd className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{selectedCompany.licenseActive ? "Aktif" : "Pasif"}</dd></div>
                 </dl>
               </div>
@@ -769,7 +783,7 @@ export default function SuperAdminPage() {
                     return (
                       <div key={channel.label} className="flex items-center justify-between py-3">
                         <span className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300"><Icon className="h-4 w-4 text-slate-400" />{channel.label}</span>
-                        <span className="text-sm text-slate-400">—</span>
+                        <span className="text-sm text-slate-400">ÔÇö</span>
                       </div>
                     );
                   })}
@@ -790,11 +804,11 @@ export default function SuperAdminPage() {
           >
             <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-900">
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-cyan-600 dark:text-cyan-300">Frontend Taslağı</p>
+                <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-cyan-600 dark:text-cyan-300">Frontend Tasla─ş─▒</p>
                 <h2 id="draft-panel-title" className="mt-1 text-lg font-semibold text-slate-950 dark:text-white">
-                  {draftPanel === "company" && "Yeni Şirket"}
-                  {draftPanel === "license" && "Lisans Yönet"}
-                  {draftPanel === "admin" && "Yönetici Ata"}
+                  {draftPanel === "company" && "Yeni ┼Şirket"}
+                  {draftPanel === "license" && "Lisans Y├Ânet"}
+                  {draftPanel === "admin" && "Y├Ânetici Ata"}
                 </h2>
               </div>
               <button type="button" onClick={() => setDraftPanel(null)} aria-label="Pencereyi kapat" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:hover:bg-slate-800"><X className="h-5 w-5" /></button>
@@ -809,7 +823,7 @@ export default function SuperAdminPage() {
                 }}
               >
                 <div className="rounded-lg bg-cyan-50 p-3 text-sm text-cyan-950 sm:col-span-2 dark:bg-cyan-500/10 dark:text-cyan-100">
-                  Tek işlemde tenant, şirket, ilk şube, muhasebe dönemi, lisans ve ilk şirket yöneticisi oluşturulur.
+                  Tek i┼şlemde tenant, ┼şirket, ilk ┼şube, muhasebe d├Ânemi, lisans ve ilk ┼şirket y├Âneticisi olu┼şturulur.
                 </div>
 
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
@@ -817,16 +831,16 @@ export default function SuperAdminPage() {
                   <input required value={companyDraft.tenantCode} onChange={event => setCompanyDraft({...companyDraft, tenantCode: event.target.value})} className={fieldClassName} />
                 </label>
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Tenant Adı
+                  Tenant Ad─▒
                   <input required value={companyDraft.tenantName} onChange={event => setCompanyDraft({...companyDraft, tenantName: event.target.value})} className={fieldClassName} />
                 </label>
 
                 <label className="text-sm font-medium text-slate-700 sm:col-span-2 dark:text-slate-300">
-                  Şirket Adı
+                  ┼Şirket Ad─▒
                   <input required value={companyDraft.name} onChange={event => setCompanyDraft({...companyDraft, name: event.target.value})} className={fieldClassName} />
                 </label>
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Şirket Kodu
+                  ┼Şirket Kodu
                   <input required value={companyDraft.code} onChange={event => setCompanyDraft({...companyDraft, code: event.target.value})} className={fieldClassName} />
                 </label>
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
@@ -835,28 +849,28 @@ export default function SuperAdminPage() {
                 </label>
 
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  İlk Şube Kodu
+                  ─░lk ┼Şube Kodu
                   <input required value={companyDraft.branchCode} onChange={event => setCompanyDraft({...companyDraft, branchCode: event.target.value})} className={fieldClassName} />
                 </label>
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  İlk Şube Adı
+                  ─░lk ┼Şube Ad─▒
                   <input required value={companyDraft.branchName} onChange={event => setCompanyDraft({...companyDraft, branchName: event.target.value})} className={fieldClassName} />
                 </label>
 
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Dönem Kodu
+                  D├Ânem Kodu
                   <input required value={companyDraft.periodCode} onChange={event => setCompanyDraft({...companyDraft, periodCode: event.target.value})} className={fieldClassName} />
                 </label>
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Dönem Adı
+                  D├Ânem Ad─▒
                   <input required value={companyDraft.periodName} onChange={event => setCompanyDraft({...companyDraft, periodName: event.target.value})} className={fieldClassName} />
                 </label>
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Dönem Başlangıcı
+                  D├Ânem Ba┼şlang─▒c─▒
                   <input required type="date" value={companyDraft.periodStartsOn} onChange={event => setCompanyDraft({...companyDraft, periodStartsOn: event.target.value})} className={fieldClassName} />
                 </label>
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Dönem Bitişi
+                  D├Ânem Biti┼şi
                   <input required type="date" value={companyDraft.periodEndsOn} onChange={event => setCompanyDraft({...companyDraft, periodEndsOn: event.target.value})} className={fieldClassName} />
                 </label>
 
@@ -870,35 +884,35 @@ export default function SuperAdminPage() {
                   </select>
                 </label>
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Kullanıcı Limiti
+                  Kullan─▒c─▒ Limiti
                   <input required type="number" min={1} max={100000} value={userLimit} onChange={event => setUserLimit(Number(event.target.value))} className={fieldClassName} />
                 </label>
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Şube Limiti
+                  ┼Şube Limiti
                   <input required type="number" min={1} max={1000} value={branchLimit} onChange={event => setBranchLimit(Number(event.target.value))} className={fieldClassName} />
                 </label>
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Lisans Başlangıcı
+                  Lisans Ba┼şlang─▒c─▒
                   <input required type="datetime-local" value={startsAt} onChange={event => setStartsAt(event.target.value)} className={fieldClassName} />
                 </label>
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Lisans Bitişi
+                  Lisans Biti┼şi
                   <input type="datetime-local" value={endsAt} onChange={event => setEndsAt(event.target.value)} className={fieldClassName} />
                 </label>
 
                 <div className="border-t border-slate-200 pt-4 sm:col-span-2 dark:border-slate-800">
-                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">İlk Şirket Yöneticisi</p>
+                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">─░lk ┼Şirket Y├Âneticisi</p>
                 </div>
                 <label className="text-sm font-medium text-slate-700 sm:col-span-2 dark:text-slate-300">
                   Ad Soyad
                   <input required value={companyDraft.adminName} onChange={event => setCompanyDraft({...companyDraft, adminName: event.target.value})} className={fieldClassName} />
                 </label>
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Kullanıcı Adı
+                  Kullan─▒c─▒ Ad─▒
                   <input required autoComplete="off" value={companyDraft.adminUsername} onChange={event => setCompanyDraft({...companyDraft, adminUsername: event.target.value})} className={fieldClassName} />
                 </label>
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  İlk Şifre
+                  ─░lk ┼Şifre
                   <input required minLength={8} type="password" autoComplete="new-password" value={companyDraft.adminPassword} onChange={event => setCompanyDraft({...companyDraft, adminPassword: event.target.value})} className={fieldClassName} />
                 </label>
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
@@ -912,10 +926,10 @@ export default function SuperAdminPage() {
 
                 <div className="mt-2 flex justify-end gap-2 border-t border-slate-200 pt-4 sm:col-span-2 dark:border-slate-800">
                   <button type="button" disabled={creatingCompany} onClick={() => setDraftPanel(null)} className="rounded-lg px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:text-slate-300 dark:hover:bg-slate-800">
-                    İptal
+                    ─░ptal
                   </button>
                   <button type="submit" disabled={creatingCompany} className="rounded-lg bg-cyan-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500">
-                    {creatingCompany ? "Oluşturuluyor..." : "Şirketi Oluştur"}
+                    {creatingCompany ? "Olu┼şturuluyor..." : "┼Şirketi Olu┼ştur"}
                   </button>
                 </div>
               </form>
@@ -923,14 +937,14 @@ export default function SuperAdminPage() {
 
             {draftPanel === "license" && selectedCompany && (
               <form className="grid gap-4 p-5 sm:grid-cols-2" onSubmit={event => { event.preventDefault(); handlePreview(); }}>
-                <div className="rounded-lg bg-cyan-50 p-3 text-sm text-cyan-950 sm:col-span-2 dark:bg-cyan-500/10 dark:text-cyan-100"><strong>{selectedCompany.companyName}</strong><p className="mt-1 text-xs opacity-75">Canlı sunucu yazımı kapalıdır.</p></div>
+                <div className="rounded-lg bg-cyan-50 p-3 text-sm text-cyan-950 sm:col-span-2 dark:bg-cyan-500/10 dark:text-cyan-100"><strong>{selectedCompany.companyName}</strong><p className="mt-1 text-xs opacity-75">Canl─▒ sunucu yaz─▒m─▒ kapal─▒d─▒r.</p></div>
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Paket<select value={packageValue} onChange={event => setPackageValue(event.target.value as "ECO" | "PRO" | "PLUS" | "ELITE")} className={fieldClassName}><option value="ECO">ECO</option><option value="PRO">PRO</option><option value="PLUS">PLUS</option><option value="ELITE">ELITE</option></select></label>
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Kullanıcı Limiti<input type="number" min={1} value={userLimit} onChange={event => setUserLimit(Number(event.target.value))} className={fieldClassName} /></label>
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Şube Limiti<input type="number" min={1} value={branchLimit} onChange={event => setBranchLimit(Number(event.target.value))} className={fieldClassName} /></label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Kullan─▒c─▒ Limiti<input type="number" min={1} value={userLimit} onChange={event => setUserLimit(Number(event.target.value))} className={fieldClassName} /></label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">┼Şube Limiti<input type="number" min={1} value={branchLimit} onChange={event => setBranchLimit(Number(event.target.value))} className={fieldClassName} /></label>
                 <label className="flex items-end"><span className="flex h-10 w-full items-center justify-between rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-700 dark:border-slate-700 dark:text-slate-300">Lisans aktif<input type="checkbox" checked={licenseActive} onChange={event => setLicenseActive(event.target.checked)} className="h-4 w-4 accent-cyan-600" /></span></label>
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Başlangıç<input type="datetime-local" value={startsAt} onChange={event => setStartsAt(event.target.value)} className={fieldClassName} /></label>
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Bitiş<input type="datetime-local" value={endsAt} onChange={event => setEndsAt(event.target.value)} className={fieldClassName} /></label>
-                <div className="mt-2 flex justify-end gap-2 border-t border-slate-200 pt-4 sm:col-span-2 dark:border-slate-800"><button type="button" onClick={() => setDraftPanel(null)} className="rounded-lg px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:text-slate-300 dark:hover:bg-slate-800">İptal</button><button type="submit" className="rounded-lg bg-cyan-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-cyan-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500">Taslağı Doğrula</button></div>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Ba┼şlang─▒├ğ<input type="datetime-local" value={startsAt} onChange={event => setStartsAt(event.target.value)} className={fieldClassName} /></label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Biti┼ş<input type="datetime-local" value={endsAt} onChange={event => setEndsAt(event.target.value)} className={fieldClassName} /></label>
+                <div className="mt-2 flex justify-end gap-2 border-t border-slate-200 pt-4 sm:col-span-2 dark:border-slate-800"><button type="button" onClick={() => setDraftPanel(null)} className="rounded-lg px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:text-slate-300 dark:hover:bg-slate-800">─░ptal</button><button type="submit" className="rounded-lg bg-cyan-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-cyan-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500">Tasla─ş─▒ Do─şrula</button></div>
               </form>
             )}
 
@@ -939,16 +953,16 @@ export default function SuperAdminPage() {
                 className="grid gap-4 p-5 sm:grid-cols-2"
                 onSubmit={event => {
                   event.preventDefault();
-                  setNotice("Canlı yönetici oluşturma servisi henüz bağlı değildir. Yönetici taslağı sunucuya kaydedilmedi.");
+                  setNotice("Canl─▒ y├Ânetici olu┼şturma servisi hen├╝z ba─şl─▒ de─şildir. Y├Ânetici tasla─ş─▒ sunucuya kaydedilmedi.");
                   setDraftPanel(null);
                 }}
               >
-                <div className="rounded-lg bg-cyan-50 p-3 text-sm text-cyan-950 sm:col-span-2 dark:bg-cyan-500/10 dark:text-cyan-100"><strong>{selectedCompany.companyName}</strong><p className="mt-1 text-xs opacity-75">Bu form yalnız geçici frontend taslağıdır.</p></div>
+                <div className="rounded-lg bg-cyan-50 p-3 text-sm text-cyan-950 sm:col-span-2 dark:bg-cyan-500/10 dark:text-cyan-100"><strong>{selectedCompany.companyName}</strong><p className="mt-1 text-xs opacity-75">Bu form yaln─▒z ge├ğici frontend tasla─ş─▒d─▒r.</p></div>
                 <label className="text-sm font-medium text-slate-700 sm:col-span-2 dark:text-slate-300">Ad Soyad<input required value={adminDraft.fullName} onChange={event => setAdminDraft({...adminDraft, fullName: event.target.value})} className={fieldClassName} /></label>
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">E-posta<input required type="email" value={adminDraft.email} onChange={event => setAdminDraft({...adminDraft, email: event.target.value})} className={fieldClassName} /></label>
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Telefon<input type="tel" value={adminDraft.phone} onChange={event => setAdminDraft({...adminDraft, phone: event.target.value})} className={fieldClassName} /></label>
-                <label className="text-sm font-medium text-slate-700 sm:col-span-2 dark:text-slate-300">Rol<input value="Şirket Yöneticisi" readOnly className={`${fieldClassName} cursor-not-allowed bg-slate-100 dark:bg-slate-800`} /></label>
-                <div className="mt-2 flex justify-end gap-2 border-t border-slate-200 pt-4 sm:col-span-2 dark:border-slate-800"><button type="button" onClick={() => setDraftPanel(null)} className="rounded-lg px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:text-slate-300 dark:hover:bg-slate-800">İptal</button><button type="submit" className="rounded-lg bg-cyan-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-cyan-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500">Taslağı Hazırla</button></div>
+                <label className="text-sm font-medium text-slate-700 sm:col-span-2 dark:text-slate-300">Rol<input value="┼Şirket Y├Âneticisi" readOnly className={`${fieldClassName} cursor-not-allowed bg-slate-100 dark:bg-slate-800`} /></label>
+                <div className="mt-2 flex justify-end gap-2 border-t border-slate-200 pt-4 sm:col-span-2 dark:border-slate-800"><button type="button" onClick={() => setDraftPanel(null)} className="rounded-lg px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:text-slate-300 dark:hover:bg-slate-800">─░ptal</button><button type="submit" className="rounded-lg bg-cyan-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-cyan-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500">Tasla─ş─▒ Haz─▒rla</button></div>
               </form>
             )}
           </section>

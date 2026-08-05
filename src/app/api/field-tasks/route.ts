@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyAuth } from "@/lib/authHelper";
 import { loadShadowErpContext } from "@/lib/serverErpContext";
@@ -343,6 +343,57 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const {
+    data: assignedUserScope,
+    error: assignedUserScopeError,
+  } = await supabase
+    .from("erp_user_scopes")
+    .select("user_scope_id")
+    .eq("user_id", assignedUserId)
+    .eq(
+      "tenant_id",
+      erpContext.scope.tenantId,
+    )
+    .eq(
+      "company_id",
+      erpContext.scope.companyId,
+    )
+    .eq(
+      "branch_id",
+      erpContext.scope.branchId,
+    )
+    .eq(
+      "accounting_period_id",
+      erpContext.scope.accountingPeriodId,
+    )
+    .eq("is_active", true)
+    .limit(1)
+    .maybeSingle();
+
+  if (assignedUserScopeError) {
+    console.error(
+      "[Field Tasks POST] Assigned user scope query failed.",
+    );
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Assigned user scope could not be verified.",
+      },
+      { status: 503 },
+    );
+  }
+
+  if (!assignedUserScope) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          "Selected user is not active in the current company scope.",
+      },
+      { status: 400 },
+    );
+  }
   const now =
     new Date().toISOString();
 

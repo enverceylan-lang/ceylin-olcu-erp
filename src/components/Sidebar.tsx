@@ -20,7 +20,7 @@ import { LayoutDashboard,
   ReceiptText,
   ChevronDown,
   X,
-  LogOut, ClipboardList } from "lucide-react";
+  LogOut, ClipboardList, Headphones } from "lucide-react";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { useAuthStore, ROLE_PERMISSIONS, canViewModule, normalizeUser, normalizeRole } from "@/store/useAuthStore";
@@ -49,6 +49,7 @@ const menuItems = [
   { name: "Bekleyen Hakedişler", href: "/bekleyen-hakedisler", icon: ReceiptText },
   { name: "Raporlar", href: "/raporlar", icon: FileText },
   { name: "Ajanda", href: "/ajanda", icon: CalendarDays },
+  { name: "Destek", href: "/destek", icon: Headphones },
   { name: "Ayarlar", href: "/ayarlar", icon: Settings },
 ];
 
