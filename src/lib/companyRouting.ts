@@ -7,6 +7,7 @@ export const COMPANY_INTERNAL_ROOTS =
     "ayarlar",
     "bekleyen-hakedisler",
     "cariler",
+    "destek",
     "finans",
     "gorevler",
     "hakedislerim",
