@@ -6,7 +6,7 @@ import {
   createClient,
 } from "@supabase/supabase-js";
 import {
-  hashPassword,
+  hashPasswordV2,
 } from "@/lib/authHelper";
 import {
   normalizeUsername,
@@ -47,6 +47,7 @@ type TenantRow = {
 };
 
 type LicenseRow = {
+  license_id: string;
   tenant_id: string;
   package_code: string;
   starts_at: string;
@@ -55,6 +56,54 @@ type LicenseRow = {
   feature_overrides: Record<string, unknown> | null;
   branch_limit: number;
   user_limit: number;
+};
+
+type LicenseChannelRow = {
+  license_id: string;
+  channel_code: "WEB" | "MOBILE" | "DESKTOP";
+  is_enabled: boolean;
+};
+
+type BranchRow = {
+  tenant_id: string;
+  company_id: string;
+  branch_id: string;
+  branch_code: string;
+  name: string;
+  is_active: boolean;
+};
+
+type AccountingPeriodRow = {
+  tenant_id: string;
+  company_id: string;
+  accounting_period_id: string;
+  period_code: string;
+  name: string;
+  starts_on: string;
+  ends_on: string;
+  is_closed: boolean;
+};
+
+type UserScopeRow = {
+  user_scope_id: string;
+  user_id: string;
+  tenant_id: string;
+  company_id: string;
+  branch_id: string | null;
+  accounting_period_id: string | null;
+  username: string | null;
+  is_default: boolean;
+  is_active: boolean;
+};
+
+type CompanyAdminUserRow = {
+  id: string;
+  name: string;
+  username: string;
+  role: string;
+  isActive: boolean;
+  email: string | null;
+  phone: string | null;
 };
 
 function serverClient() {
@@ -157,6 +206,11 @@ export async function GET(
     companiesResult,
     tenantsResult,
     licensesResult,
+    licenseChannelsResult,
+    branchesResult,
+    periodsResult,
+    scopesResult,
+    adminUsersResult,
   ] = await Promise.all([
     supabase
       .from("erp_companies")
@@ -172,15 +226,47 @@ export async function GET(
     supabase
       .from("erp_package_licenses")
       .select(
-        "tenant_id,package_code,starts_at,ends_at,is_active,feature_overrides,branch_limit,user_limit",
+        "license_id,tenant_id,package_code,starts_at,ends_at,is_active,feature_overrides,branch_limit,user_limit",
       )
       .eq("is_active", true),
+    supabase
+      .from("erp_license_channel_access")
+      .select(
+        "license_id,channel_code,is_enabled",
+      ),
+    supabase
+      .from("erp_branches")
+      .select(
+        "tenant_id,company_id,branch_id,branch_code,name,is_active",
+      ),
+    supabase
+      .from("erp_accounting_periods")
+      .select(
+        "tenant_id,company_id,accounting_period_id,period_code,name,starts_on,ends_on,is_closed",
+      ),
+    supabase
+      .from("erp_user_scopes")
+      .select(
+        "user_scope_id,user_id,tenant_id,company_id,branch_id,accounting_period_id,username,is_default,is_active",
+      )
+      .eq("is_active", true),
+    supabase
+      .from("users")
+      .select(
+        "id,name,username,role,isActive,email,phone",
+      )
+      .in("role", ["COMPANY_ADMIN", "ADMIN"]),
   ]);
 
   if (
     companiesResult.error ||
     tenantsResult.error ||
-    licensesResult.error
+    licensesResult.error ||
+    licenseChannelsResult.error ||
+    branchesResult.error ||
+    periodsResult.error ||
+    scopesResult.error ||
+    adminUsersResult.error
   ) {
     console.error(
       "[Platform Companies] Metadata read failed.",
@@ -204,6 +290,40 @@ export async function GET(
     (tenantsResult.data || []) as TenantRow[];
   const licenses =
     (licensesResult.data || []) as LicenseRow[];
+  const licenseChannels =
+    (licenseChannelsResult.data || []) as LicenseChannelRow[];
+  const branches =
+    (branchesResult.data || []) as BranchRow[];
+  const periods =
+    (periodsResult.data || []) as AccountingPeriodRow[];
+  const scopes =
+    (scopesResult.data || []) as UserScopeRow[];
+  const adminUsers =
+    (adminUsersResult.data || []) as CompanyAdminUserRow[];
+
+  const branchById =
+    new Map(
+      branches.map((row) => [
+        row.branch_id,
+        row,
+      ]),
+    );
+
+  const periodById =
+    new Map(
+      periods.map((row) => [
+        row.accounting_period_id,
+        row,
+      ]),
+    );
+
+  const adminUserById =
+    new Map(
+      adminUsers.map((row) => [
+        row.id,
+        row,
+      ]),
+    );
 
   const tenantById =
     new Map(
@@ -227,6 +347,93 @@ export async function GET(
         tenantById.get(company.tenant_id);
       const license =
         licenseByTenant.get(company.tenant_id);
+
+      const companyAdminCandidates =
+        scopes
+          .filter(
+            (scope) =>
+              scope.tenant_id === company.tenant_id &&
+              scope.company_id === company.company_id &&
+              scope.is_active,
+          )
+          .map((scope) => ({
+            scope,
+            user: adminUserById.get(scope.user_id),
+          }))
+          .filter(
+            (
+              candidate,
+            ): candidate is {
+              scope: UserScopeRow;
+              user: CompanyAdminUserRow;
+            } =>
+              candidate.user !== undefined &&
+              candidate.user.isActive === true &&
+              (
+                candidate.user.role === "COMPANY_ADMIN" ||
+                candidate.user.role === "ADMIN"
+              ),
+          )
+          .sort((left, right) => {
+            const leftRoleRank =
+              left.user.role === "COMPANY_ADMIN" ? 0 : 1;
+            const rightRoleRank =
+              right.user.role === "COMPANY_ADMIN" ? 0 : 1;
+
+            if (leftRoleRank !== rightRoleRank) {
+              return leftRoleRank - rightRoleRank;
+            }
+
+            return Number(right.scope.is_default) -
+              Number(left.scope.is_default);
+          });
+
+      const primaryAdmin =
+        companyAdminCandidates[0] || null;
+
+      const scopedBranch =
+        primaryAdmin?.scope.branch_id
+          ? branchById.get(primaryAdmin.scope.branch_id) || null
+          : null;
+
+      const fallbackBranch =
+        branches.find(
+          (branch) =>
+            branch.tenant_id === company.tenant_id &&
+            branch.company_id === company.company_id &&
+            branch.is_active,
+        ) || null;
+
+      const defaultBranch =
+        scopedBranch || fallbackBranch;
+
+      const scopedPeriod =
+        primaryAdmin?.scope.accounting_period_id
+          ? periodById.get(
+              primaryAdmin.scope.accounting_period_id,
+            ) || null
+          : null;
+
+      const fallbackPeriod =
+        periods
+          .filter(
+            (period) =>
+              period.tenant_id === company.tenant_id &&
+              period.company_id === company.company_id,
+          )
+          .sort((left, right) => {
+            if (left.is_closed !== right.is_closed) {
+              return Number(left.is_closed) -
+                Number(right.is_closed);
+            }
+
+            return right.starts_on.localeCompare(
+              left.starts_on,
+            );
+          })[0] || null;
+
+      const defaultPeriod =
+        scopedPeriod || fallbackPeriod;
 
       return {
         tenantId: company.tenant_id,
@@ -257,6 +464,83 @@ export async function GET(
           license?.user_limit ?? null,
         featureOverrides:
           license?.feature_overrides || {},
+
+        channelAccess: {
+          WEB:
+            license
+              ? licenseChannels.some(
+                  (row) =>
+                    row.license_id === license.license_id &&
+                    row.channel_code === "WEB" &&
+                    row.is_enabled === true,
+                )
+              : false,
+          MOBILE:
+            license
+              ? licenseChannels.some(
+                  (row) =>
+                    row.license_id === license.license_id &&
+                    row.channel_code === "MOBILE" &&
+                    row.is_enabled === true,
+                )
+              : false,
+          DESKTOP:
+            license
+              ? licenseChannels.some(
+                  (row) =>
+                    row.license_id === license.license_id &&
+                    row.channel_code === "DESKTOP" &&
+                    row.is_enabled === true,
+                )
+              : false,
+        },
+
+        companyAdmin:
+          primaryAdmin
+            ? {
+                userId: primaryAdmin.user.id,
+                name: primaryAdmin.user.name,
+                username:
+                  primaryAdmin.scope.username ||
+                  primaryAdmin.user.username,
+                role:
+                  primaryAdmin.user.role === "COMPANY_ADMIN"
+                    ? "COMPANY_ADMIN"
+                    : "ADMIN",
+                active:
+                  primaryAdmin.user.isActive === true &&
+                  primaryAdmin.scope.is_active,
+                email:
+                  primaryAdmin.user.email || null,
+                phone:
+                  primaryAdmin.user.phone || null,
+                legacyRole:
+                  primaryAdmin.user.role === "ADMIN",
+              }
+            : null,
+
+        defaultBranch:
+          defaultBranch
+            ? {
+                branchId: defaultBranch.branch_id,
+                code: defaultBranch.branch_code,
+                name: defaultBranch.name,
+                active: defaultBranch.is_active,
+              }
+            : null,
+
+        defaultAccountingPeriod:
+          defaultPeriod
+            ? {
+                accountingPeriodId:
+                  defaultPeriod.accounting_period_id,
+                code: defaultPeriod.period_code,
+                name: defaultPeriod.name,
+                startsOn: defaultPeriod.starts_on,
+                endsOn: defaultPeriod.ends_on,
+                closed: defaultPeriod.is_closed,
+              }
+            : null,
 
         createdAt: company.created_at,
         updatedAt: company.updated_at,
@@ -469,7 +753,7 @@ export async function POST(
   }
 
   const passwordHash =
-    hashPassword(adminPassword);
+    hashPasswordV2(adminPassword);
 
   const rpcRequest = {
     tenant_code: tenantCode,

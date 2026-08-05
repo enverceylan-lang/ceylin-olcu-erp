@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { hashPassword } from "@/lib/authHelper";
+import { hashPasswordV2 } from "@/lib/authHelper";
 import { requireCompanySession } from "@/lib/companySessionGuard";
 import {
   createCompanyUserScope,
@@ -434,7 +434,7 @@ export async function POST(req: NextRequest) {
           );
         }
       } else {
-        finalPassword = hashPassword(cleanPassword);
+        finalPassword = hashPasswordV2(cleanPassword);
         passwordChanged = true;
       }
     } else if (isCreate) {

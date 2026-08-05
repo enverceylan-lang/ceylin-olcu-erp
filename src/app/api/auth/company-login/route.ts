@@ -8,7 +8,8 @@ import {
 } from "@supabase/supabase-js";
 
 import {
-  hashPassword,
+  hashPasswordV2,
+  verifyPassword,
 } from "@/lib/authHelper";
 import {
   createCompanySessionToken,
@@ -116,36 +117,6 @@ function genericUnauthorized() {
       status: 401,
       headers: NO_STORE_HEADERS,
     },
-  );
-}
-
-function safePasswordMatches(
-  storedPasswordHash: string,
-  suppliedPassword: string,
-): boolean {
-  const suppliedHash =
-    hashPassword(
-      suppliedPassword,
-    );
-
-  const stored =
-    Buffer.from(
-      String(storedPasswordHash),
-      "utf8",
-    );
-
-  const supplied =
-    Buffer.from(
-      suppliedHash,
-      "utf8",
-    );
-
-  return (
-    stored.length === supplied.length &&
-    crypto.timingSafeEqual(
-      stored,
-      supplied,
-    )
   );
 }
 
@@ -361,13 +332,40 @@ export async function POST(
       return genericUnauthorized();
     }
 
-    if (
-      !safePasswordMatches(
+    const passwordVerification =
+      verifyPassword(
         user.password,
         password,
-      )
-    ) {
+      );
+
+    if (!passwordVerification.valid) {
       return genericUnauthorized();
+    }
+
+    if (passwordVerification.needsRehash) {
+      const passwordUpgradedAt =
+        new Date().toISOString();
+
+      const {
+        error: passwordUpgradeError,
+      } = await supabase
+        .from("users")
+        .update({
+          password:
+            hashPasswordV2(password),
+          updatedAt:
+            passwordUpgradedAt,
+        })
+        .eq("id", user.id);
+
+      if (passwordUpgradeError) {
+        console.error(
+          "[Company Login] Legacy password upgrade failed.",
+        );
+      } else {
+        user.updatedAt =
+          passwordUpgradedAt;
+      }
     }
 
     const context =

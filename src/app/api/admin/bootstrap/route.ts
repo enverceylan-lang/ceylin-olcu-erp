@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { hashPassword } from "@/lib/authHelper";
+import { hashPasswordV2 } from "@/lib/authHelper";
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder-project.supabase.co";
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "placeholder-service-key";
@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
       id: "user-admin",
       name: "Yönetici (Admin)",
       username: "admin",
-      password: hashPassword(cleanPassword),
+      password: hashPasswordV2(cleanPassword),
       role: "ADMIN",
       isActive: true,
       permissions: ["dashboard", "cariler", "olculer", "stok", "satis", "uretim", "montaj", "raporlar", "ayarlar"],

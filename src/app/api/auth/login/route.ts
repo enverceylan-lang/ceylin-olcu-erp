@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
-import { hashPassword } from "@/lib/authHelper";
+import { hashPasswordV2, verifyPassword } from "@/lib/authHelper";
 import { normalizeUsername } from "@/lib/usernameHelper";
 import {
   LEGACY_FINANCE_PERMISSION_VERSION,
@@ -153,16 +153,42 @@ export async function POST(req: NextRequest) {
         storedLocal.length === suppliedLocal.length &&
         crypto.timingSafeEqual(storedLocal, suppliedLocal);
     }
+    const passwordVerification =
+      verifyPassword(
+        String(user.password),
+        cleanPassword,
+      );
 
-    const hashedPassword = hashPassword(cleanPassword);
-    const stored = Buffer.from(String(user.password), "utf8");
-    const supplied = Buffer.from(hashedPassword, "utf8");
-    const passwordMatches =
-      stored.length === supplied.length &&
-      crypto.timingSafeEqual(stored, supplied);
-
-    if (!passwordMatches && !localPasswordMatches) {
+    if (
+      !passwordVerification.valid &&
+      !localPasswordMatches
+    ) {
       return genericUnauthorized();
+    }
+
+    if (
+      passwordVerification.valid &&
+      passwordVerification.needsRehash
+    ) {
+      const {
+        error: passwordUpgradeError,
+      } = await supabaseServer
+        .from("users")
+        .update({
+          password:
+            hashPasswordV2(
+              cleanPassword,
+            ),
+          updatedAt:
+            new Date().toISOString(),
+        })
+        .eq("id", user.id);
+
+      if (passwordUpgradeError) {
+        console.error(
+          "[Platform Login] Legacy password upgrade failed.",
+        );
+      }
     }
 
     const nowSeconds = Math.floor(Date.now() / 1000);

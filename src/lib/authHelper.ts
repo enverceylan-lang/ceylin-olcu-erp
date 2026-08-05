@@ -30,8 +30,8 @@ type SessionPayload = {
   exp: number;
 };
 
-// Legacy password hashing must stay available until the users table is migrated.
-// Do not change its output or existing users will be unable to log in.
+// Legacy password hashing must stay available until all stored legacy hashes
+// have been upgraded. New passwords must never be written with this function.
 export function hashPassword(password: string): string {
   const cleanPassword = String(password || "").trim();
   const salt =
@@ -40,8 +40,177 @@ export function hashPassword(password: string): string {
     "olcu-erp-salt-1293";
 
   return crypto
-    .pbkdf2Sync(cleanPassword, salt, 1000, 64, "sha512")
+    .pbkdf2Sync(
+      cleanPassword,
+      salt,
+      1000,
+      64,
+      "sha512",
+    )
     .toString("hex");
+}
+
+const PASSWORD_V2_PREFIX = "enverp-pw-v2";
+const PASSWORD_V2_KDF = "scrypt";
+const PASSWORD_V2_SALT_BYTES = 16;
+const PASSWORD_V2_KEY_BYTES = 64;
+
+export type PasswordVerificationResult = {
+  valid: boolean;
+  needsRehash: boolean;
+  version: "v2" | "legacy" | "unknown";
+};
+
+function safeEqualBuffer(
+  left: Buffer,
+  right: Buffer,
+): boolean {
+  return (
+    left.length === right.length &&
+    crypto.timingSafeEqual(left, right)
+  );
+}
+
+export function hashPasswordV2(
+  password: string,
+): string {
+  const cleanPassword =
+    String(password || "").trim();
+
+  if (!cleanPassword) {
+    throw new Error(
+      "PASSWORD_REQUIRED",
+    );
+  }
+
+  const salt =
+    crypto.randomBytes(
+      PASSWORD_V2_SALT_BYTES,
+    );
+
+  const derived =
+    crypto.scryptSync(
+      cleanPassword,
+      salt,
+      PASSWORD_V2_KEY_BYTES,
+    );
+
+  return [
+    PASSWORD_V2_PREFIX,
+    PASSWORD_V2_KDF,
+    salt.toString("hex"),
+    derived.toString("hex"),
+  ].join("$");
+}
+
+export function verifyPassword(
+  storedPasswordHash: string,
+  suppliedPassword: string,
+): PasswordVerificationResult {
+  const stored =
+    String(storedPasswordHash || "").trim();
+
+  const supplied =
+    String(suppliedPassword || "").trim();
+
+  if (!stored || !supplied) {
+    return {
+      valid: false,
+      needsRehash: false,
+      version: "unknown",
+    };
+  }
+
+  if (
+    stored.startsWith(
+      `${PASSWORD_V2_PREFIX}$`,
+    )
+  ) {
+    const parts = stored.split("$");
+
+    if (
+      parts.length !== 4 ||
+      parts[0] !== PASSWORD_V2_PREFIX ||
+      parts[1] !== PASSWORD_V2_KDF ||
+      !/^[0-9a-f]+$/i.test(parts[2]) ||
+      !/^[0-9a-f]+$/i.test(parts[3])
+    ) {
+      return {
+        valid: false,
+        needsRehash: false,
+        version: "v2",
+      };
+    }
+
+    try {
+      const salt =
+        Buffer.from(parts[2], "hex");
+
+      const expected =
+        Buffer.from(parts[3], "hex");
+
+      if (
+        salt.length !==
+          PASSWORD_V2_SALT_BYTES ||
+        expected.length !==
+          PASSWORD_V2_KEY_BYTES
+      ) {
+        return {
+          valid: false,
+          needsRehash: false,
+          version: "v2",
+        };
+      }
+
+      const actual =
+        crypto.scryptSync(
+          supplied,
+          salt,
+          expected.length,
+        );
+
+      return {
+        valid:
+          safeEqualBuffer(
+            expected,
+            actual,
+          ),
+        needsRehash: false,
+        version: "v2",
+      };
+    }
+    catch {
+      return {
+        valid: false,
+        needsRehash: false,
+        version: "v2",
+      };
+    }
+  }
+
+  const legacyHash =
+    hashPassword(supplied);
+
+  const legacyStored =
+    Buffer.from(stored, "utf8");
+
+  const legacySupplied =
+    Buffer.from(
+      legacyHash,
+      "utf8",
+    );
+
+  const valid =
+    safeEqualBuffer(
+      legacyStored,
+      legacySupplied,
+    );
+
+  return {
+    valid,
+    needsRehash: valid,
+    version: "legacy",
+  };
 }
 
 function base64UrlDecode(value: string): Buffer {
