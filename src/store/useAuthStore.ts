@@ -1,3 +1,4 @@
+import { getProviderRole } from "@/lib/providerRolePolicy";
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { normalizeUsername } from '@/lib/usernameHelper';
@@ -144,16 +145,7 @@ export function getRoleDefaultPermissions(role: UserRole): string[] {
 export function normalizeUser(user: UserInput | null | undefined): MockUser {
   const now = new Date().toISOString();
   if (!user) {
-    return {
-      id: 'user-admin',
-      name: 'Yönetici (Admin)',
-      username: 'admin',
-      role: 'ADMIN',
-      isActive: true,
-      permissions: ['dashboard', 'cariler', 'olculer', 'stok', 'satis', 'uretim', 'montaj', 'raporlar', 'ayarlar'],
-      createdAt: now,
-      updatedAt: now
-    };
+    throw new Error("normalizeUser requires an explicit user");
   }
 
   // Normalize legacy fields
@@ -194,12 +186,7 @@ export function normalizeUser(user: UserInput | null | undefined): MockUser {
       legacyProviderCustomerId ||
       undefined,
 
-    providerType:
-      normalizeRole(role) === "TAILOR"
-        ? "TAILOR"
-        : normalizeRole(role) === "INSTALLER"
-          ? "INSTALLER"
-          : undefined,
+    providerType: getProviderRole(role),
     username,
     password,
     role,
@@ -248,7 +235,10 @@ export const MOCK_USERS = INITIAL_USERS;
 // ─── Permission Helpers ───
 
 export function canViewModule(role: UserRole | undefined, modulePath: string): boolean {
+  if (!role) return false;
+
   const normRole = normalizeRole(role);
+  if (modulePath === "/destek") return normRole !== "PLATFORM_SUPER_ADMIN";
   if (normRole === 'ADMIN') return true;
   
   // Normalize layout paths or names
@@ -278,6 +268,8 @@ export function canViewModule(role: UserRole | undefined, modulePath: string): b
 }
 
 export function canEditModule(role: UserRole | undefined, modulePath: string): boolean {
+  if (!role) return false;
+
   const normRole = normalizeRole(role);
   if (normRole === 'ADMIN') return true;
   
@@ -612,6 +604,7 @@ export function canViewCustomerFinancialReport(user: UserInput | null | undefine
 }
 
 export function canViewMeasurement(user: UserInput | null | undefined, _measurement: ProductMeasurement): boolean {
+  if (!user) return false;
   void _measurement;
   const safeUser = normalizeUser(user);
   const normRole = normalizeRole(safeUser.role);
@@ -620,6 +613,7 @@ export function canViewMeasurement(user: UserInput | null | undefined, _measurem
 }
 
 export function canViewProductionTask(user: UserInput | null | undefined, task: AssignedProductionTask): boolean {
+  if (!user) return false;
   const safeUser = normalizeUser(user);
   const normRole = normalizeRole(safeUser.role);
   if (normRole === 'ADMIN' || normRole === 'OFFICE') return true;
@@ -631,6 +625,7 @@ export function canViewProductionTask(user: UserInput | null | undefined, task: 
 }
 
 export function canViewInstallationTask(user: UserInput | null | undefined, task: MontageTask): boolean {
+  if (!user) return false;
   const safeUser = normalizeUser(user);
   const normRole = normalizeRole(safeUser.role);
   if (normRole === 'ADMIN' || normRole === 'OFFICE') return true;

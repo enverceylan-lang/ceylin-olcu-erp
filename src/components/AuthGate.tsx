@@ -1,5 +1,6 @@
 "use client";
 
+import { getProviderHomePath } from "@/lib/providerRolePolicy";
 import { useState, useEffect, useSyncExternalStore } from "react";
 import { useAuthStore, normalizeRole, canViewModule, normalizeUser } from "@/store/useAuthStore";
 import { usePathname, useRouter } from "next/navigation";
@@ -80,13 +81,19 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   // Auto-redirect tailors and installers when they land on the root "/" route
   useEffect(() => {
     if (mounted && currentUser) {
-      const normRole = normalizeRole(currentUser.role);
-      if (appPathname === "/") {
-        if (normRole === "TAILOR") {
-          router.replace(withCompanyPrefix(pathname, "/uretim"));
-        } else if (normRole === "INSTALLER") {
-          router.replace(withCompanyPrefix(pathname, "/montaj"));
-        }
+      const providerHomePath =
+        getProviderHomePath(currentUser.role);
+
+      if (
+        appPathname === "/" &&
+        providerHomePath
+      ) {
+        router.replace(
+          withCompanyPrefix(
+            pathname,
+            providerHomePath
+          )
+        );
       }
     }
   }, [mounted, currentUser, appPathname, pathname, router]);
@@ -279,29 +286,21 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           setProfileError("Profil bilgileri sunucuda güncellenemedi.");
         } else {
           // Role specific redirect
-          const normRole = normalizeRole(currentUser.role);
-          if (normRole === "TAILOR") {
-            router.replace(withCompanyPrefix(pathname, "/uretim"));
-          } else if (normRole === "INSTALLER") {
-            router.replace(withCompanyPrefix(pathname, "/montaj"));
-          } else {
-            router.replace(withCompanyPrefix(pathname, "/"));
-          }
+          const providerHomePath =
+            getProviderHomePath(currentUser.role);
+
+          router.replace(
+            withCompanyPrefix(
+              pathname,
+              providerHomePath || "/"
+            )
+          );
         }
       }).catch(() => {
         setProfileError("Profil güncellenirken hata oluştu.");
       });
 
-      // Secure Logging (Only boolean flags and non-sensitive status)
-      console.log("User profile status:", {
-        hasFullName: !!trimmedName,
-        hasEmail: !!trimmedEmail,
-        hasPhone: !!trimmedPhone,
-        hasTcNo: !!trimmedTcNo,
-        hasAddress: !!trimmedAddress,
-        role: currentUser.role,
-        active: currentUser.isActive
-      });    };
+    };
 
     return (
       <div className="min-h-screen w-full bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden">
@@ -416,14 +415,15 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   // 2. Render Unauthorized warning if page access is denied
   if (!canViewModule(currentUser.role, appPathname)) {
     const handleReturnClick = () => {
-      const normRole = normalizeRole(currentUser.role);
-      if (normRole === "TAILOR") {
-        router.push(withCompanyPrefix(pathname, "/uretim"));
-      } else if (normRole === "INSTALLER") {
-        router.push(withCompanyPrefix(pathname, "/montaj"));
-      } else {
-        router.push(withCompanyPrefix(pathname, "/"));
-      }
+      const providerHomePath =
+        getProviderHomePath(currentUser.role);
+
+      router.push(
+        withCompanyPrefix(
+          pathname,
+          providerHomePath || "/"
+        )
+      );
     };
 
     return (

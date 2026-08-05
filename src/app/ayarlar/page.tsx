@@ -1,5 +1,6 @@
 "use client";
 
+import { isProviderRole } from "@/lib/providerRolePolicy";
 import { Download, Settings, Upload, ShieldCheck, AlertTriangle, UserPlus, Trash2, Check, X, Shield } from "lucide-react";
 import { useRef, useState, useEffect, useSyncExternalStore, Fragment } from "react";
 import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, MockUser } from "@/store/useAuthStore";
@@ -259,16 +260,7 @@ export default function AyarlarPage() {
       }
     };
 
-  const isProviderRole = (role: string): boolean => {
-    const normalized = normalizeRole(
-      role as MockUser["role"]
-    );
 
-    return (
-      normalized === "TAILOR" ||
-      normalized === "INSTALLER"
-    );
-  };
 
   const getProviderCariType = (
     role: string

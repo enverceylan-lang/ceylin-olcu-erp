@@ -2,6 +2,7 @@
 
 
 
+import { isProviderRole } from "@/lib/providerRolePolicy";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
@@ -47,6 +48,7 @@ const menuItems = [
   { name: "Üretim", href: "/uretim", icon: Factory },
   { name: "Montaj", href: "/montaj", icon: Wrench },
   { name: "Bekleyen Hakedişler", href: "/bekleyen-hakedisler", icon: ReceiptText },
+  { name: "Benim Hakedişlerim", href: "/hakedislerim", icon: ReceiptText },
   { name: "Raporlar", href: "/raporlar", icon: FileText },
   { name: "Ajanda", href: "/ajanda", icon: CalendarDays },
   { name: "Destek", href: "/destek", icon: Headphones },
@@ -104,11 +106,15 @@ export function Sidebar({
         role === "ADMIN" ||
         role === "MODERATOR" ||
         role === "OFFICE" ||
-        role === "TAILOR" ||
-        role === "INSTALLER"
+        isProviderRole(role)
       );
     }
 
+    if (item.href === "/hakedislerim") {
+      return (
+        isProviderRole(role)
+      );
+    }
     if (item.href === "/bekleyen-hakedisler") {
       return (
         role === "ADMIN" ||
@@ -234,7 +240,7 @@ export function Sidebar({
             <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">
               <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">Kullanıcı Değiştir (Admin)</span>
             </div>
-            {users.map(u => normalizeUser(u)).filter(u => u.isActive).map(user => (
+            {users.filter(u => u.isActive).map(user => (
               <button
                 key={user.id}
                 onClick={() => { switchUser(user.id); setShowUserPicker(false); setMobileMenuOpen(false); }}

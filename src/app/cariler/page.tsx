@@ -247,7 +247,7 @@ export default function CarilerPage() {
                 </button>
               </>
             )}
-            {normalizeRole(currentUser?.role) === 'ADMIN' && (
+            {currentUser && normalizeRole(currentUser.role) === 'ADMIN' && (
               <button
                 onClick={handlePreviewStandardization}
                 className="flex items-center gap-2 bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-lg transition-colors font-medium text-sm shadow-sm"
