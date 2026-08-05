@@ -26,16 +26,18 @@ import {
 import {
   useErpRuntimeContext
 } from "@/lib/useErpRuntimeContext";
+import { fetchActiveCompanyDisplayName } from "@/lib/activeCompanyDisplayNameClient";
 import type {
   OperationKind,
-  OperationRecord,
-  OperationStatus
+  OperationPriority,
+  OperationRecord
 } from "@/lib/operationsWorkflow";
 import {
   useOperationsStore
 } from "@/store/useOperationsStore";
 import OperationRoutingModal from "@/components/operations/OperationRoutingModal";
 import OperationChildSummary from "@/components/operations/OperationChildSummary";
+import MaterialCutDecisionPanel from "@/components/operations/MaterialCutDecisionPanel";
 import ProviderOperationActions from "@/components/operations/ProviderOperationActions";
 import {
   useSalesStore
@@ -48,26 +50,27 @@ import {
   useAuthStore
 } from "@/store/useAuthStore";
 import {
+  isInstallationAssignableUser,
+  resolveInstallationAssignment
+} from "@/lib/installationAssignmentService";
+import {
   resolveProviderPortalMode
 } from "@/lib/providerPortalMode";
 import {
   listProviderMyWork
 } from "@/lib/providerMyWorkService";
+import {
+  buildOperationCommandCenterSummary,
+  buildOperationTimeline,
+  deriveOperationReadiness,
+  deriveOperationRisk,
+  matchesOperationSearch,
+  resolveNextAllowedOperationStatus
+} from "@/lib/operationCommandCenterView";
 import type {
   ProviderWorkActor,
   ProviderWorkLinkSnapshot
 } from "@/lib/providerAccountContracts";
-
-const NEXT_STATUS: Partial<
-  Record<OperationStatus, OperationStatus>
-> = {
-  DRAFT: "ASSIGNED",
-  ASSIGNED: "SENT",
-  SENT: "ACCEPTED",
-  ACCEPTED: "IN_PROGRESS",
-  IN_PROGRESS: "COMPLETED",
-  PROBLEM: "IN_PROGRESS"
-};
 
 const KIND_LABELS: Record<
   OperationKind,
@@ -141,6 +144,13 @@ export default function OperationsPage() {
     resolveProviderPortalMode(
       currentUser
     );
+
+  const [
+    cutOperation,
+    setCutOperation
+  ] = useState<OperationRecord | null>(
+    null
+  );
 
   const providerActor =
     useMemo<
@@ -235,13 +245,26 @@ export default function OperationsPage() {
       localDateTimeValue(48)
     );
 
+  const [priority, setPriority] =
+    useState<OperationPriority>(
+      "NORMAL"
+    );
+
   const [notes, setNotes] =
     useState("");
 
   const [kindFilter, setKindFilter] =
     useState<"ALL" | OperationKind>("ALL");
 
-  const [showCompleted, setShowCompleted] =
+
+  const [searchQuery, setSearchQuery] =
+    useState("");
+
+  const [
+    expandedOperationIds,
+    setExpandedOperationIds
+  ] = useState<Record<string, boolean>>({});
+const [showCompleted, setShowCompleted] =
     useState(false);
 
   const [
@@ -278,16 +301,29 @@ export default function OperationsPage() {
         user =>
           user.isActive &&
           normalizeRole(user.role) ===
-            "TAILOR"
+            "TAILOR" &&
+          user.providerType ===
+            "TAILOR" &&
+          Boolean(
+            user.providerCustomerId?.trim()
+          )
       );
     }
 
     if (kind === "INSTALLATION") {
       return users.filter(
         user =>
-          user.isActive &&
-          normalizeRole(user.role) ===
-            "INSTALLER"
+          isInstallationAssignableUser({
+            id: user.id,
+            name: user.name,
+            phone: user.phone,
+            role: user.role,
+            isActive: user.isActive,
+            providerCustomerId:
+              user.providerCustomerId,
+            providerType:
+              user.providerType
+          })
       );
     }
 
@@ -402,6 +438,12 @@ export default function OperationsPage() {
             : operation.status !==
                 "COMPLETED"
         )
+        .filter(operation =>
+          matchesOperationSearch(
+            operation,
+            searchQuery
+          )
+        )
         .sort((left, right) =>
           left.dueAt.localeCompare(
             right.dueAt
@@ -413,12 +455,22 @@ export default function OperationsPage() {
       scope,
       currentUser,
       kindFilter,
+      searchQuery,
       showCompleted,
       portalMode,
       providerWorkResult
     ]
   );
 
+  const commandCenterSummary =
+    useMemo(
+      () =>
+        buildOperationCommandCenterSummary(
+          visibleOperations,
+          new Date()
+        ),
+      [visibleOperations]
+    );
   function handleCreate(): void {
     if (!scope) {
       window.alert(
@@ -454,6 +506,38 @@ export default function OperationsPage() {
           user.id === selectedPartyId
       );
 
+    const installationAssignment =
+      kind === "INSTALLATION"
+        ? resolveInstallationAssignment(
+            selectedParty
+              ? {
+                  id: selectedParty.id,
+                  name: selectedParty.name,
+                  phone: selectedParty.phone,
+                  role: selectedParty.role,
+                  isActive:
+                    selectedParty.isActive,
+                  providerCustomerId:
+                    selectedParty
+                      .providerCustomerId,
+                  providerType:
+                    selectedParty
+                      .providerType
+                }
+              : undefined
+          )
+        : null;
+
+    if (
+      installationAssignment?.mode ===
+      "REJECTED"
+    ) {
+      window.alert(
+        `Montaj ataması geçersiz: ${installationAssignment.reason}`
+      );
+      return;
+    }
+
     try {
       const now =
         new Date().toISOString();
@@ -477,17 +561,26 @@ export default function OperationsPage() {
               selectedCustomer.address
           },
           kind,
-          party: selectedParty
-            ? {
-                id: selectedParty.id,
-                name: selectedParty.name,
-                phone: selectedParty.phone
-              }
-            : undefined,
+          party:
+            kind === "INSTALLATION"
+              ? installationAssignment?.party
+              : selectedParty
+                ? {
+                    id:
+                      selectedParty.providerCustomerId as string,
+                    userId:
+                      selectedParty.id,
+                    name:
+                      selectedParty.name,
+                    phone:
+                      selectedParty.phone
+                  }
+                : undefined,
           supplierName,
           supplierPhone,
           scheduledAt,
           dueAt,
+          priority,
           notes,
           createdByUserId:
             currentUser.id,
@@ -503,6 +596,7 @@ export default function OperationsPage() {
         setSelectedPartyId("");
         setSupplierName("");
         setSupplierPhone("");
+        setPriority("NORMAL");
         setNotes("");
 
         window.alert(
@@ -543,7 +637,16 @@ export default function OperationsPage() {
     }
 
     const nextStatus =
-      NEXT_STATUS[operation.status];
+      resolveNextAllowedOperationStatus(
+        operation,
+        currentUser
+          ? {
+              userId: currentUser.id,
+              role: currentUser.role
+            }
+          : null,
+        new Date().toISOString()
+      );
 
     if (!nextStatus) {
       window.alert(
@@ -856,8 +959,33 @@ export default function OperationsPage() {
               />
             </label>
 
+            <label className="text-sm font-medium text-slate-700">
+              Öncelik
+
+              <select
+                value={priority}
+                onChange={event =>
+                  setPriority(
+                    event.target.value as
+                      OperationPriority
+                  )
+                }
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+              >
+                <option value="NORMAL">
+                  Normal
+                </option>
+                <option value="PRIORITY">
+                  Öncelikli
+                </option>
+                <option value="URGENT">
+                  ACİL
+                </option>
+              </select>
+            </label>
+
             <label className="text-sm font-medium text-slate-700 md:col-span-2 xl:col-span-3">
-              Operasyon Notu
+              İş Kartında Görünecek Not
 
               <textarea
                 value={notes}
@@ -912,6 +1040,107 @@ export default function OperationsPage() {
         </section>
       )}
 
+      {portalMode.mode === "MANAGEMENT" ? (
+        <section
+          data-operation-command-center
+          className="space-y-4"
+        >
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                Aktif İş
+              </p>
+              <p className="mt-2 text-3xl font-black tracking-tight text-slate-950">
+                {commandCenterSummary.active}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Açık operasyon
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-red-200 bg-gradient-to-br from-red-50 to-white p-4 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-red-700">
+                Kritik
+              </p>
+              <p className="mt-2 text-3xl font-black tracking-tight text-red-950">
+                {commandCenterSummary.critical}
+              </p>
+              <p className="mt-1 text-xs text-red-700">
+                Gecikmiş / acil / sorunlu
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-700">
+                Termin Riski
+              </p>
+              <p className="mt-2 text-3xl font-black tracking-tight text-amber-950">
+                {commandCenterSummary.dueSoon}
+              </p>
+              <p className="mt-1 text-xs text-amber-700">
+                24 saat içinde
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-4 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-violet-700">
+                Sorun / Bloke
+              </p>
+              <p className="mt-2 text-3xl font-black tracking-tight text-violet-950">
+                {commandCenterSummary.problem}
+              </p>
+              <p className="mt-1 text-xs text-violet-700">
+                Sebep incelenmeli
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-4 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">
+                Tamamlanan
+              </p>
+              <p className="mt-2 text-3xl font-black tracking-tight text-emerald-950">
+                {commandCenterSummary.completed}
+              </p>
+              <p className="mt-1 text-xs text-emerald-700">
+                Görünen kapsam
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-slate-950">
+                  Operasyon Komuta Merkezi
+                </p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  İş, müşteri, atanan kişi veya operasyon detayı içinde ara.
+                </p>
+              </div>
+
+              <div className="w-full lg:max-w-md">
+                <label
+                  className="sr-only"
+                  htmlFor="operation-search"
+                >
+                  Operasyon ara
+                </label>
+                <input
+                  id="operation-search"
+                  value={searchQuery}
+                  onChange={event =>
+                    setSearchQuery(
+                      event.target.value
+                    )
+                  }
+                  placeholder="İş, müşteri, terzi, montajcı, tedarikçi ara..."
+                  className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                />
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : null}
       <section>
         {portalMode.mode === "PROVIDER_READY" ? (
           <div
@@ -1014,10 +1243,42 @@ export default function OperationsPage() {
                 const late =
                   isLate(operation);
 
+                const readiness =
+                  deriveOperationReadiness(
+                    operation
+                  );
+
+                const risk =
+                  deriveOperationRisk(
+                    operation,
+                    new Date()
+                  );
+
+                const timeline =
+                  buildOperationTimeline(
+                    operation
+                  );
+
+                const isExpanded =
+                  Boolean(
+                    expandedOperationIds[
+                      operation.id
+                    ]
+                  );
+
                 const nextStatus =
-                  NEXT_STATUS[
-                    operation.status
-                  ];
+                  resolveNextAllowedOperationStatus(
+                    operation,
+                    currentUser
+                      ? {
+                          userId:
+                            currentUser.id,
+                          role:
+                            currentUser.role
+                        }
+                      : null,
+                    new Date().toISOString()
+                  );
   return (
                   <article
                     data-provider-operation-card={
@@ -1026,10 +1287,10 @@ export default function OperationsPage() {
                         : undefined
                     }
                     key={operation.id}
-                    className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"
+                    className={`overflow-hidden rounded-2xl border bg-white shadow-sm transition-shadow hover:shadow-md ${late ? "border-red-300 ring-1 ring-red-100" : "border-slate-200"}`}
                   >
-                    <div className="flex flex-col gap-4 lg:flex-row lg:justify-between">
-                      <div>
+                    <div className="flex flex-col gap-4 p-4 sm:p-5 lg:flex-row lg:justify-between">
+                      <div className="min-w-0">
                         <div className="flex flex-wrap gap-2">
                           <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">
                             {getOperationKindLabel(
@@ -1043,6 +1304,18 @@ export default function OperationsPage() {
                             )}
                           </span>
 
+                          {operation.priority ===
+                          "URGENT" ? (
+                            <span className="rounded-full bg-red-600 px-3 py-1 text-xs font-bold text-white">
+                              ACİL
+                            </span>
+                          ) : operation.priority ===
+                            "PRIORITY" ? (
+                            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">
+                              Öncelikli
+                            </span>
+                          ) : null}
+
                           {late ? (
                             <span className="rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
                               Gecikmiş
@@ -1050,7 +1323,7 @@ export default function OperationsPage() {
                           ) : null}
                         </div>
 
-                        <h3 className="mt-3 text-lg font-semibold text-slate-900">
+                        <h3 className="mt-3 break-words text-base font-bold text-slate-900 sm:text-lg">
                           {operation.title}
                         </h3>
 
@@ -1063,7 +1336,7 @@ export default function OperationsPage() {
                         </p>
                       </div>
 
-                      <div className="text-sm text-slate-600">
+                      <div className={`rounded-lg px-3 py-2 text-xs sm:text-sm ${late ? "bg-red-50 font-semibold text-red-700" : "bg-slate-50 text-slate-600"}`}>
                         <div>
                           Başlangıç:{" "}
                           {new Date(
@@ -1084,11 +1357,154 @@ export default function OperationsPage() {
                       </div>
                     </div>
 
-                    <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                    <div
+                      data-operation-health-panel
+                      className="grid gap-3 border-t border-slate-100 bg-slate-50/70 p-4 sm:grid-cols-2 sm:p-5 lg:grid-cols-3"
+                    >
+                      <div className="rounded-xl border border-slate-200 bg-white p-3">
+                        <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                          Hazırlık
+                        </p>
+                        <div className="mt-2 flex items-center gap-2">
+                          <span
+                            aria-hidden="true"
+                            className={`h-2.5 w-2.5 rounded-full ${
+                              readiness.code === "BLOCKED"
+                                ? "bg-red-500"
+                                : readiness.code === "WAITING"
+                                  ? "bg-amber-500"
+                                  : readiness.code === "COMPLETE"
+                                    ? "bg-emerald-500"
+                                    : readiness.code === "CLOSED"
+                                      ? "bg-slate-400"
+                                      : "bg-blue-500"
+                            }`}
+                          />
+                          <span className="text-sm font-bold text-slate-900">
+                            {readiness.label}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                          {readiness.message}
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl border border-slate-200 bg-white p-3">
+                        <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                          Risk
+                        </p>
+                        <div className="mt-2 flex items-center gap-2">
+                          <span
+                            aria-hidden="true"
+                            className={`h-2.5 w-2.5 rounded-full ${
+                              risk.level === "HIGH"
+                                ? "bg-red-500"
+                                : risk.level === "MEDIUM"
+                                  ? "bg-amber-500"
+                                  : "bg-emerald-500"
+                            }`}
+                          />
+                          <span className="text-sm font-bold text-slate-900">
+                            {risk.label}
+                          </span>
+                        </div>
+
+                        {risk.reasons.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {risk.reasons.map(reason => (
+                              <span
+                                key={reason.code}
+                                className={`rounded-full px-2 py-1 text-[10px] font-bold ${
+                                  reason.severity === "CRITICAL"
+                                    ? "bg-red-50 text-red-700"
+                                    : reason.severity === "WARNING"
+                                      ? "bg-amber-50 text-amber-800"
+                                      : "bg-slate-100 text-slate-700"
+                                }`}
+                              >
+                                {reason.message}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-1 text-xs text-slate-500">
+                            Aktif kritik sinyal yok.
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="rounded-xl border border-slate-200 bg-white p-3 sm:col-span-2 lg:col-span-1">
+                        <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                          Atama
+                        </p>
+                        <p className="mt-2 text-sm font-bold text-slate-900">
+                          {operation.party?.name ||
+                            "Atanmamış"}
+                        </p>
+                        <div className="mt-1 flex flex-wrap gap-1.5">
+                          {operation.party?.assignmentType ? (
+                            <span className="rounded-full bg-indigo-50 px-2 py-1 text-[10px] font-bold text-indigo-700">
+                              {operation.party.assignmentType === "INTERNAL"
+                                ? "Şirket İçi"
+                                : "Dış Partner"}
+                            </span>
+                          ) : null}
+
+                          {operation.party?.phone ? (
+                            <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-600">
+                              Telefon kayıtlı
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-slate-100 px-4 py-3 sm:hidden">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedOperationIds(
+                            previous => ({
+                              ...previous,
+                              [operation.id]:
+                                !previous[
+                                  operation.id
+                                ]
+                            })
+                          )
+                        }
+                        className="flex w-full items-center justify-between rounded-lg bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700"
+                        aria-expanded={isExpanded}
+                      >
+                        <span>
+                          {isExpanded
+                            ? "Detayları Gizle"
+                            : "İş Detaylarını Aç"}
+                        </span>
+                        <span aria-hidden="true">
+                          {isExpanded ? "−" : "+"}
+                        </span>
+                      </button>
+                    </div>
+
+                    <div
+                      className={`px-4 pb-4 sm:px-5 sm:pb-5 ${
+                        isExpanded
+                          ? "block"
+                          : "hidden sm:block"
+                      }`}
+                    >                    {operation.notes ? (
+                      <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-950">
+                        {operation.notes}
+                      </div>
+                    ) : null}
+
+                    <ul className="mt-4 space-y-1.5 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
                       {operation.details.map(
                         (detail, index) => (
                           <li
                             key={`${operation.id}:${index}`}
+                            className="flex gap-2 before:mt-2 before:h-1 before:w-1 before:shrink-0 before:rounded-full before:bg-slate-400"
                           >
                             {detail}
                           </li>
@@ -1096,7 +1512,55 @@ export default function OperationsPage() {
                       )}
                     </ul>
 
-                    <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap [&_button]:w-full sm:[&_button]:w-auto [&_a]:w-full sm:[&_a]:w-auto">
+                      {timeline.length > 0 ? (
+                        <div
+                          data-operation-timeline
+                          className="mt-4 rounded-xl border border-slate-200 bg-white p-3"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-600">
+                              Zaman Çizgisi
+                            </p>
+                            <span className="text-[10px] font-semibold text-slate-400">
+                              Kayıtlı olaylar
+                            </span>
+                          </div>
+
+                          <ol className="mt-3 space-y-3">
+                            {timeline.map(
+                              (item, index) => (
+                                <li
+                                  key={`${operation.id}:${item.code}:${item.occurredAt}`}
+                                  className="relative flex gap-3"
+                                >
+                                  <div className="flex w-3 shrink-0 justify-center">
+                                    <span className="mt-1.5 h-2 w-2 rounded-full bg-slate-400" />
+                                    {index <
+                                    timeline.length - 1 ? (
+                                      <span className="absolute ml-0 mt-3 h-[calc(100%-2px)] w-px bg-slate-200" />
+                                    ) : null}
+                                  </div>
+
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-xs font-bold text-slate-800">
+                                      {item.label}
+                                    </p>
+                                    <p className="mt-0.5 text-[11px] text-slate-500">
+                                      {new Date(
+                                        item.occurredAt
+                                      ).toLocaleString(
+                                        "tr-TR"
+                                      )}
+                                    </p>
+                                  </div>
+                                </li>
+                              )
+                            )}
+                          </ol>
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-col gap-2 border-t border-slate-100 p-4 sm:flex-row sm:flex-wrap sm:p-5 [&_button]:w-full sm:[&_button]:w-auto [&_a]:w-full sm:[&_a]:w-auto">
                       {portalMode.mode === "PROVIDER_READY" &&
                       providerActor &&
                       providerLink ? (
@@ -1108,10 +1572,14 @@ export default function OperationsPage() {
                       ) : null}
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           try {
+                            const activeCompanyName =
+                              await fetchActiveCompanyDisplayName();
+
                             openOperationPrintWindow(
-                              operation
+                              operation,
+                              activeCompanyName
                             );
                           } catch (error) {
                             window.alert(
@@ -1128,15 +1596,25 @@ export default function OperationsPage() {
 
                       <button
                         type="button"
-                        onClick={() =>
-                          window.open(
-                            buildOperationWhatsAppUrl(
-                              operation
-                            ),
-                            "_blank",
-                            "noopener,noreferrer"
-                          )
-                        }
+                        onClick={async () => {
+                          try {
+                            const activeCompanyName =
+                              await fetchActiveCompanyDisplayName();
+
+                            window.open(
+                              buildOperationWhatsAppUrl(
+                                operation,
+                                activeCompanyName
+                              ),
+                              "_blank",
+                              "noopener,noreferrer"
+                            );
+                          } catch {
+                            window.alert(
+                              "Aktif şirket adı okunamadı. WhatsApp çıktısı oluşturulmadı."
+                            );
+                          }
+                        }}
                         className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white"
                       >
                         WhatsApp
@@ -1205,10 +1683,26 @@ export default function OperationsPage() {
                       ) : null}
                     </div>
                     {portalMode.mode === "MANAGEMENT" && operation.kind === "GENERAL" ? (
-                      <OperationChildSummary
-                        parent={operation}
-                        operations={operations}
-                      />
+                      <>
+                        <div className="mt-4 border-t border-slate-100 pt-4">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCutOperation(
+                                operation
+                              )
+                            }
+                            className="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100"
+                          >
+                            Kesim / Malzeme
+                          </button>
+                        </div>
+
+                        <OperationChildSummary
+                          parent={operation}
+                          operations={operations}
+                        />
+                      </>
                     ) : null}
                   </article>
                 );
@@ -1217,6 +1711,42 @@ export default function OperationsPage() {
           </div>
         )}
       </section>
+          {portalMode.mode === "MANAGEMENT" &&
+      cutOperation &&
+      currentUser ? (
+        <MaterialCutDecisionPanel
+          operation={cutOperation}
+          sale={sales.find(
+            sale =>
+              sale.id ===
+              cutOperation.saleId
+          )}
+          currentUserId={currentUser.id}
+          suppliers={customers
+            .filter(
+              customer =>
+                customer.cariType ===
+                  "SUPPLIER" &&
+                customer.approvalStatus ===
+                  "APPROVED" &&
+                !customer.isDeleted &&
+                !customer.isArchived &&
+                customer.isActive !== false &&
+                !customer.isLockedForAllTransactions
+            )
+            .map(customer => ({
+              id: customer.id,
+              name: customer.name,
+              phone:
+                customer.phone ||
+                undefined
+            }))}
+          onClose={() =>
+            setCutOperation(null)
+          }
+        />
+      ) : null}
+
           {portalMode.mode === "MANAGEMENT" &&
       routingOperation &&
       currentUser ? (
@@ -1227,7 +1757,11 @@ export default function OperationsPage() {
             name: user.name,
             phone: user.phone,
             role: user.role,
-            isActive: user.isActive
+            isActive: user.isActive,
+            providerCustomerId:
+              user.providerCustomerId,
+            providerType:
+              user.providerType
           }))}
           currentUserId={currentUser.id}
           onClose={() =>
