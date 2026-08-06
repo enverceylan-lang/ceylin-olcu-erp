@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useSyncExternalStore } from "react";
-import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, ChevronRight, Layers, Camera, Video, FileText, Shield, AlertTriangle, MapPin, MessageCircle, Loader2, Ruler, RefreshCw } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, ChevronRight, ChevronUp, Layers, Camera, Video, FileText, Shield, AlertTriangle, MapPin, MessageCircle, Loader2, Ruler, RefreshCw, Phone } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -14,6 +14,7 @@ import { fileToDataUrl } from "@/lib/fileStorage";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
 import { syncNow } from "@/lib/syncService";
 import { buildWhatsAppShortReport, getValidNote } from "@/lib/reportFormatters";
+import { fetchActiveCompanyDisplayName } from "@/lib/activeCompanyDisplayNameClient";
 import { MeasurementVisualReport } from "@/components/reports/MeasurementVisualReport";
 import { RoomPreparationModal } from "@/components/reports/RoomPreparationModal";
 import { localDraftDb, FieldMeasurementDraft, forceRequeueCustomerMeasurementTree } from "@/lib/localDraftDb";
@@ -28,6 +29,7 @@ import { PlicellCamListEditor } from "@/components/measurements/PlicellCamListEd
 import { FieldTaskAssignButton } from "@/components/FieldTaskAssignButton";
 import { hasSlopedFacadeHeight } from "@/lib/facadeHeight";
 import { CustomerFinancePanel } from "@/components/finance/CustomerFinancePanel";
+import { CounterpartyPayablePanel } from "@/components/finance/CounterpartyPayablePanel";
 import { validateMeasurementRecord } from "@/lib/measurementValidationEngine";
 
 const measurementOpeningId = (measurement: { openingId?: string; windowId?: string }) =>
@@ -83,6 +85,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
+  const [isCustomerCardExpanded, setIsCustomerCardExpanded] = useState(false);
   const [isRecovering, setIsRecovering] = useState(false);
 
   const handleTargetRecover = async () => {
@@ -406,10 +409,23 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   };
 
   const handleShareWhatsAppReport = async () => {
+    let activeCompanyName: string;
+
+    try {
+      activeCompanyName =
+        await fetchActiveCompanyDisplayName();
+    } catch {
+      showToast(
+        "Aktif şirket adı okunamadı. Rapor paylaşılmadı.",
+      );
+      return;
+    }
+
     const report = buildWhatsAppShortReport(
       customer,
       users,
       useMeasurementStore.getState().measurements,
+      activeCompanyName,
     );
 
     if (navigator.share) {
@@ -1407,7 +1423,7 @@ showToast("Saha taslağı telefona kaydedildi.");
   };
 
   return (
-    <div className="mx-auto max-w-7xl space-y-5 pb-24">
+    <div data-cari-360-ui-v2 data-cari-360-final-polish data-cari-360-final-layout className="mx-auto max-w-[1600px] space-y-3 pb-24">
 {customer.isArchived && !customer.isDeleted && (
   <div className="bg-yellow-100 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-400 px-4 py-3 rounded-xl mb-6">
     <div className="flex items-center justify-between">
@@ -1439,18 +1455,111 @@ showToast("Saha taslağı telefona kaydedildi.");
   </div>
 )}
       {/* Header & Mode Toggle */}
-      <div className="flex flex-col items-start justify-between gap-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-5 lg:flex-row">
-        <div className="flex items-center gap-4">
+      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <div className="grid gap-4 p-4 sm:p-5 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)] xl:items-center">
+        <div className="flex min-w-0 items-center gap-4">
           <Link href="/cariler" className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
             <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-300" />
           </Link>
-          <div>
-            <h1 className="text-2xl font-bold heading-title">{customer.name}</h1>
-            <p className="text-sm heading-subtitle">Ölçü & Proje Yönetimi (V2)</p>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="truncate text-2xl font-extrabold tracking-tight heading-title sm:text-3xl">{customer.name}</h1>
+              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${getCariTypeColor(customer.cariType)}`}>
+                {getCariTypeLabel(customer.cariType)}
+              </span>
+              {customer.customerCode && (
+                <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 font-mono text-[10px] font-semibold text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
+                  {customer.customerCode}
+                </span>
+              )}
+            </div>
+
+            {canViewCustomerContactFields(currentUser, customer) && (
+              <div className="mt-2 grid max-w-3xl gap-x-6 gap-y-2 text-sm text-gray-600 dark:text-gray-300 sm:grid-cols-2 xl:grid-cols-[auto_1fr]">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Phone className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                  {customer.phone ? (
+                    <a href={`tel:${customer.phone}`} className="truncate font-semibold hover:text-blue-600 hover:underline dark:hover:text-blue-300">
+                      {customer.phone}
+                    </a>
+                  ) : (
+                    <span className="text-gray-400">Telefon belirtilmemiş</span>
+                  )}
+                </div>
+
+                <div className="flex min-w-0 items-center gap-2">
+                  <MapPin className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                  <span className="truncate font-semibold text-blue-600 dark:text-blue-300">
+                    {[customer.province, customer.district].filter(Boolean).join(" / ") || "İl / İlçe belirtilmemiş"}
+                  </span>
+                </div>
+
+                <div className="flex min-w-0 items-start gap-2 sm:col-span-2 xl:col-span-2">
+                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-400" />
+                  <span className="line-clamp-2 font-medium leading-relaxed text-gray-500 dark:text-gray-400">{customer.address || "Adres belirtilmemiş"}</span>
+                </div>
+
+                <div className="mt-1 grid grid-cols-2 gap-x-6 gap-y-2 rounded-xl border border-gray-200/80 bg-gray-50/70 p-3 text-sm dark:border-gray-800 dark:bg-gray-950/30 sm:col-span-2 sm:grid-cols-4 xl:col-span-2">
+                  <div>
+                    <span className="block text-[9px] font-bold uppercase tracking-wider text-gray-400">Müşteri No</span>
+                    <span className="mt-0.5 block truncate font-mono font-semibold text-gray-700 dark:text-gray-200">{customer.customerCode || "-"}</span>
+                  </div>
+                  <div>
+                    <span className="block text-[9px] font-bold uppercase tracking-wider text-gray-400">Vergi No</span>
+                    <span className="mt-0.5 block truncate font-mono font-semibold text-gray-700 dark:text-gray-200">{customer.taxNumber || "-"}</span>
+                  </div>
+                  <div>
+                    <span className="block text-[9px] font-bold uppercase tracking-wider text-gray-400">Grup</span>
+                    <span className="mt-0.5 block truncate font-semibold text-gray-700 dark:text-gray-200">{getCariTypeLabel(customer.cariType)}</span>
+                  </div>
+                  <div>
+                    <span className="block text-[9px] font-bold uppercase tracking-wider text-gray-400">İl / İlçe</span>
+                    <span className="mt-0.5 block truncate font-semibold text-gray-700 dark:text-gray-200">{[customer.province, customer.district].filter(Boolean).join(" / ") || "-"}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {canViewCustomerContactFields(currentUser, customer) && customer.phone && (
+                <a href={`tel:${customer.phone}`} className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-[11px] font-semibold text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-750">
+                  <Phone className="h-3.5 w-3.5" />
+                  Ara
+                </a>
+              )}
+              {(() => {
+                const mapsUrl = getGoogleMapsUrl(customer);
+                return mapsUrl ? (
+                  <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-[11px] font-semibold text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-750">
+                    <MapPin className="h-3.5 w-3.5" />
+                    Harita
+                  </a>
+                ) : null;
+              })()}
+              <button
+                type="button"
+                onClick={handleUpdateLocation}
+                disabled={updatingLocation}
+                className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-[11px] font-semibold text-gray-700 transition-colors hover:bg-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-750"
+              >
+                {updatingLocation ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MapPin className="h-3.5 w-3.5" />}
+                {customer.mapLocation ? "Konum Güncelle" : "Konum Al"}
+              </button>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => setIsEditModalOpen(true)}
+                  className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-[11px] font-semibold text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-750"
+                >
+                  <Edit className="h-3.5 w-3.5" />
+                  Cariyi Düzenle
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3 lg:max-w-3xl xl:grid-cols-4">
+        <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-2 [&_button]:h-9 [&_button]:min-h-9 [&_button]:rounded-lg [&_button]:px-3 [&_button]:py-1.5 [&_button]:text-xs [&_button]:font-semibold [&_a]:h-9 [&_a]:min-h-9 [&_a]:rounded-lg [&_a]:px-3 [&_a]:text-xs [&_a]:font-semibold">
           {currentUser?.role === 'ADMIN' && (
             <button
               onClick={handleTargetRecover}
@@ -1494,7 +1603,7 @@ showToast("Saha taslağı telefona kaydedildi.");
         <Archive className="w-4 h-4" />
         Arşivle
       </button>
-      <button onClick={handleMoveToTrash} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#c46773] bg-[#a94756] px-3 py-2 text-center text-sm font-bold leading-tight text-white shadow-sm transition-colors hover:bg-[#ba5665]">
+      <button onClick={handleMoveToTrash} className="inline-flex h-9 min-h-9 w-full items-center justify-center gap-2 rounded-lg border border-[#c46773] bg-[#a94756] px-3 py-1.5 text-center text-xs font-semibold leading-tight text-white shadow-sm transition-colors hover:bg-[#ba5665]">
         <Trash2 className="w-4 h-4" />
         Sil
       </button>
@@ -1571,23 +1680,70 @@ showToast("Saha taslağı telefona kaydedildi.");
           )}
           </div>
         </div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 gap-4">
         {/* Sidebar */}
-        <div className="lg:col-span-1 space-y-6">
-          <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-gray-50/80 px-4 py-4 dark:border-gray-800 dark:bg-gray-800/40 sm:px-5">
-              <div>
-                <h2 className="font-bold text-gray-900 dark:text-white">Müşteri Kartı</h2>
-                <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">Kimlik, iletişim ve adres bilgileri</p>
+        <div className="space-y-3">
+          <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 lg:hidden">
+            <div className="border-b border-gray-200 bg-gray-50/80 px-4 py-3 dark:border-gray-800 dark:bg-gray-800/40">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="truncate text-sm font-bold text-gray-900 dark:text-white lg:text-xs lg:uppercase lg:tracking-wide lg:text-gray-500 lg:dark:text-gray-400">{customer.name}<span className="hidden lg:inline"> · Detaylar</span></h2>
+                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${getCariTypeColor(customer.cariType)}`}>
+                      {getCariTypeLabel(customer.cariType)}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+                    {canViewCustomerContactFields(currentUser, customer) && customer.phone && (
+                      <a href={`tel:${customer.phone}`} className="inline-flex items-center gap-1 hover:text-blue-600 dark:hover:text-blue-300">
+                        <Phone className="h-3.5 w-3.5" />
+                        {customer.phone}
+                      </a>
+                    )}
+                    {(customer.province || customer.district) && (
+                      <span className="inline-flex items-center gap-1 font-semibold text-blue-600 dark:text-blue-300">
+                        <MapPin className="h-3.5 w-3.5" />
+                        {[customer.province, customer.district].filter(Boolean).join(" / ")}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsCustomerCardExpanded(value => !value)}
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 lg:hidden"
+                  aria-label={isCustomerCardExpanded ? "Müşteri kartını daralt" : "Müşteri kartını genişlet"}
+                >
+                  {isCustomerCardExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </button>
               </div>
-              <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold border ${getCariTypeColor(customer.cariType)}`}>
-                  {getCariTypeLabel(customer.cariType)}
-              </span>
+
+              <div className="mt-2 flex items-center gap-1.5 lg:hidden">
+                {canViewCustomerContactFields(currentUser, customer) && customer.phone && (
+                  <a href={`tel:${customer.phone}`} title="Ara" className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+                    <Phone className="h-4 w-4" />
+                  </a>
+                )}
+                {(() => {
+                  const mapsUrl = getGoogleMapsUrl(customer);
+                  return mapsUrl ? (
+                    <a href={mapsUrl} target="_blank" rel="noopener noreferrer" title="Haritada Aç" className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
+                      <MapPin className="h-4 w-4" />
+                    </a>
+                  ) : null;
+                })()}
+                {canEdit && (
+                  <button type="button" onClick={() => setIsEditModalOpen(true)} title="Cariyi Düzenle" className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-purple-50 text-purple-700 dark:bg-purple-950/30 dark:text-purple-300">
+                    <Edit className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
             </div>
 
-            <div className="divide-y divide-gray-100 px-4 text-sm dark:divide-gray-800 sm:px-5">
+            <div className={`${isCustomerCardExpanded ? "block" : "hidden"} divide-y divide-gray-100 px-4 text-sm dark:divide-gray-800 sm:px-5 lg:block`}>
 
               {customer.approvalStatus === 'PENDING_APPROVAL' && (
                 <div className="my-4 space-y-2 rounded-xl border border-amber-250 bg-amber-50 p-3 dark:border-amber-900/30 dark:bg-amber-950/20">
@@ -1624,15 +1780,20 @@ showToast("Saha taslağı telefona kaydedildi.");
                 </div>
               )}
               {canViewCustomerContactFields(currentUser, customer) && (
-                <div className="py-3">
-                  <span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Telefon</span>
-                  {customer.phone ? (
-                    <a href={`tel:${customer.phone}`} className="mt-1 inline-flex min-h-8 items-center font-bold text-blue-700 hover:underline dark:text-blue-300">
-                      {customer.phone}
-                    </a>
-                  ) : (
-                    <span className="mt-1 block text-gray-400">Belirtilmemiş</span>
-                  )}
+                <div className="py-2.5">
+                  <div className="flex items-center gap-2">
+                    <Phone className="h-4 w-4 shrink-0 text-gray-400" />
+                    <div className="min-w-0 flex-1">
+                      <span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Telefon</span>
+                      {customer.phone ? (
+                        <a href={`tel:${customer.phone}`} className="mt-0.5 inline-flex min-h-6 items-center font-semibold text-gray-900 hover:text-blue-700 hover:underline dark:text-gray-100 dark:hover:text-blue-300">
+                          {customer.phone}
+                        </a>
+                      ) : (
+                        <span className="mt-0.5 block text-gray-400">Belirtilmemiş</span>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
               {canViewCustomerContactFields(currentUser, customer) && customer.phone2 && (
@@ -1645,7 +1806,14 @@ showToast("Saha taslağı telefona kaydedildi.");
               )}
               {canViewCustomerContactFields(currentUser, customer) && (
                 <div className="py-3">
-                  <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Adres</span>
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Adres</span>
+                    {(customer.province || customer.district) && (
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-blue-600 dark:text-blue-300">
+                        {[customer.province, customer.district].filter(Boolean).join(" / ")}
+                      </span>
+                    )}
+                  </div>
                   {(() => {
                     const mapsUrl = getGoogleMapsUrl(customer);
                     if (mapsUrl) {
@@ -1654,7 +1822,7 @@ showToast("Saha taslağı telefona kaydedildi.");
                           href={mapsUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                           className="group flex min-h-10 items-start gap-2 rounded-lg bg-blue-50 p-2.5 font-medium text-blue-700 hover:bg-blue-100 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-950/50"
+                           className="group flex min-h-9 items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/70 p-2 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-300 dark:hover:bg-blue-950/40"
                           title="Haritada Göster"
                         >
                           <MapPin className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
@@ -1698,7 +1866,7 @@ showToast("Saha taslağı telefona kaydedildi.");
                     </div>
                   )}
 
-                  <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div className="mt-2 flex flex-wrap gap-2">
                     {(() => {
                       const mapsUrl = getGoogleMapsUrl(customer);
                       return (
@@ -1712,7 +1880,7 @@ showToast("Saha taslağı telefona kaydedildi.");
                               showToast("Konum veya adres bilgisi bulunmuyor.");
                             }
                           }}
-                          className={`flex min-h-10 items-center justify-center gap-1.5 px-2 py-2 text-center text-xs font-bold rounded-lg transition-colors border ${
+                          className={`inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-center text-[11px] font-bold transition-colors ${
                             mapsUrl
                               ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800/50 hover:bg-blue-100 dark:hover:bg-blue-900/40"
                               : "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 border-gray-250 dark:border-gray-700 cursor-not-allowed"
@@ -1727,7 +1895,7 @@ showToast("Saha taslağı telefona kaydedildi.");
                     <button
                       onClick={handleUpdateLocation}
                       disabled={updatingLocation}
-                      className="flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-transparent bg-emerald-700 px-2 py-2 text-center text-xs font-bold text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-emerald-700/50"
+                      className="inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-emerald-700 bg-emerald-700 px-2 py-1.5 text-center text-[11px] font-bold text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {updatingLocation ? (
                         <>
@@ -1802,7 +1970,7 @@ showToast("Saha taslağı telefona kaydedildi.");
                           });
                         });
                       }}
-                      className="flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg transition-colors border border-gray-250 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-750 text-gray-700 dark:text-gray-300 w-full cursor-pointer"
+                      className="inline-flex min-h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-gray-50 px-3 py-1.5 text-[11px] font-bold text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-750 cursor-pointer"
                     >
                       <Camera className="w-3.5 h-3.5" />
                       Bina Fotoğrafı Ekle
@@ -2964,7 +3132,10 @@ showToast("Saha taslağı telefona kaydedildi.");
           )}
 
           {activeTab === "financial" && (
-            <CustomerFinancePanel customerId={customer.id} currency="TRY" />
+            <>
+                <CustomerFinancePanel customerId={customer.id} currency="TRY" />
+                <CounterpartyPayablePanel customerId={customer.id} />
+              </>
           )}
         </div>
 
