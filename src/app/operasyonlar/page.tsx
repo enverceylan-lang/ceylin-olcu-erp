@@ -71,6 +71,17 @@ import type {
   ProviderWorkActor,
   ProviderWorkLinkSnapshot
 } from "@/lib/providerAccountContracts";
+import {
+  WorkflowAssignmentChip,
+  WorkflowReadinessBadge,
+  WorkflowRiskBadge,
+  WorkflowTimeline
+} from "@/components/workflow/WorkflowUiKit";
+import {
+  readinessTone,
+  riskTone,
+  toWorkflowEvent
+} from "@/lib/workflowUiKit";
 
 const KIND_LABELS: Record<
   OperationKind,
@@ -1451,24 +1462,15 @@ const [showCompleted, setShowCompleted] =
                         <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
                           Hazırlık
                         </p>
-                        <div className="mt-2 flex items-center gap-2">
-                          <span
-                            aria-hidden="true"
-                            className={`h-2.5 w-2.5 rounded-full ${
-                              readiness.code === "BLOCKED"
-                                ? "bg-red-500"
-                                : readiness.code === "WAITING"
-                                  ? "bg-amber-500"
-                                  : readiness.code === "COMPLETE"
-                                    ? "bg-emerald-500"
-                                    : readiness.code === "CLOSED"
-                                      ? "bg-slate-400"
-                                      : "bg-blue-500"
-                            }`}
+                        <div className="mt-2">
+                          <WorkflowReadinessBadge
+                            readiness={{
+                              code: readiness.code,
+                              label: readiness.label,
+                              message: readiness.message,
+                              tone: readinessTone(readiness.code)
+                            }}
                           />
-                          <span className="text-sm font-bold text-slate-900">
-                            {readiness.label}
-                          </span>
                         </div>
                         <p className="mt-1 text-xs leading-5 text-slate-500">
                           {readiness.message}
@@ -1479,69 +1481,45 @@ const [showCompleted, setShowCompleted] =
                         <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
                           Risk
                         </p>
-                        <div className="mt-2 flex items-center gap-2">
-                          <span
-                            aria-hidden="true"
-                            className={`h-2.5 w-2.5 rounded-full ${
-                              risk.level === "HIGH"
-                                ? "bg-red-500"
-                                : risk.level === "MEDIUM"
-                                  ? "bg-amber-500"
-                                  : "bg-emerald-500"
-                            }`}
+                        <div className="mt-2">
+                          <WorkflowRiskBadge
+                            risk={{
+                              level: risk.level,
+                              label: risk.label,
+                              reasons: risk.reasons,
+                              tone: riskTone(risk.level)
+                            }}
                           />
-                          <span className="text-sm font-bold text-slate-900">
-                            {risk.label}
-                          </span>
                         </div>
 
-                        {risk.reasons.length > 0 ? (
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {risk.reasons.map(reason => (
-                              <span
-                                key={reason.code}
-                                className={`rounded-full px-2 py-1 text-[10px] font-bold ${
-                                  reason.severity === "CRITICAL"
-                                    ? "bg-red-50 text-red-700"
-                                    : reason.severity === "WARNING"
-                                      ? "bg-amber-50 text-amber-800"
-                                      : "bg-slate-100 text-slate-700"
-                                }`}
-                              >
-                                {reason.message}
-                              </span>
-                            ))}
-                          </div>
-                        ) : (
+                        {risk.reasons.length === 0 ? (
                           <p className="mt-1 text-xs text-slate-500">
                             Aktif kritik sinyal yok.
                           </p>
-                        )}
+                        ) : null}
                       </div>
 
                       <div className="rounded-xl border border-slate-200 bg-white p-3 sm:col-span-2 lg:col-span-1">
                         <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
                           Atama
                         </p>
-                        <p className="mt-2 text-sm font-bold text-slate-900">
-                          {operation.party?.name ||
-                            "Atanmamış"}
-                        </p>
-                        <div className="mt-1 flex flex-wrap gap-1.5">
-                          {operation.party?.assignmentType ? (
-                            <span className="rounded-full bg-indigo-50 px-2 py-1 text-[10px] font-bold text-indigo-700">
-                              {operation.party.assignmentType === "INTERNAL"
-                                ? "Şirket İçi"
-                                : "Dış Partner"}
-                            </span>
-                          ) : null}
-
-                          {operation.party?.phone ? (
+                        <div className="mt-2">
+                          <WorkflowAssignmentChip
+                            assignment={{
+                              label: "Atanmamış",
+                              partyName: operation.party?.name,
+                              assignmentType:
+                                operation.party?.assignmentType
+                            }}
+                          />
+                        </div>
+                        {operation.party?.phone ? (
+                          <div className="mt-1">
                             <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-600">
                               Telefon kayıtlı
                             </span>
-                          ) : null}
-                        </div>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
 
@@ -1612,37 +1590,23 @@ const [showCompleted, setShowCompleted] =
                             </span>
                           </div>
 
-                          <ol className="mt-3 space-y-3">
-                            {timeline.map(
-                              (item, index) => (
-                                <li
-                                  key={`${operation.id}:${item.code}:${item.occurredAt}`}
-                                  className="relative flex gap-3"
-                                >
-                                  <div className="flex w-3 shrink-0 justify-center">
-                                    <span className="mt-1.5 h-2 w-2 rounded-full bg-slate-400" />
-                                    {index <
-                                    timeline.length - 1 ? (
-                                      <span className="absolute ml-0 mt-3 h-[calc(100%-2px)] w-px bg-slate-200" />
-                                    ) : null}
-                                  </div>
+                          <div className="mt-3">
+                            <WorkflowTimeline
+                              events={timeline.map(item => {
+                                const event =
+                                  toWorkflowEvent(item);
 
-                                  <div className="min-w-0 flex-1">
-                                    <p className="text-xs font-bold text-slate-800">
-                                      {item.label}
-                                    </p>
-                                    <p className="mt-0.5 text-[11px] text-slate-500">
-                                      {new Date(
-                                        item.occurredAt
-                                      ).toLocaleString(
-                                        "tr-TR"
-                                      )}
-                                    </p>
-                                  </div>
-                                </li>
-                              )
-                            )}
-                          </ol>
+                                return {
+                                  ...event,
+                                  at: new Date(
+                                    event.at
+                                  ).toLocaleString(
+                                    "tr-TR"
+                                  )
+                                };
+                              })}
+                            />
+                          </div>
                         </div>
                       ) : null}
                     </div>
