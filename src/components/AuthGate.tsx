@@ -7,6 +7,8 @@ import { usePathname, useRouter } from "next/navigation";
 import Image from "next/image";
 import { ShieldAlert, User, KeyRound, ArrowRight } from "lucide-react";
 import {
+  getCompanySlugFromPath,
+  isCompanyInternalPath,
   normalizeCompanyAppPath,
   withCompanyPrefix,
 } from "@/lib/companyRouting";
@@ -100,12 +102,48 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   // Session expiry is handled by the auth store. Plain passwords are never stored.
 
+  const unauthenticatedCompanySlug =
+    !currentUser &&
+    isCompanyInternalPath(pathname)
+      ? getCompanySlugFromPath(pathname)
+      : null;
+
+  useEffect(() => {
+    if (
+      !mounted ||
+      currentUser ||
+      !unauthenticatedCompanySlug
+    ) {
+      return;
+    }
+
+    router.replace(
+      `/${unauthenticatedCompanySlug}`
+    );
+  }, [
+    mounted,
+    currentUser,
+    unauthenticatedCompanySlug,
+    router,
+  ]);
 
   if (!mounted) {
     return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">Yükleniyor...</div>;
   }
 
-  // 1. Render Login screen if not authenticated
+  // Tenant-internal routes must use the company gateway login surface.
+  if (
+    !currentUser &&
+    unauthenticatedCompanySlug
+  ) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">
+        Yönlendiriliyor...
+      </div>
+    );
+  }
+
+  // 1. Render legacy Login screen only outside tenant-prefixed internal routes
   if (!currentUser) {
     const handleLoginSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
