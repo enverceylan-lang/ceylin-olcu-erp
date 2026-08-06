@@ -15,7 +15,17 @@ export type SupplierOrderStatus =
   | "PARTIALLY_RECEIVED"
   | "RECEIVED"
   | "CHECKED"
-  | "READY_FOR_TAILOR";
+  | "READY_FOR_TAILOR"
+  | "READY_FOR_OPERATION";
+
+export type SupplierOrderUnit =
+  | "mt"
+  | "m2"
+  | "adet";
+
+export type SupplierOrderPurpose =
+  | "TAILOR_MATERIAL"
+  | "MECHANICAL_PRODUCT";
 
 export interface SupplierOrderRequest extends ErpScope {
   id: string;
@@ -28,6 +38,14 @@ export interface SupplierOrderRequest extends ErpScope {
   productionOrderId: string;
   stockItemId: string;
   orderedQuantity: number;
+
+  /*
+   * Legacy records may omit these fields.
+   * Omitted values mean mt + TAILOR_MATERIAL for backward compatibility.
+   */
+  orderedUnit?: SupplierOrderUnit;
+  purpose?: SupplierOrderPurpose;
+
   expectedAt?: string;
   createdByUserId: string;
   createdAt: string;
@@ -56,6 +74,45 @@ export interface SupplierReceiptSummary {
   excessQuantity: number;
   status: "WAITING" | "PARTIAL" | "READY" | "OVER_RECEIVED";
 }
+
+export interface SupplierReceiptRequest extends ErpScope {
+  id: string;
+  idempotencyKey: string;
+  supplierOrderId: string;
+  receivedQuantity: number;
+  receivedByUserId: string;
+  receivedAt: string;
+}
+
+export interface SupplierReceipt extends SupplierReceiptRequest {
+  cumulativeReceivedQuantity: number;
+  orderStatus:
+    | "PARTIALLY_RECEIVED"
+    | "READY_FOR_TAILOR"
+    | "READY_FOR_OPERATION";
+}
+
+export type SupplierReceiptDecision =
+  | {
+      outcome: "CREATE";
+      receipt: SupplierReceipt;
+      order: SupplierOrder;
+    }
+  | {
+      outcome: "REPLAY";
+      receipt: SupplierReceipt;
+      order: SupplierOrder;
+    }
+  | {
+      outcome: "REJECT";
+      reason:
+        | "INVALID_REQUEST"
+        | "ORDER_NOT_FOUND"
+        | "SCOPE_MISMATCH"
+        | "IDEMPOTENCY_CONFLICT"
+        | "OVER_RECEIPT"
+        | "ORDER_ALREADY_READY";
+    };
 
 export interface MixedSupplyLineSummary {
   productionItemId: string;
@@ -100,6 +157,10 @@ function sameSupplierPayload(
     request.productionOrderId === order.productionOrderId &&
     request.stockItemId === order.stockItemId &&
     Math.abs(request.orderedQuantity - order.orderedQuantity) <= EPSILON &&
+    (request.orderedUnit ?? "mt") ===
+      (order.orderedUnit ?? "mt") &&
+    (request.purpose ?? "TAILOR_MATERIAL") ===
+      (order.purpose ?? "TAILOR_MATERIAL") &&
     sameScope(request, order)
   );
 }
@@ -182,6 +243,152 @@ export function summarizeSupplierReceipt(
     missingQuantity,
     excessQuantity,
     status,
+  };
+}
+
+export function decideSupplierReceipt(
+  request: SupplierReceiptRequest,
+  existingReceipts: SupplierReceipt[],
+  order: SupplierOrder | undefined
+): SupplierReceiptDecision {
+  const requiredText = [
+    request.id,
+    request.idempotencyKey,
+    request.supplierOrderId,
+    request.receivedByUserId,
+    request.receivedAt
+  ];
+
+  if (
+    requiredText.some(
+      value => !value.trim()
+    ) ||
+    !Number.isFinite(
+      request.receivedQuantity
+    ) ||
+    request.receivedQuantity <=
+      EPSILON
+  ) {
+    return {
+      outcome: "REJECT",
+      reason: "INVALID_REQUEST"
+    };
+  }
+
+  const replay =
+    existingReceipts.find(
+      receipt =>
+        receipt.idempotencyKey ===
+          request.idempotencyKey &&
+        sameScope(receipt, request)
+    );
+
+  if (replay) {
+    if (
+      replay.id !== request.id ||
+      replay.supplierOrderId !==
+        request.supplierOrderId ||
+      Math.abs(
+        replay.receivedQuantity -
+          request.receivedQuantity
+      ) > EPSILON
+    ) {
+      return {
+        outcome: "REJECT",
+        reason:
+          "IDEMPOTENCY_CONFLICT"
+      };
+    }
+
+    if (!order) {
+      return {
+        outcome: "REJECT",
+        reason: "ORDER_NOT_FOUND"
+      };
+    }
+
+    return {
+      outcome: "REPLAY",
+      receipt: replay,
+      order
+    };
+  }
+
+  if (!order) {
+    return {
+      outcome: "REJECT",
+      reason: "ORDER_NOT_FOUND"
+    };
+  }
+
+  if (!sameScope(order, request)) {
+    return {
+      outcome: "REJECT",
+      reason: "SCOPE_MISMATCH"
+    };
+  }
+
+  if (
+    order.status ===
+      "READY_FOR_TAILOR" ||
+    order.status ===
+      "READY_FOR_OPERATION" ||
+    order.receivedQuantity >=
+      order.orderedQuantity -
+        EPSILON
+  ) {
+    return {
+      outcome: "REJECT",
+      reason:
+        "ORDER_ALREADY_READY"
+    };
+  }
+
+  const cumulative =
+    order.receivedQuantity +
+    request.receivedQuantity;
+
+  if (
+    cumulative >
+    order.orderedQuantity + EPSILON
+  ) {
+    return {
+      outcome: "REJECT",
+      reason: "OVER_RECEIPT"
+    };
+  }
+
+  const summary =
+    summarizeSupplierReceipt(
+      order.orderedQuantity,
+      cumulative
+    );
+
+  const orderStatus =
+    summary.status === "READY"
+      ? (order.purpose ??
+          "TAILOR_MATERIAL") ===
+        "MECHANICAL_PRODUCT"
+        ? "READY_FOR_OPERATION"
+        : "READY_FOR_TAILOR"
+      : "PARTIALLY_RECEIVED";
+
+  const nextOrder: SupplierOrder = {
+    ...order,
+    receivedQuantity:
+      cumulative,
+    status: orderStatus
+  };
+
+  return {
+    outcome: "CREATE",
+    receipt: {
+      ...request,
+      cumulativeReceivedQuantity:
+        cumulative,
+      orderStatus
+    },
+    order: nextOrder
   };
 }
 

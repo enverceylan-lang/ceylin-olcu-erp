@@ -20,10 +20,35 @@ export type OperationStatus =
   | "PROBLEM"
   | "CANCELLED";
 
+export type OperationPriority =
+  | "NORMAL"
+  | "PRIORITY"
+  | "URGENT";
+
+export type InstallationAssignmentType =
+  | "INTERNAL"
+  | "EXTERNAL";
+
 export interface OperationParty {
+  /*
+   * EXTERNAL:
+   *   id = providerCustomerId (hakediş/cari kimliği)
+   *   userId = giriş yapan kullanıcı kimliği
+   *
+   * INTERNAL:
+   *   id = internal-user:<userId>
+   *   userId = şirket içi gerçek kullanıcı kimliği
+   *   provider/cari zorunlu değildir.
+   *
+   * UNASSIGNED:
+   *   party oluşturulmaz. İş, atama bekleyen ana operasyonda kalır.
+   */
   id: string;
+  userId?: string;
   name: string;
   phone?: string;
+  assignmentType?: InstallationAssignmentType;
+  providerCustomerId?: string;
 }
 
 export interface OperationRecord extends ErpScope {
@@ -46,6 +71,7 @@ export interface OperationRecord extends ErpScope {
   scheduledAt: string;
   dueAt: string;
   status: OperationStatus;
+  priority?: OperationPriority;
   notes?: string;
 
   createdByUserId: string;
@@ -170,6 +196,11 @@ function samePayload(
     left.saleId === right.saleId &&
     left.customerId === right.customerId &&
     left.party?.id === right.party?.id &&
+    left.party?.userId === right.party?.userId &&
+    left.party?.assignmentType ===
+      right.party?.assignmentType &&
+    left.party?.providerCustomerId ===
+      right.party?.providerCustomerId &&
     left.scheduledAt === right.scheduledAt &&
     left.dueAt === right.dueAt &&
     erpScopeMatches(left, right)
@@ -221,10 +252,21 @@ export function decideOperationCreation(
     request.updatedAt
   ];
 
+  const providerIdentityInvalid =
+    (
+      request.kind === "TAILOR" ||
+      request.kind === "INSTALLATION"
+    ) &&
+    (
+      !request.party?.id?.trim() ||
+      !request.party?.userId?.trim()
+    );
+
   if (
     required.some(
       value => value.trim().length === 0
     ) ||
+    providerIdentityInvalid ||
     !validateErpScope(request).valid ||
     !isIsoDate(request.scheduledAt) ||
     !isIsoDate(request.dueAt) ||
@@ -298,7 +340,7 @@ export function decideOperationTransition(
     role === "MODERATOR";
 
   const assignedWorker =
-    operation.party?.id === actor.userId;
+    operation.party?.userId === actor.userId;
 
   if (!manager && !assignedWorker) {
     return {
@@ -357,7 +399,8 @@ export function decideOperationTransition(
 }
 
 export function buildOperationWhatsAppText(
-  operation: OperationRecord
+  operation: OperationRecord,
+  companyName = "ENVerp"
 ): string {
   const typeLabel =
     operation.kind === "GENERAL"
@@ -369,6 +412,7 @@ export function buildOperationWhatsAppText(
           : "MONTAJ İŞ EMRİ";
 
   const lines = [
+    companyName,
     `*${typeLabel}*`,
     `Müşteri: ${operation.customerName}`,
     `İş: ${operation.title}`,
@@ -378,6 +422,13 @@ export function buildOperationWhatsAppText(
     `Termin: ${new Date(
       operation.dueAt
     ).toLocaleString("tr-TR")}`,
+    `Öncelik: ${
+      operation.priority === "URGENT"
+        ? "ACİL"
+        : operation.priority === "PRIORITY"
+          ? "Öncelikli"
+          : "Normal"
+    }`,
     operation.address
       ? `Adres: ${operation.address}`
       : "",

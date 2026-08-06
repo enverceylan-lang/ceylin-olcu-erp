@@ -49,7 +49,8 @@ export function getOperationStatusLabel(
 }
 
 export function buildOperationPrintHtml(
-  operation: OperationRecord
+  operation: OperationRecord,
+  companyName = "ENVerp"
 ): string {
   const details = operation.details
     .map(
@@ -65,11 +66,18 @@ export function buildOperationPrintHtml(
   const phone =
     operation.party?.phone ?? "-";
 
+  const priorityLabel =
+    operation.priority === "URGENT"
+      ? "ACİL"
+      : operation.priority === "PRIORITY"
+        ? "Öncelikli"
+        : "Normal";
+
   return `<!doctype html>
 <html lang="tr">
 <head>
 <meta charset="utf-8">
-<title>${escapeHtml(getOperationKindLabel(operation))}</title>
+<title>${escapeHtml(companyName)} — ${escapeHtml(getOperationKindLabel(operation))}</title>
 <style>
 body {
   font-family: Arial, Helvetica, sans-serif;
@@ -119,7 +127,8 @@ ul {
 </head>
 <body>
 <div class="header">
-  <h1>${escapeHtml(getOperationKindLabel(operation))}</h1>
+  <h1>${escapeHtml(companyName)}</h1>
+  <div>${escapeHtml(getOperationKindLabel(operation))}</div>
 </div>
 
 <div class="meta">
@@ -152,6 +161,9 @@ ul {
     getOperationStatusLabel(operation.status)
   )}</div>
 
+  <div class="label">Öncelik</div>
+  <div>${escapeHtml(priorityLabel)}</div>
+
   <div class="label">Adres</div>
   <div>${escapeHtml(operation.address ?? "-")}</div>
 </div>
@@ -183,7 +195,8 @@ ${
 }
 
 export function openOperationPrintWindow(
-  operation: OperationRecord
+  operation: OperationRecord,
+  companyName = "ENVerp"
 ): void {
   if (typeof window === "undefined") {
     throw new Error(
@@ -205,7 +218,7 @@ export function openOperationPrintWindow(
 
   printWindow.document.open();
   printWindow.document.write(
-    buildOperationPrintHtml(operation)
+    buildOperationPrintHtml(operation, companyName)
   );
   printWindow.document.close();
   printWindow.focus();
@@ -216,14 +229,15 @@ export function openOperationPrintWindow(
 }
 
 export function buildOperationWhatsAppUrl(
-  operation: OperationRecord
+  operation: OperationRecord,
+  companyName = "ENVerp"
 ): string {
   const phone = (
     operation.party?.phone ?? ""
   ).replace(/\D/g, "");
 
   const text = encodeURIComponent(
-    buildOperationWhatsAppText(operation)
+    buildOperationWhatsAppText(operation, companyName)
   );
 
   if (phone.length === 0) {

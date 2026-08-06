@@ -2,6 +2,7 @@ import type {
   AgendaEvent,
   OperationKind,
   OperationParty,
+  OperationPriority,
   OperationRecord
 } from "./operationsWorkflow";
 import {
@@ -22,6 +23,7 @@ export interface RouteChildOperationInput {
   supplierPhone?: string;
   scheduledAt: string;
   dueAt: string;
+  priority?: OperationPriority;
   notes?: string;
   createdByUserId: string;
   now: string;
@@ -181,6 +183,30 @@ export function routeChildOperation(
 
   const stableParty = party as OperationParty;
 
+  if (
+    input.kind === "INSTALLATION" &&
+    stableParty.assignmentType === "EXTERNAL" &&
+    !stableParty.providerCustomerId?.trim()
+  ) {
+    return {
+      outcome: "REJECTED",
+      state,
+      reason: "PARTY_REQUIRED"
+    };
+  }
+
+  if (
+    input.kind === "INSTALLATION" &&
+    stableParty.assignmentType === "INTERNAL" &&
+    !stableParty.userId?.trim()
+  ) {
+    return {
+      outcome: "REJECTED",
+      state,
+      reason: "PARTY_REQUIRED"
+    };
+  }
+
   const id =
     createStableChildId(
       input.parent.id,
@@ -270,6 +296,9 @@ export function routeChildOperation(
       dueAt.toISOString(),
 
     status: "ASSIGNED",
+
+    priority:
+      input.priority ?? "NORMAL",
 
     notes:
       input.notes?.trim() ||

@@ -397,6 +397,48 @@ export interface Product {
   cashPrice: number;
   installmentPrice: number;
   dealerPrice: number;
+
+  // STOCK V1 — master card fields
+  brand?: string;
+  barcode1?: string;
+  barcode2?: string;
+  additionalDescription?: string;
+  generalDescription?: string;
+  imageUrl?: string;
+
+  purchasePrice1?: number;
+  purchasePrice2?: number;
+  purchasePrice3?: number;
+  purchasePrice4?: number;
+
+  salePrice1?: number;
+  salePrice2?: number;
+  salePrice3?: number;
+  salePrice4?: number;
+
+  purchaseVatRate?: number;
+  saleVatRate?: number;
+
+  defaultSupplierCustomerId?: string;
+  alternativeSupplierCustomerIds?: string[];
+
+  productKind?: 'PHYSICAL' | 'SERVICE';
+  requiresSewing?: boolean;
+  requiresInstallation?: boolean;
+
+  // Service card links only. Provider is selected/resolved per job.
+  sewingServiceStockItemId?: string;
+  installationServiceStockItemId?: string;
+
+  currentStockAveragePurchasePrice?: number;
+  currentStockAverageSalePrice?: number;
+  lastPurchasePrice?: number;
+  lastSalePrice?: number;
+  suggestedSalePrice?: number;
+
+  targetProfitRate?: number;
+  overheadRate?: number;
+
   // V2 Jumbo fields
   jumboEnabled?: boolean;
   jumboThresholdCm?: number;
@@ -419,6 +461,7 @@ export interface SaleItem {
   originalWidth?: number;
   originalHeight?: number;
   productId: string; // stockProductId
+  stockItemId?: string;
   productGroup: string;
   productType: string;
   calculationType?: string;
@@ -484,6 +527,7 @@ export interface ProductionItem {
   id: string;
   orderId: string;
   saleLineId: string;
+  stockItemId?: string;
   customerId: string;
   roomName: string;
   openingName: string;
@@ -532,6 +576,10 @@ interface CascadeEntity {
 interface AppState {
   customers: Customer[];
   products: Product[];
+  addProduct: (product: Product) => void;
+  updateProduct: (id: string, data: Partial<Product>) => void;
+  setProducts: (products: Product[]) => void;
+
   sales: Sale[];
   productionTasks: ProductionTask[];
   montageTasks: MontageTask[];
@@ -600,6 +648,32 @@ export const useStore = create<AppState>()(
       productionItems: [],
       pendingDeletes: [],
       syncStatus: 'synced',
+
+      addProduct: product => {
+        set(state => {
+          if (state.products.some(existing => existing.id === product.id)) {
+            return state;
+          }
+
+          return {
+            products: [...state.products, product],
+          };
+        });
+      },
+
+      updateProduct: (id, data) => {
+        set(state => ({
+          products: state.products.map(product =>
+            product.id === id
+              ? { ...product, ...data, id: product.id }
+              : product
+          ),
+        }));
+      },
+
+      setProducts: products => {
+        set({ products });
+      },
 
       addCustomer: async (data) => {
         const state = get();
@@ -1375,20 +1449,21 @@ export const useStore = create<AppState>()(
         const montageDate = deadline;
 
         const filteredItemsForProduction = saleData.items.filter(item => {
-          const prod = state.products.find(p => p.id === item.productId);
+          const prod = state.products.find(p => p.id === (item.stockItemId || item.productId));
           return shouldCreateTailorProductionItem(item, prod);
         });
 
         const itemsString = filteredItemsForProduction.map(i => `${i.roomName} (${i.windowName}): ${i.productType}`).join(', ');
 
         const newProductionItems: ProductionItem[] = filteredItemsForProduction.map(item => {
-          const prod = state.products.find(p => p.id === item.productId);
+          const prod = state.products.find(p => p.id === (item.stockItemId || item.productId));
           const productName = prod ? prod.name : item.productType || 'Bilinmeyen Ürün';
 
           return {
             id: generateUUID(),
             orderId: saleId,
             saleLineId: item.id,
+            stockItemId: item.stockItemId || item.productId || undefined,
             customerId: saleData.customerId,
             roomName: item.roomName,
             openingName: item.windowName,

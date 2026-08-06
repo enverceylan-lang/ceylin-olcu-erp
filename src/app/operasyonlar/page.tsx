@@ -266,6 +266,10 @@ export default function OperationsPage() {
   ] = useState<Record<string, boolean>>({});
 const [showCompleted, setShowCompleted] =
     useState(false);
+  const [
+    showCreateOperation,
+    setShowCreateOperation
+  ] = useState(false);
 
   const [
     routingOperation,
@@ -277,6 +281,36 @@ const [showCompleted, setShowCompleted] =
   useEffect(() => {
     void loadSales();
   }, [loadSales]);
+  useEffect(() => {
+    function handleShortcut(
+      event: KeyboardEvent
+    ): void {
+      if (
+        event.altKey &&
+        event.key.toLowerCase() === "n"
+      ) {
+        event.preventDefault();
+        setShowCreateOperation(true);
+      }
+
+      if (
+        event.key === "Escape"
+      ) {
+        setShowCreateOperation(false);
+      }
+    }
+
+    window.addEventListener(
+      "keydown",
+      handleShortcut
+    );
+
+    return () =>
+      window.removeEventListener(
+        "keydown",
+        handleShortcut
+      );
+  }, []);
 
   const activeSales = useMemo(
     () =>
@@ -734,24 +768,55 @@ const [showCompleted, setShowCompleted] =
     );
   }
   return (
-    <main className="mx-auto max-w-7xl space-y-6 p-4 pb-24 md:p-6">
-      <header>
-        <h1 className="text-2xl font-bold text-slate-900">
-          {portalMode.title}
-        </h1>
+    <main className="min-h-screen bg-slate-100/70 px-3 py-3 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-4 md:px-5"><div className="mx-auto w-full max-w-[1600px]">
+      <header className="flex min-h-14 items-center gap-3 rounded-t-lg border border-slate-200 bg-white px-4 py-2.5 shadow-sm dark:border-slate-800 dark:bg-slate-900/90">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <h1 className="truncate text-[14px] font-semibold tracking-[-0.01em] text-slate-950 dark:text-white">
+              {portalMode.title}
+            </h1>
 
-        <p className="mt-1 text-sm text-slate-600">
-          {portalMode.description}
-        </p>
+            <span className="hidden text-slate-300 dark:text-slate-700 sm:inline">
+              |
+            </span>
 
-        {packageName ? (
-          <p className="mt-1 text-xs text-slate-500">
-            Aktif paket: {getPackageDisplayLabel(packageName)}
-          </p>
+            <span className="hidden truncate text-[13px] leading-5 text-slate-500 dark:text-slate-300 sm:inline">
+              {portalMode.description}
+            </span>
+
+            {packageName ? (
+              <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                {getPackageDisplayLabel(packageName)}
+              </span>
+            ) : null}
+          </div>
+        </div>
+
+        {portalMode.mode === "MANAGEMENT" &&
+        canCreateOperation(
+          currentUser
+            ? {
+                userId: currentUser.id,
+                role: currentUser.role
+              }
+            : null
+        ) ? (
+          <button
+            type="button"
+            onClick={() =>
+              setShowCreateOperation(true)
+            }
+            className="shrink-0 rounded-md bg-slate-900 px-3.5 py-2 text-[12px] font-bold text-white transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-blue-600 dark:text-white dark:hover:bg-blue-500"
+          >
+            + Yeni Operasyon
+            <span className="ml-2 hidden font-normal opacity-60 md:inline">
+              Alt+N
+            </span>
+          </button>
         ) : null}
       </header>
 
-      {portalMode.mode === "MANAGEMENT" &&
+      {showCreateOperation && portalMode.mode === "MANAGEMENT" &&
       canCreateOperation(
         currentUser
           ? {
@@ -760,18 +825,38 @@ const [showCompleted, setShowCompleted] =
             }
           : null
       ) ? (
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-5 flex items-center justify-between gap-4">
+      <div
+        className="fixed inset-0 z-50 flex justify-end bg-slate-950/20 backdrop-blur-[1px]"
+        onMouseDown={event => {
+          if (
+            event.target ===
+            event.currentTarget
+          ) {
+            setShowCreateOperation(false);
+          }
+        }}
+      >
+        <section className="h-full w-full max-w-[460px] overflow-y-auto border-l border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">
+            <h2 className="text-sm font-bold text-slate-950 dark:text-slate-50">
               Yeni Operasyon
             </h2>
 
-            <p className="mt-1 text-sm text-slate-500">
-              Kayıt oluşturulunca Ajandaya
-              otomatik olarak eklenir.
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              Operasyon + bağlı Ajanda kaydı
             </p>
           </div>
+
+          <button
+            type="button"
+            onClick={() =>
+              setShowCreateOperation(false)
+            }
+            className="rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            Kapat
+          </button>
 
           {scopeError ? (
             <button
@@ -799,7 +884,7 @@ const [showCompleted, setShowCompleted] =
         ) : null}
 
         {!scopeLoading && scope ? (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3 px-4 pt-4 sm:grid-cols-2">
             <label className="text-sm font-medium text-slate-700">
               Satış
 
@@ -810,7 +895,7 @@ const [showCompleted, setShowCompleted] =
                     event.target.value
                   )
                 }
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-blue-950"
               >
                 <option value="">
                   Satış seçin
@@ -850,7 +935,7 @@ const [showCompleted, setShowCompleted] =
                   );
                   setSelectedPartyId("");
                 }}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-blue-950"
               >
                 <option value="TAILOR">
                   Terzi
@@ -877,7 +962,7 @@ const [showCompleted, setShowCompleted] =
                       event.target.value
                     )
                   }
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                  className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-blue-950"
                 >
                   <option value="">
                     Personel seçin
@@ -907,7 +992,7 @@ const [showCompleted, setShowCompleted] =
                         event.target.value
                       )
                     }
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-blue-950"
                     placeholder="Tedarikçi adı"
                   />
                 </label>
@@ -922,7 +1007,7 @@ const [showCompleted, setShowCompleted] =
                         event.target.value
                       )
                     }
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-blue-950"
                     placeholder="05xx..."
                   />
                 </label>
@@ -940,7 +1025,7 @@ const [showCompleted, setShowCompleted] =
                     event.target.value
                   )
                 }
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-blue-950"
               />
             </label>
 
@@ -955,7 +1040,7 @@ const [showCompleted, setShowCompleted] =
                     event.target.value
                   )
                 }
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-blue-950"
               />
             </label>
 
@@ -970,7 +1055,7 @@ const [showCompleted, setShowCompleted] =
                       OperationPriority
                   )
                 }
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-blue-950"
               >
                 <option value="NORMAL">
                   Normal
@@ -994,15 +1079,15 @@ const [showCompleted, setShowCompleted] =
                     event.target.value
                   )
                 }
-                rows={3}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                rows={4}
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-blue-950"
               />
             </label>
           </div>
         ) : null}
 
         {selectedSale && selectedCustomer ? (
-          <div className="mt-5 rounded-lg bg-slate-50 p-4">
+          <div className="mx-4 mt-4 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
             <div className="font-semibold text-slate-900">
               {selectedCustomer.name}
             </div>
@@ -1028,124 +1113,139 @@ const [showCompleted, setShowCompleted] =
             !selectedCustomer
           }
           onClick={handleCreate}
-          className="mt-5 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+          className="mx-4 mb-4 mt-4 w-[calc(100%-2rem)] rounded-md bg-slate-950 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"
         >
           Operasyon ve Ajanda Kaydı Oluştur
         </button>
-      </section>
-      ) : (
-        <section className="rounded-xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-600">
-          Kullanıcı rolünüz yeni operasyon oluşturma yetkisine sahip değil.
-          Yalnız size atanmış işler aşağıda gösterilir.
         </section>
-      )}
+      </div>
+      ) : null}
 
       {portalMode.mode === "MANAGEMENT" ? (
         <section
           data-operation-command-center
-          className="space-y-4"
+          className="border-x border-b border-slate-200 bg-white/95 dark:border-slate-800 dark:bg-slate-900/70"
         >
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                Aktif İş
-              </p>
-              <p className="mt-2 text-3xl font-black tracking-tight text-slate-950">
-                {commandCenterSummary.active}
-              </p>
-              <p className="mt-1 text-xs text-slate-500">
-                Açık operasyon
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-red-200 bg-gradient-to-br from-red-50 to-white p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-red-700">
-                Kritik
-              </p>
-              <p className="mt-2 text-3xl font-black tracking-tight text-red-950">
-                {commandCenterSummary.critical}
-              </p>
-              <p className="mt-1 text-xs text-red-700">
-                Gecikmiş / acil / sorunlu
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-700">
-                Termin Riski
-              </p>
-              <p className="mt-2 text-3xl font-black tracking-tight text-amber-950">
-                {commandCenterSummary.dueSoon}
-              </p>
-              <p className="mt-1 text-xs text-amber-700">
-                24 saat içinde
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-violet-700">
-                Sorun / Bloke
-              </p>
-              <p className="mt-2 text-3xl font-black tracking-tight text-violet-950">
-                {commandCenterSummary.problem}
-              </p>
-              <p className="mt-1 text-xs text-violet-700">
-                Sebep incelenmeli
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">
-                Tamamlanan
-              </p>
-              <p className="mt-2 text-3xl font-black tracking-tight text-emerald-950">
-                {commandCenterSummary.completed}
-              </p>
-              <p className="mt-1 text-xs text-emerald-700">
-                Görünen kapsam
-              </p>
-            </div>
+          <div className="flex min-h-11 items-center overflow-x-auto border-b border-slate-200 text-[12px] dark:border-slate-800">
+            {[
+              {
+                label: "Aktif",
+                value: commandCenterSummary.active,
+                tone: "text-slate-700 dark:text-slate-200"
+              },
+              {
+                label: "Kritik",
+                value: commandCenterSummary.critical,
+                tone: "text-red-700 dark:text-red-300"
+              },
+              {
+                label: "Termin Riski",
+                value: commandCenterSummary.dueSoon,
+                tone: "text-amber-700 dark:text-amber-300"
+              },
+              {
+                label: "Bloke",
+                value: commandCenterSummary.problem,
+                tone: "text-red-800 dark:text-red-300"
+              },
+              {
+                label: "Tamamlanan",
+                value: commandCenterSummary.completed,
+                tone: "text-emerald-700 dark:text-emerald-300"
+              }
+            ].map(item => (
+              <div
+                key={item.label}
+                className="flex shrink-0 items-center gap-1 border-r border-slate-200 px-4 py-2.5 dark:border-slate-800"
+              >
+                <span className="text-[12px] text-slate-600 dark:text-slate-300">
+                  {item.label}
+                </span>
+                <span className={`ml-1 rounded px-1.5 py-0.5 text-[11px] font-bold tabular-nums ${item.tone}`}>
+                  {item.value}
+                </span>
+              </div>
+            ))}
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-bold text-slate-950">
-                  Operasyon Komuta Merkezi
-                </p>
-                <p className="mt-1 text-xs leading-5 text-slate-500">
-                  İş, müşteri, atanan kişi veya operasyon detayı içinde ara.
-                </p>
-              </div>
+          <div className="flex min-h-10 flex-col gap-2 bg-slate-50/70 px-2.5 py-2 dark:bg-slate-950/35 md:h-10 md:flex-row md:items-center md:gap-3 md:py-0">
+            <label
+              className="sr-only"
+              htmlFor="operation-search"
+            >
+              Operasyon ara
+            </label>
 
-              <div className="w-full lg:max-w-md">
-                <label
-                  className="sr-only"
-                  htmlFor="operation-search"
+            <input
+              id="operation-search"
+              value={searchQuery}
+              onChange={event =>
+                setSearchQuery(
+                  event.target.value
+                )
+              }
+              placeholder="Operasyon, cari, atanan ara..."
+              className="h-8 min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 text-[13px] text-slate-900 placeholder:text-slate-400 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-400 dark:focus:ring-blue-950 md:max-w-[420px]"
+            />
+
+            <select
+              value={kindFilter}
+              onChange={event =>
+                setKindFilter(
+                  event.target.value as
+                    | "ALL"
+                    | OperationKind
+                )
+              }
+              className="h-8 shrink-0 rounded-md border border-slate-300 bg-white px-2.5 text-[12px] text-slate-700 outline-none transition focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+            >
+              <option value="ALL">
+                Tüm İş Türleri
+              </option>
+
+              {(
+                Object.entries(
+                  KIND_LABELS
+                ) as Array<
+                  [OperationKind, string]
                 >
-                  Operasyon ara
-                </label>
-                <input
-                  id="operation-search"
-                  value={searchQuery}
-                  onChange={event =>
-                    setSearchQuery(
-                      event.target.value
-                    )
-                  }
-                  placeholder="İş, müşteri, terzi, montajcı, tedarikçi ara..."
-                  className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100"
-                />
-              </div>
-            </div>
+              ).map(([value, label]) => (
+                <option
+                  key={value}
+                  value={value}
+                >
+                  {label}
+                </option>
+              ))}
+            </select>
+
+            <label className="flex shrink-0 items-center gap-2 text-[12px] text-slate-600 dark:text-slate-300">
+              <input
+                type="checkbox"
+                checked={showCompleted}
+                onChange={event =>
+                  setShowCompleted(
+                    event.target.checked
+                  )
+                }
+                className="h-3.5 w-3.5"
+              />
+
+              Tamamlananları göster
+            </label>
+
+            <span className="ml-auto shrink-0 text-[12px] font-medium tabular-nums text-slate-500 dark:text-slate-300">
+              Görünen: {visibleOperations.length} iş
+            </span>
           </div>
         </section>
       ) : null}
-      <section>
+
+      <section className="mt-3">
         {portalMode.mode === "PROVIDER_READY" ? (
           <div
             data-provider-portal-filter
-            className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center"
+            className="flex flex-col gap-2 border border-slate-200 bg-white p-2.5 dark:border-slate-800 dark:bg-slate-900 sm:flex-row sm:items-center"
           >
             <div>
               <p className="text-sm font-semibold text-slate-900">
@@ -1177,67 +1277,41 @@ const [showCompleted, setShowCompleted] =
               {visibleOperations.length} iş
             </span>
           </div>
-        ) : (
-<div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <select
-            value={kindFilter}
-            onChange={event =>
-              setKindFilter(
-                event.target.value as
-                  | "ALL"
-                  | OperationKind
-              )
-            }
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          >
-            <option value="ALL">
-              Tüm İşler
-            </option>
-
-            {(
-              Object.entries(
-                KIND_LABELS
-              ) as Array<
-                [OperationKind, string]
-              >
-            ).map(([value, label]) => (
-              <option
-                key={value}
-                value={value}
-              >
-                {label}
-              </option>
-            ))}
-          </select>
-
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input
-              type="checkbox"
-              checked={showCompleted}
-              onChange={event =>
-                setShowCompleted(
-                  event.target.checked
-                )
-              }
-            />
-
-            Tamamlananları göster
-          </label>
-
-          <span className="ml-auto text-sm text-slate-600">
-            {visibleOperations.length} iş
-          </span>
-        </div>
-        )}
-
+        ) : null}
         {visibleOperations.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500">
-            {portalMode.mode === "PROVIDER_READY"
-              ? portalMode.emptyMessage
-              : "Gösterilecek operasyon kaydı bulunmuyor."}
-          </div>
-        ) : (
-          <div className="grid gap-4">
+          <div className="flex min-h-[150px] max-h-[180px] items-center justify-center rounded-lg border border-slate-200 bg-white/70 px-4 py-5 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900/45">
+            <div className="w-full max-w-[400px] rounded-lg border border-slate-200 bg-white px-6 py-4 dark:border-slate-800 dark:bg-slate-900">
+              <div className="mx-auto grid h-8 w-8 grid-cols-2 gap-1 rounded-md border border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-800">
+                <span className="rounded-sm bg-slate-300 dark:bg-slate-600" />
+                <span className="rounded-sm bg-blue-400" />
+                <span className="rounded-sm bg-amber-400" />
+                <span className="rounded-sm bg-emerald-400" />
+              </div>
+
+              <h3 className="mt-2 text-[14px] font-semibold text-slate-900 dark:text-white">
+                Aktif Operasyon Bulunmadı
+              </h3>
+
+              <p className="mt-1 text-[12px] leading-5 text-slate-500 dark:text-slate-300">
+                {portalMode.mode === "PROVIDER_READY"
+                  ? portalMode.emptyMessage
+                  : "Kriterlere uygun operasyon kaydı yok veya tüm işler tamamlandı."}
+              </p>
+
+              {portalMode.mode === "MANAGEMENT" ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowCreateOperation(true)
+                  }
+                  className="mt-3 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  + Yeni Operasyon Oluştur
+                </button>
+              ) : null}
+            </div>
+          </div>        ) : (
+          <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
             {visibleOperations.map(
               operation => {
                 const late =
@@ -1287,9 +1361,21 @@ const [showCompleted, setShowCompleted] =
                         : undefined
                     }
                     key={operation.id}
-                    className={`overflow-hidden rounded-2xl border bg-white shadow-sm transition-shadow hover:shadow-md ${late ? "border-red-300 ring-1 ring-red-100" : "border-slate-200"}`}
+                    className={`relative border-b border-slate-200 bg-white last:border-b-0 dark:border-slate-800 dark:bg-slate-900 ${late ? "bg-red-50/40 dark:bg-red-950/10" : ""}`}
                   >
-                    <div className="flex flex-col gap-4 p-4 sm:p-5 lg:flex-row lg:justify-between">
+                    <div
+                      aria-hidden="true"
+                      className={`absolute inset-y-0 left-0 w-1 ${
+                        readiness.code === "BLOCKED"
+                          ? "bg-red-500"
+                          : risk.level === "MEDIUM"
+                            ? "bg-amber-400"
+                            : readiness.code === "COMPLETE"
+                              ? "bg-emerald-500"
+                              : "bg-blue-500"
+                      }`}
+                    />
+                    <div className="grid min-h-12 grid-cols-1 gap-2 px-3 py-2 pl-4 sm:grid-cols-[minmax(220px,1.5fr)_minmax(150px,0.8fr)_minmax(180px,0.9fr)] sm:items-center">
                       <div className="min-w-0">
                         <div className="flex flex-wrap gap-2">
                           <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">
@@ -1323,20 +1409,20 @@ const [showCompleted, setShowCompleted] =
                           ) : null}
                         </div>
 
-                        <h3 className="mt-3 break-words text-base font-bold text-slate-900 sm:text-lg">
+                        <h3 className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
                           {operation.title}
                         </h3>
 
-                        <p className="mt-1 text-sm font-medium text-slate-700">
+                        <p className="mt-0.5 truncate text-xs font-medium text-slate-600 dark:text-slate-300">
                           {operation.customerName}
                         </p>
 
-                        <p className="mt-1 text-sm text-slate-500">
+                        <p className="mt-1 text-sm leading-5 text-slate-500">
                           {operation.party?.name}
                         </p>
                       </div>
 
-                      <div className={`rounded-lg px-3 py-2 text-xs sm:text-sm ${late ? "bg-red-50 font-semibold text-red-700" : "bg-slate-50 text-slate-600"}`}>
+                      <div className={`text-xs tabular-nums ${late ? "font-semibold text-red-700 dark:text-red-300" : "text-slate-500 dark:text-slate-400"}`}>
                         <div>
                           Başlangıç:{" "}
                           {new Date(
@@ -1359,7 +1445,7 @@ const [showCompleted, setShowCompleted] =
 
                     <div
                       data-operation-health-panel
-                      className="grid gap-3 border-t border-slate-100 bg-slate-50/70 p-4 sm:grid-cols-2 sm:p-5 lg:grid-cols-3"
+                      className={`grid gap-2 border-t border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950 sm:grid-cols-3 ${isExpanded ? "grid" : "hidden"}`}
                     >
                       <div className="rounded-xl border border-slate-200 bg-white p-3">
                         <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
@@ -1459,7 +1545,7 @@ const [showCompleted, setShowCompleted] =
                       </div>
                     </div>
 
-                    <div className="border-t border-slate-100 px-4 py-3 sm:hidden">
+                    <div className="border-t border-slate-200 px-3 py-2 dark:border-slate-800">
                       <button
                         type="button"
                         onClick={() =>
@@ -1488,10 +1574,10 @@ const [showCompleted, setShowCompleted] =
                     </div>
 
                     <div
-                      className={`px-4 pb-4 sm:px-5 sm:pb-5 ${
+                      className={`px-3 pb-3 ${
                         isExpanded
                           ? "block"
-                          : "hidden sm:block"
+                          : "hidden"
                       }`}
                     >                    {operation.notes ? (
                       <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-950">
@@ -1560,7 +1646,7 @@ const [showCompleted, setShowCompleted] =
                         </div>
                       ) : null}
                     </div>
-                    <div className="flex flex-col gap-2 border-t border-slate-100 p-4 sm:flex-row sm:flex-wrap sm:p-5 [&_button]:w-full sm:[&_button]:w-auto [&_a]:w-full sm:[&_a]:w-auto">
+                    <div className={`${isExpanded ? "flex" : "hidden"} flex-col gap-2 border-t border-slate-200 p-3 dark:border-slate-800 sm:flex-row sm:flex-wrap [&_button]:w-full sm:[&_button]:w-auto [&_a]:w-full sm:[&_a]:w-auto`}>
                       {portalMode.mode === "PROVIDER_READY" &&
                       providerActor &&
                       providerLink ? (
@@ -1770,6 +1856,6 @@ const [showCompleted, setShowCompleted] =
           onRoute={routeChild}
         />
       ) : null}
-</main>
+</div></main>
   );
 }

@@ -5,6 +5,7 @@ import type {
 import type {
   OperationKind,
   OperationParty,
+  OperationPriority,
   OperationRecord
 } from "./operationsWorkflow";
 import type {
@@ -28,6 +29,7 @@ export interface BuildOperationFromSaleInput {
   supplierPhone?: string;
   scheduledAt: string;
   dueAt: string;
+  priority?: OperationPriority;
   notes?: string;
   createdByUserId: string;
   now: string;
@@ -227,6 +229,8 @@ export function buildOperationFromSale(
       ).toISOString(),
 
     status: "ASSIGNED",
+    priority:
+      input.priority ?? "NORMAL",
     notes:
       input.notes?.trim() ||
       undefined,
