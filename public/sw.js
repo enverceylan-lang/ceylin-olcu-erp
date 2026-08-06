@@ -1,12 +1,10 @@
 // ─── Cache Version — bump this string on every deployment to force cache refresh ───
-const CACHE_VERSION = 'v3-enverp-brand';
+const CACHE_VERSION = 'v4-tenant-launch-update';
 const CACHE_NAME = `olcu-erp-shell-${CACHE_VERSION}`;
 const STATIC_CACHE_NAME = `olcu-erp-static-${CACHE_VERSION}`;
 const PAGES_CACHE_NAME = `olcu-erp-pages-${CACHE_VERSION}`;
 
 const STATIC_ASSETS = [
-  '/',
-  '/manifest.json',
   '/favicon.ico',
   '/brand/enverp-icon.png',
   '/icons/icon-192x192.png',

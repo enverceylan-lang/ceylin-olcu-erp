@@ -34,7 +34,7 @@ export const metadata:
     description:
       "ENVerp — Entegre Net Veri iş ve operasyon yönetim platformu",
     manifest:
-      "/manifest.json",
+      "/api/pwa/manifest",
     applicationName:
       "ENVerp",
     appleWebApp: {

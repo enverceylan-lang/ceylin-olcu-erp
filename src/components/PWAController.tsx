@@ -117,8 +117,17 @@ export function PWAController() {
 
       // 4. Service Worker registration and update detection
       if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("/sw.js").then((registration) => {
+        navigator.serviceWorker.register("/sw.js").then(async (registration) => {
           console.log("Service Worker registered with scope:", registration.scope);
+
+          // Ask the browser to check sw.js immediately instead of waiting for
+          // its normal update interval. This keeps installed PWAs aligned with
+          // the latest production deployment when they are opened online.
+          try {
+            await registration.update();
+          } catch (updateError) {
+            console.warn("Service Worker update check failed:", updateError);
+          }
 
           // Check if there's already a waiting worker on page load
           if (registration.waiting) {
