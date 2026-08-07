@@ -1,6 +1,6 @@
 import { formatDefaultDeliveryPromiseDate } from "@/lib/deliveryPromise";
 import { create } from 'zustand';
-import { normalizeCariName } from '@/lib/stringUtils';
+import { normalizeCariAddress, normalizeCariName, normalizeCariRegion } from '@/lib/stringUtils';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { useAuthStore, normalizeRole } from './useAuthStore';
 import { saveLocalCustomer, saveLocalCustomers, loadLocalCustomers } from '@/lib/localCustomerDb';
@@ -319,6 +319,10 @@ export interface Customer {
   name: string;
   phone: string;
   address: string;
+  province?: string;
+  district?: string;
+  locationSource?: 'GPS' | 'MANUAL';
+  locationResolvedAt?: string;
   mapLocation: string;
   notes: string;
   rooms: Room[];
@@ -711,6 +715,9 @@ export const useStore = create<AppState>()(
         }
 
         if (data.name) { data.name = normalizeCariName(data.name); }
+        if (data.address) { data.address = normalizeCariAddress(data.address); }
+        if (data.province) { data.province = normalizeCariRegion(data.province); }
+        if (data.district) { data.district = normalizeCariRegion(data.district); }
         const newCustomer: Customer = {
           ...data,
           id: newCustomerId,
@@ -757,6 +764,9 @@ export const useStore = create<AppState>()(
         const target = state.customers.find(c => c.id === id);
         if (target) {
           if (data.name) { data.name = normalizeCariName(data.name); }
+        if (data.address) { data.address = normalizeCariAddress(data.address); }
+        if (data.province) { data.province = normalizeCariRegion(data.province); }
+        if (data.district) { data.district = normalizeCariRegion(data.district); }
           const updatedCustomer = {
             ...target,
             ...data,

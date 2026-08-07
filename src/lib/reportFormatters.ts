@@ -21,15 +21,319 @@ export function getValidNote(note?: string | null): string {
 
 // ─── WhatsApp Short Report Builder ───
 
+
+function formatWhatsAppMeasurementCm(
+  value:
+    unknown
+): string {
+  const number =
+    Number(value);
+
+  if (
+    !Number.isFinite(number) ||
+    number <= 0
+  ) {
+    return "0";
+  }
+
+  return number
+    .toFixed(2)
+    .replace(
+      /\.?0+$/,
+      ""
+    );
+}
+
+function buildPlicellOnlyWhatsAppReport(
+  customer:
+    Customer,
+  measurements:
+    MeasurementRecord[],
+  companyName:
+    string
+): string | null {
+  const customerMeasurements =
+    measurements.filter(
+      measurement =>
+        measurement.customerId ===
+          customer.id &&
+        !measurement.isDeleted
+    );
+
+  if (
+    customerMeasurements.length ===
+    0
+  ) {
+    return null;
+  }
+
+  let hasPlicell =
+    false;
+
+  let hasOtherProduct =
+    false;
+
+  customerMeasurements.forEach(
+    measurement => {
+      const activeTypes =
+        (
+          measurement.selectedProducts ||
+          []
+        )
+          .filter(
+            product =>
+              product.isActive
+          )
+          .map(
+            product =>
+              String(
+                product.productType ||
+                ""
+              ).toUpperCase()
+          )
+          .filter(Boolean);
+
+      const types =
+        activeTypes.length > 0
+          ? activeTypes
+          : [
+              String(
+                measurement.productType ||
+                measurement.templateType ||
+                ""
+              ).toUpperCase()
+            ].filter(Boolean);
+
+      types.forEach(
+        type => {
+          if (
+            type ===
+            "PLICELL"
+          ) {
+            hasPlicell =
+              true;
+          }
+          else {
+            hasOtherProduct =
+              true;
+          }
+        }
+      );
+    }
+  );
+
+  if (
+    !hasPlicell ||
+    hasOtherProduct
+  ) {
+    return null;
+  }
+
+  const lines:
+    string[] = [
+    `${companyName} — ÖLÇÜ RAPORU`,
+    `Müşteri: ${customer.name}`,
+    `Tarih : ${new Date().toLocaleDateString("tr-TR")}`,
+    ""
+  ];
+
+  let totalM2 =
+    0;
+
+  customer.rooms.forEach(
+    room => {
+      const roomMeasurements =
+        customerMeasurements.filter(
+          measurement =>
+            measurement.roomId ===
+            room.id
+        );
+
+      if (
+        roomMeasurements.length ===
+        0
+      ) {
+        return;
+      }
+
+      const cams:
+        Array<{
+          widthCm:
+            number;
+          heightCm:
+            number;
+        }> = [];
+
+      const profiles =
+        new Set<string>();
+
+      roomMeasurements.forEach(
+        measurement => {
+          const raw =
+            asRecord(
+              measurement.rawValues
+            );
+
+          const profile =
+            String(
+              raw.profilRengi ||
+              ""
+            ).trim();
+
+          if (profile) {
+            profiles.add(
+              profile
+            );
+          }
+
+          const rawCams =
+            Array.isArray(
+              raw.plicellCamListesi
+            )
+              ? raw.plicellCamListesi
+              : [];
+
+          rawCams.forEach(
+            rawCam => {
+              const cam =
+                asRecord(
+                  rawCam
+                );
+
+              const widthCm =
+                Number(
+                  cam.widthCm ??
+                  cam.enCm ??
+                  cam.width ??
+                  0
+                );
+
+              const heightCm =
+                Number(
+                  cam.heightCm ??
+                  cam.boyCm ??
+                  cam.height ??
+                  raw.ortakCamBoyuCm ??
+                  0
+                );
+
+              if (
+                widthCm > 0 &&
+                heightCm > 0
+              ) {
+                cams.push({
+                  widthCm,
+                  heightCm
+                });
+              }
+            }
+          );
+
+          const calculation =
+            getStoredProductCalculation(
+              measurement,
+              "PLICELL"
+            );
+
+          const storedTotalM2 =
+            Number(
+              calculation.totalSystemM2 ??
+              calculation.totalM2 ??
+              0
+            );
+
+          if (
+            Number.isFinite(
+              storedTotalM2
+            ) &&
+            storedTotalM2 > 0
+          ) {
+            totalM2 +=
+              storedTotalM2;
+          }
+        }
+      );
+
+      if (
+        cams.length ===
+        0
+      ) {
+        return;
+      }
+
+      lines.push(
+        room.name
+          .toLocaleUpperCase(
+            "tr-TR"
+          )
+      );
+
+      lines.push(
+        "* Plicell"
+      );
+
+      if (
+        profiles.size > 0
+      ) {
+        lines.push(
+          `  Profil: ${[
+            ...profiles
+          ].join(" / ")}`
+        );
+      }
+
+      lines.push("");
+
+      cams.forEach(
+        (cam, index) => {
+          lines.push(
+            `  ${index + 1}. Cam: ${formatWhatsAppMeasurementCm(
+              cam.widthCm
+            )} en × ${formatWhatsAppMeasurementCm(
+              cam.heightCm
+            )} boy`
+          );
+        }
+      );
+
+      lines.push("");
+    }
+  );
+
+  lines.push(
+    `Toplam M2: ${totalM2.toFixed(
+      2
+    )}`
+  );
+
+  return lines
+    .join("\n")
+    .trim();
+}
 export function buildWhatsAppShortReport(
   customer: Customer,
   users: { id: string; name: string }[],
   measurements: MeasurementRecord[] = [],
+  companyName = "ENVerp"
 ): string {
+  const normalizedCompanyName =
+    companyName.trim() ||
+    "ENVerp";
+
+  const plicellOnlyReport =
+    buildPlicellOnlyWhatsAppReport(
+      customer,
+      measurements,
+      normalizedCompanyName
+    );
+
+  if (plicellOnlyReport) {
+    return plicellOnlyReport;
+  }
   void users;
 
   const lines: string[] = [
-    '*CEYLİN PERDE — ÖLÇÜ RAPORU*',
+    `${normalizedCompanyName} — ÖLÇÜ RAPORU`,
     `Müşteri: ${customer.name}`,
     `Tarih: ${new Date().toLocaleDateString('tr-TR')}`,
     '',

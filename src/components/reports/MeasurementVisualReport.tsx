@@ -1,5 +1,6 @@
 import React from 'react';
 import { buildWhatsAppShortReport } from "@/lib/reportFormatters";
+import { fetchActiveCompanyDisplayName } from "@/lib/activeCompanyDisplayNameClient";
 import { X, Printer, Share2, Loader2, ZoomIn, ZoomOut, RotateCcw, Move } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -722,6 +723,29 @@ interface MeasurementVisualReportProps {
 
 export function MeasurementVisualReport({ isOpen, onClose, customer, measurements: propMeasurements }: MeasurementVisualReportProps) {
   const [isGeneratingPdf, setIsGeneratingPdf] = React.useState(false);
+
+  const [activeCompanyName, setActiveCompanyName] =
+    React.useState<string>("");
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    fetchActiveCompanyDisplayName()
+      .then(name => {
+        if (!cancelled) {
+          setActiveCompanyName(name);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setActiveCompanyName("");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [previewNode, setPreviewNode] = React.useState<React.ReactNode | null>(null);
   const [previewZoom, setPreviewZoom] = React.useState(1);
   const [previewOffset, setPreviewOffset] = React.useState({ x: 0, y: 0 });
@@ -1881,7 +1905,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
         .toLowerCase();
 
     const fileName =
-      `ceylin-perde-ceyiz-olcu-raporu-${safeCustomerName || 'musteri'}.pdf`;
+      `${(activeCompanyName || 'sirket').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase()}-olcu-raporu-${safeCustomerName || 'musteri'}.pdf`;
 
     const pdfBlob =
       pdf.output('blob');
@@ -2005,7 +2029,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
     }
 
     const documentTitle =
-      'CEYLİN PERDE & ÇEYİZ - Saha Ölçü Raporu';
+      `${activeCompanyName || "Şirket"} - Saha Ölçü Raporu`;
 
     frameDocument.open();
     frameDocument.write(
@@ -2196,7 +2220,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
 
       if (supportsFileShare) {
         await shareNavigator.share!({
-          title: 'CEYLİN PERDE & ÇEYİZ',
+          title: activeCompanyName || "Şirket",
           files: [pdfFile]
         });
       } else {
@@ -2234,10 +2258,14 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
   const fallbackWhatsApp = async (file: File) => {
     if (typeof window === 'undefined') return;
 
+    const activeCompanyName =
+      await fetchActiveCompanyDisplayName();
+
     const reportText = buildWhatsAppShortReport(
       customer,
       [],
       activeMeasurements,
+      activeCompanyName
     );
 
     if (navigator.share) {
@@ -2278,7 +2306,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
       const a = document.createElement('a');
       a.href = url;
       a.download =
-        `CEYLIN-OLCU-RAPORU-${customer.name || 'MUSTERI'}.pdf`;
+        `${(activeCompanyName || 'SIRKET').toUpperCase()}-OLCU-RAPORU-${customer.name || 'MUSTERI'}.pdf`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -2516,7 +2544,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
 
             {/* Report Header Title */}
             <div className="border-b border-slate-800 pb-4 text-left print:border-slate-300">
-              <h1 className="text-lg font-black tracking-wide text-blue-500 print:text-blue-700">CEYLİN PERDE & ÇEYİZ</h1>
+              <h1 data-report-company-name className="text-lg font-black tracking-wide text-blue-500 print:text-blue-700">{activeCompanyName || "Şirket"}</h1>
               <h2 className="mt-1 text-[11px] font-bold uppercase tracking-widest text-slate-400 print:text-slate-600">Saha Ölçü Raporu</h2>
             </div>
 
