@@ -6,6 +6,7 @@ import {
 import type {
   OperationRecord
 } from "@/lib/operationsWorkflow";
+import type { OperationTransitionContext } from "@/lib/operationsWorkflow";
 import type {
   ProviderWorkActor,
   ProviderWorkLinkSnapshot
@@ -18,6 +19,24 @@ import {
 import {
   useOperationsStore
 } from "@/store/useOperationsStore";
+import {
+  useSalesStore
+} from "@/store/salesStore";
+import {
+  useStore
+} from "@/store/useStore";
+import {
+  useServiceRateStore
+} from "@/store/useServiceRateStore";
+import {
+  calculateTailorCompletionEarnings
+} from "@/lib/tailorCompletionEarningsCoordinator";
+import {
+  calculateInstallationEarningsAmount
+} from "@/lib/installationCompletionEarningsCoordinator";
+import {
+  routeInstallationAfterTailorCompletion
+} from "@/lib/tailorCompletionInstallationCoordinator";
 
 interface ProviderOperationActionsProps {
   operation:
@@ -55,7 +74,9 @@ function resultMessage(
     | "NOT_FOUND"
     | "REJECTED",
   action:
-    ProviderStatusAction
+    ProviderStatusAction,
+  providerType:
+    "TAILOR" | "INSTALLER"
 ): string {
   if (outcome === "REPLAY") {
     return "Bu işlem daha önce uygulanmış. Mükerrer değişiklik yapılmadı.";
@@ -74,7 +95,9 @@ function resultMessage(
   }
 
   if (action === "START") {
-    return "İşe başlandı.";
+    return providerType === "TAILOR"
+      ? "Planlamaya başlandı. Fiziksel kesim, malzeme hazır olduğunda Üretim ekranından başlatılır."
+      : "İşe başlandı.";
   }
 
   if (
@@ -87,18 +110,36 @@ function resultMessage(
     return "İşe devam edildi.";
   }
 
-  return "Tamamlanma bildirildi. Hakediş tutarı yönetici tarafından girilmek üzere beklemeye alındı.";
+  return "Tamamlanma bildirildi.";
 }
 
 export default function ProviderOperationActions({
   operation,
   actor,
-  link
-}: ProviderOperationActionsProps) {
+  link,
+  transitionContext
+}: ProviderOperationActionsProps & {
+  transitionContext?: OperationTransitionContext;
+}) {
   const updateProviderStatus =
     useOperationsStore(
       state =>
         state.updateProviderStatus
+    );
+
+  const sales =
+    useSalesStore(
+      state => state.sales
+    );
+
+  const products =
+    useStore(
+      state => state.products
+    );
+
+  const rates =
+    useServiceRateStore(
+      state => state.rates
     );
 
   const [busy, setBusy] =
@@ -148,6 +189,62 @@ export default function ProviderOperationActions({
     setMessage("");
 
     try {
+      const occurredAt =
+        new Date().toISOString();
+
+      let automaticEarningsAmount:
+        number | undefined;
+
+      if (
+        action ===
+        "REPORT_COMPLETED"
+      ) {
+        const completedOperation = {
+          ...operation,
+          status:
+            "COMPLETED" as const,
+          completedAt:
+            occurredAt,
+          updatedAt:
+            occurredAt
+        };
+
+        const sale =
+          sales.find(
+            item =>
+              item.id ===
+              operation.saleId
+          );
+
+        const calculation =
+          link.providerType ===
+            "TAILOR"
+            ? calculateTailorCompletionEarnings({
+                operation:
+                  completedOperation,
+                sale,
+                products,
+                rates
+              })
+            : calculateInstallationEarningsAmount({
+                operation:
+                  completedOperation,
+                sale,
+                products,
+                rates
+              });
+
+        if (!calculation.ok) {
+          setMessage(
+            `Tamamlama reddedildi. Hakediş tamamlanma tarihindeki tarifeden hesaplanamadı: ${calculation.reason}`
+          );
+          return;
+        }
+
+        automaticEarningsAmount =
+          calculation.amount;
+      }
+
       const result =
         updateProviderStatus({
           actor,
@@ -175,14 +272,128 @@ export default function ProviderOperationActions({
                   normalizedProblem
               }
             : {})
-        });
+        },
+          transitionContext);
 
-      setMessage(
-        resultMessage(
-          result.outcome,
-          action
-        )
-      );
+      if (
+        result.outcome ===
+          "UPDATED" &&
+        action ===
+          "REPORT_COMPLETED" &&
+        typeof automaticEarningsAmount ===
+          "number"
+      ) {
+        const updatedOperation =
+          useOperationsStore
+            .getState()
+            .operations
+            .find(
+              item =>
+                item.id ===
+                operation.id
+            );
+
+        if (!updatedOperation) {
+          setMessage(
+            "İş tamamlandı ancak güncel operasyon kaydı bulunamadı; hakediş kaydı oluşturulmadı."
+          );
+          return;
+        }
+
+        const earning =
+          useOperationsStore
+            .getState()
+            .registerAutomaticProviderEarning({
+              operation:
+                updatedOperation,
+              amount:
+                automaticEarningsAmount,
+              occurredAt,
+              actorUserId:
+                actor.userId
+            });
+
+        if (
+          earning.outcome ===
+          "REJECTED" ||
+          earning.outcome ===
+          "NOT_FOUND"
+        ) {
+          setMessage(
+            "İş tamamlandı ancak otomatik hakediş/cari borç kaydı oluşturulamadı."
+          );
+          return;
+        }
+
+        if (
+          link.providerType ===
+          "TAILOR"
+        ) {
+          const installation =
+            routeInstallationAfterTailorCompletion({
+              operation:
+                updatedOperation,
+              actorUserId:
+                actor.userId,
+              now:
+                occurredAt
+            });
+
+          if (
+            installation.outcome ===
+            "WAITING_ASSIGNMENT"
+          ) {
+            setMessage(
+              `Tamamlandı. Hakediş ${automaticEarningsAmount.toFixed(
+                2
+              )} TRY olarak cariye işlendi. İş montaja hazır; montajcı ataması bekleniyor.`
+            );
+            return;
+          }
+
+          if (
+            installation.outcome ===
+            "READY_NOT_ROUTED" ||
+            installation.outcome ===
+            "REJECTED"
+          ) {
+            setMessage(
+              `Tamamlandı. Hakediş ${automaticEarningsAmount.toFixed(
+                2
+              )} TRY olarak cariye işlendi; montaj yönlendirmesi ayrıca kontrol edilmeli.`
+            );
+            return;
+          }
+
+          if (
+            installation.outcome ===
+            "ROUTED" ||
+            installation.outcome ===
+            "REPLAY"
+          ) {
+            setMessage(
+              `Tamamlandı. Hakediş ${automaticEarningsAmount.toFixed(
+                2
+              )} TRY olarak cariye işlendi ve montaj işi hazırlandı.`
+            );
+            return;
+          }
+        }
+
+        setMessage(
+          `Tamamlandı. Hakediş ${automaticEarningsAmount.toFixed(
+            2
+          )} TRY olarak tamamlanma tarihindeki tarifeden otomatik kesinleştirildi ve cariye işlendi.`
+        );
+      } else {
+        setMessage(
+          resultMessage(
+            result.outcome,
+            action,
+            link.providerType
+          )
+        );
+      }
 
       if (
         result.outcome ===
@@ -338,7 +549,8 @@ export default function ProviderOperationActions({
                 {busy
                   ? "İşleniyor..."
                   : getProviderStatusActionLabel(
-                      action
+                      action,
+                      link.providerType
                     )}
               </button>
             );

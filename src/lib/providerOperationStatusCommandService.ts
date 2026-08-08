@@ -1,3 +1,5 @@
+import type { OperationTransitionContext } from "./operationsWorkflow";
+import { decideOperationRelease } from "./operationDependencyReleasePolicy";
 import {
   buildAgendaEvent,
   type AgendaEvent,
@@ -76,6 +78,9 @@ export interface ProviderOperationStatusCommandRequest {
 
   earningsCurrency?:
     ProviderEarningsCurrency;
+
+  automaticEarningsAmount?:
+    number;
 
   auditId:
     string;
@@ -162,7 +167,8 @@ export function executeProviderOperationStatusCommand(
   state:
     OperationsStateData,
   request:
-    ProviderOperationStatusCommandRequest
+    ProviderOperationStatusCommandRequest,
+  context?: OperationTransitionContext
 ): ProviderOperationStatusCommandResult {
   const operation =
     state.operations.find(
@@ -216,6 +222,27 @@ export function executeProviderOperationStatusCommand(
 
   const nextStatus =
     decision.targetStatus;
+
+  if (
+    (nextStatus === "IN_PROGRESS" ||
+      nextStatus === "COMPLETED") &&
+    context?.release
+  ) {
+    const release = decideOperationRelease(
+      context.release
+    );
+
+    if (!release.released) {
+      return {
+        outcome: "REJECTED",
+        state,
+        reason:
+          release.state === "BLOCKED"
+            ? "OPERATION_RELEASE_BLOCKED"
+            : "OPERATION_RELEASE_WAITING"
+      };
+    }
+  }
 
   const nextOperation:
     OperationRecord = {

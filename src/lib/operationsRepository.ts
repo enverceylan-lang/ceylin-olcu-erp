@@ -5,7 +5,9 @@ import {
   decideOperationTransition,
   type AgendaEvent,
   type OperationRecord,
-  type OperationStatus
+  type OperationStatus,
+  type OperationTransitionRejectReason,
+  type OperationTransitionContext
 } from "./operationsWorkflow";
 
 export interface OperationsStateData {
@@ -51,11 +53,7 @@ export type UpdateOperationStatusResult =
   | {
       outcome: "REJECTED";
       state: OperationsStateData;
-      reason:
-        | "ROLE_FORBIDDEN"
-        | "ASSIGNMENT_REQUIRED"
-        | "INVALID_TRANSITION"
-        | "TERMINAL_STATUS_LOCKED";
+      reason: OperationTransitionRejectReason;
     };
 
 function sameScope(
@@ -129,7 +127,8 @@ export function updateOperationRecordStatus(
   operationId: string,
   target: OperationStatus,
   actor: OperationActor,
-  occurredAt: string
+  occurredAt: string,
+  context?: OperationTransitionContext
 ): UpdateOperationStatusResult {
   const current = state.operations.find(
     operation => operation.id === operationId
@@ -146,7 +145,8 @@ export function updateOperationRecordStatus(
     current,
     target,
     actor,
-    occurredAt
+    occurredAt,
+    context
   );
 
   if (!decision.allowed) {
@@ -219,6 +219,6 @@ export function listVisibleOperationsForUser(
   return listScopedOperations(state, scope).filter(
     operation =>
       manager ||
-      operation.party?.id === actor.userId
+      operation.party?.userId === actor.userId
   );
 }

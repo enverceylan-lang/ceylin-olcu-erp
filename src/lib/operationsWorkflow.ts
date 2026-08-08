@@ -3,6 +3,13 @@ import {
   erpScopeMatches,
   validateErpScope
 } from "./erpScope";
+import type {
+  OperationDependencySignal,
+  OperationReleaseBlocker
+} from "./operationDependencyReleasePolicy";
+import {
+  decideOperationRelease
+} from "./operationDependencyReleasePolicy";
 
 export type OperationKind =
   | "GENERAL"
@@ -119,6 +126,14 @@ export type OperationCreateDecision =
         | "DUPLICATE_ACTIVE_OPERATION";
     };
 
+export type OperationTransitionRejectReason =
+  | "ROLE_FORBIDDEN"
+  | "ASSIGNMENT_REQUIRED"
+  | "INVALID_TRANSITION"
+  | "TERMINAL_STATUS_LOCKED"
+  | "OPERATION_RELEASE_WAITING"
+  | "OPERATION_RELEASE_BLOCKED";
+
 export type OperationTransitionDecision =
   | {
       allowed: true;
@@ -127,12 +142,20 @@ export type OperationTransitionDecision =
     }
   | {
       allowed: false;
-      reason:
-        | "ROLE_FORBIDDEN"
-        | "ASSIGNMENT_REQUIRED"
-        | "INVALID_TRANSITION"
-        | "TERMINAL_STATUS_LOCKED";
+      reason: OperationTransitionRejectReason;
     };
+
+export interface OperationTransitionContext {
+  release?: {
+    dependencies: readonly OperationDependencySignal[];
+    blockers?: readonly OperationReleaseBlocker[];
+  };
+}
+
+const RELEASE_GATED_TARGETS = new Set<OperationStatus>([
+  "IN_PROGRESS",
+  "COMPLETED"
+]);
 
 const ALLOWED_TRANSITIONS: Record<
   OperationStatus,
@@ -329,7 +352,8 @@ export function decideOperationTransition(
     userId: string;
     role: string;
   },
-  occurredAt: string
+  occurredAt: string,
+  context?: OperationTransitionContext
 ): OperationTransitionDecision {
   const role = actor.role.trim().toUpperCase();
 
@@ -370,6 +394,25 @@ export function decideOperationTransition(
       allowed: false,
       reason: "INVALID_TRANSITION"
     };
+  }
+
+  if (
+    RELEASE_GATED_TARGETS.has(target) &&
+    context?.release
+  ) {
+    const release = decideOperationRelease(
+      context.release
+    );
+
+    if (!release.released) {
+      return {
+        allowed: false,
+        reason:
+          release.state === "BLOCKED"
+            ? "OPERATION_RELEASE_BLOCKED"
+            : "OPERATION_RELEASE_WAITING"
+      };
+    }
   }
 
   const next: OperationRecord = {

@@ -45,6 +45,8 @@ import {
 import {
   useStore
 } from "@/store/useStore";
+import { useProductionMaterialStore } from "@/store/useProductionMaterialStore";
+import { resolveOperationReleaseProjection } from "@/lib/operationReleaseContextResolver";
 import {
   normalizeRole,
   useAuthStore
@@ -143,6 +145,12 @@ export default function OperationsPage() {
 
   const customers =
     useStore(state => state.customers);
+
+  const productionItems =
+    useStore(state => state.productionItems);
+
+  const productionSourcePlans =
+    useProductionMaterialStore(state => state.plans);
 
   const users =
     useAuthStore(state => state.users);
@@ -700,6 +708,13 @@ const [showCompleted, setShowCompleted] =
       return;
     }
 
+    const releaseProjection =
+      resolveOperationReleaseProjection({
+        operation,
+        productionItems,
+        sourcePlans: productionSourcePlans
+      });
+
     const result = updateStatus(
       operation.id,
       nextStatus,
@@ -707,7 +722,8 @@ const [showCompleted, setShowCompleted] =
         userId: currentUser.id,
         role: currentUser.role
       },
-      new Date().toISOString()
+      new Date().toISOString(),
+      releaseProjection.context
     );
 
     if (result.outcome !== "UPDATED") {
@@ -1333,6 +1349,13 @@ const [showCompleted, setShowCompleted] =
                     operation
                   );
 
+                const releaseProjection =
+                  resolveOperationReleaseProjection({
+                    operation,
+                    productionItems,
+                    sourcePlans: productionSourcePlans
+                  });
+
                 const risk =
                   deriveOperationRisk(
                     operation,
@@ -1456,9 +1479,55 @@ const [showCompleted, setShowCompleted] =
 
                     <div
                       data-operation-health-panel
-                      className={`grid gap-2 border-t border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950 sm:grid-cols-3 ${isExpanded ? "grid" : "hidden"}`}
+                      className={`grid gap-2 border-t border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950 sm:grid-cols-2 xl:grid-cols-4 ${isExpanded ? "grid" : "hidden"}`}
                     >
-                      <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <div
+                          data-operation-release-panel
+                          className={`rounded-xl border p-3 ${
+                            releaseProjection.label === "BLOKELI"
+                              ? "border-red-200 bg-red-50 text-red-900 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-100"
+                              : releaseProjection.label === "BEKLIYOR"
+                                ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"
+                                : "border-teal-200 bg-teal-50 text-teal-900 dark:border-cyan-900/60 dark:bg-cyan-950/30 dark:text-cyan-100"
+                          }`}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-[10px] font-black uppercase tracking-[0.14em] opacity-70">
+                              Operasyon Serbestliği
+                            </p>
+                            <span
+                              data-operation-release-state={releaseProjection.label}
+                              className="rounded-full bg-white/70 px-2.5 py-1 text-[10px] font-black tracking-wide shadow-sm dark:bg-slate-950/50"
+                            >
+                              {releaseProjection.label === "BLOKELI"
+                                ? "Blokeli"
+                                : releaseProjection.label === "BEKLIYOR"
+                                  ? "Bağımlılık Bekliyor"
+                                  : "Serbest"}
+                            </span>
+                          </div>
+
+                          <p className="mt-3 text-xs font-black uppercase tracking-[0.12em] opacity-70">
+                            Şimdi ne yapmalıyım?
+                          </p>
+                          <p className="mt-1 text-sm font-semibold leading-5">
+                            {releaseProjection.nextAction}
+                          </p>
+
+                          {releaseProjection.decision?.waitingDependencyIds.length ? (
+                            <p className="mt-2 text-xs opacity-80">
+                              Bekleyen: {releaseProjection.decision.waitingDependencyIds.join(", ")}
+                            </p>
+                          ) : null}
+
+                          {releaseProjection.decision?.blockedDependencyIds.length ? (
+                            <p className="mt-2 text-xs opacity-80">
+                              Blokeli: {releaseProjection.decision.blockedDependencyIds.join(", ")}
+                            </p>
+                          ) : null}
+                        </div>
+
+                        <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
                         <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
                           Hazırlık
                         </p>
@@ -1618,6 +1687,7 @@ const [showCompleted, setShowCompleted] =
                           operation={operation}
                           actor={providerActor}
                           link={providerLink}
+                          transitionContext={releaseProjection.context}
                         />
                       ) : null}
                       <button
