@@ -126,14 +126,18 @@ function isAllowedTransition(
 
 export function getProviderStatusActionLabel(
   action:
-    ProviderStatusAction
+    ProviderStatusAction,
+  providerType?:
+    "TAILOR" | "INSTALLER"
 ): string {
   if (action === "ACCEPT") {
     return "İşi Kabul Et";
   }
 
   if (action === "START") {
-    return "İşe Başla";
+    return providerType === "TAILOR"
+      ? "Planlamaya Başla"
+      : "İşe Başla";
   }
 
   if (

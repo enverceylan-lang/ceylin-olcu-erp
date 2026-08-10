@@ -626,7 +626,11 @@ const [showCompleted, setShowCompleted] =
                     name:
                       selectedParty.name,
                     phone:
-                      selectedParty.phone
+                      selectedParty.phone,
+                    assignmentType:
+                      "EXTERNAL",
+                    providerCustomerId:
+                      selectedParty.providerCustomerId as string
                   }
                 : undefined,
           supplierName,

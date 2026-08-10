@@ -24,6 +24,8 @@ interface RoutingUser {
   phone?: string;
   role: string;
   isActive: boolean;
+  providerCustomerId?: string;
+  providerType?: "TAILOR" | "INSTALLER";
 }
 
 interface OperationRoutingModalProps {
@@ -115,15 +117,27 @@ export default function OperationRoutingModal({
 
         if (kind === "TAILOR") {
           return (
-            role === "TAILOR" ||
-            role === "PRODUCTION"
+            (
+              role === "TAILOR" ||
+              role === "PRODUCTION"
+            ) &&
+            user.providerType === "TAILOR" &&
+            Boolean(
+              user.providerCustomerId?.trim()
+            )
           );
         }
 
         if (kind === "INSTALLATION") {
           return (
-            role === "INSTALLER" ||
-            role === "INSTALLATION"
+            (
+              role === "INSTALLER" ||
+              role === "INSTALLATION"
+            ) &&
+            user.providerType === "INSTALLER" &&
+            Boolean(
+              user.providerCustomerId?.trim()
+            )
           );
         }
 
@@ -216,10 +230,17 @@ export default function OperationRoutingModal({
 
           party: selectedParty
             ? {
-                id: selectedParty.id,
+                id:
+                  selectedParty.providerCustomerId as string,
+                userId:
+                  selectedParty.id,
                 name: selectedParty.name,
                 phone:
-                  selectedParty.phone
+                  selectedParty.phone,
+                assignmentType:
+                  "EXTERNAL",
+                providerCustomerId:
+                  selectedParty.providerCustomerId as string
               }
             : undefined,
 

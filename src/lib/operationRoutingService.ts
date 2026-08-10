@@ -184,6 +184,18 @@ export function routeChildOperation(
   const stableParty = party as OperationParty;
 
   if (
+    input.kind === "TAILOR" &&
+    stableParty.assignmentType === "EXTERNAL" &&
+    !stableParty.providerCustomerId?.trim()
+  ) {
+    return {
+      outcome: "REJECTED",
+      state,
+      reason: "PARTY_REQUIRED"
+    };
+  }
+
+  if (
     input.kind === "INSTALLATION" &&
     stableParty.assignmentType === "EXTERNAL" &&
     !stableParty.providerCustomerId?.trim()
