@@ -30,7 +30,7 @@ function Badge({
 }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${badgeToneClasses(tone)}`}
+      className={`inline-flex min-h-7 items-center rounded-full border px-2.5 py-1 text-xs font-semibold leading-none ${badgeToneClasses(tone)}`}
     >
       {label}
     </span>
@@ -64,12 +64,12 @@ export function WorkflowRiskBadge({
       {risk.reasons.map(reason => (
         <span
           key={reason.code}
-          className={`rounded-full px-2 py-1 text-[10px] font-bold ${
+          className={`inline-flex min-h-6 items-center rounded-full border px-2 py-1 text-[10px] font-bold leading-none ${
             reason.severity === "CRITICAL"
-              ? "bg-red-50 text-red-700"
+              ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
               : reason.severity === "WARNING"
-                ? "bg-amber-50 text-amber-800"
-                : "bg-slate-100 text-slate-700"
+                ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200"
+                : "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
           }`}
         >
           {reason.message}
@@ -85,7 +85,7 @@ export function WorkflowBlockerCard({
   blocker: WorkflowBlocker;
 }) {
   return (
-    <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-100">
+    <div className="rounded-xl border border-red-200 border-l-4 bg-red-50 p-4 text-sm text-red-900 shadow-sm dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-100">
       <div className="font-semibold">{blocker.label}</div>
       {blocker.message ? (
         <div className="mt-1 text-xs opacity-90">{blocker.message}</div>
@@ -107,7 +107,7 @@ export function WorkflowAssignmentChip({
         : null;
 
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+    <span className="inline-flex min-h-7 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium leading-none text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
       <span>{assignment.partyName || assignment.label}</span>
       {suffix ? <span className="text-[10px] opacity-60">· {suffix}</span> : null}
     </span>
@@ -126,9 +126,9 @@ export function WorkflowTimeline({
   }
 
   return (
-    <ol className="space-y-3">
+    <ol className="space-y-1">
       {events.map(event => (
-        <li key={event.id} className="flex gap-3">
+        <li key={event.id} className="relative flex gap-3 rounded-lg px-2 py-2 hover:bg-slate-50 dark:hover:bg-slate-900/60">
           <span
             className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${dotToneClass(event.tone || "NEUTRAL")}`}
             aria-hidden="true"

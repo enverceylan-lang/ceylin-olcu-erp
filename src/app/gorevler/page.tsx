@@ -494,17 +494,17 @@ export default function FieldTasksPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 pb-24">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div className="mx-auto max-w-7xl space-y-6 px-1 pb-24 sm:px-2">
+      <div className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between dark:border-slate-800 dark:bg-slate-900">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
+          <h1 className="flex items-center gap-2 text-2xl font-black tracking-tight text-slate-950 dark:text-white sm:text-3xl">
             <Ruler className="w-6 h-6 text-cyan-600" />
             {isAdminView
               ? "Saha Görevleri"
               : "Görevlerim"}
           </h1>
 
-          <p className="text-sm text-gray-500">
+          <p className="mt-1 text-sm font-medium text-slate-500 dark:text-slate-400">
             Aktif görev:
             {" "}
             {activeTasks.length}
@@ -522,7 +522,7 @@ export default function FieldTasksPage() {
               await Notification.requestPermission();
             }
           }}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-cyan-200 text-cyan-700 dark:text-cyan-300"
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-2.5 text-sm font-bold text-cyan-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-cyan-100 dark:border-cyan-900/70 dark:bg-cyan-950/30 dark:text-cyan-300"
         >
           <BellRing className="w-4 h-4" />
           Bildirime İzin Ver
@@ -530,19 +530,19 @@ export default function FieldTasksPage() {
       </div>
 
       {loading ? (
-        <div className="p-8 text-center">
+        <div className="rounded-3xl border border-slate-200 bg-white p-10 text-center text-sm font-medium text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
           Görevler yükleniyor...
         </div>
       ) : tasks.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 p-10 text-center">
+        <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50/70 p-12 text-center text-sm font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-400">
           Henüz saha görevi yok.
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
           {tasks.map(task => (
             <article
               key={task.id}
-              className={`rounded-2xl border p-5 shadow-sm ${
+              className={`group rounded-3xl border p-5 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md ${
                 task.status ===
                   "COMPLETED"
                   ? "border-green-200 bg-green-50/50 dark:border-green-900 dark:bg-green-950/10"
@@ -551,25 +551,25 @@ export default function FieldTasksPage() {
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-bold">
+                  <h2 className="text-lg font-black tracking-tight text-slate-950 dark:text-white">
                     {task.customerName}
                   </h2>
 
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
                     Atanan:
                     {" "}
                     {task.assignedUserName}
                   </p>
                 </div>
 
-                <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-300">
+                <span className="inline-flex min-h-7 shrink-0 items-center rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-black text-cyan-800 dark:border-cyan-900/70 dark:bg-cyan-950/30 dark:text-cyan-300">
                   {STATUS_LABELS[
                     task.status
                   ]}
                 </span>
               </div>
 
-              <div className="space-y-2 mt-4 text-sm">
+              <div className="mt-5 space-y-2.5 rounded-2xl border border-slate-100 bg-slate-50/70 p-4 text-sm dark:border-slate-800 dark:bg-slate-950/40">
                 <div className="flex items-center gap-2">
                   <CalendarClock className="w-4 h-4 text-gray-500" />
                   {formatDate(
@@ -595,13 +595,13 @@ export default function FieldTasksPage() {
                 </div>
 
                 {task.note && (
-                  <div className="rounded-xl bg-gray-50 dark:bg-gray-950 p-3">
+                  <div className="rounded-xl border border-slate-200 bg-white p-3 text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
                     {task.note}
                   </div>
                 )}
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-5">
+              <div className="mt-5 grid grid-cols-2 gap-2.5 border-t border-slate-100 pt-4 sm:grid-cols-3 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() =>
@@ -609,7 +609,7 @@ export default function FieldTasksPage() {
                       task
                     )
                   }
-                  className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-bold"
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-cyan-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-cyan-700"
                 >
                   <Ruler className="w-4 h-4" />
                   Cariyi Aç
@@ -622,7 +622,7 @@ export default function FieldTasksPage() {
                     }
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-sm font-bold"
+                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                   >
                     <Navigation className="w-4 h-4" />
                     Yol Tarifi
@@ -640,7 +640,7 @@ export default function FieldTasksPage() {
                           "ON_THE_WAY"
                         )
                       }
-                      className="px-3 py-2 rounded-xl bg-amber-500 text-white text-sm font-bold"
+                      className="min-h-11 rounded-xl bg-amber-500 px-3 py-2.5 text-sm font-bold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-amber-600"
                     >
                       Yola Çıktım
                     </button>
@@ -660,7 +660,7 @@ export default function FieldTasksPage() {
                           task
                         )
                       }
-                      className="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm font-bold"
+                      className="min-h-11 rounded-xl bg-blue-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-blue-700"
                     >
                       Ölçüye Başla
                     </button>
@@ -676,7 +676,7 @@ export default function FieldTasksPage() {
                           task
                         )
                       }
-                      className="px-3 py-2 rounded-xl bg-purple-600 text-white text-sm font-bold"
+                      className="min-h-11 rounded-xl bg-purple-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-purple-700"
                     >
                       Ölçü Alındı
                     </button>
@@ -693,7 +693,7 @@ export default function FieldTasksPage() {
                           "COMPLETED"
                         )
                       }
-                      className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-green-600 text-white text-sm font-bold"
+                      className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-green-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-green-700"
                     >
                       <CheckCircle2 className="w-4 h-4" />
                       Tamamla
