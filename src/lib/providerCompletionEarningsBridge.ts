@@ -132,12 +132,16 @@ export function createEstimatedEarningFromCompletedOperation(
   }
 
   const providerCustomerId =
-    String(
-      operation.party?.id ||
-      ""
-    ).trim();
+    operation.party
+      ?.providerCustomerId
+      ?.trim();
 
-  if (!providerCustomerId) {
+  if (
+    operation.party
+      ?.assignmentType !==
+      "EXTERNAL" ||
+    !providerCustomerId
+  ) {
     return {
       outcome:
         "REJECTED",

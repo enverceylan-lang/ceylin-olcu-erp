@@ -59,8 +59,17 @@ function operation(
       id:
         "provider-cari-1",
 
+      userId:
+        "tailor-user-1",
+
       name:
-        "Örnek Terzi"
+        "Örnek Terzi",
+
+      assignmentType:
+        "EXTERNAL",
+
+      providerCustomerId:
+        "provider-cari-1"
     },
 
     scheduledAt:
@@ -280,8 +289,17 @@ const installer =
           id:
             "installer-cari-1",
 
+          userId:
+            "installer-user-1",
+
           name:
-            "Örnek Montajcı"
+            "Örnek Montajcı",
+
+          assignmentType:
+            "EXTERNAL",
+
+          providerCustomerId:
+            "installer-cari-1"
         }
       }),
 
