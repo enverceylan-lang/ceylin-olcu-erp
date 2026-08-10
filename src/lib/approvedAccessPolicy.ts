@@ -29,6 +29,25 @@ export interface ApprovedRoleCapabilities {
 
 const ALL_FEATURES = [...ERP_FEATURES];
 
+const OFFICE_FEATURES: readonly ErpFeature[] = [
+  "measurement",
+  "sales",
+  "basicFinance",
+  "customerFinance",
+  "stockTracking",
+  "stockLots",
+  "storeCutOrders",
+  "supplierOrders",
+  "advancedCutOptimization",
+  "tailorWorkOrders",
+  "tailorPayroll",
+  "installerTasks",
+  "installerPayroll",
+  "multiBranch",
+  "multiWarehouse",
+  "capacityPlanning",
+];
+
 export const APPROVED_ROLE_CAPABILITIES: Record<
   ShadowAccessRole,
   ApprovedRoleCapabilities
@@ -52,7 +71,7 @@ export const APPROVED_ROLE_CAPABILITIES: Record<
     assignmentRequiredForOperationalTasks: false,
   },
   OFFICE: {
-    features: ALL_FEATURES,
+    features: OFFICE_FEATURES,
     scopeAccess: "SELECT_ASSIGNED",
     canManageSystemSettings: false,
     canManagePackageLicense: false,

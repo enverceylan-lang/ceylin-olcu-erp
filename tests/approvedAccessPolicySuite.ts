@@ -29,6 +29,26 @@ assert.equal(
   false
 );
 
+for (const feature of [
+  "operations",
+  "agenda",
+  "operationPdf",
+  "operationWhatsApp",
+] as const) {
+  assert.equal(approvedRoleAllowsFeature("ADMIN", feature), true);
+  assert.equal(approvedRoleAllowsFeature("MODERATOR", feature), true);
+  assert.equal(approvedRoleAllowsFeature("OFFICE", feature), false);
+  assert.equal(approvedRoleAllowsFeature("FIELD", feature), false);
+  assert.equal(approvedRoleAllowsFeature("TAILOR", feature), false);
+  assert.equal(approvedRoleAllowsFeature("INSTALLER", feature), false);
+  assert.equal(approvedRoleAllowsFeature("ACCOUNTING", feature), false);
+}
+
+assert.equal(
+  getApprovedRoleCapabilities("OFFICE").features.length,
+  16
+);
+
 assert.equal(approvedRoleAllowsFeature("FIELD", "measurement"), true);
 assert.equal(approvedRoleAllowsFeature("FIELD", "sales"), false);
 assert.equal(

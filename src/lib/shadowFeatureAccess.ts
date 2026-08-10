@@ -45,6 +45,10 @@ export const ERP_FEATURES: readonly ErpFeature[] = [
   "multiBranch",
   "multiWarehouse",
   "capacityPlanning",
+  "operations",
+  "agenda",
+  "operationPdf",
+  "operationWhatsApp",
 ];
 
 export function normalizeShadowAccessRole(
