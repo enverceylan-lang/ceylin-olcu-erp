@@ -156,8 +156,7 @@ export function executeMechanicalSupplierReceiptToInstallation(
   }
 
   if (
-    (orderBefore.purpose ??
-      "TAILOR_MATERIAL") !==
+    orderBefore.purpose !==
     "MECHANICAL_PRODUCT"
   ) {
     return {

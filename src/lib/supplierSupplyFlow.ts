@@ -40,11 +40,11 @@ export interface SupplierOrderRequest extends ErpScope {
   orderedQuantity: number;
 
   /*
-   * Legacy records may omit these fields.
-   * Omitted values mean mt + TAILOR_MATERIAL for backward compatibility.
+   * Legacy records may omit orderedUnit.
+   * Omitted orderedUnit means mt for backward compatibility.
    */
   orderedUnit?: SupplierOrderUnit;
-  purpose?: SupplierOrderPurpose;
+  purpose: SupplierOrderPurpose;
 
   expectedAt?: string;
   createdByUserId: string;
@@ -159,8 +159,7 @@ function sameSupplierPayload(
     Math.abs(request.orderedQuantity - order.orderedQuantity) <= EPSILON &&
     (request.orderedUnit ?? "mt") ===
       (order.orderedUnit ?? "mt") &&
-    (request.purpose ?? "TAILOR_MATERIAL") ===
-      (order.purpose ?? "TAILOR_MATERIAL") &&
+    request.purpose === order.purpose &&
     sameScope(request, order)
   );
 }
@@ -188,6 +187,8 @@ export function decideSupplierOrder(
   ];
   if (
     requiredText.some((value) => value.trim().length === 0) ||
+    (request.purpose !== "TAILOR_MATERIAL" &&
+      request.purpose !== "MECHANICAL_PRODUCT") ||
     !Number.isFinite(request.orderedQuantity) ||
     request.orderedQuantity <= 0
   ) {
@@ -268,6 +269,17 @@ export function decideSupplierReceipt(
     ) ||
     request.receivedQuantity <=
       EPSILON
+  ) {
+    return {
+      outcome: "REJECT",
+      reason: "INVALID_REQUEST"
+    };
+  }
+
+  if (
+    order &&
+    order.purpose !== "TAILOR_MATERIAL" &&
+    order.purpose !== "MECHANICAL_PRODUCT"
   ) {
     return {
       outcome: "REJECT",
@@ -366,8 +378,7 @@ export function decideSupplierReceipt(
 
   const orderStatus =
     summary.status === "READY"
-      ? (order.purpose ??
-          "TAILOR_MATERIAL") ===
+      ? order.purpose ===
         "MECHANICAL_PRODUCT"
         ? "READY_FOR_OPERATION"
         : "READY_FOR_TAILOR"

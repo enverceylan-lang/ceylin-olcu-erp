@@ -176,8 +176,7 @@ export function executeSupplierReceiptToProduction(
   }
 
   if (
-    (orderBefore.purpose ??
-      "TAILOR_MATERIAL") !==
+    orderBefore.purpose !==
     "TAILOR_MATERIAL"
   ) {
     return {

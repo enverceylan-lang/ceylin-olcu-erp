@@ -474,9 +474,10 @@ export default function MaterialCutDecisionPanel({
         )
         .filter(
           order =>
-            (order.purpose ??
-              "TAILOR_MATERIAL") ===
+            order.purpose ===
               "MECHANICAL_PRODUCT" ||
+            (order.purpose ===
+              "TAILOR_MATERIAL" &&
             productionPlans.some(
               plan =>
                 plan.allocations.some(
@@ -486,7 +487,7 @@ export default function MaterialCutDecisionPanel({
                     allocation.supplierOrderId ===
                       order.id
                 )
-            )
+            ))
         );
     }, [
       supplierOrders,
@@ -511,8 +512,17 @@ export default function MaterialCutDecisionPanel({
       supplierOrder.receivedQuantity;
 
     const purpose =
-      supplierOrder.purpose ??
-      "TAILOR_MATERIAL";
+      supplierOrder.purpose;
+
+    if (
+      purpose !== "TAILOR_MATERIAL" &&
+      purpose !== "MECHANICAL_PRODUCT"
+    ) {
+      window.alert(
+        "Tedarikçi siparişi kullanım amacı eksik veya geçersiz."
+      );
+      return;
+    }
 
     const unit =
       supplierOrder.orderedUnit ??

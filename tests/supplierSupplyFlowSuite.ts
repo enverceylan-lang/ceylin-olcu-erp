@@ -30,6 +30,7 @@ function request(
     productionOrderId: "production-1",
     stockItemId: "fabric-1",
     orderedQuantity: 5,
+    purpose: "TAILOR_MATERIAL",
     createdByUserId: "office-1",
     createdAt: "2026-07-26T03:30:00.000Z",
     ...overrides,
