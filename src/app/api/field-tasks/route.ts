@@ -106,6 +106,16 @@ function mapTask(row: Record<string, unknown>) {
 
     seenAt: row.seen_at,
     completedAt: row.completed_at,
+
+    cancelledAt: row.cancelled_at,
+    cancelledById: row.cancelled_by_id,
+    cancelledByName: row.cancelled_by_name,
+    cancelReason: row.cancel_reason,
+
+    archivedAt: row.archived_at,
+    archivedById: row.archived_by_id,
+    archivedByName: row.archived_by_name,
+
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -172,6 +182,7 @@ export async function GET(req: NextRequest) {
       accounting_period_id:
         erpContext.scope.accountingPeriodId,
     })
+    .is("archived_at", null)
     .order("updated_at", {
       ascending: false,
     })
@@ -208,9 +219,46 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const {
+    data: deletedRows,
+    error: deletedRowsError,
+  } = await supabase
+    .from("field_task_tombstones")
+    .select("task_id")
+    .match({
+      tenant_id: erpContext.scope.tenantId,
+      company_id: erpContext.scope.companyId,
+      branch_id: erpContext.scope.branchId,
+      accounting_period_id:
+        erpContext.scope.accountingPeriodId,
+    })
+    .order("deleted_at", {
+      ascending: false,
+    })
+    .limit(500);
+
+  if (deletedRowsError) {
+    console.error(
+      "[Field Tasks GET] Tombstone query failed:",
+      deletedRowsError.message,
+    );
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Deleted task state could not be verified.",
+      },
+      { status: 503 },
+    );
+  }
+
   return NextResponse.json({
     success: true,
     tasks: (data || []).map(mapTask),
+    deletedTaskIds:
+      (deletedRows || [])
+        .map(row => String(row.task_id || ""))
+        .filter(Boolean),
     serverTime: new Date().toISOString(),
   });
 }
@@ -299,6 +347,47 @@ export async function POST(req: NextRequest) {
         reason: erpContext.reason,
       },
       { status: erpContext.reason === "READ_FAILED" ? 503 : 409 },
+    );
+  }
+
+  const {
+    data: tombstone,
+    error: tombstoneError,
+  } = await supabase
+    .from("field_task_tombstones")
+    .select("task_id")
+    .eq("task_id", id)
+    .match({
+      tenant_id: erpContext.scope.tenantId,
+      company_id: erpContext.scope.companyId,
+      branch_id: erpContext.scope.branchId,
+      accounting_period_id:
+        erpContext.scope.accountingPeriodId,
+    })
+    .maybeSingle();
+
+  if (tombstoneError) {
+    console.error(
+      "[Field Tasks POST] Tombstone query failed:",
+      tombstoneError.message,
+    );
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Deleted task state could not be verified.",
+      },
+      { status: 503 },
+    );
+  }
+
+  if (tombstone) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Deleted task cannot be recreated.",
+      },
+      { status: 410 },
     );
   }
 
@@ -537,6 +626,17 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
+  if (status === "CANCELLED") {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          "Cancellation must use the audited admin lifecycle endpoint.",
+      },
+      { status: 409 },
+    );
+  }
+
   const supabase = getSupabaseServer();
   const erpContext = await loadShadowErpContext(supabase, user.id, {
     requestedScopeId: readRequestedErpScopeId(req),
@@ -602,6 +702,16 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
+  if (existing.archived_at) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Archived task cannot change workflow status.",
+      },
+      { status: 409 },
+    );
+  }
+
   const now =
     new Date().toISOString();
 
@@ -662,5 +772,3 @@ export async function PATCH(req: NextRequest) {
     task: mapTask(data),
   });
 }
-
-

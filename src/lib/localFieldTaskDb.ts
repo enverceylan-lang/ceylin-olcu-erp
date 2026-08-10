@@ -1,4 +1,4 @@
-﻿import Dexie, { type Table } from "dexie";
+import Dexie, { type Table } from "dexie";
 
 export type FieldTaskStatus =
   | "ASSIGNED"
@@ -38,6 +38,15 @@ export interface FieldTask {
   updatedAt: string;
   seenAt?: string;
   completedAt?: string;
+
+  cancelledAt?: string;
+  cancelledById?: string;
+  cancelledByName?: string;
+  cancelReason?: string;
+
+  archivedAt?: string;
+  archivedById?: string;
+  archivedByName?: string;
 }
 
 class CeylinFieldTaskDb extends Dexie {
@@ -109,17 +118,19 @@ export async function listFieldTasksForUser(
       .equals(userId)
       .toArray();
 
-  return rows.sort(
-    (a, b) =>
-      new Date(
-        b.scheduledAt ||
-          b.createdAt
-      ).getTime() -
-      new Date(
-        a.scheduledAt ||
-          a.createdAt
-      ).getTime()
-  );
+  return rows
+    .filter(task => !task.archivedAt)
+    .sort(
+      (a, b) =>
+        new Date(
+          b.scheduledAt ||
+            b.createdAt
+        ).getTime() -
+        new Date(
+          a.scheduledAt ||
+            a.createdAt
+        ).getTime()
+    );
 }
 
 export async function listAllFieldTasks():
@@ -128,11 +139,34 @@ Promise<FieldTask[]> {
     await localFieldTaskDb.fieldTasks
       .toArray();
 
-  return rows.sort(
-    (a, b) =>
-      new Date(b.createdAt).getTime() -
-      new Date(a.createdAt).getTime()
-  );
+  return rows
+    .filter(task => !task.archivedAt)
+    .sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() -
+        new Date(a.createdAt).getTime()
+    );
+}
+
+export async function listArchivedFieldTasks():
+Promise<FieldTask[]> {
+  const rows =
+    await localFieldTaskDb.fieldTasks
+      .toArray();
+
+  return rows
+    .filter(task => Boolean(task.archivedAt))
+    .sort(
+      (a, b) =>
+        new Date(
+          b.archivedAt ||
+            b.updatedAt
+        ).getTime() -
+        new Date(
+          a.archivedAt ||
+            a.updatedAt
+        ).getTime()
+    );
 }
 
 export async function updateFieldTaskStatus(
@@ -209,3 +243,41 @@ export async function putFieldTask(
   }
 }
 
+export async function deleteLocalFieldTask(
+  id: string,
+): Promise<void> {
+  if (!id) return;
+
+  await localFieldTaskDb.fieldTasks.delete(id);
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new Event("field-tasks-updated"),
+    );
+  }
+}
+
+export async function deleteLocalFieldTasks(
+  ids: string[],
+): Promise<void> {
+  const uniqueIds =
+    Array.from(
+      new Set(
+        ids.filter(Boolean),
+      ),
+    );
+
+  if (uniqueIds.length === 0) {
+    return;
+  }
+
+  await localFieldTaskDb.fieldTasks.bulkDelete(
+    uniqueIds,
+  );
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new Event("field-tasks-updated"),
+    );
+  }
+}
