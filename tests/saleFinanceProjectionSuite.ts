@@ -24,6 +24,7 @@ function payment(overrides: Partial<SalePayment> = {}): SalePayment {
 
 function sale(overrides: Partial<Sale> = {}): Sale {
   return {
+    ...scope,
     id: "sale-1",
     saleNo: "SAT-1",
     customerId: "customer-1",

@@ -118,7 +118,7 @@ export interface SaleItem {
   isJumboComponent?: boolean;
 }
 
-export interface Sale {
+export interface Sale extends ErpScope {
   id: string;
   saleNo: string;
   customerId: string;
@@ -161,7 +161,7 @@ export interface Sale {
 interface SalesState {
   sales: Sale[];
   isLoading: boolean;
-  loadSales: () => Promise<void>;
+  loadSales: (scope: ErpScope) => Promise<void>;
   addSale: (sale: Sale) => Promise<void>;
   updateSale: (sale: Sale) => Promise<void>;
 
@@ -172,7 +172,7 @@ interface SalesState {
     statusAudit?:
       SaleStatusTransitionAudit
   ) => Promise<SalesFinanceOutboxRecord>;
-  removeSale: (id: string) => Promise<void>;
+  removeSale: (scope: ErpScope, id: string) => Promise<void>;
   transferSales: (sourceCustomerId: string, targetCustomerId: string) => Promise<void>;
   cascadeArchiveCustomer: (customerId: string, batchId: string, username: string) => Promise<void>;
   cascadeRestoreArchivedCustomer: (customerId: string, batchId: string) => Promise<void>;
@@ -184,10 +184,10 @@ export const useSalesStore = create<SalesState>((set, get) => ({
   sales: [],
   isLoading: false,
 
-  loadSales: async () => {
+  loadSales: async (scope: ErpScope) => {
     set({ isLoading: true });
     try {
-      const data = await loadLocalSales();
+      const data = await loadLocalSales(scope);
       set({ sales: data, isLoading: false });
     } catch (err) {
       console.error('Error loading sales:', err);
@@ -261,7 +261,7 @@ export const useSalesStore = create<SalesState>((set, get) => ({
       return outboxRecord;
     },
 
-  removeSale: async (id: string) => {
+  removeSale: async (scope: ErpScope, id: string) => {
     const existingSale =
       get().sales.find(
         sale => sale.id === id
@@ -277,7 +277,7 @@ export const useSalesStore = create<SalesState>((set, get) => ({
       existingSale.status
     );
 
-    await deleteLocalSale(id);
+    await deleteLocalSale(scope, id);
 
     set(state => ({
       sales:

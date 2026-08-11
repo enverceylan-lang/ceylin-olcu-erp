@@ -5,12 +5,14 @@ import { useSalesStore } from "@/store/salesStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useEffect, useSyncExternalStore } from "react";
 import { getVisibleSales } from "@/lib/salesVisibility";
+import { useErpRuntimeContext } from "@/lib/useErpRuntimeContext";
 
 const subscribeToHydration = () => () => {};
 const getClientSnapshot = () => true;
 const getServerSnapshot = () => false;
 
 export default function RaporlarPage() {
+  const { scope } = useErpRuntimeContext();
   const { sales, loadSales, isLoading } = useSalesStore();
   const { currentUser } = useAuthStore();
   const mounted = useSyncExternalStore(
@@ -20,8 +22,12 @@ export default function RaporlarPage() {
   );
 
   useEffect(() => {
-    loadSales();
-  }, [loadSales]);
+    if (!scope) {
+      return;
+    }
+
+    void loadSales(scope);
+  }, [loadSales, scope]);
 
   if (!mounted || isLoading) return <div className="p-8 text-center">Yükleniyor...</div>;
 

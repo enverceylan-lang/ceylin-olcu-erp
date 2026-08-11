@@ -20,8 +20,12 @@ export default function FinanceOverviewPage() {
   const [projectionAt] = useState(() => new Date().toISOString());
 
   useEffect(() => {
-    void loadSales();
-  }, [loadSales]);
+    if (runtime.state !== "ready") {
+      return;
+    }
+
+    void loadSales(runtime.scope);
+  }, [loadSales, runtime]);
 
   if (runtime.state === "loading" || isLoading) {
     return <div className="p-8 text-center">Finans verileri doğrulanıyor…</div>;

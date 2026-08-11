@@ -89,6 +89,10 @@ function createSale(
   const now = '2026-07-23T12:00:00.000Z';
 
   return {
+    tenantId: "tenant-1",
+    companyId: "company-1",
+    branchId: "branch-1",
+    accountingPeriodId: "period-1",
     id: overrides.id || 'sale-1',
     saleNo: overrides.saleNo || 'SAT-0001',
     customerId: overrides.customerId || 'customer-1',

@@ -20,6 +20,7 @@ import { RoomPreparationModal } from "@/components/reports/RoomPreparationModal"
 import { localDraftDb, FieldMeasurementDraft, forceRequeueCustomerMeasurementTree } from "@/lib/localDraftDb";
 import { useSalesStore } from "@/store/salesStore";
 import { syncOrCreateDraftSale } from "@/lib/salesAdapter";
+import { useErpRuntimeContext } from "@/lib/useErpRuntimeContext";
 import { ShoppingCart, Edit, Merge, Archive } from "lucide-react";
 import { CariEditModal } from "@/components/modals/CariEditModal";
 import { MergeCustomerModal } from "@/components/modals/MergeCustomerModal";
@@ -79,6 +80,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const user = currentUser!;
   const customer = customers.find(c => c.id === id);
   const router = useRouter();
+  const { scope } = useErpRuntimeContext();
 
   const normRole = user ? normalizeRole(user.role) : 'FIELD';
   const cariType = customer?.cariType || 'CUSTOMER';
@@ -1171,7 +1173,8 @@ showToast("Saha taslağı telefona kaydedildi.");
       const draftId = await syncOrCreateDraftSale(
         customer,
         useSalesStore.getState(),
-        currentUser
+        currentUser,
+        scope
       );
       router.push(`/satis/${draftId}`);
     } catch (err) {
@@ -3257,7 +3260,8 @@ showToast("Saha taslağı telefona kaydedildi.");
                   const draftId = await syncOrCreateDraftSale(
                     customer,
                     useSalesStore.getState(),
-                    currentUser
+                    currentUser,
+                    scope
                   );
                   showToast("Satış taslağı oluşturuldu / güncellendi.");
                   router.push(`/satis/${draftId}`);

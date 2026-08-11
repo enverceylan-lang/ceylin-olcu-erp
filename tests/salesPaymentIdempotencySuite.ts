@@ -11,6 +11,10 @@ const payment: SalePayment = {
 };
 
 const sale: Sale = {
+  tenantId: "tenant-1",
+  companyId: "company-1",
+  branchId: "branch-1",
+  accountingPeriodId: "period-1",
   id: "sale-1",
   saleNo: "SAT-1",
   customerId: "customer-1",

@@ -43,7 +43,8 @@ const dateText = (value?: string): string => {
 
 export async function generateSalesPdfFile(
   sale: Sale,
-  customer?: Customer
+  customer?: Customer,
+  companyName = "ENVerp"
 ): Promise<File> {
   const doc = new jsPDF('p', 'mm', 'a4');
   const left = 12;
@@ -84,7 +85,7 @@ export async function generateSalesPdfFile(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(19);
   doc.setTextColor(37, 99, 235);
-  doc.text('CEYLIN ERP', 105, y, { align: 'center' });
+  doc.text(tr(companyName), 105, y, { align: 'center' });
   y += 7;
   doc.setFontSize(11);
   doc.setTextColor(71, 85, 105);

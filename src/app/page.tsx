@@ -22,15 +22,19 @@ import {
   useAuthStore,
 } from "@/store/useAuthStore";
 import { getVisibleSales } from "@/lib/salesVisibility";
+import { useErpRuntimeContext } from "@/lib/useErpRuntimeContext";
 
 export default function Home() {
+  const { scope } = useErpRuntimeContext();
   const { customers, products } = useStore();
   const { sales, loadSales } = useSalesStore();
   const currentUser = useAuthStore(state => state.currentUser);
   const [inboundCount, setInboundCount] = useState(0);
 
   useEffect(() => {
-    loadSales();
+    if (scope) {
+      void loadSales(scope);
+    }
 
     localDraftDb.inboundMeasurements
       .toArray()
@@ -49,7 +53,7 @@ export default function Home() {
           error,
         );
       });
-  }, [loadSales]);
+  }, [loadSales, scope]);
 
   const role = currentUser
     ? normalizeRole(currentUser.role)

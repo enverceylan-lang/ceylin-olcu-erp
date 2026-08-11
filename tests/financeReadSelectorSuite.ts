@@ -15,6 +15,7 @@ const projectionAt = "2026-07-27T11:00:00.000Z";
 
 function sale(overrides: Partial<Sale> = {}): Sale {
   return {
+    ...scope,
     id: "sale-1",
     saleNo: "SAT-1",
     customerId: "customer-1",

@@ -119,8 +119,12 @@ export function CustomerFinancePanel({
     useState<string | null>(null);
 
   useEffect(() => {
-    void loadSales();
-  }, [loadSales]);
+    if (runtime.state !== "ready") {
+      return;
+    }
+
+    void loadSales(runtime.scope);
+  }, [loadSales, runtime]);
 
   useEffect(() => {
     if (runtime.state !== "ready") {

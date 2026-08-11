@@ -1,6 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 import { Sale } from '@/store/salesStore';
 import {
+  erpScopeMatches,
   validateErpScope,
   type ErpScope
 } from '@/lib/erpScope';
@@ -87,23 +88,69 @@ class LocalSalesDatabase extends Dexie {
         '[tenantId+companyId+branchId+accountingPeriodId], ' +
         '[tenantId+companyId+branchId+accountingPeriodId+saleId]'
     });
+
+    this.version(4).stores({
+      sales:
+        'id, customerId, saleNo, status, ' +
+        '[tenantId+companyId+branchId+accountingPeriodId], ' +
+        '[tenantId+companyId+branchId+accountingPeriodId+id]',
+
+      financeOutbox:
+        'id, saleId, status, updatedAt, ' +
+        '[tenantId+companyId+branchId+accountingPeriodId]',
+
+      saleStatusAudits:
+        'id, saleId, actorUserId, occurredAt, ' +
+        '[tenantId+companyId+branchId+accountingPeriodId], ' +
+        '[tenantId+companyId+branchId+accountingPeriodId+saleId]'
+    });
   }
 }
 
 export const localSalesDb = new LocalSalesDatabase();
 
-export async function loadLocalSales(): Promise<Sale[]> {
+export async function loadLocalSales(
+  scope: ErpScope
+): Promise<Sale[]> {
+  const scopeValidation = validateErpScope(scope);
+
+  if (!scopeValidation.valid) {
+    throw new Error(
+      `SALE_SCOPE_REQUIRED:${scopeValidation.missingFields.join(',')}`
+    );
+  }
   try {
-    return await localSalesDb.sales.toArray();
+    return await localSalesDb.sales
+      .where(
+        '[tenantId+companyId+branchId+accountingPeriodId]'
+      )
+      .equals([
+        scope.tenantId,
+        scope.companyId,
+        scope.branchId,
+        scope.accountingPeriodId
+      ])
+      .toArray();
   } catch (err) {
-    console.error('[localSalesDb] Failed to load sales:', err);
-    return [];
+    console.error('[localSalesDb] Failed to load scoped sales:', err);
+    throw err;
   }
 }
 
 export async function saveLocalSale(sale: Sale): Promise<void> {
+  const scopeValidation = validateErpScope(sale);
+
+  if (!scopeValidation.valid) {
+    throw new Error(
+      `SALE_SCOPE_REQUIRED:${scopeValidation.missingFields.join(',')}`
+    );
+  }
   try {
     const existing = await localSalesDb.sales.get(sale.id);
+
+    if (existing && !erpScopeMatches(existing, sale)) {
+      throw new Error('SALE_SCOPE_CONFLICT');
+    }
     const now = new Date().toISOString();
     const storedSale: Sale = existing
       ? { ...existing, ...sale, updatedAt: now }
@@ -158,6 +205,19 @@ export async function saveLocalSaleWithFinanceOutbox(
     throw new Error(
       `SALES_FINANCE_OUTBOX_SCOPE_REQUIRED:${scopeValidation.missingFields.join(',')}`
     );
+  }
+
+  const saleScopeValidation =
+    validateErpScope(input.sale);
+
+  if (!saleScopeValidation.valid) {
+    throw new Error(
+      `SALE_SCOPE_REQUIRED:${saleScopeValidation.missingFields.join(',')}`
+    );
+  }
+
+  if (!erpScopeMatches(input.sale, input.scope)) {
+    throw new Error('SALE_SCOPE_MISMATCH');
   }
 
   const currency =
@@ -349,9 +409,23 @@ export async function updateSalesFinanceOutbox(
       new Date().toISOString()
   });
 }
-export async function deleteLocalSale(id: string): Promise<void> {
+export async function deleteLocalSale(
+  scope: ErpScope,
+  saleId: string
+): Promise<void> {
+  const scopeValidation = validateErpScope(scope);
+
+  if (!scopeValidation.valid) {
+    throw new Error(
+      `SALE_SCOPE_REQUIRED:${scopeValidation.missingFields.join(',')}`
+    );
+  }
   try {
-    const existing = await localSalesDb.sales.get(id);
+    const existing = await localSalesDb.sales.get(saleId);
+
+    if (existing && !erpScopeMatches(existing, scope)) {
+      throw new Error('SALE_SCOPE_CONFLICT');
+    }
 
     if (existing) {
       try {
@@ -363,7 +437,7 @@ export async function deleteLocalSale(id: string): Promise<void> {
       }
     }
 
-    await localSalesDb.sales.delete(id);
+    await localSalesDb.sales.delete(saleId);
   } catch (err) {
     console.error('[localSalesDb] Failed to delete sale:', err);
     throw err;

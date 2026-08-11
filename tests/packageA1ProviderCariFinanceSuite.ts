@@ -271,6 +271,7 @@ test(
             "2026-08-05T10:00:00.000Z"
         },
         sale: {
+          ...scope,
           id: "sale-1",
           saleNo: "S-1",
           customerId:

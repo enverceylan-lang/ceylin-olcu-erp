@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useErpRuntimeContext } from "@/lib/useErpRuntimeContext";
 import { useStore } from "@/store/useStore";
 import { useSalesStore } from "@/store/salesStore";
 import {
@@ -24,6 +25,7 @@ function formatCurrency(value: number): string {
 }
 
 export function SaleDueNotifier() {
+  const { scope } = useErpRuntimeContext();
   const currentUser = useAuthStore(
     state => state.currentUser
   );
@@ -58,11 +60,11 @@ export function SaleDueNotifier() {
     let active = true;
     const userId = currentUser?.id;
 
-    if (!userId) {
+    if (!userId || !scope) {
       return;
     }
 
-    void loadSales()
+    void loadSales(scope)
       .then(() => {
         if (active) {
           setSalesLoadedForUserId(userId);
@@ -78,7 +80,7 @@ export function SaleDueNotifier() {
     return () => {
       active = false;
     };
-  }, [currentUser?.id, loadSales]);
+  }, [currentUser?.id, loadSales, scope]);
 
   const reconciliationKey = useMemo(() => {
     const saleKey = sales

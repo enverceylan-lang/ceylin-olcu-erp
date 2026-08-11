@@ -1,6 +1,7 @@
 import { Customer, ProductMeasurement } from '@/store/useStore';
 import { useMeasurementStore, MeasurementRecord } from '@/store/measurementStore';
 import { Sale, SaleItem } from '@/store/salesStore';
+import type { ErpScope } from '@/lib/erpScope';
 import { getMeasurementDimensions, resolveMeasurementProductGroup, resolveMeasurementProductLabel } from '@/lib/measurementAdapter';
 import { resolveSaleStockItemId } from '@/lib/saleStockIdentity';
 
@@ -359,6 +360,7 @@ interface SalesActor {
 export function createDraftSaleFromCustomer(
   customer: Customer,
   actor: SalesActor,
+  scope: ErpScope,
   selectedMeasurementIds?: string[]
 ): Sale {
   const items: SaleItem[] = [];
@@ -913,6 +915,7 @@ export function createDraftSaleFromCustomer(
   const saleNo = `TEK-${new Date().getFullYear()}${(new Date().getMonth()+1).toString().padStart(2,'0')}-${Math.floor(Math.random()*10000).toString().padStart(4,'0')}`;
 
   return {
+    ...scope,
     id: crypto.randomUUID(),
     saleNo,
     customerId: customer.id,
@@ -936,7 +939,8 @@ export function createDraftSaleFromCustomer(
 export async function syncOrCreateDraftSale(
   customer: Customer,
   salesStore: DraftSalesStore,
-  actor: SalesActor | null
+  actor: SalesActor | null,
+  scope: ErpScope | null
 ): Promise<string> {
   if (
     !actor?.id ||
@@ -946,6 +950,10 @@ export async function syncOrCreateDraftSale(
     throw new Error(
       'Satışı yapan kullanıcı bilgisi bulunamadı.'
     );
+  }
+
+  if (!scope) {
+    throw new Error('SALE_SCOPE_REQUIRED');
   }
   const existingDraft = salesStore.sales.find(
     (sale) =>
@@ -957,7 +965,8 @@ export async function syncOrCreateDraftSale(
   const newSaleObj =
     createDraftSaleFromCustomer(
       customer,
-      actor
+      actor,
+      scope
     );
 
   /*

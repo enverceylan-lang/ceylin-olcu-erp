@@ -8,9 +8,11 @@ import { useStore } from "@/store/useStore";
 import { useSalesStore } from "@/store/salesStore";
 import { syncOrCreateDraftSale } from "@/lib/salesAdapter";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useErpRuntimeContext } from "@/lib/useErpRuntimeContext";
 
 export default function YeniSatisPage() {
   const router = useRouter();
+  const { scope } = useErpRuntimeContext();
   const searchParams = useSearchParams();
 
   const customers = useStore(state => state.customers);
@@ -38,8 +40,12 @@ export default function YeniSatisPage() {
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    void loadSales();
-  }, [loadSales]);
+    if (!scope) {
+      return;
+    }
+
+    void loadSales(scope);
+  }, [loadSales, scope]);
 
   useEffect(() => {
     const selectionTimer = window.setTimeout(() => {
@@ -94,7 +100,8 @@ export default function YeniSatisPage() {
           addSale,
           updateSale
         },
-        currentUser
+        currentUser,
+        scope
       );
 
       router.push(`/satis/${saleId}`);

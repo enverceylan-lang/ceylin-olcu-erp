@@ -20,6 +20,13 @@ import {
   shouldOverwriteMeasurement
 } from '../src/lib/deltaSyncClient';
 
+const testSalesScope = {
+  tenantId: "tenant-1",
+  companyId: "company-1",
+  branchId: "branch-1",
+  accountingPeriodId: "period-1"
+};
+
 const mockLocalStorage = {
   store: {} as Record<string, string>,
   getItem(key: string) { return this.store[key] || null; },
@@ -348,7 +355,8 @@ async function runTests() {
   await runTest('saleSnapshotStable', async () => {
     const sale = createDraftSaleFromCustomer(
       testCustomer,
-      testSalesActor
+      testSalesActor,
+      testSalesScope
     );
     saleId = sale.id;
     await useSalesStore.getState().addSale(sale);
@@ -786,7 +794,8 @@ async function runTests() {
     const draftId = await syncOrCreateDraftSale(
       customerObj,
       useSalesStore.getState(),
-      testSalesActor
+      testSalesActor,
+      testSalesScope
     );
 
     const draft = useSalesStore.getState().sales.find(s => s.id === draftId)!;
@@ -797,7 +806,8 @@ async function runTests() {
     const draftId2 = await syncOrCreateDraftSale(
       customerObj,
       useSalesStore.getState(),
-      testSalesActor
+      testSalesActor,
+      testSalesScope
     );
     const finalDraft = useSalesStore.getState().sales.find(s => s.id === draftId2)!;
 
@@ -847,7 +857,8 @@ async function runTests() {
     const draftId = await syncOrCreateDraftSale(
       customerObj,
       useSalesStore.getState(),
-      testSalesActor
+      testSalesActor,
+      testSalesScope
     );
     const draft1 = useSalesStore.getState().sales.find(s => s.id === draftId)!;
     console.log("  draft1 items:", JSON.stringify(draft1.items.map(i => ({ pType: i.productType, mId: i.measurementId })), null, 2));
@@ -863,7 +874,8 @@ async function runTests() {
     const draftId2 = await syncOrCreateDraftSale(
       customerObj,
       useSalesStore.getState(),
-      testSalesActor
+      testSalesActor,
+      testSalesScope
     );
     const draft2 = useSalesStore.getState().sales.find(s => s.id === draftId2)!;
     if (draft2.items.length !== 1) throw new Error(`Expected 1 item in draft after deactivation, got ${draft2.items.length}`);
@@ -1228,7 +1240,8 @@ async function runTests() {
     const draftId = await syncOrCreateDraftSale(
       customerObj,
       useSalesStore.getState(),
-      testSalesActor
+      testSalesActor,
+      testSalesScope
     );
     const draft = useSalesStore.getState().sales.find(s => s.id === draftId)!;
     const measLines = draft.items.filter(i => i.measurementId === mId);
@@ -1292,7 +1305,8 @@ async function runTests() {
     const draftId = await syncOrCreateDraftSale(
       customerObj,
       useSalesStore.getState(),
-      testSalesActor
+      testSalesActor,
+      testSalesScope
     );
     const draft = useSalesStore.getState().sales.find(s => s.id === draftId)!;
     const guneslikLines = draft.items.filter(i => i.measurementId === mId && i.productType === 'Güneşlik');
@@ -1359,12 +1373,14 @@ async function runTests() {
     const draftId1 = await syncOrCreateDraftSale(
       customerObj,
       useSalesStore.getState(),
-      testSalesActor
+      testSalesActor,
+      testSalesScope
     );
     const draftId2 = await syncOrCreateDraftSale(
       customerObj,
       useSalesStore.getState(),
-      testSalesActor
+      testSalesActor,
+      testSalesScope
     );
     if (draftId1 !== draftId2) throw new Error('Two syncs created two drafts instead of one');
     const draft = useSalesStore.getState().sales.find(s => s.id === draftId1)!;
@@ -1385,6 +1401,7 @@ async function runTests() {
     useStore.getState().addCustomer(customerObj);
     // Create an APPROVED sale directly (not TASLAK)
     const approvedSale = {
+      ...testSalesScope,
       id: generateUUID(), saleNo: 'TEK-ONAY-001', customerId: custId,
       status: 'ONAYLANDI', items: [{ id: generateUUID(), measurementId: 'old-meas', productType: 'Stor', productGroup: 'Mekanik Perde', roomName: 'Oda', windowName: 'Pencere', width: 100, height: 200, calcWidth: 100, calcHeight: 200, quantity: 1, metricSize: 2.0, metricUnit: 'm2', unitPrice: 500, discount: 0, rowTotal: 500 }],
       priceSource: 'MANUAL', totalAmount: 500, cashPrice: 500, installmentPrice: 500,
@@ -1397,7 +1414,8 @@ async function runTests() {
     const draftId = await syncOrCreateDraftSale(
       customerObj,
       useSalesStore.getState(),
-      testSalesActor
+      testSalesActor,
+      testSalesScope
     );
     const approvedAfter = useSalesStore.getState().sales.find(s => s.id === approvedSale.id);
     const snapshotAfter = JSON.stringify(approvedAfter);
@@ -1633,7 +1651,8 @@ async function runTests() {
     await syncOrCreateDraftSale(
       customerObj,
       useSalesStore.getState(),
-      testSalesActor
+      testSalesActor,
+      testSalesScope
     );
 
     const enriched = useMeasurementStore.getState().measurements.find(m => m.id === mId)!;
@@ -1645,7 +1664,8 @@ async function runTests() {
     const draftId = await syncOrCreateDraftSale(
       customerObj,
       useSalesStore.getState(),
-      testSalesActor
+      testSalesActor,
+      testSalesScope
     );
     const draft = useSalesStore.getState().sales.find(s => s.id === draftId)!;
 
@@ -1673,12 +1693,14 @@ async function runTests() {
     await syncOrCreateDraftSale(
       customerObj,
       useSalesStore.getState(),
-      testSalesActor
+      testSalesActor,
+      testSalesScope
     );
     const draftId = await syncOrCreateDraftSale(
       customerObj,
       useSalesStore.getState(),
-      testSalesActor
+      testSalesActor,
+      testSalesScope
     );
     const draft = useSalesStore.getState().sales.find(s => s.id === draftId)!;
 
@@ -1699,6 +1721,7 @@ async function runTests() {
     useStore.getState().addCustomer(customerObj);
 
     const approvedSale = {
+      ...testSalesScope,
       id: generateUUID(), saleNo: 'TEK-JUMBO-ONAY', customerId: custId,
       status: 'ONAYLANDI', items: [
         { id: 'parent-id', measurementId: 'meas-jumbo', productType: 'Stor Perde', productGroup: 'Mekanik Perde', roomName: 'Oda', windowName: 'Pencere', width: 240, height: 200, calcWidth: 240, calcHeight: 200, quantity: 1, metricSize: 4.80, metricUnit: 'm2', unitPrice: 300, discount: 0, rowTotal: 1440 },
@@ -1713,7 +1736,8 @@ async function runTests() {
     await syncOrCreateDraftSale(
       customerObj,
       useSalesStore.getState(),
-      testSalesActor
+      testSalesActor,
+      testSalesScope
     );
     const reloadedApproved = useSalesStore.getState().sales.find(s => s.id === approvedSale.id)!;
     const jumboLine = reloadedApproved.items.find(i => i.isJumboComponent);

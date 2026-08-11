@@ -298,8 +298,12 @@ const [showCompleted, setShowCompleted] =
   );
 
   useEffect(() => {
-    void loadSales();
-  }, [loadSales]);
+    if (!scope) {
+      return;
+    }
+
+    void loadSales(scope);
+  }, [loadSales, scope]);
   useEffect(() => {
     function handleShortcut(
       event: KeyboardEvent
