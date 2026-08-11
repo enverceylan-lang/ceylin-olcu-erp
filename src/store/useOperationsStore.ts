@@ -634,9 +634,7 @@ export const useOperationsStore =
                   providerType:
                     entry.providerType,
                   assignmentType:
-                    request.operation.party
-                      ?.assignmentType ||
-                    "INTERNAL",
+                    "EXTERNAL",
                   operationId:
                     request.operation.id,
                   earningsEntryId:

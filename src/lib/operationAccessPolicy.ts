@@ -111,7 +111,7 @@ export function canViewOperation(
     return false;
   }
 
-  return operation.party?.id === actor.userId;
+  return operation.party?.userId === actor.userId;
 }
 
 export function canViewAgendaEvent(
@@ -166,7 +166,7 @@ export function canAdvanceOperation(
   }
 
   return (
-    operation.party?.id === actor.userId &&
+    operation.party?.userId === actor.userId &&
     (
       normalizeAccessRole(actor.role) ===
         "TAILOR" ||

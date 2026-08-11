@@ -7,21 +7,19 @@ import { MessageCircle } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useStore } from "@/store/useStore";
+import { StockItemPicker } from "@/components/stock/StockItemPicker";
 import { useSalesStore, Sale, SaleStatus, SaleItem, PaymentMethod } from "@/store/salesStore";
 import InstallmentPlanPanel from "@/components/sales/InstallmentPlanPanel";
 import PaymentTrackingPanel from "@/components/sales/PaymentTrackingPanel";
 import SaleReturnPanel from "@/components/sales/SaleReturnPanel";
 import { generateSalesPdfFile, openSalesPdfPreview } from "@/lib/salesPdfGenerator";
 import { prepareSaleForApproval } from "@/lib/salesApproval";
+import { fetchActiveCompanyDisplayName } from "@/lib/activeCompanyDisplayNameClient";
 import { getSaleRemainingBalance } from "@/lib/salesFinance";
 import { useAuthStore } from "@/store/useAuthStore";
 import { canViewSale } from "@/lib/salesVisibility";
 import OpenMeasurementsNotice from "@/components/sales/OpenMeasurementsNotice";
 import { createDraftSaleFromCustomer } from "@/lib/salesAdapter";
-import { useOperationsStore } from "@/store/useOperationsStore";
-import {
-  shouldSyncMainOperationForSaleStatus
-} from "@/lib/saleOperationEligibility";
 import { useErpRuntimeContext } from "@/lib/useErpRuntimeContext";
 import { getSaleStatusPresentation } from "@/lib/saleStatusPresentation";
 import {
@@ -40,12 +38,15 @@ import {
   canApproveSpecificSale
 } from "@/lib/saleApprovalAccess";
 
+import {
+  executeSaleApprovalOperations
+} from "@/lib/saleApprovalOperationsCoordinator";
 export default function SaleDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
   const id = unwrappedParams.id;
 
   const router = useRouter();
-  const { customers } = useStore();
+  const { customers, products } = useStore();
   const {
     sales,
     loadSales,
@@ -56,10 +57,6 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
   } = useSalesStore();
   const currentUser = useAuthStore(state => state.currentUser);
 
-  const syncMainOperation =
-    useOperationsStore(
-      state => state.syncMainOperation
-    );
 
   const {
     scope,
@@ -91,8 +88,12 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
   ] = useState(false);
 
   useEffect(() => {
-    loadSales().then(() => setMounted(true));
-  }, [loadSales]);
+    if (!scope) {
+      return;
+    }
+
+    loadSales(scope).then(() => setMounted(true));
+  }, [loadSales, scope]);
 
   useEffect(() => {
     if (mounted && !isLoading) {
@@ -139,6 +140,51 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
     // Recalculate global total
     const totalAmount = newItems.reduce((acc, curr) => acc + curr.rowTotal, 0);
     setSale({ ...sale, items: newItems, totalAmount });
+  };
+  const handleStockSelect = (
+    index: number,
+    product: import("@/store/useStore").Product,
+  ) => {
+    if (!sale) {
+      return;
+    }
+
+    const newItems = [...sale.items];
+    const current = newItems[index];
+
+    if (!current) {
+      return;
+    }
+
+    const nextUnitPrice =
+      product.salePrice1 ??
+      product.cashPrice ??
+      current.unitPrice;
+
+    const nextItem: SaleItem = {
+      ...current,
+      stockItemId: product.id,
+      unitPrice: nextUnitPrice,
+    };
+
+    nextItem.rowTotal =
+      calculateRowTotal(nextItem);
+
+    newItems[index] = nextItem;
+
+    const totalAmount =
+      newItems.reduce(
+        (sum, item) =>
+          sum + item.rowTotal,
+        0,
+      );
+
+    setSale({
+      ...sale,
+      items: newItems,
+      totalAmount,
+      priceSource: "STOCK",
+    });
   };
 
   const getRemainingBalance = () => {
@@ -198,6 +244,14 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
         return;
       }
 
+      if (!scope) {
+        alert(
+          scopeError ||
+            "Aktif şirket / şube / dönem kapsamı yüklenemedi."
+        );
+        return;
+      }
+
       const selectedDraft =
         createDraftSaleFromCustomer(
           customer,
@@ -207,6 +261,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
               currentUser.username,
             name: currentUser.name
           },
+          scope,
           measurementIds
         );
 
@@ -466,37 +521,45 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
         await updateSale(updatedSale);
       }
 
-      if (
-        shouldSyncMainOperationForSaleStatus(
-          updatedSale.status
-        )
-      ) {
-        const operationResult =
-          syncMainOperation({
-            scope,
-            sale: updatedSale,
-            customer: {
-              id: customer.id,
-              name: customer.name,
-              phone: customer.phone || "",
-              address: customer.address || ""
-            },
-            createdByUserId:
-              currentUser.id
-          });
+      const operationsResult =
+        updatedSale.status ===
+          "ONAYLANDI" &&
+        persistedSaleForSave.status !==
+          "ONAYLANDI"
+          ? executeSaleApprovalOperations({
+              sale:
+                updatedSale,
+              scope,
+              customer: {
+                id:
+                  customer.id,
+                name:
+                  customer.name,
+                phone:
+                  customer.phone || "",
+                address:
+                  customer.address || ""
+              },
+              actorUserId:
+                currentUser.id,
+              now:
+                updatedSale.updatedAt
+            })
+          : null;
 
-        if (
-          operationResult.outcome ===
-          "REJECTED"
-        ) {
-          throw new Error(
-            `MAIN_OPERATION_REJECTED:${
-              operationResult.reason
-            }`
-          );
-        }
-      }
+      const materialFulfillmentResult =
+        operationsResult?.outcome ===
+          "COMMITTED"
+          ? operationsResult.material
+          : operationsResult?.material ??
+            null;
 
+      const mechanicalProcurementResult =
+        operationsResult?.outcome ===
+          "COMMITTED"
+          ? operationsResult.mechanical
+          : operationsResult?.mechanical ??
+            null;
       if (financeOutboxRecord) {
         const financeResult =
           await executeSalesFinanceOutboxRecord(
@@ -520,6 +583,30 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
 
           return;
         }
+      }
+
+      if (
+        materialFulfillmentResult?.outcome ===
+        "REJECTED"
+      ) {
+        alert(
+          [
+            "Satış ONAYLANDI olarak kaydedildi ancak perde/dikim malzeme otomasyonu tamamlanamadı.",
+            ...materialFulfillmentResult.errors
+          ].join("\n")
+        );
+      }
+
+      if (
+        mechanicalProcurementResult?.outcome ===
+        "REJECTED"
+      ) {
+        alert(
+          [
+            "Satış ONAYLANDI olarak kaydedildi ancak mekanik tedarik otomasyonu tamamlanamadı.",
+            ...mechanicalProcurementResult.errors
+          ].join("\n")
+        );
       }
 
       router.replace("/satis");
@@ -603,9 +690,13 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
         pdfGeneratedAt: new Date().toISOString()
       };
 
+      const activeCompanyName =
+        await fetchActiveCompanyDisplayName();
+
       const file = await generateSalesPdfFile(
         currentSale,
-        customer
+        customer,
+        activeCompanyName
       );
 
       openSalesPdfPreview(
@@ -767,7 +858,11 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
     }
 
     try {
-      await removeSale(sale.id);
+      if (!scope) {
+        throw new Error("SALE_SCOPE_REQUIRED");
+      }
+
+      await removeSale(scope, sale.id);
       router.push("/satis");
     } catch (error) {
       console.error(
@@ -887,11 +982,33 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
                         <div className="font-medium text-gray-900 dark:text-white">{item.roomName}</div>
                         <div className="text-xs text-gray-500">{item.windowName}</div>
                       </td>
-                      <td className="flex items-center justify-between px-1 py-2 sm:table-cell sm:px-4 sm:py-3">
-                        <span className="text-xs font-semibold text-gray-400 sm:hidden">Ürün</span>
-                        <span className="inline-block bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-2 py-1 rounded text-xs font-semibold">
-                          {item.productType || item.productGroup || 'Ürün'}
-                        </span>
+                      <td className="block px-1 py-2 sm:table-cell sm:px-4 sm:py-3">
+                        <div className="mb-1 flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold text-gray-400 sm:hidden">
+                            Ürün
+                          </span>
+                          <span className="inline-block rounded bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                            {item.productType || item.productGroup || "Ürün"}
+                          </span>
+                        </div>
+
+                        <StockItemPicker
+                          products={products}
+                          value={item.stockItemId}
+                          disabled={
+                            sale.status === "ONAYLANDI" ||
+                            sale.status === "SİPARİŞ" ||
+                            sale.status === "ÜRETİME_GÖNDERİLDİ" ||
+                            sale.status === "MONTAJA_GÖNDERİLDİ" ||
+                            sale.status === "TAMAMLANDI"
+                          }
+                          onSelect={product =>
+                            handleStockSelect(
+                              idx,
+                              product,
+                            )
+                          }
+                        />
                       </td>
                       <td className="flex items-center justify-between px-1 py-2 text-right sm:table-cell sm:px-4 sm:py-3">
                         <span className="text-xs font-semibold text-gray-400 sm:hidden">Birim</span>

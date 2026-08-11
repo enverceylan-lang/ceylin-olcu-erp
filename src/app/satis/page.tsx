@@ -23,17 +23,11 @@ import {
   requestSaleStatusTransition
 } from "@/lib/saleStatusTransitionService";
 import {
-  shouldSyncMainOperationForSaleStatus
-} from "@/lib/saleOperationEligibility";
-import {
   executeSalesFinanceOutboxRecord
 } from "@/lib/finance/salesFinanceOutboxExecutor";
 import {
   useErpRuntimeContext
 } from "@/lib/useErpRuntimeContext";
-import {
-  useOperationsStore
-} from "@/store/useOperationsStore";
 import {
   type Sale,
   useSalesStore
@@ -47,6 +41,9 @@ import {
 import {
   getVisibleSales
 } from "@/lib/salesVisibility";
+import {
+  executeSaleApprovalOperations
+} from "@/lib/saleApprovalOperationsCoordinator";
 
 export default function SatisPage() {
   const { customers } = useStore();
@@ -61,10 +58,6 @@ export default function SatisPage() {
   const currentUser =
     useAuthStore(state => state.currentUser);
 
-  const syncMainOperation =
-    useOperationsStore(
-      state => state.syncMainOperation
-    );
 
   const {
     scope,
@@ -85,8 +78,12 @@ export default function SatisPage() {
     useState<string | null>(null);
 
   useEffect(() => {
-    void loadSales();
-  }, [loadSales]);
+    if (!scope) {
+      return;
+    }
+
+    void loadSales(scope);
+  }, [loadSales, scope]);
 
   const handleApproveSale = async (
     sale: Sale
@@ -206,42 +203,31 @@ export default function SatisPage() {
           transition.audit
         );
 
-      if (
-        shouldSyncMainOperationForSaleStatus(
-          approvedSale.status
-        )
-      ) {
-        const operationResult =
-          syncMainOperation({
-            scope,
-            sale: approvedSale,
-            customer: {
-              id: customer.id,
-              name: customer.name,
-              phone: customer.phone || "",
-              address:
-                customer.address || ""
-            },
-            createdByUserId:
-              currentUser.id
-          });
-
-        if (
-          operationResult.outcome ===
-          "REJECTED"
-        ) {
-          throw new Error(
-            `MAIN_OPERATION_REJECTED:${operationResult.reason}`
-          );
-        }
-      }
-
+      const operationsResult =
+        executeSaleApprovalOperations({
+          sale:
+            approvedSale,
+          scope,
+          customer: {
+            id:
+              customer.id,
+            name:
+              customer.name,
+            phone:
+              customer.phone || "",
+            address:
+              customer.address || ""
+          },
+          actorUserId:
+            currentUser.id,
+          now
+        });
       const financeResult =
         await executeSalesFinanceOutboxRecord(
           financeOutboxRecord
         );
 
-      await loadSales();
+      await loadSales(scope);
 
       if (
         financeResult.outcome ===
@@ -253,8 +239,30 @@ export default function SatisPage() {
         return;
       }
 
+      if (
+        operationsResult.outcome ===
+        "REJECTED"
+      ) {
+        alert(
+          [
+            "Satış ONAYLANDI olarak kaydedildi ancak operasyon paketinin bir bölümü tamamlanamadı.",
+            `Aşama: ${operationsResult.stage}`,
+            ...operationsResult.errors
+          ].join("\n")
+        );
+        return;
+      }
+
+      const supplyStarted =
+        operationsResult.material.outcome ===
+          "COMMITTED" ||
+        operationsResult.mechanical.outcome ===
+          "COMMITTED";
+
       alert(
-        "Satış onaylandı. Finans ve operasyon zinciri başlatıldı."
+        supplyStarted
+          ? "Satış onaylandı. Finans, operasyon ve ilgili stok/tedarik planları başlatıldı."
+          : "Satış onaylandı. Finans ve operasyon zinciri başlatıldı."
       );
     }
     catch (error) {
@@ -269,7 +277,7 @@ export default function SatisPage() {
           : "Satış onayı tamamlanamadı."
       );
 
-      await loadSales();
+      await loadSales(scope);
     }
     finally {
       setApprovingSaleId(null);

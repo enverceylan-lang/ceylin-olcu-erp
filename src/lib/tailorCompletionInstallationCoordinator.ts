@@ -5,6 +5,9 @@ import type {
   OperationRecord
 } from "@/lib/operationsWorkflow";
 import {
+  erpScopeMatches
+} from "@/lib/erpScope";
+import {
   useAuthStore
 } from "@/store/useAuthStore";
 import {
@@ -117,7 +120,11 @@ export function routeInstallationAfterTailorCompletion(
       .find(
         current =>
           current.id ===
-          operation.saleId
+            operation.saleId &&
+          erpScopeMatches(
+            current,
+            operation
+          )
       );
 
   if (!sale) {

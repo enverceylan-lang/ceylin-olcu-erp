@@ -214,12 +214,9 @@ export function calculateTailorCompletionEarnings(
   }
 
   const providerCustomerId =
-    String(
-      operation.party
-        ?.providerCustomerId ||
-      operation.party?.id ||
-      ""
-    ).trim();
+    operation.party
+      ?.providerCustomerId
+      ?.trim();
 
   if (!providerCustomerId) {
     return {

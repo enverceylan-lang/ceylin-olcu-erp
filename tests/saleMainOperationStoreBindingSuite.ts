@@ -19,6 +19,7 @@ const customer = {
 };
 
 const sale: Sale = {
+  ...scope,
   id: "sale-store-1",
   saleNo: "SAT-STORE-1",
   customerId: customer.id,

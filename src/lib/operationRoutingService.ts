@@ -11,6 +11,9 @@ import {
 import {
   erpScopeMatches
 } from "./erpScope";
+import {
+  decideInstallationScheduleConflict
+} from "./installationScheduleConflictGuard";
 
 export interface RouteChildOperationInput {
   parent: OperationRecord;
@@ -53,6 +56,8 @@ export type RouteChildOperationResult =
         | "PARTY_REQUIRED"
         | "SUPPLIER_REQUIRED"
         | "INVALID_DATE_RANGE"
+        | "SCHEDULE_CONFLICT"
+        | "INVALID_EXISTING_SCHEDULE"
         | "ACTOR_REQUIRED";
     };
 
@@ -254,6 +259,33 @@ export function routeChildOperation(
       state,
       operation: existing
     };
+  }
+
+  if (input.kind === "INSTALLATION") {
+    const scheduleDecision =
+      decideInstallationScheduleConflict(
+        {
+          tenantId: input.parent.tenantId,
+          companyId: input.parent.companyId,
+          branchId: input.parent.branchId,
+          accountingPeriodId:
+            input.parent.accountingPeriodId,
+          partyId: stableParty.id,
+          scheduledAt:
+            scheduledAt.toISOString(),
+          dueAt:
+            dueAt.toISOString()
+        },
+        state.operations
+      );
+
+    if (!scheduleDecision.allowed) {
+      return {
+        outcome: "REJECTED",
+        state,
+        reason: scheduleDecision.reason
+      };
+    }
   }
 
   const operation: OperationRecord = {

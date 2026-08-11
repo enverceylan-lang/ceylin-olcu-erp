@@ -68,6 +68,10 @@ function createSale(
   overrides: Partial<Sale> = {}
 ): Sale {
   return {
+    tenantId: "tenant-1",
+    companyId: "company-1",
+    branchId: "branch-1",
+    accountingPeriodId: "period-1",
     id: "central-sale-1",
     saleNo: "SAT-0001",
     customerId: "customer-1",

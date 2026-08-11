@@ -202,7 +202,15 @@ export function executeStoreCutCompletionToProduction(
           lotId:
             input.request.stockLotId,
           previousOnHandMeters:
-            beforeLot.onHandMeters
+            beforeLot.onHandMeters,
+          reversedByUserId:
+            input.request.completedByUserId,
+          reversedAt:
+            new Date().toISOString(),
+          reason:
+            "STORE_CUT_COMPLETION_ROLLBACK",
+          source:
+            "STORE_CUT_COMPLETION_COORDINATOR"
         });
     }
 
@@ -248,7 +256,15 @@ export function executeStoreCutCompletionToProduction(
           lotId:
             input.request.stockLotId,
           previousOnHandMeters:
-            beforeLot.onHandMeters
+            beforeLot.onHandMeters,
+          reversedByUserId:
+            input.request.completedByUserId,
+          reversedAt:
+            new Date().toISOString(),
+          reason:
+            "STORE_CUT_COMPLETION_ROLLBACK",
+          source:
+            "STORE_CUT_COMPLETION_COORDINATOR"
         });
     }
 
@@ -304,7 +320,15 @@ export function executeStoreCutCompletionToProduction(
           lotId:
             input.request.stockLotId,
           previousOnHandMeters:
-            beforeLot.onHandMeters
+            beforeLot.onHandMeters,
+          reversedByUserId:
+            input.request.completedByUserId,
+          reversedAt:
+            new Date().toISOString(),
+          reason:
+            "STORE_CUT_COMPLETION_ROLLBACK",
+          source:
+            "STORE_CUT_COMPLETION_COORDINATOR"
         });
     }
 

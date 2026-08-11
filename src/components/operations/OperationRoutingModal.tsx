@@ -6,6 +6,7 @@ import {
 } from "react";
 import type {
   OperationKind,
+  OperationPriority,
   OperationRecord
 } from "@/lib/operationsWorkflow";
 import type {
@@ -97,6 +98,11 @@ export default function OperationRoutingModal({
   const [dueAt, setDueAt] =
     useState(
       localDateTimeValue(24)
+    );
+
+  const [priority, setPriority] =
+    useState<OperationPriority>(
+      "NORMAL"
     );
 
   const [notes, setNotes] =
@@ -258,6 +264,8 @@ export default function OperationRoutingModal({
           dueAt:
             dueDate.toISOString(),
 
+          priority,
+
           notes:
             notes.trim() ||
             undefined,
@@ -414,7 +422,7 @@ export default function OperationRoutingModal({
 
               {availableUsers.length === 0 ? (
                 <span className="mt-1 block text-xs text-amber-700">
-                  Bu görev türüne uygun aktif personel bulunamadı.
+                  Bu görev türüne uygun, aktif ve hizmet sağlayıcı carisine bağlı personel bulunamadı.
                 </span>
               ) : null}
             </label>
@@ -486,7 +494,32 @@ export default function OperationRoutingModal({
         </div>
 
         <label className="mt-4 block text-sm font-medium text-slate-700">
-          Not
+          Öncelik
+
+          <select
+            value={priority}
+            onChange={event =>
+              setPriority(
+                event.target.value as
+                  OperationPriority
+              )
+            }
+            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5"
+          >
+            <option value="NORMAL">
+              Normal
+            </option>
+            <option value="PRIORITY">
+              Öncelikli
+            </option>
+            <option value="URGENT">
+              ACİL
+            </option>
+          </select>
+        </label>
+
+        <label className="mt-4 block text-sm font-medium text-slate-700">
+          İş Kartında Görünecek Not
 
           <textarea
             value={notes}

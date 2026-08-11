@@ -9,6 +9,7 @@ import type {
   SaleItem as LegacySaleItem
 } from '@/store/useStore';
 import { shouldCreateTailorProductionItem } from '@/lib/productionRouting';
+import { shouldPublishTailorPlanning } from '@/lib/tailorPlanningEligibility';
 
 function resolveProductionQuantity(item: CentralSaleItem): number {
   const fabricMeters = Number(item.fabricMeters || 0);
@@ -45,7 +46,7 @@ function toLegacySaleItem(item: CentralSaleItem): LegacySaleItem {
     measurementId: item.measurementId,
     originalWidth: item.width,
     originalHeight: item.height,
-    productId: '',
+    productId: item.stockItemId || '',
     productGroup: item.productGroup,
     productType: item.productType,
     calculationType: item.metricUnit,
@@ -78,6 +79,7 @@ function toProductionItem(
     id: `central-production-${sale.id}-${item.id}`,
     orderId: sale.id,
     saleLineId: item.id,
+    stockItemId: item.stockItemId,
     customerId: sale.customerId,
     roomName: item.roomName,
     openingName: item.windowName,
@@ -99,7 +101,7 @@ function toProductionItem(
     quantityUnit: resolveProductionQuantityUnit(item),
     pleatType: item.pleatDetails,
     wingQuantity: item.wingQuantity,     fonPlacement: item.fonPlacement,
-    productionStatus: 'READY_FOR_CUTTING',
+    productionStatus: 'WAITING_MATERIAL',
     cutCompleted: false,
     sewingCompleted: false,
     ironingCompleted: false,
@@ -109,9 +111,9 @@ function toProductionItem(
     history: [
       {
         date: new Date().toISOString(),
-        status: 'READY_FOR_CUTTING',
+        status: 'WAITING_MATERIAL',
         employeeId: 'system',
-        notes: `Merkezi satıştan terzi üretimine aktarıldı${
+        notes: `Merkezi satıştan üretim havuzuna alındı; malzeme kaynağı hazır olana kadar kesime çıkamaz${
           item.calculationVersion
             ? ` (${item.calculationVersion})`
             : ''
@@ -126,7 +128,11 @@ function toProductionItem(
 export async function syncCentralSaleToTailorProduction(
   sale: CentralSale
 ): Promise<void> {
-  if (sale.status !== 'ÜRETİME_GÖNDERİLDİ') {
+  /*
+   * İş emri / kapasite planı satış ONAYLANDI olduğunda erkenden görünür.
+   * Fiziksel kesim izni ayrı malzeme readiness kapısı tarafından yönetilir.
+   */
+  if (!shouldPublishTailorPlanning(sale.status)) {
     return;
   }
 
@@ -192,6 +198,16 @@ export async function syncCentralSaleToTailorProduction(
         if (!sourceItem) return item;
 
         let repairedItem = item;
+
+        if (
+          !repairedItem.stockItemId &&
+          sourceItem.stockItemId
+        ) {
+          repairedItem = {
+            ...repairedItem,
+            stockItemId: sourceItem.stockItemId
+          };
+        }
 
         if (!repairedItem.quantityUnit) {
           repairedItem = {
@@ -286,7 +302,7 @@ export async function syncCentralSaleToTailorProduction(
               saleId: sale.id,
               customerId: sale.customerId,
               items: taskText,
-              status: 'Kesim Bekliyor',
+              status: 'Planlandı / Malzeme Bekliyor',
               deadline: formatDefaultDeliveryPromiseDate()
             },
             ...state.productionTasks

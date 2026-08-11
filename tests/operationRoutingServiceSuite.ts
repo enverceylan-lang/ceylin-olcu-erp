@@ -160,6 +160,127 @@ assert.equal(
   parent.id
 );
 
+const firstInstallation =
+  routeChildOperation(
+    {
+      operations: [parent],
+      agendaEvents: []
+    },
+    {
+      parent,
+      kind: "INSTALLATION",
+      party: {
+        id: "internal-user:installer-1",
+        userId: "installer-1",
+        name: "Montaj Ustası",
+        assignmentType: "INTERNAL"
+      },
+      scheduledAt:
+        "2026-08-02T08:00:00.000Z",
+      dueAt:
+        "2026-08-02T12:00:00.000Z",
+      createdByUserId: "admin-1",
+      now:
+        "2026-07-28T21:12:00.000Z"
+    }
+  );
+
+assert.equal(
+  firstInstallation.outcome,
+  "CREATED"
+);
+
+if (firstInstallation.outcome !== "CREATED") {
+  throw new Error(
+    "First installation must be created"
+  );
+}
+
+const secondParent: OperationRecord = {
+  ...parent,
+  id: "general-operation:sale-2",
+  idempotencyKey: "GENERAL:sale-2",
+  sourceId: "sale-2",
+  saleId: "sale-2",
+  customerId: "customer-2",
+  customerName: "Ayşe Yılmaz"
+};
+
+const installationConflict =
+  routeChildOperation(
+    {
+      operations: [
+        secondParent,
+        firstInstallation.operation
+      ],
+      agendaEvents:
+        firstInstallation.state.agendaEvents
+    },
+    {
+      parent: secondParent,
+      kind: "INSTALLATION",
+      party: {
+        id: "internal-user:installer-1",
+        userId: "installer-1",
+        name: "Montaj Ustası",
+        assignmentType: "INTERNAL"
+      },
+      scheduledAt:
+        "2026-08-02T10:00:00.000Z",
+      dueAt:
+        "2026-08-02T14:00:00.000Z",
+      createdByUserId: "admin-1",
+      now:
+        "2026-07-28T21:13:00.000Z"
+    }
+  );
+
+assert.equal(
+  installationConflict.outcome,
+  "REJECTED"
+);
+
+if (installationConflict.outcome === "REJECTED") {
+  assert.equal(
+    installationConflict.reason,
+    "SCHEDULE_CONFLICT"
+  );
+}
+
+const installationBoundary =
+  routeChildOperation(
+    {
+      operations: [
+        secondParent,
+        firstInstallation.operation
+      ],
+      agendaEvents:
+        firstInstallation.state.agendaEvents
+    },
+    {
+      parent: secondParent,
+      kind: "INSTALLATION",
+      party: {
+        id: "internal-user:installer-1",
+        userId: "installer-1",
+        name: "Montaj Ustası",
+        assignmentType: "INTERNAL"
+      },
+      scheduledAt:
+        "2026-08-02T12:00:00.000Z",
+      dueAt:
+        "2026-08-02T16:00:00.000Z",
+      createdByUserId: "admin-1",
+      now:
+        "2026-07-28T21:14:00.000Z"
+    }
+  );
+
+assert.equal(
+  installationBoundary.outcome,
+  "CREATED"
+);
+
 const invalidParent =
   routeChildOperation(
     tailor.state,

@@ -39,6 +39,7 @@ function operation(
 
     party: {
       id: "tailor-1",
+      userId: "tailor-1",
       name: "Hasan Terzi"
     },
 
@@ -139,6 +140,7 @@ const installation =
     kind: "INSTALLATION",
     party: {
       id: "installer-1",
+      userId: "installer-1",
       name: "Ali Montaj"
     }
   });

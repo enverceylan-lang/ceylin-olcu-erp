@@ -1,5 +1,9 @@
 import type { ErpScope } from "./erpScope";
 
+export type StoreCutConsumptionMode =
+  | "WITHIN_RESERVATION"
+  | "USE_WHOLE_LOT";
+
 export interface StoreCutCompletionRequest extends ErpScope {
   id: string;
   idempotencyKey: string;
@@ -10,6 +14,7 @@ export interface StoreCutCompletionRequest extends ErpScope {
   productionOrderId: string;
   stockItemId: string;
   stockLotId: string;
+  consumptionMode?: StoreCutConsumptionMode;
   reservedMeters: number;
   plannedCutMeters: number;
   actualCutMeters: number;
@@ -42,6 +47,9 @@ export type StoreCutCompletionDecision =
         | "SCOPE_MISMATCH"
         | "LOT_MISMATCH"
         | "ACTUAL_EXCEEDS_RESERVATION"
+        | "WHOLE_LOT_REQUIRES_FULL_LOT"
+        | "WHOLE_LOT_BELOW_RESERVATION"
+        | "WHOLE_LOT_OUTPUT_MISMATCH"
         | "OUTPUT_EXCEEDS_ACTUAL_CUT"
         | "INSUFFICIENT_PHYSICAL_STOCK";
       message: string;
@@ -74,6 +82,8 @@ function samePayload(
     request.cutOrderId === completion.cutOrderId &&
     request.reservationId === completion.reservationId &&
     request.stockLotId === completion.stockLotId &&
+    (request.consumptionMode ?? "WITHIN_RESERVATION") ===
+      (completion.consumptionMode ?? "WITHIN_RESERVATION") &&
     request.actualCutMeters === completion.actualCutMeters &&
     request.usableOutputMeters === completion.usableOutputMeters &&
     sameScope(request, completion)
@@ -159,13 +169,61 @@ export function decideStoreCutCompletion(
       message: "Kesim kaydı ile top/lot eşleşmiyor.",
     };
   }
-  if (request.actualCutMeters > request.reservedMeters + EPSILON) {
+  const consumptionMode =
+    request.consumptionMode ??
+    "WITHIN_RESERVATION";
+
+  if (
+    request.actualCutMeters >
+      request.reservedMeters + EPSILON &&
+    consumptionMode !== "USE_WHOLE_LOT"
+  ) {
     return {
       outcome: "REJECT",
       reason: "ACTUAL_EXCEEDS_RESERVATION",
-      message: "Gerçek kesim rezerve edilmiş miktarı aşamaz.",
+      message: "Gerçek kesim rezerve edilmiş miktarı yalnız açık USE_WHOLE_LOT kararıyla aşabilir.",
     };
   }
+
+  if (consumptionMode === "USE_WHOLE_LOT") {
+    if (
+      request.actualCutMeters + EPSILON <
+      request.reservedMeters
+    ) {
+      return {
+        outcome: "REJECT",
+        reason: "WHOLE_LOT_BELOW_RESERVATION",
+        message: "USE_WHOLE_LOT tüketimi rezerve miktarın altında olamaz.",
+      };
+    }
+
+    if (
+      Math.abs(
+        request.actualCutMeters -
+          lot.onHandMeters
+      ) > EPSILON
+    ) {
+      return {
+        outcome: "REJECT",
+        reason: "WHOLE_LOT_REQUIRES_FULL_LOT",
+        message: "USE_WHOLE_LOT yalnız lotun fiziksel tamamı tüketildiğinde kullanılabilir.",
+      };
+    }
+
+    if (
+      Math.abs(
+        request.usableOutputMeters -
+          request.actualCutMeters
+      ) > EPSILON
+    ) {
+      return {
+        outcome: "REJECT",
+        reason: "WHOLE_LOT_OUTPUT_MISMATCH",
+        message: "USE_WHOLE_LOT durumunda küçük kalan fire yazılmaz; üretime çıkan metre fiziksel tüketimle eşleşmelidir.",
+      };
+    }
+  }
+
   if (request.usableOutputMeters > request.actualCutMeters + EPSILON) {
     return {
       outcome: "REJECT",

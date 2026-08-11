@@ -28,6 +28,7 @@ export type ProductionTransitionResult =
         | "SEWING_REQUIRED"
         | "IRONING_REQUIRED"
         | "PACKAGING_REQUIRED"
+        | "MATERIAL_NOT_READY"
         | "ALREADY_COMPLETED"
         | "CANCELLED_ITEM_LOCKED"
         | "STATUS_INVALID";
@@ -101,6 +102,18 @@ export function getProductionTransition(
           reason: "ALREADY_COMPLETED"
         };
       }
+
+      if (
+        item.productionStatus !==
+        "READY_FOR_CUTTING"
+      ) {
+        return {
+          allowed: false,
+          reason:
+            "MATERIAL_NOT_READY"
+        };
+      }
+
       return {
         allowed: true,
         changes: {

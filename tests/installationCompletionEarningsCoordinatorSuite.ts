@@ -55,6 +55,10 @@ test(
       calculateInstallationEarningsAmount({
         operation,
         sale: {
+          tenantId: operation.tenantId,
+          companyId: operation.companyId,
+          branchId: operation.branchId,
+          accountingPeriodId: operation.accountingPeriodId,
           id: "sale-1",
           saleNo: "S-1",
           customerId: "customer-1",
@@ -174,6 +178,10 @@ test(
       calculateInstallationEarningsAmount({
         operation,
         sale: {
+          tenantId: operation.tenantId,
+          companyId: operation.companyId,
+          branchId: operation.branchId,
+          accountingPeriodId: operation.accountingPeriodId,
           id: "sale-1",
           saleNo: "S-1",
           customerId: "customer-1",

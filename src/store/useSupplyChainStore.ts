@@ -34,6 +34,12 @@ import {
   type StoreCutCompletion,
   type StoreCutCompletionRequest
 } from "@/lib/storeCutCompletion";
+import {
+  decideInventoryConsumption,
+  decideInventoryConsumptionReversal,
+  type InventoryConsumption,
+  type InventoryConsumptionReversal
+} from "@/lib/inventoryConsumption";
 
 export interface SupplyStockLot
   extends ReservableStockLot {
@@ -72,6 +78,9 @@ interface SupplyChainState {
   purchaseDocuments: PurchaseDocument[];
   tradeOrderLinks: TradeOrderLink[];
   cutCompletions: StoreCutCompletion[];
+  inventoryConsumptions: InventoryConsumption[];
+  inventoryConsumptionReversals:
+    InventoryConsumptionReversal[];
 
   upsertLot(
     lot: SupplyStockLot
@@ -121,8 +130,12 @@ interface SupplyChainState {
       reservationId: string;
       lotId: string;
       previousOnHandMeters: number;
+      reversedByUserId: string;
+      reversedAt: string;
+      reason: string;
+      source: string;
     }
-  ): void;
+  ): SupplyStoreResult<InventoryConsumptionReversal>;
 
   rollbackFulfillmentCreated(
     input: {
@@ -220,6 +233,8 @@ export const useSupplyChainStore =
         purchaseDocuments: [],
         tradeOrderLinks: [],
         cutCompletions: [],
+        inventoryConsumptions: [],
+        inventoryConsumptionReversals: [],
 
         upsertLot: lot => {
           const validation =
@@ -649,6 +664,36 @@ export const useSupplyChainStore =
               };
             }
 
+            if (
+              request.consumptionMode ===
+                "USE_WHOLE_LOT"
+            ) {
+              const otherActiveReservedMeters =
+                activeReservedMeters(
+                  lot.id,
+                  get().reservations.filter(
+                    current =>
+                      current.id !==
+                        reservation.id &&
+                      sameScope(
+                        current,
+                        request
+                      )
+                  )
+                );
+
+              if (
+                otherActiveReservedMeters >
+                0.000001
+              ) {
+                return {
+                  outcome: "REJECTED",
+                  reason:
+                    "WHOLE_LOT_HAS_OTHER_ACTIVE_RESERVATIONS"
+                };
+              }
+            }
+
             const decision =
               decideStoreCutCompletion(
                 request,
@@ -691,7 +736,27 @@ export const useSupplyChainStore =
             const completion =
               decision.completion;
 
-            set({
+
+            const consumptionDecision =
+              decideInventoryConsumption(
+                completion,
+                get().inventoryConsumptions
+              );
+
+            if (
+              consumptionDecision.outcome ===
+              "REJECT"
+            ) {
+              return {
+                outcome: "REJECTED",
+                reason:
+                  consumptionDecision.reason
+              };
+            }
+
+            const inventoryConsumption =
+              consumptionDecision.consumption;
+set({
               lots:
                 get().lots.map(
                   current =>
@@ -731,7 +796,17 @@ export const useSupplyChainStore =
               cutCompletions: [
                 ...get().cutCompletions,
                 completion
-              ]
+              ],
+              inventoryConsumptions:
+                consumptionDecision.outcome ===
+                  "CREATE"
+                  ? [
+                      ...get()
+                        .inventoryConsumptions,
+                      inventoryConsumption
+                    ]
+                  : get()
+                      .inventoryConsumptions
             });
 
             return {
@@ -742,6 +817,53 @@ export const useSupplyChainStore =
 
         rollbackStoreCutCompletionCreated:
           input => {
+            const originalConsumption =
+              get().inventoryConsumptions.find(
+                consumption =>
+                  consumption.cutCompletionId ===
+                    input.completionId &&
+                  sameScope(
+                    consumption,
+                    input.scope
+                  )
+              );
+
+            if (!originalConsumption) {
+              return {
+                outcome: "REJECTED",
+                reason:
+                  "INVENTORY_CONSUMPTION_NOT_FOUND"
+              };
+            }
+
+            const reversalDecision =
+              decideInventoryConsumptionReversal(
+                {
+                  original:
+                    originalConsumption,
+                  scope: input.scope,
+                  actorUserId:
+                    input.reversedByUserId,
+                  occurredAt:
+                    input.reversedAt,
+                  reason: input.reason,
+                  source: input.source
+                },
+                get()
+                  .inventoryConsumptionReversals
+              );
+
+            if (
+              reversalDecision.outcome ===
+              "REJECT"
+            ) {
+              return {
+                outcome: "REJECTED",
+                reason:
+                  reversalDecision.reason
+              };
+            }
+
             set({
               lots:
                 get().lots.map(
@@ -788,8 +910,30 @@ export const useSupplyChainStore =
                         input.scope
                       )
                     )
-                )
+                ),
+              inventoryConsumptions:
+                get().inventoryConsumptions,
+              inventoryConsumptionReversals:
+                reversalDecision.outcome ===
+                  "CREATE"
+                  ? [
+                      ...get()
+                        .inventoryConsumptionReversals,
+                      reversalDecision.reversal
+                    ]
+                  : get()
+                      .inventoryConsumptionReversals
             });
+            return {
+              outcome:
+                reversalDecision.outcome ===
+                  "CREATE"
+                  ? "CREATED"
+                  : "REPLAY",
+              value:
+                reversalDecision.reversal
+            };
+
           },
 
         rollbackFulfillmentCreated:
@@ -897,7 +1041,11 @@ export const useSupplyChainStore =
           tradeOrderLinks:
             state.tradeOrderLinks,
           cutCompletions:
-            state.cutCompletions
+            state.cutCompletions,
+          inventoryConsumptions:
+            state.inventoryConsumptions,
+          inventoryConsumptionReversals:
+            state.inventoryConsumptionReversals
         })
       }
     )

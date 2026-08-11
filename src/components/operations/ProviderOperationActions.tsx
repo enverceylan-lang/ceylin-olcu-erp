@@ -6,6 +6,9 @@ import {
 import type {
   OperationRecord
 } from "@/lib/operationsWorkflow";
+import {
+  erpScopeMatches
+} from "@/lib/erpScope";
 import type { OperationTransitionContext } from "@/lib/operationsWorkflow";
 import type {
   ProviderWorkActor,
@@ -213,7 +216,11 @@ export default function ProviderOperationActions({
           sales.find(
             item =>
               item.id ===
-              operation.saleId
+                operation.saleId &&
+              erpScopeMatches(
+                item,
+                operation
+              )
           );
 
         const calculation =
