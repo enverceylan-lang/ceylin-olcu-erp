@@ -27,6 +27,9 @@ import {
 import {
   loadServerChannelAccess,
 } from "@/lib/serverChannelAccess";
+import {
+  ERP_ACTIVE_SCOPE_COOKIE,
+} from "@/lib/erpActiveScopeCookie";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -485,7 +488,7 @@ export async function POST(
         "password"
       >;
 
-    return NextResponse.json(
+    const response = NextResponse.json(
       {
         success: true,
 
@@ -562,6 +565,21 @@ export async function POST(
         headers: NO_STORE_HEADERS,
       },
     );
+
+
+    response.cookies.set(
+      ERP_ACTIVE_SCOPE_COOKIE,
+      scope.user_scope_id,
+      {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: sessionLifetimeSeconds,
+      },
+    );
+
+    return response;
   } catch {
     console.error(
       "[Company Login] Internal error.",

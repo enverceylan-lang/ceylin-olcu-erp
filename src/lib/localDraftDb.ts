@@ -299,6 +299,11 @@ export type SaveInboundMeasurementOutcome =
 export async function saveInboundMeasurement(
   inbound: InboundMeasurement
 ): Promise<SaveInboundMeasurementOutcome> {
+  try {
+    return await localDraftDb.transaction(
+      'rw',
+      localDraftDb.inboundMeasurements,
+      async () => {
   // Idempotency is based only on the immutable event identity.
   const existing = await localDraftDb.inboundMeasurements.get(inbound.changeId);
   if (existing) return 'ALREADY_RECORDED';
@@ -422,6 +427,19 @@ export async function saveInboundMeasurement(
 
   await localDraftDb.inboundMeasurements.add(inbound);
   return 'INSERTED';
+
+      },
+    );
+  } catch (error: unknown) {
+    if (
+      error instanceof Error &&
+      error.name === 'ConstraintError'
+    ) {
+      return 'ALREADY_RECORDED';
+    }
+
+    throw error;
+  }
 }
 
 export async function listInboundMeasurements(status?: InboundMeasurement['status']): Promise<InboundMeasurement[]> {
