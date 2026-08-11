@@ -280,7 +280,8 @@ export function FieldTaskAssignButton({
           );
 
         await putFieldTask(
-          remoteTask
+          remoteTask,
+          true,
         );
 
         setOpen(false);

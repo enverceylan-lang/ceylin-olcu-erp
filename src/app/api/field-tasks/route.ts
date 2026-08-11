@@ -255,6 +255,8 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     success: true,
     tasks: (data || []).map(mapTask),
+    authoritative:
+      !since && (data || []).length < 200,
     deletedTaskIds:
       (deletedRows || [])
         .map(row => String(row.task_id || ""))

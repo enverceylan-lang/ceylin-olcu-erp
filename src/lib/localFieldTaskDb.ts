@@ -47,6 +47,9 @@ export interface FieldTask {
   archivedAt?: string;
   archivedById?: string;
   archivedByName?: string;
+
+  /* Local provenance only: proves this record was returned by the server. */
+  remoteKnownAt?: string;
 }
 
 class CeylinFieldTaskDb extends Dexie {
@@ -217,12 +220,18 @@ export async function markFieldTaskSeen(
 
 export async function upsertRemoteFieldTasks(
   tasks: FieldTask[],
+  remoteKnownAt = new Date().toISOString(),
 ): Promise<void> {
   if (!Array.isArray(tasks) || tasks.length === 0) {
     return;
   }
 
-  await localFieldTaskDb.fieldTasks.bulkPut(tasks);
+  await localFieldTaskDb.fieldTasks.bulkPut(
+    tasks.map(task => ({
+      ...task,
+      remoteKnownAt,
+    })),
+  );
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(
@@ -231,10 +240,75 @@ export async function upsertRemoteFieldTasks(
   }
 }
 
+export async function reconcileAuthoritativeRemoteFieldTasks({
+  tasks,
+  deletedTaskIds = [],
+  confirmedAbsentTaskIds = [],
+  remoteKnownAt = new Date().toISOString(),
+}: {
+  tasks: FieldTask[];
+  deletedTaskIds?: string[];
+  confirmedAbsentTaskIds?: string[];
+  remoteKnownAt?: string;
+}): Promise<{ removedTaskIds: string[] }> {
+  const remoteIds = new Set(tasks.map(task => task.id).filter(Boolean));
+  const explicitlyAbsentIds = new Set([
+    ...deletedTaskIds,
+    ...confirmedAbsentTaskIds,
+  ].filter(Boolean));
+
+  const removedTaskIds = await localFieldTaskDb.transaction(
+    "rw",
+    localFieldTaskDb.fieldTasks,
+    async () => {
+      const localTasks = await localFieldTaskDb.fieldTasks.toArray();
+      const staleIds = localTasks
+        .filter(task =>
+          explicitlyAbsentIds.has(task.id) ||
+          (
+            Boolean(task.remoteKnownAt) &&
+            !task.archivedAt &&
+            !remoteIds.has(task.id)
+          )
+        )
+        .map(task => task.id);
+
+      if (staleIds.length > 0) {
+        await localFieldTaskDb.fieldTasks.bulkDelete(staleIds);
+      }
+
+      if (tasks.length > 0) {
+        await localFieldTaskDb.fieldTasks.bulkPut(
+          tasks.map(task => ({
+            ...task,
+            remoteKnownAt,
+          })),
+        );
+      }
+
+      return staleIds;
+    },
+  );
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("field-tasks-updated"));
+  }
+
+  return { removedTaskIds };
+}
+
 export async function putFieldTask(
   task: FieldTask,
+  markRemote = false,
 ): Promise<void> {
-  await localFieldTaskDb.fieldTasks.put(task);
+  await localFieldTaskDb.fieldTasks.put(
+    markRemote
+      ? {
+          ...task,
+          remoteKnownAt: new Date().toISOString(),
+        }
+      : task,
+  );
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(

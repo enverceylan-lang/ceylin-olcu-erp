@@ -33,6 +33,7 @@ import {
   listFieldTasksForUser,
   markFieldTaskSeen,
   putFieldTask,
+  reconcileAuthoritativeRemoteFieldTasks,
   type FieldTask,
   type FieldTaskStatus,
   updateFieldTaskStatus,
@@ -40,6 +41,7 @@ import {
 } from "@/lib/localFieldTaskDb";
 import {
   deleteRemoteFieldTaskLifecycle,
+  FieldTaskApiError,
   fetchRemoteFieldTasks,
   updateRemoteFieldTask,
   updateRemoteFieldTaskLifecycle,
@@ -213,7 +215,15 @@ export default function FieldTasksPage() {
     ) {
       try {
         const remote = await fetchRemoteFieldTasks(sessionToken);
-        await upsertRemoteFieldTasks(remote.tasks);
+        if (remote.authoritative) {
+          await reconcileAuthoritativeRemoteFieldTasks({
+            tasks: remote.tasks,
+            deletedTaskIds: remote.deletedTaskIds,
+            remoteKnownAt: remote.serverTime,
+          });
+        } else {
+          await upsertRemoteFieldTasks(remote.tasks, remote.serverTime);
+        }
       } catch (error) {
         console.warn("[Field Tasks Page] Remote load skipped:", error instanceof Error ? error.message : "Unknown error");
       }
@@ -283,7 +293,7 @@ export default function FieldTasksPage() {
     await updateFieldTaskStatus(task.id, status);
     await markFieldTaskSeen(task.id);
     if (sessionToken) {
-      try { await putFieldTask(await updateRemoteFieldTask(task.id, status, sessionToken, true)); }
+      try { await putFieldTask(await updateRemoteFieldTask(task.id, status, sessionToken, true), true); }
       catch (error) {
         console.warn("[Field Tasks Page] Remote status update failed:", error instanceof Error ? error.message : "Unknown error");
         alert("Durum telefona kaydedildi fakat sunucuya henüz gönderilemedi.");
@@ -334,11 +344,41 @@ export default function FieldTasksPage() {
         await deleteLocalFieldTask(pendingLifecycle.task.id);
       } else {
         const result = await updateRemoteFieldTaskLifecycle(pendingLifecycle.task.id, pendingLifecycle.action, sessionToken, reason || undefined);
-        await putFieldTask(result.task);
+        await putFieldTask(result.task, true);
       }
       setPendingLifecycle(null);
       await loadTasks();
     } catch (error) {
+      if (error instanceof FieldTaskApiError && error.status === 404) {
+        try {
+          const staleTaskId = pendingLifecycle.task.id;
+          const remote = await fetchRemoteFieldTasks(sessionToken);
+          const confirmedAbsent = !remote.tasks.some(task => task.id === staleTaskId);
+
+          if (confirmedAbsent) {
+            if (remote.authoritative) {
+              await reconcileAuthoritativeRemoteFieldTasks({
+                tasks: remote.tasks,
+                deletedTaskIds: remote.deletedTaskIds,
+                confirmedAbsentTaskIds: [staleTaskId],
+                remoteKnownAt: remote.serverTime,
+              });
+            } else {
+              await upsertRemoteFieldTasks(remote.tasks, remote.serverTime);
+              await deleteLocalFieldTask(staleTaskId);
+            }
+
+            setPendingLifecycle(null);
+            await loadTasks(false, false);
+            return;
+          }
+        } catch (refreshError) {
+          console.warn(
+            "[Field Tasks Page] Missing task reconciliation failed:",
+            refreshError instanceof Error ? refreshError.message : "Unknown error",
+          );
+        }
+      }
       setLifecycleError(error instanceof Error ? error.message : "İşlem tamamlanamadı.");
     } finally { setLifecycleBusy(false); }
   };

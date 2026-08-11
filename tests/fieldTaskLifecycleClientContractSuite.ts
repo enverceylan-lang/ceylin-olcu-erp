@@ -75,6 +75,10 @@ assert.match(
   /deletion\.alreadyDeleted === true/,
 );
 
+assert.match(source, /export class FieldTaskApiError extends Error/);
+assert.match(source, /readonly status: number/);
+assert.match(source, /authoritative:\s*result\.authoritative === true/);
+
 console.log(
   "[PASS] field task lifecycle client bridge contract",
 );

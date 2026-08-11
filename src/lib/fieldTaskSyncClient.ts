@@ -10,7 +10,18 @@ interface FieldTaskApiResponse {
   tasks?: FieldTask[];
   deletedTaskIds?: string[];
   serverTime?: string;
+  authoritative?: boolean;
   error?: string;
+}
+
+export class FieldTaskApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "FieldTaskApiError";
+  }
 }
 
 async function parseResponse(
@@ -72,6 +83,7 @@ export async function fetchRemoteFieldTasks(
   tasks: FieldTask[];
   deletedTaskIds: string[];
   serverTime: string;
+  authoritative: boolean;
 }> {
   const params =
     new URLSearchParams();
@@ -119,6 +131,8 @@ export async function fetchRemoteFieldTasks(
     serverTime:
       result.serverTime ||
       new Date().toISOString(),
+    authoritative:
+      result.authoritative === true,
   };
 }
 
@@ -189,9 +203,10 @@ async function parseLifecycleResponse(
   }
 
   if (!response.ok || !result.success) {
-    throw new Error(
+    throw new FieldTaskApiError(
       result.error ||
         `Field task lifecycle API returned HTTP ${response.status}.`,
+      response.status,
     );
   }
 

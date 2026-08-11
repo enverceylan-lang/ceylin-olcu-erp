@@ -8,6 +8,7 @@ import {
   listAllFieldTasks,
   listArchivedFieldTasks,
   localFieldTaskDb,
+  reconcileAuthoritativeRemoteFieldTasks,
   type FieldTask,
 } from "../src/lib/localFieldTaskDb";
 
@@ -111,6 +112,53 @@ async function verifyCanonicalLocalLists() {
     (await listArchivedFieldTasks()).map(task => task.id),
     ["canonical-archived-task"],
     "canonical archive list must exclude active records",
+  );
+
+  const knownRemoteA: FieldTask = {
+    ...canonicalActiveTask,
+    id: "known-remote-a",
+    remoteKnownAt: now,
+  };
+  const staleKnownRemoteB: FieldTask = {
+    ...canonicalActiveTask,
+    id: "stale-known-remote-b",
+    remoteKnownAt: now,
+  };
+  const protectedLocalDraft: FieldTask = {
+    ...canonicalActiveTask,
+    id: "protected-local-draft",
+    remoteKnownAt: undefined,
+  };
+
+  await localFieldTaskDb.fieldTasks.clear();
+  await localFieldTaskDb.fieldTasks.bulkPut([
+    knownRemoteA,
+    staleKnownRemoteB,
+    protectedLocalDraft,
+  ]);
+
+  const reconciliation = await reconcileAuthoritativeRemoteFieldTasks({
+    tasks: [{ ...knownRemoteA, updatedAt: "2026-08-11T01:00:00.000Z" }],
+    remoteKnownAt: "2026-08-11T01:00:01.000Z",
+  });
+  const reconciledIds = (
+    await localFieldTaskDb.fieldTasks.orderBy("id").toArray()
+  ).map(task => task.id);
+
+  assert.deepEqual(
+    reconciliation.removedTaskIds,
+    ["stale-known-remote-b"],
+    "known-remote B absent from an authoritative response must be removed",
+  );
+  assert.deepEqual(
+    reconciledIds,
+    ["known-remote-a", "protected-local-draft"],
+    "authoritative reconciliation must retain remote A and protect a genuine local draft",
+  );
+  assert.equal(
+    (await localFieldTaskDb.fieldTasks.get("known-remote-a"))?.remoteKnownAt,
+    "2026-08-11T01:00:01.000Z",
+    "authoritative remote records must retain remote provenance",
   );
 
   await localFieldTaskDb.delete();

@@ -11,6 +11,7 @@ const requiredImports = [
   "listArchivedFieldTasks",
   "deleteLocalFieldTask",
   "putFieldTask",
+  "reconcileAuthoritativeRemoteFieldTasks",
   "updateRemoteFieldTaskLifecycle",
   "deleteRemoteFieldTaskLifecycle",
 ];
@@ -48,8 +49,19 @@ const remoteLifecycle = source.indexOf(
   "await updateRemoteFieldTaskLifecycle",
 );
 const localPutAfterLifecycle = source.indexOf(
-  "await putFieldTask(result.task)",
+  "await putFieldTask(result.task, true)",
   remoteLifecycle,
+);
+
+assert.match(
+  source,
+  /error instanceof FieldTaskApiError && error\.status === 404/,
+  "Task not found must trigger the typed stale-task recovery path",
+);
+assert.match(
+  source,
+  /const remote = await fetchRemoteFieldTasks\(sessionToken\);[\s\S]*confirmedAbsent/,
+  "Task not found recovery must refresh remotely before local removal",
 );
 assert.ok(
   remoteLifecycle >= 0 && localPutAfterLifecycle > remoteLifecycle,
