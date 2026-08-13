@@ -3,11 +3,9 @@ import { createClient } from "@supabase/supabase-js";
 import { hashPasswordV2 } from "@/lib/authHelper";
 import { requireCompanySession } from "@/lib/companySessionGuard";
 import {
-  createCompanyUserScope,
   findCompanyUsernameConflict,
   isUserInCompany,
   listCompanyUserIds,
-  updateCompanyScopeUsername,
 } from "@/lib/companyUserScopeGuard";
 import { normalizeUsername } from "@/lib/usernameHelper";
 import {
@@ -669,78 +667,67 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const { error: upsertError } = await supabaseServer
-      .from("users")
-      .upsert(userRecord);
+    const { error: persistenceError } = await supabaseServer.rpc(
+      "manage_company_user_v1",
+      {
+        p_user: userRecord,
+        p_is_create: isCreate,
+        p_password_changed: passwordChanged,
+        p_actor_user_id: caller.id,
+        p_actor_user_scope_id: companySession.session.userScopeId,
+        p_tenant_id: companySession.session.tenantId,
+        p_company_id: companySession.session.companyId,
+      },
+    );
 
-    if (upsertError) {
-      console.error("Upsert user failed:", upsertError);
+    if (persistenceError) {
+      const persistenceMessage = String(
+        persistenceError.message || "",
+      );
+
+      if (
+        persistenceMessage.includes(
+          "ERP_USER_MGMT_CONFLICT:USERNAME",
+        )
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: "USERNAME_EXISTS",
+            error: "Bu kullanıcı adı bu şirkette zaten kullanımda.",
+          },
+          { status: 409 },
+        );
+      }
+
+      if (
+        persistenceMessage.includes(
+          "ERP_USER_MGMT_FORBIDDEN:",
+        )
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: "USER_MANAGEMENT_FORBIDDEN",
+            error: "Kullanıcı işlemi şirket yetki kapsamı tarafından reddedildi.",
+          },
+          { status: 403 },
+        );
+      }
+
+      console.error(
+        "Atomic user persistence failed:",
+        persistenceError,
+      );
 
       return NextResponse.json(
         {
           success: false,
-          error: "Kullanıcı kaydedilemedi: " + upsertError.message,
+          code: "USER_MANAGEMENT_PERSIST_FAILED",
+          error: "Kullanıcı kaydı atomik olarak tamamlanamadı.",
         },
-        { status: 500 }
+        { status: 500 },
       );
-    }
-
-    if (
-      !isCreate &&
-      isAdmin &&
-      username !== undefined &&
-      userRecord.username !== existingUser?.username
-    ) {
-      const scopeUsernameUpdated =
-        await updateCompanyScopeUsername(
-          supabaseServer,
-          companySession.session,
-          userRecord.id,
-          userRecord.username,
-        );
-
-      if (!scopeUsernameUpdated) {
-        return NextResponse.json(
-          {
-            success: false,
-            code: "USER_SCOPE_USERNAME_UPDATE_FAILED",
-            error: "Kullanıcı adı şirket kapsamına yazılamadı.",
-          },
-          { status: 500 },
-        );
-      }
-    }
-    if (isCreate) {
-      const scopeCreated =
-        await createCompanyUserScope(
-          supabaseServer,
-          companySession.session,
-          userRecord.id,
-          userRecord.username,
-        );
-
-      if (!scopeCreated) {
-        const { error: rollbackError } =
-          await supabaseServer
-            .from("users")
-            .delete()
-            .eq("id", userRecord.id);
-
-        if (rollbackError) {
-          console.error(
-            "User create scope rollback failed.",
-          );
-        }
-
-        return NextResponse.json(
-          {
-            success: false,
-            code: "USER_SCOPE_CREATE_FAILED",
-            error: "Kullanıcı şirket kapsamına bağlanamadı.",
-          },
-          { status: 500 },
-        );
-      }
     }
 
     console.log("User updated/created status:", {

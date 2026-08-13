@@ -78,7 +78,10 @@ const route = fs.readFileSync(
   ),
   "utf8",
 );
-assert.match(route, /verifyAuth\(req\)/);
+assert.match(
+  route,
+  /requireCompanySession\([\s\S]*req,[\s\S]*"WEB"/,
+);
 assert.match(route, /hasFinancePermissionUpdate && !isAdmin/);
 assert.match(route, /mergeSelectedFinancePermissions/);
 assert.match(route, /updatedAt: now/);
