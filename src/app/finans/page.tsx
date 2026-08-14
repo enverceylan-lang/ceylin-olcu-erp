@@ -7,6 +7,7 @@ import { useFinanceRuntimeContext } from "@/lib/finance/useFinanceRuntimeContext
 import { useSalesStore } from "@/store/salesStore";
 import { FinanceAccessState } from "@/components/finance/FinanceAccessState";
 import { FinanceIssueList } from "@/components/finance/FinanceIssueList";
+import { FinanceAccountManager } from "@/components/finance/FinanceAccountManager";
 import { FinanceSummaryCards } from "@/components/finance/FinanceSummaryCards";
 import { FinanceTransactionTable } from "@/components/finance/FinanceTransactionTable";
 
@@ -82,6 +83,7 @@ export default function FinanceOverviewPage() {
       </header>
 
       <FinanceSummaryCards summary={result.summary} currency={CURRENCY} />
+      <FinanceAccountManager />
       <FinanceIssueList issues={result.issues} />
 
       <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
