@@ -130,3 +130,14 @@ assert.doesNotMatch(
 console.log(
   "financePersistenceRpcSqlContractSuite: PASS"
 );
+
+/* ENVERP V4 live/local replay ambiguity contract */
+assert.match(
+  sql,
+  /from\s+public\.finance_transactions\s+as\s+ft[\s\S]*ft\.idempotency_key\s*=\s*v_idempotency_key/i
+);
+
+assert.match(
+  sql,
+  /from\s+public\.finance_transaction_audits\s+as\s+fta[\s\S]*fta\.transaction_id\s*=\s*v_existing\.transaction_id[\s\S]*fta\.action\s*=\s*'POSTED'/i
+);

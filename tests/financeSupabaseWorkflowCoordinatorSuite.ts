@@ -177,9 +177,26 @@ const client:
     );
   },
 
-  async rpc() {
+  async rpc(functionName, parameters) {
     callOrder.push(
-      "FINANCE_RPC"
+      "WORKFLOW_FINANCE_RPC"
+    );
+
+    assert.equal(
+      functionName,
+      "persist_finance_system_workflow_v1"
+    );
+    assert.equal(
+      parameters.p_workflow,
+      "SALE_APPROVAL"
+    );
+    assert.equal(
+      parameters.p_source.sale_id,
+      "sale-1"
+    );
+    assert.equal(
+      parameters.p_transaction.transaction_id,
+      "transaction-1"
     );
 
     return {
@@ -249,9 +266,7 @@ async function main(): Promise<void> {
   assert.deepEqual(
     callOrder,
     [
-      "SOURCE_WRITE",
-      "SOURCE_READ",
-      "FINANCE_RPC"
+      "WORKFLOW_FINANCE_RPC"
     ]
   );
 

@@ -1,111 +1,131 @@
 import type {
   FinanceTransaction
 } from "@/lib/finance/financeContracts";
-
 import type {
-  ApprovedSaleReturnWorkflowSourceInput,
-  ApprovedSaleWorkflowSourceInput
-} from "@/lib/finance/financeWorkflowSourcePayload";
-
-import {
-  FinanceSupabaseWorkflowSourceWriter,
-  type FinanceWorkflowSourceWriteClient
+  FinanceWorkflowSourceWriteClient
 } from "@/lib/finance/financeSupabaseWorkflowSourceWriter";
-
-import {
-  persistSupabaseSystemWorkflowFinance,
-  type FinanceSupabaseSystemWorkflowClient
-} from "@/lib/finance/financeSupabaseSystemWorkflowOrchestrator";
-
 import type {
-  FinanceSystemWorkflowContext,
-  FinanceSystemWorkflowPersistenceResult
+  FinanceWorkflowSourceSupabaseClient
+} from "@/lib/finance/financeSupabaseWorkflowSourceRepository";
+import type {
+  FinanceSystemWorkflowSourceRepository
+} from "@/lib/finance/financeSystemWorkflowSourceVerifier";
+import {
+  persistSystemWorkflowFinanceTransaction,
+  type FinanceSystemWorkflowContext,
+  type FinanceSystemWorkflowPersistenceResult
 } from "@/lib/finance/financeSystemWorkflowPersistence";
+import {
+  buildFinanceSaleReturnWorkflowSourceRow,
+  buildFinanceSaleWorkflowSourceRow,
+  type ApprovedSaleReturnWorkflowSourceInput,
+  type ApprovedSaleWorkflowSourceInput
+} from "@/lib/finance/financeWorkflowSourcePayload";
+import {
+  FinanceSupabaseWorkflowAtomicGateway,
+  type FinanceWorkflowAtomicRpcClient
+} from "@/lib/finance/financeSupabaseWorkflowAtomicGateway";
 
 export type FinanceSupabaseWorkflowCoordinatorClient =
+  FinanceWorkflowAtomicRpcClient &
   FinanceWorkflowSourceWriteClient &
-  FinanceSupabaseSystemWorkflowClient;
+  FinanceWorkflowSourceSupabaseClient;
 
 export type FinanceSupabaseWorkflowCoordinatorInput =
   | {
-      workflow:
-        "SALE_APPROVAL";
-      source:
-        ApprovedSaleWorkflowSourceInput;
-      transaction:
-        FinanceTransaction;
-      context:
-        FinanceSystemWorkflowContext;
+      workflow: "SALE_APPROVAL";
+      source: ApprovedSaleWorkflowSourceInput;
+      transaction: FinanceTransaction;
+      context: FinanceSystemWorkflowContext;
     }
   | {
-      workflow:
-        "SALE_RETURN_APPROVAL";
-      source:
-        ApprovedSaleReturnWorkflowSourceInput;
-      transaction:
-        FinanceTransaction;
-      context:
-        FinanceSystemWorkflowContext;
+      workflow: "SALE_RETURN_APPROVAL";
+      source: ApprovedSaleReturnWorkflowSourceInput;
+      transaction: FinanceTransaction;
+      context: FinanceSystemWorkflowContext;
     };
 
 export type FinanceSupabaseWorkflowCoordinatorResult =
-  | FinanceSystemWorkflowPersistenceResult
-  | {
-      outcome:
-        "SOURCE_WRITE_FAILED";
-      reason:
-        | "SALE_SOURCE_WRITE_FAILED"
-        | "SALE_RETURN_SOURCE_WRITE_FAILED";
-    };
+  FinanceSystemWorkflowPersistenceResult;
+
+function sourceRepositoryFromInput(
+  input: FinanceSupabaseWorkflowCoordinatorInput
+): FinanceSystemWorkflowSourceRepository {
+  return {
+    async loadApprovedSale(_scope, saleId) {
+      if (
+        input.workflow !== "SALE_APPROVAL" ||
+        input.source.saleId !== saleId
+      ) {
+        return null;
+      }
+
+      return {
+        tenantId: input.source.tenantId,
+        companyId: input.source.companyId,
+        branchId: input.source.branchId,
+        accountingPeriodId: input.source.accountingPeriodId,
+        id: input.source.saleId,
+        customerId: input.source.customerId,
+        status: "ONAYLANDI",
+        totalAmount: input.source.totalAmount,
+        approvedByUserId: input.source.approvedByUserId
+      };
+    },
+
+    async loadApprovedSaleReturn(_scope, saleReturnId) {
+      if (
+        input.workflow !== "SALE_RETURN_APPROVAL" ||
+        input.source.saleReturnId !== saleReturnId
+      ) {
+        return null;
+      }
+
+      return {
+        tenantId: input.source.tenantId,
+        companyId: input.source.companyId,
+        branchId: input.source.branchId,
+        accountingPeriodId: input.source.accountingPeriodId,
+        id: input.source.saleReturnId,
+        saleId: input.source.saleId,
+        customerId: input.source.customerId,
+        status: "ONAYLANDI",
+        amount: input.source.amount,
+        actorUserId: input.source.actorUserId
+      };
+    }
+  };
+}
 
 export async function persistSupabaseWorkflowSourceAndFinance(
-  input:
-    FinanceSupabaseWorkflowCoordinatorInput,
-  client:
-    FinanceSupabaseWorkflowCoordinatorClient
+  input: FinanceSupabaseWorkflowCoordinatorInput,
+  client: FinanceSupabaseWorkflowCoordinatorClient
 ): Promise<FinanceSupabaseWorkflowCoordinatorResult> {
-  if (
-    input.context.workflow !==
-      input.workflow
-  ) {
+  if (input.context.workflow !== input.workflow) {
     return {
-      outcome:
-        "REJECT",
-      reason:
-        "WORKFLOW_AUTHORIZATION_MISMATCH"
+      outcome: "REJECT",
+      reason: "WORKFLOW_AUTHORIZATION_MISMATCH"
     };
   }
 
-  const writer =
-    new FinanceSupabaseWorkflowSourceWriter(
-      client
+  const sourceRow =
+    input.workflow === "SALE_APPROVAL"
+      ? buildFinanceSaleWorkflowSourceRow(input.source)
+      : buildFinanceSaleReturnWorkflowSourceRow(input.source);
+
+  const gateway =
+    new FinanceSupabaseWorkflowAtomicGateway(
+      client,
+      input.workflow,
+      sourceRow
     );
 
-  const sourceWrite =
-    input.workflow ===
-      "SALE_APPROVAL"
-      ? await writer.writeApprovedSale(
-          input.source
-        )
-      : await writer.writeApprovedSaleReturn(
-          input.source
-        );
-
-  if (
-    sourceWrite.outcome ===
-      "FAILED"
-  ) {
-    return {
-      outcome:
-        "SOURCE_WRITE_FAILED",
-      reason:
-        sourceWrite.reason
-    };
-  }
-
-  return persistSupabaseSystemWorkflowFinance(
+  return persistSystemWorkflowFinanceTransaction(
     input.transaction,
     input.context,
-    client
+    {
+      gateway,
+      sourceRepository: sourceRepositoryFromInput(input)
+    }
   );
 }

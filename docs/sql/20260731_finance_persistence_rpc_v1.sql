@@ -120,26 +120,26 @@ begin
       using message = 'FINANCE_AUDIT_TRANSACTION_MISMATCH';
   end if;
 
-  select *
+  select ft.*
   into v_existing
-  from public.finance_transactions
-  where tenant_id = v_tenant_id
-    and company_id = v_company_id
-    and branch_id = v_branch_id
-    and accounting_period_id = v_accounting_period_id
-    and idempotency_key = v_idempotency_key
+  from public.finance_transactions as ft
+  where ft.tenant_id = v_tenant_id
+    and ft.company_id = v_company_id
+    and ft.branch_id = v_branch_id
+    and ft.accounting_period_id = v_accounting_period_id
+    and ft.idempotency_key = v_idempotency_key
   for update;
 
   if found then
-    select *
+    select fta.*
     into v_existing_audit
-    from public.finance_transaction_audits
-    where tenant_id = v_tenant_id
-      and company_id = v_company_id
-      and branch_id = v_branch_id
-      and accounting_period_id = v_accounting_period_id
-      and transaction_id = v_existing.transaction_id
-      and action = 'POSTED';
+    from public.finance_transaction_audits as fta
+    where fta.tenant_id = v_tenant_id
+      and fta.company_id = v_company_id
+      and fta.branch_id = v_branch_id
+      and fta.accounting_period_id = v_accounting_period_id
+      and fta.transaction_id = v_existing.transaction_id
+      and fta.action = 'POSTED';
 
     if not found then
       raise exception
