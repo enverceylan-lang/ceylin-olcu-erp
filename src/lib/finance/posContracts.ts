@@ -64,6 +64,7 @@ export interface PosTransaction extends ErpScope {
 
   grossAmount: number;
   commissionAmount: number;
+  fixedTransactionFee: number;
   taxAmount: number;
   additionalFeeAmount: number;
   totalDeductionAmount: number;
@@ -227,6 +228,7 @@ export interface PosSettlementScheduleLine
 
   grossAmount: number;
   commissionAmount: number;
+  fixedTransactionFee: number;
   taxAmount: number;
   additionalFeeAmount: number;
   netAmount: number;

@@ -318,6 +318,8 @@ export function createPosTransaction(
       pricing.grossAmount,
     commissionAmount:
       pricing.commissionAmount,
+    fixedTransactionFee:
+      pricing.fixedTransactionFee,
     taxAmount:
       pricing.taxAmount,
     additionalFeeAmount:
@@ -387,6 +389,8 @@ export function createPosTransaction(
         line.grossAmount,
       commissionAmount:
         line.commissionAmount,
+      fixedTransactionFee:
+        line.fixedTransactionFee,
       taxAmount:
         line.taxAmount,
       additionalFeeAmount:

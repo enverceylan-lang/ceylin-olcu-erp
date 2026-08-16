@@ -581,20 +581,6 @@ begin
       and ca.accounting_period_id = v_period;
 
   elsif v_kind = 'BANK' then
-    if exists (
-      select 1
-      from public.pos_accounts as pa
-      where pa.tenant_id = v_tenant
-        and pa.company_id = v_company
-        and pa.branch_id = v_branch
-        and pa.accounting_period_id = v_period
-        and pa.bank_account_id = v_operational_id
-        and pa.is_active = true
-    ) then
-      return query select 'REJECT', null::uuid, v_operational_id, 'FINANCE_BANK_HAS_ACTIVE_POS';
-      return;
-    end if;
-
     select ba.ledger_account_id
     into v_target_finance_id
     from public.bank_accounts as ba
@@ -607,6 +593,20 @@ begin
 
     if not found then
       return query select 'REJECT', null::uuid, v_operational_id, 'FINANCE_BANK_ACCOUNT_NOT_FOUND';
+      return;
+    end if;
+
+    if exists (
+      select 1
+      from public.pos_accounts as pa
+      where pa.tenant_id = v_tenant
+        and pa.company_id = v_company
+        and pa.branch_id = v_branch
+        and pa.accounting_period_id = v_period
+        and pa.bank_account_id = v_operational_id
+        and pa.is_active = true
+    ) then
+      return query select 'REJECT', null::uuid, v_operational_id, 'FINANCE_BANK_HAS_ACTIVE_POS';
       return;
     end if;
 

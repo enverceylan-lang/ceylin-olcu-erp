@@ -380,6 +380,11 @@ export function createPosSettlementFinance(
       line.commissionAmount * ratio
     );
 
+  const fixedTransactionFee =
+    roundMoney(
+      line.fixedTransactionFee * ratio
+    );
+
   const taxAmount =
     roundMoney(
       line.taxAmount * ratio
@@ -396,6 +401,7 @@ export function createPosSettlementFinance(
   const totalExpenseAmount =
     roundMoney(
       commissionAmount +
+      fixedTransactionFee +
       taxAmount +
       additionalFeeAmount
     );
@@ -501,6 +507,24 @@ export function createPosSettlementFinance(
         0,
         command.transaction.currency,
         "POS komisyon gideri"
+      )
+    );
+
+    lineNo++;
+  }
+
+  if (fixedTransactionFee > MONEY_EPSILON) {
+    lines.push(
+      createJournalLine(
+        scope,
+        command.documents.journalEntryId,
+        lineNo,
+        command.accounts
+          .posCommissionExpenseAccountId,
+        fixedTransactionFee,
+        0,
+        command.transaction.currency,
+        "POS sabit işlem ücreti"
       )
     );
 
