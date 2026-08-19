@@ -240,11 +240,14 @@ export default function CompanyGatewayPage() {
             };
           },
         );
-
-        router.replace(
+        /*
+         * Login + scope activation tamamlandıktan sonra tam browser
+         * navigation kullanılır. Böylece yeni şirket-scope cookie'si
+         * proxy tarafından ilk şirket içi istekte kesin görülür.
+         */
+        window.location.replace(
           `/${companySlug}/${COMPANY_HOME_SEGMENT}`,
         );
-        router.refresh();
       }
       catch {
         setError(

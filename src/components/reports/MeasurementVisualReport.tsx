@@ -2211,6 +2211,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
       };
       const supportsFileShare =
         Boolean(
+          window.isSecureContext &&
           shareNavigator.share &&
           shareNavigator.canShare &&
           shareNavigator.canShare({
@@ -2255,7 +2256,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
     }
   };
 
-  const fallbackWhatsApp = async (file: File) => {
+    const fallbackWhatsApp = async (file: File) => {
     if (typeof window === 'undefined') return;
 
     const activeCompanyName =
@@ -2268,54 +2269,35 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
       activeCompanyName
     );
 
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: `${customer.name} Ölçü Raporu`,
-          text: reportText,
-        });
-        return;
-      } catch (error) {
-        if (
-          error instanceof DOMException &&
-          error.name === 'AbortError'
-        ) {
-          return;
-        }
+    /*
+     * Mobil tarayıcıda PDF üretimi uzun sürdüğünde Web Share API'nin
+     * geçici kullanıcı aktivasyonu sona erebilir. Bu nedenle fallback
+     * ikinci kez navigator.share/window.open istemez:
+     * 1) PDF kesin olarak indirilir.
+     * 2) WhatsApp metni aynı sekmede açılır.
+     * Böylece popup/share-permission kaybı fail-closed biçimde aşılır.
+     */
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('a');
 
-        console.error(
-          '[VisualReport] Native text share failed:',
-          error,
-        );
-      }
-    }
+    a.href = url;
+    a.download =
+      `${(activeCompanyName || 'SIRKET').toUpperCase()}-OLCU-RAPORU-${customer.name || 'MUSTERI'}.pdf`;
+    a.style.display = 'none';
+
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    window.setTimeout(
+      () => URL.revokeObjectURL(url),
+      1000,
+    );
 
     const wpUrl =
       `https://wa.me/?text=${encodeURIComponent(reportText)}`;
 
-    const opened = window.open(
-      wpUrl,
-      '_blank',
-      'noopener,noreferrer',
-    );
-
-    if (opened) return;
-
-    if (file) {
-      const url = URL.createObjectURL(file);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download =
-        `${(activeCompanyName || 'SIRKET').toUpperCase()}-OLCU-RAPORU-${customer.name || 'MUSTERI'}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      alert(
-        "WhatsApp doğrudan açılamadı. Ayrıntılı ölçü metni paylaşım için hazırlandı; PDF ayrıca indirildi."
-      );
-    }
+    window.location.assign(wpUrl);
   };
 
   return (
@@ -2579,7 +2561,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
                   let plicellCounter = 0;
                   let mechanicalCurtainCounter = 0;
                   windows.forEach(win => {
-                    const winMeasurements = activeMeasurements.filter(m => m.windowId === win.id);
+                    const winMeasurements = activeMeasurements.filter(m => (m.openingId || m.windowId) === win.id);
                     winMeasurements.forEach(m => {
                       const activeProducts = m.selectedProducts?.filter(sp => sp.isActive) || [];
 

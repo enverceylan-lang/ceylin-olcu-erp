@@ -392,7 +392,7 @@ export function createDraftSaleFromCustomer(
       );
   measurements.forEach(m => {
     const room = customer.rooms?.find(r => r.id === m.roomId);
-    const win = room?.windows?.find(w => w.id === m.windowId);
+    const win = room?.windows?.find(w => w.id === (m.openingId || m.windowId));
     const activeProducts = m.selectedProducts?.filter(sp => sp.isActive) || [];
 
     if (activeProducts.length === 0) {
@@ -940,7 +940,8 @@ export async function syncOrCreateDraftSale(
   customer: Customer,
   salesStore: DraftSalesStore,
   actor: SalesActor | null,
-  scope: ErpScope | null
+  scope: ErpScope | null,
+  targetSaleId?: string
 ): Promise<string> {
   if (
     !actor?.id ||
@@ -955,12 +956,34 @@ export async function syncOrCreateDraftSale(
   if (!scope) {
     throw new Error('SALE_SCOPE_REQUIRED');
   }
-  const existingDraft = salesStore.sales.find(
-    (sale) =>
-      sale.customerId === customer.id &&
-      sale.status === 'TASLAK' &&
-      !sale.isDeleted
-  );
+  const cleanTargetSaleId =
+    String(targetSaleId || '').trim();
+
+  const existingDraft =
+    cleanTargetSaleId
+      ? salesStore.sales.find(
+          sale =>
+            sale.id === cleanTargetSaleId &&
+            sale.customerId === customer.id &&
+            (
+              sale.status === 'TASLAK' ||
+              sale.status === 'TEKLİF'
+            ) &&
+            !sale.isDeleted
+        )
+      : salesStore.sales.find(
+          sale =>
+            sale.customerId === customer.id &&
+            (
+              sale.status === 'TASLAK' ||
+              sale.status === 'TEKLİF'
+            ) &&
+            !sale.isDeleted
+        );
+
+  if (cleanTargetSaleId && !existingDraft) {
+    throw new Error('TARGET_SALE_NOT_FOUND_OR_NOT_EDITABLE');
+  }
 
   const newSaleObj =
     createDraftSaleFromCustomer(
