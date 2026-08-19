@@ -1,16 +1,17 @@
 "use client";
 
 import React, { useEffect, useState, useSyncExternalStore } from "react";
-import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, ChevronRight, ChevronUp, Layers, FileText, Shield, AlertTriangle, MapPin, MessageCircle, Loader2, Ruler, RefreshCw, Phone } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, ChevronRight, ChevronUp, Layers, Camera, Video, FileText, Shield, AlertTriangle, MapPin, MessageCircle, Loader2, Ruler, RefreshCw, Phone } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { useStore, Customer, Room, WindowItem, MEASUREMENT_TEMPLATES, ProductMeasurement } from "@/store/useStore";
 import { useMeasurementStore } from "@/store/measurementStore";
 import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer, canViewCustomerWorkflowReport, canViewCustomerContactFields, canViewCariCard, canEditCari, canMergeCari, canArchiveCari, canMoveMeasurementBetweenCustomers, canTransferMeasurementToSale } from "@/store/useAuthStore";
+import { isPilotFieldV1RuntimeEnabled } from "@/lib/pilotFieldV1";
 import { getMeasurementDimensions, getTemplateLabel, getGoogleMapsUrl, getWorkflowStatusLabel, getWorkflowStatusColorClass, WORKFLOW_STATUS_LABELS } from "@/lib/measurementAdapter";
+import { fileToDataUrl } from "@/lib/fileStorage";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
-import { CanonicalMediaPanel } from "@/components/media/CanonicalMediaPanel";
 import { syncNow } from "@/lib/syncService";
 import { buildWhatsAppShortReport, getValidNote } from "@/lib/reportFormatters";
 import { fetchActiveCompanyDisplayName } from "@/lib/activeCompanyDisplayNameClient";
@@ -74,7 +75,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
   const store = useStore();
   const measurementStore = useMeasurementStore();
-  const { customers, updateCustomer, addRoom, deleteRoom, addWindow, deleteWindow, updateWindowItem, addProductMeasurement, updateProductMeasurement, deleteProductMeasurement } = store;
+  const { customers, updateCustomer, addRoom, deleteRoom, addWindow, deleteWindow, updateRoomAttachments, updateWindowItem, addProductMeasurement, updateProductMeasurement, deleteProductMeasurement } = store;
   const { currentUser, addAuditEntry, users } = useAuthStore();
   const user = currentUser!;
   const customer = customers.find(c => c.id === id);
@@ -189,6 +190,9 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const [isAddingRoom, setIsAddingRoom] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
 
+  // Media Upload Choice Modal State
+  const [mediaUploadType, setMediaUploadType] = useState<'photo' | 'video' | null>(null);
+  const [mediaUploadCallback, setMediaUploadCallback] = useState<((url: string) => void) | null>(null);
 
   // Media Preview Modal State
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -765,6 +769,50 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
         setIsSaving(false);
       }
     };
+
+  const triggerFileSelector = (useCamera: boolean) => {
+    if (!mediaUploadType || !mediaUploadCallback) return;
+
+    const type = mediaUploadType;
+    const callback = mediaUploadCallback;
+
+    // Close the modal
+    setMediaUploadType(null);
+    setMediaUploadCallback(null);
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = type === 'photo' ? 'image/*' : 'video/*';
+    if (useCamera) {
+      input.setAttribute('capture', 'environment');
+    }
+
+    input.onchange = async (event) => {
+      const file = (event.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+
+      try {
+        const dataUrl = await fileToDataUrl(file, type);
+        callback(dataUrl);
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : 'Dosya kaydedilemedi.');
+      }
+    };
+
+    input.click();
+  };
+
+  const handleFileUpload = (type: 'photo' | 'video', callback: (url: string) => void) => {
+    if (isPilotFieldV1RuntimeEnabled()) {
+      alert(
+        "Pilot kullanımında fotoğraf ve video yükleme henüz aktif değildir."
+      );
+      return;
+    }
+
+    setMediaUploadType(type);
+    setMediaUploadCallback(() => callback);
+  };
 
   const openMeasurementForm = (w: WindowItem) => {
     setActiveWindowIdForProduct(w.id);
@@ -1968,13 +2016,20 @@ showToast("Saha taslağı telefona kaydedildi.");
                   })()}
 
                   {canAddAddressPhoto && (
-                    <CanonicalMediaPanel
-                          targetType="CUSTOMER"
-                          targetId={customer.id}
-                          purpose="ADDRESS_PHOTO"
-                          actorRole={user.role}
-                          compact
-                        />
+                    <button
+                      onClick={() => {
+                        handleFileUpload('photo', (url) => {
+                          const currentPhotos = customer.addressPhotos || [];
+                          updateCustomer(customer.id, {
+                            addressPhotos: [...currentPhotos, url]
+                          });
+                        });
+                      }}
+                      className="inline-flex min-h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-gray-50 px-3 py-1.5 text-[11px] font-bold text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-750 cursor-pointer"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      Bina Fotoğrafı Ekle
+                    </button>
                   )}
                 </div>
               )}
@@ -2235,13 +2290,20 @@ showToast("Saha taslağı telefona kaydedildi.");
                       ))}
                       {mode === 'MEASUREMENT' && (
                         <div className="flex gap-2">
-                          <CanonicalMediaPanel
-                            targetType="ROOM"
-                            targetId={room.id}
-                            purpose="ROOM_PHOTO"
-                            actorRole={user.role}
-                            compact
-                          />
+                          <button
+                            onClick={() => handleFileUpload('photo', (url) => updateRoomAttachments(customer.id, room.id, [...(room.photos||[]), url], room.videos||[]))}
+                            className="w-16 h-16 border-2 border-dashed border-gray-400 dark:border-gray-600 rounded flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                          >
+                            <Camera className="w-4 h-4" />
+                            <span className="text-[10px] mt-1">Foto Ekle</span>
+                          </button>
+                          <button
+                            onClick={() => handleFileUpload('video', (url) => updateRoomAttachments(customer.id, room.id, room.photos||[], [...(room.videos||[]), url]))}
+                            className="w-16 h-16 border-2 border-dashed border-gray-400 dark:border-gray-600 rounded flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                          >
+                            <Video className="w-4 h-4" />
+                            <span className="text-[10px] mt-1">Video Ekle</span>
+                          </button>
                         </div>
                       )}
                     </div>
@@ -2274,13 +2336,18 @@ showToast("Saha taslağı telefona kaydedildi.");
                                 {/* Window Attachments Button */}
                                 {mode === 'MEASUREMENT' && (
                                   <div className="flex gap-2">
-                                    <CanonicalMediaPanel
-                                      targetType="OPENING"
-                                      targetId={window.id}
-                                      purpose="OPENING_PHOTO"
-                                      actorRole={user.role}
-                                      compact
-                                    />
+                                    <button
+                                      onClick={() => handleFileUpload('photo', (url) => updateWindowItem(customer.id, room.id, window.id, { photos: [...(window.photos||[]), url] }))}
+                                      className="text-xs bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 px-2 py-1 rounded text-gray-600 dark:text-gray-400 flex items-center gap-1 transition-colors cursor-pointer"
+                                    >
+                                      <Camera className="w-3 h-3" /> Foto Ekle
+                                    </button>
+                                    <button
+                                      onClick={() => handleFileUpload('video', (url) => updateWindowItem(customer.id, room.id, window.id, { videos: [...(window.videos||[]), url] }))}
+                                      className="text-xs bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 px-2 py-1 rounded text-gray-600 dark:text-gray-400 flex items-center gap-1 transition-colors cursor-pointer"
+                                    >
+                                      <Video className="w-3 h-3" /> Video Ekle
+                                    </button>
                                   </div>
                                 )}
                               </div>
@@ -2795,13 +2862,26 @@ showToast("Saha taslağı telefona kaydedildi.");
                               {/* Measurement Media Upload Buttons */}
                               {mode === 'MEASUREMENT' && (
                                 <div className="flex gap-2 mb-3">
-                                  <CanonicalMediaPanel
-                                    targetType="MEASUREMENT"
-                                    targetId={p.id}
-                                    purpose="MEASUREMENT_PHOTO"
-                                    actorRole={user.role}
-                                    compact
-                                  />
+                                  <button
+                                    onClick={() => handleFileUpload('photo', (url) => {
+                                      updateProductMeasurement(customer.id, room.id, window.id, p.id, {
+                                        photos: [...(p.photos || []), url]
+                                      });
+                                    })}
+                                    className="text-xs bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 px-2.5 py-1.5 rounded text-gray-700 dark:text-gray-300 flex items-center gap-1 transition-colors border border-gray-200 dark:border-gray-700"
+                                  >
+                                    <Camera className="w-3.5 h-3.5" /> Foto Ekle
+                                  </button>
+                                  <button
+                                    onClick={() => handleFileUpload('video', (url) => {
+                                      updateProductMeasurement(customer.id, room.id, window.id, p.id, {
+                                        videos: [...(p.videos || []), url]
+                                      });
+                                    })}
+                                    className="text-xs bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 px-2.5 py-1.5 rounded text-gray-700 dark:text-gray-300 flex items-center gap-1 transition-colors border border-gray-200 dark:border-gray-700"
+                                  >
+                                    <Video className="w-3.5 h-3.5" /> Video Ekle
+                                  </button>
                                 </div>
                               )}
 
@@ -3113,6 +3193,49 @@ showToast("Saha taslağı telefona kaydedildi.");
               </>
           )}
         </div>
+
+        {/* Media Upload Modal */}
+        {mediaUploadType && (
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-4 z-50 animate-fade-in"
+            onClick={() => { setMediaUploadType(null); setMediaUploadCallback(null); }}
+          >
+            <div
+              className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-t-2xl sm:rounded-2xl p-6 space-y-4 shadow-2xl animate-slide-up"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-center space-y-1">
+                <h4 className="text-md font-bold text-white">
+                  {mediaUploadType === 'photo' ? 'Fotoğraf Yükle' : 'Video Yükle'}
+                </h4>
+                <p className="text-xs text-slate-400">
+                  Lütfen medya kaynağını seçin.
+                </p>
+              </div>
+
+              <div className="space-y-2 pt-2">
+                <button
+                  onClick={() => triggerFileSelector(true)}
+                  className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-sm transition-colors cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Camera className="w-4 h-4" /> Kameradan Çek
+                </button>
+                <button
+                  onClick={() => triggerFileSelector(false)}
+                  className="w-full py-3 bg-slate-800 hover:bg-slate-750 text-white font-bold rounded-xl text-sm transition-colors border border-slate-750 cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Plus className="w-4 h-4" /> Galeriden Seç
+                </button>
+                <button
+                  onClick={() => { setMediaUploadType(null); setMediaUploadCallback(null); }}
+                  className="w-full py-3 bg-transparent text-slate-400 hover:text-white font-semibold rounded-xl text-sm transition-colors cursor-pointer"
+                >
+                  İptal
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Media Preview Modal */}
         <MediaPreviewModal
