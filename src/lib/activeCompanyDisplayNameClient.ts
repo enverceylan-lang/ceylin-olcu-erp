@@ -1,3 +1,5 @@
+import { useAuthStore } from "@/store/useAuthStore";
+
 interface ErpScopeListItem {
   id:
     string;
@@ -20,12 +22,25 @@ interface ErpScopesResponse {
 
 export async function fetchActiveCompanyDisplayName():
   Promise<string> {
+  const sessionToken = String(
+    useAuthStore.getState().sessionToken || "",
+  ).trim();
+
+  if (!sessionToken) {
+    throw new Error(
+      "ACTIVE_COMPANY_SESSION_TOKEN_REQUIRED",
+    );
+  }
   const response =
     await fetch(
       "/api/erp-scopes",
       {
         method:
           "GET",
+        headers: {
+          Authorization:
+            `Bearer ${sessionToken}`
+        },
         credentials:
           "same-origin",
         cache:
