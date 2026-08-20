@@ -15,6 +15,9 @@ import {
   isRoomPreparationProductAllowed,
   isRoomPreparationProductLocked
 } from '@/lib/roomPreparationProductPolicy';
+import {
+  recalculateConfiguredHeightCalculation
+} from '@/lib/configuredHeightCalculationService';
 
 interface RoomPreparationModalProps {
   isOpen: boolean;
@@ -360,20 +363,19 @@ export function RoomPreparationModal({
         ...previous
       };
 
+      if (!shouldSelect) {
+        next[measurementId] =
+          (previous[measurementId] || []).filter(
+            type => type !== productType
+          );
+
+        return next;
+      }
+
       compatibleMeasurements.forEach(
         measurement => {
           const measurementSelections =
             previous[measurement.id] || [];
-
-          if (!shouldSelect) {
-            next[measurement.id] =
-              measurementSelections.filter(
-                type =>
-                  type !== productType
-              );
-
-            return;
-          }
 
           const withoutConflicts =
             measurementSelections.filter(
@@ -1208,7 +1210,18 @@ export function RoomPreparationModal({
                         ? 'DIKEY_TUL'
                         : undefined
                   ),
-                calculation: existing?.calculation,
+                calculation:
+                  recalculateConfiguredHeightCalculation({
+                    productType,
+                    rawValues:
+                      measurement.rawValues,
+                    userOverrides: {
+                      ...(existing?.userOverrides || {}),
+                      ...overrides
+                    },
+                    calculation:
+                      existing?.calculation
+                  }),
                 userOverrides: {
                   ...(existing?.userOverrides || {}),
                   ...overrides
