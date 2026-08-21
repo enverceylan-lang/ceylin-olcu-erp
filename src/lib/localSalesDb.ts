@@ -26,6 +26,8 @@ export interface SalesFinanceOutboxRecord
   saleId: string;
   saleSnapshot: Sale;
   currency: string;
+  approvedByUserId?: string;
+  approvedAt?: string;
   status: SalesFinanceOutboxStatus;
   retryCount: number;
   lastError?: string;
@@ -283,6 +285,12 @@ export async function saveLocalSaleWithFinanceOutbox(
 
       currency,
 
+      approvedByUserId:
+        input.statusAudit?.actorUserId,
+
+      approvedAt:
+        input.statusAudit?.occurredAt,
+
       status:
         'PENDING',
 
@@ -388,15 +396,51 @@ export async function loadSaleStatusAudits(
     .sortBy('occurredAt');
 }
 
-export async function loadPendingSalesFinanceOutbox():
-Promise<SalesFinanceOutboxRecord[]> {
+export function isSalesFinanceOutboxRetryCandidate(
+  record: SalesFinanceOutboxRecord,
+  scope: ErpScope
+): boolean {
+  return (
+    record.tenantId === scope.tenantId &&
+    record.companyId === scope.companyId &&
+    record.branchId === scope.branchId &&
+    record.accountingPeriodId === scope.accountingPeriodId &&
+    (
+      record.status === 'PENDING' ||
+      record.status === 'PROCESSING' ||
+      record.status === 'ERROR'
+    )
+  );
+}
+
+export async function loadPendingSalesFinanceOutbox(
+  scope: ErpScope
+): Promise<SalesFinanceOutboxRecord[]> {
+  const scopeValidation =
+    validateErpScope(scope);
+
+  if (!scopeValidation.valid) {
+    throw new Error(
+      `SALES_FINANCE_OUTBOX_SCOPE_REQUIRED:${scopeValidation.missingFields.join(',')}`
+    );
+  }
+
   return localSalesDb.financeOutbox
-    .where('status')
-    .anyOf([
-      'PENDING',
-      'PROCESSING',
-      'ERROR'
+    .where(
+      '[tenantId+companyId+branchId+accountingPeriodId]'
+    )
+    .equals([
+      scope.tenantId,
+      scope.companyId,
+      scope.branchId,
+      scope.accountingPeriodId
     ])
+    .filter(record =>
+      isSalesFinanceOutboxRetryCandidate(
+        record,
+        scope
+      )
+    )
     .sortBy('updatedAt');
 }
 

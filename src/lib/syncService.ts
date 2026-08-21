@@ -1,9 +1,71 @@
+import { loadVerifiedClientErpScope } from '@/lib/clientErpScope';
+import { executePendingSalesFinanceOutbox } from '@/lib/finance/salesFinanceOutboxExecutor';
+import { createSalesFinanceOutboxRetryCoordinator } from '@/lib/finance/salesFinanceOutboxRetryCoordinator';
 import { useStore, Customer, Room, WindowItem, ProductMeasurement } from '@/store/useStore';
 import { useAuthStore } from '@/store/useAuthStore';
 
 // Track if a sync is currently in progress
 let isSyncing = false;
 let hasPendingSync = false;
+
+// Finance outbox retry is independent from CLOUD_SYNC_DISABLED.
+// The coordinator keeps exact-scope retry single-flight and directly testable.
+const financeOutboxRetryCoordinator =
+  createSalesFinanceOutboxRetryCoordinator({
+    isOnline:
+      () =>
+        typeof window !== 'undefined' &&
+        window.navigator.onLine,
+
+    readAuth:
+      () => {
+        const authStore =
+          useAuthStore.getState();
+
+        return {
+          currentUserId:
+            authStore.currentUser?.id ??
+            null,
+          sessionToken:
+            authStore.sessionToken ??
+            null
+        };
+      },
+
+    loadVerifiedScope:
+      loadVerifiedClientErpScope,
+
+    executePending:
+      executePendingSalesFinanceOutbox,
+
+    schedule:
+      (callback, delayMs) => {
+        setTimeout(
+          callback,
+          delayMs
+        );
+      },
+
+    onExecutionErrors:
+      errorCount => {
+        console.error(
+          `[Finance Outbox Retry] ${errorCount} record(s) remain in ERROR state.`
+        );
+      },
+
+    onFailure:
+      error => {
+        console.error(
+          '[Finance Outbox Retry] Exact-scope retry failed.',
+          error
+        );
+      }
+  });
+
+async function retryPendingFinanceOutboxForActiveScope():
+Promise<void> {
+  await financeOutboxRetryCoordinator.run();
+}
 
 // Flag to temporarily disable all cloud sync processes to protect local data
 export const CLOUD_SYNC_DISABLED = true;
@@ -744,6 +806,7 @@ export function initSync() {
   const tryInitialSync = () => {
     if (useStore.persist.hasHydrated() && useAuthStore.persist.hasHydrated()) {
       console.log('[Client Sync] Stores hydrated. Running initial sync.');
+      void retryPendingFinanceOutboxForActiveScope();
       syncNow();
     } else {
       console.log('[Client Sync] Stores not hydrated yet. Retrying initial sync in 500ms...');
@@ -756,6 +819,8 @@ export function initSync() {
   // Re-sync when coming back online after being offline
   const handleOnline = () => {
     const store = useStore.getState();
+
+    void retryPendingFinanceOutboxForActiveScope();
     if (CLOUD_SYNC_DISABLED) {
       // Sync is disabled — just ensure status shows synced, no spinner
       store.setSyncStatus('synced');
@@ -809,6 +874,7 @@ export function initSync() {
     const currentId = state.currentUser?.id ?? null;
     if (currentId && lastUserId !== currentId) {
       console.log('[Sync] User login or switch detected — triggering immediate sync.');
+      void retryPendingFinanceOutboxForActiveScope();
       syncNow();
     }
     lastUserId = currentId;

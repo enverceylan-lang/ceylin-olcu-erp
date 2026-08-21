@@ -508,7 +508,8 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
        * aynı satış borcu yeniden üretilmez.
        */
       const financeOutboxRecord =
-        updatedSale.status === "ONAYLANDI"
+        updatedSale.status === "ONAYLANDI" &&
+        persistedSaleForSave.status !== "ONAYLANDI"
           ? await updateSaleWithFinanceOutbox(
               updatedSale,
               scope,

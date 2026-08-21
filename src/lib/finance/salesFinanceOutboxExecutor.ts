@@ -2,10 +2,7 @@ import type {
   SaleFinanceProjectionResult
 } from "@/lib/finance/financeContracts";
 
-import {
-  executeFinanceCommand,
-  type FinanceCommandResult
-} from "@/lib/finance/financeCommandService";
+import { persistApprovedSaleFinanceSource } from "@/lib/finance/financeSystemWorkflowClient";
 
 import {
   projectSaleFinance,
@@ -17,6 +14,10 @@ import {
   updateSalesFinanceOutbox,
   type SalesFinanceOutboxRecord
 } from "@/lib/localSalesDb";
+
+import type {
+  ErpScope
+} from "@/lib/erpScope";
 
 export type SalesFinanceOutboxExecutionResult =
   | {
@@ -38,8 +39,12 @@ export interface SalesFinanceOutboxExecutorDependencies {
 
   executeFinanceCommand(
     transaction:
-      SaleFinanceProjectionResult["transactions"][number]
-  ): Promise<FinanceCommandResult>;
+      SaleFinanceProjectionResult["transactions"][number],
+    record: SalesFinanceOutboxRecord
+  ): Promise<
+    | { outcome: "CREATED" | "REPLAY"; transaction: SaleFinanceProjectionResult["transactions"][number] }
+    | { outcome: "REJECT"; reason: string }
+  >;
 
   updateSalesFinanceOutbox(
     record: SalesFinanceOutboxRecord
@@ -51,7 +56,7 @@ export interface SalesFinanceOutboxExecutorDependencies {
 const defaultDependencies:
   SalesFinanceOutboxExecutorDependencies = {
     projectSaleFinance,
-    executeFinanceCommand,
+    executeFinanceCommand: persistApprovedSaleFinanceSource,
     updateSalesFinanceOutbox,
     now: () => new Date().toISOString()
   };
@@ -182,7 +187,8 @@ export async function executeSalesFinanceOutboxRecord(
       const commandResult =
         await dependencies
           .executeFinanceCommand(
-            transaction
+            transaction,
+            processingRecord
           );
 
       if (
@@ -245,17 +251,40 @@ export async function executeSalesFinanceOutboxRecord(
   }
 }
 
-export async function executePendingSalesFinanceOutbox():
-Promise<SalesFinanceOutboxExecutionResult[]> {
+export interface SalesFinancePendingOutboxDependencies {
+  loadPending(
+    scope: ErpScope
+  ): Promise<SalesFinanceOutboxRecord[]>;
+  executeRecord(
+    record: SalesFinanceOutboxRecord
+  ): Promise<SalesFinanceOutboxExecutionResult>;
+}
+
+const defaultPendingDependencies:
+  SalesFinancePendingOutboxDependencies = {
+    loadPending:
+      loadPendingSalesFinanceOutbox,
+    executeRecord:
+      executeSalesFinanceOutboxRecord
+  };
+
+export async function executePendingSalesFinanceOutbox(
+  scope: ErpScope,
+  dependencies:
+    SalesFinancePendingOutboxDependencies =
+      defaultPendingDependencies
+): Promise<SalesFinanceOutboxExecutionResult[]> {
   const records =
-    await loadPendingSalesFinanceOutbox();
+    await dependencies.loadPending(
+      scope
+    );
 
   const results:
     SalesFinanceOutboxExecutionResult[] = [];
 
   for (const record of records) {
     results.push(
-      await executeSalesFinanceOutboxRecord(
+      await dependencies.executeRecord(
         record
       )
     );
