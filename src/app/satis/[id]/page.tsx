@@ -1292,9 +1292,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
               {(sale.status === "TASLAK" || sale.status === "TEKLİF") && (
                 <button
                   type="button"
-                  onClick={() =>
-                    setShowExternalStockPicker(previous => !previous)
-                  }
+                  onClick={() => setShowExternalStockPicker(true)}
                   className="inline-flex min-h-10 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300"
                 >
                   + Harici Ürün / Stok Ekle
@@ -1303,17 +1301,51 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
             </div>
 
             {showExternalStockPicker && (
-              <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50/60 p-3 dark:border-blue-900 dark:bg-blue-950/20">
-                <div className="mb-2 text-xs font-semibold text-blue-800 dark:text-blue-300">
-                  Yalnız adet bazlı hazır ürün, aksesuar ve çeyizlik stoklar gösterilir.
+              <StockItemPicker
+                products={products}
+                filterProduct={isExternalSaleStockAllowed}
+                restrictionMessage="Bu ürün ölçü gerektiriyor. Satışa Hazırlık üzerinden ekleyin."
+                pickerTitle="Harici Ürün / Stok Seç"
+                helperText="Yalnız adet bazlı hazır ürün, aksesuar ve çeyizlik stoklar gösterilir."
+                autoOpen
+                hideTrigger
+                onRequestClose={() =>
+                  setShowExternalStockPicker(false)
+                }
+                onSelect={handleAddExternalStock}
+              />
+            )}
+
+            {(sale.status === "TASLAK" ||
+              sale.status === "TEKLİF") && (
+              <>
+                <div className="fixed inset-x-0 bottom-0 z-[70] border-t border-slate-700 bg-slate-950/95 p-3 shadow-[0_-8px_28px_rgba(0,0,0,0.35)] backdrop-blur sm:hidden">
+                  <div className="mx-auto flex max-w-3xl gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShowExternalStockPicker(true)
+                      }
+                      className="min-h-12 flex-1 rounded-xl border border-blue-700 bg-blue-950/60 px-3 text-sm font-bold text-blue-300 active:bg-blue-900/70"
+                    >
+                      + Satır Ekle
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShowExternalStockPicker(true)
+                      }
+                      className="min-h-12 flex-1 rounded-xl bg-blue-600 px-3 text-sm font-bold text-white active:bg-blue-700"
+                    >
+                      + Harici Ürün / Stok Ekle
+                    </button>
+                  </div>
                 </div>
-                <StockItemPicker
-                  products={products}
-                  filterProduct={isExternalSaleStockAllowed}
-                  restrictionMessage="Bu ürün ölçü gerektiriyor. Satışa Hazırlık üzerinden ekleyin."
-                  onSelect={handleAddExternalStock}
+                <div
+                  className="h-20 sm:hidden"
+                  aria-hidden="true"
                 />
-              </div>
+              </>
             )}
 
             <div>
@@ -1349,6 +1381,8 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
                         <StockItemPicker
                           products={products}
                           value={item.stockItemId}
+                          pickerTitle={`${item.productType || item.productGroup || "Ürün"} Stok Seç`}
+                          helperText="Bu satır için yalnız ilgili ürün grubundaki stoklar gösterilir."
                           filterProduct={product =>
                             isStockAllowedForMeasuredSaleItem(
                               product,
