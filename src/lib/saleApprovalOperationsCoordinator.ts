@@ -129,7 +129,8 @@ export function executeSaleApprovalOperations(
       sale,
       scope,
       actorUserId,
-      now
+      now,
+      deferSupplierOrders: true
     });
 
   if (

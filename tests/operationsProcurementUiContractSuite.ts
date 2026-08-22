@@ -1,0 +1,10 @@
+import assert from "node:assert/strict";import fs from "node:fs";
+const u=fs.readFileSync("src/components/operations/ProcurementDecisionPanel.tsx","utf8");
+const p=fs.readFileSync("src/components/operations/MaterialCutDecisionPanel.tsx","utf8");
+const c=fs.readFileSync("src/lib/procurement/procurementServerContract.ts","utf8");
+const s=fs.readFileSync("docs/sql/20260821_supplier_procurement_authority_v1.sql","utf8");
+assert.match(u,/Tedarikçi Siparişi Oluştur/);assert.match(u,/defaultSupplierCustomerId/);assert.match(u,/analyzeProductionSourcePlan/);
+assert.match(u,/groups=new Map/);assert.match(u,/sale\.status!=="ONAYLANDI"/);assert.match(p,/ProcurementDecisionPanel/);
+assert.match(c,/productionOrderId: string/);assert.match(c,/allocationId: string/);assert.match(c,/purpose: "TAILOR_MATERIAL" \| "MECHANICAL_PRODUCT"/);assert.match(c,/requiredUnit: ProcurementUnit/);assert.match(c,/const productionOrderId =/);assert.match(c,/const allocationId =/);assert.match(c,/const purpose =/);
+assert.match(s,/production_order_id text not null/);assert.match(s,/allocation_id text not null/);assert.match(s,/persist_supplier_order_batch_v1/);
+console.log("PAK operations procurement UI");

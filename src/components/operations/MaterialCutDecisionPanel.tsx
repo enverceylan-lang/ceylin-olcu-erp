@@ -1,4 +1,5 @@
 "use client";
+import ProcurementDecisionPanel from "@/components/operations/ProcurementDecisionPanel";
 
 import {
   useMemo,
@@ -1167,6 +1168,12 @@ export default function MaterialCutDecisionPanel({
               yapmaz.
             </p>
           </div>
+      <ProcurementDecisionPanel
+        operation={operation}
+        sale={sale}
+        currentUserId={currentUserId}
+        suppliers={suppliers}
+      />
 
           <button
             type="button"

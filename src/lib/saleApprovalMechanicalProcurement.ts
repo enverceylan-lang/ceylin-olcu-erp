@@ -23,7 +23,8 @@ export type SaleApprovalMechanicalProcurementResult =
       outcome: "SKIPPED";
       reason:
         | "NOT_APPROVED"
-        | "NO_MECHANICAL_PACKAGE";
+        | "NO_MECHANICAL_PACKAGE"
+        | "DEFERRED_TO_OPERATIONS";
     }
   | {
       outcome: "COMMITTED";
@@ -138,6 +139,7 @@ export function executeSaleApprovalMechanicalProcurement(
     scope: ErpScope;
     actorUserId: string;
     now?: string;
+    deferSupplierOrders?: boolean;
   }
 ): SaleApprovalMechanicalProcurementResult {
   if (
@@ -161,6 +163,17 @@ export function executeSaleApprovalMechanicalProcurement(
       outcome: "SKIPPED",
       reason:
         "NO_MECHANICAL_PACKAGE"
+    };
+  }
+
+  if (
+    input.deferSupplierOrders ===
+    true
+  ) {
+    return {
+      outcome: "SKIPPED",
+      reason:
+        "DEFERRED_TO_OPERATIONS"
     };
   }
 

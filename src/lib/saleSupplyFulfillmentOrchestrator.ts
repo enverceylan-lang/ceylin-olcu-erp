@@ -44,6 +44,12 @@ export interface SaleSupplyFulfillmentInput
   targetSupplierTenantId?: string;
   targetSupplierCompanyId?: string;
 
+  /*
+   * Sale approval may reserve usable stock while deliberately deferring
+   * supplier-order creation to the Operations screen.
+   */
+  deferSupplierOrders?: boolean;
+
   optimization:
     SaleCutOptimizationResult;
 }
@@ -156,6 +162,19 @@ export function executeSaleSupplyFulfillment(
         piece.suggestions[0];
 
       if (!bestSuggestion) {
+        if (
+          input.deferSupplierOrders ===
+          true
+        ) {
+          supplierMeters =
+            roundMeters(
+              supplierMeters +
+              piece.requiredMeters
+            );
+
+          continue;
+        }
+
         const supplierId =
           input.supplierId?.trim() ?? "";
         const supplierName =

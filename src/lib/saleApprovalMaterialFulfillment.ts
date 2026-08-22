@@ -374,6 +374,7 @@ export function executeSaleApprovalMaterialFulfillment(
         createdByUserId:
           input.actorUserId,
         now,
+        deferSupplierOrders: true,
         optimization:
           buildSingleStockOptimization(
             input.sale.id,
@@ -434,6 +435,23 @@ export function executeSaleApprovalMaterialFulfillment(
       fulfillment.supplierMeters;
   }
 
+  const productionRequirements =
+    optimization.stockRequirements
+      .flatMap(
+        stockRequirement =>
+          stockRequirement.pieces.map(
+            piece => ({
+              saleItemId:
+                piece.requirement
+                  .saleItemId,
+              parentSaleItemId:
+                piece.parentSaleItemId,
+              requiredQuantity:
+                piece.requiredMeters
+            })
+          )
+      );
+
   const combinedFulfillment:
     SaleSupplyFulfillmentResult = {
       outcome:
@@ -465,7 +483,9 @@ export function executeSaleApprovalMaterialFulfillment(
   const sourceBridge =
     buildProductionSourcePlansFromFulfillment(
       workPackage,
-      combinedFulfillment
+      combinedFulfillment,
+      1,
+      productionRequirements
     );
 
   if (
