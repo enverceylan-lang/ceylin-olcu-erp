@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAuth } from "@/lib/authHelper";
+import { stableFinanceOperationHash } from "@/lib/finance/stableFinanceOperationHash";
 import {
   assertSaleAuthorityScope,
   assertSaleDraftAuthorityInput,
@@ -49,21 +50,23 @@ export async function POST(request: NextRequest) {
 
     assertSaleAuthorityScope(body, context.scope);
 
+    const serverSale = {
+      tenantId: context.scope.tenantId,
+      companyId: context.scope.companyId,
+      branchId: context.scope.branchId,
+      accountingPeriodId: context.scope.accountingPeriodId,
+      saleId: body.saleId,
+      customerId: body.customerId,
+      saleNumber: body.saleNumber ?? null,
+      status: body.status,
+      totalAmount: body.totalAmount,
+      currency: body.currency,
+    };
+
     const result = await persistSaleDocumentAuthority(client, {
-      sale: {
-        tenantId: context.scope.tenantId,
-        companyId: context.scope.companyId,
-        branchId: context.scope.branchId,
-        accountingPeriodId: context.scope.accountingPeriodId,
-        saleId: body.saleId,
-        customerId: body.customerId,
-        saleNumber: body.saleNumber ?? null,
-        status: body.status,
-        totalAmount: body.totalAmount,
-        currency: body.currency,
-      },
+      sale: serverSale,
       actorUserId: user.id,
-      payloadHash: body.payloadHash,
+      payloadHash: stableFinanceOperationHash(serverSale),
     });
 
     return json({ success: true, result });

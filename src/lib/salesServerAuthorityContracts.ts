@@ -8,7 +8,6 @@ export interface SaleAuthorityDraftInput extends ErpScope {
   status: "TASLAK" | "TEKLİF";
   totalAmount: number;
   currency: string;
-  payloadHash: string;
 }
 
 export interface SaleApprovalAuthorityInput extends ErpScope {
@@ -27,7 +26,6 @@ export interface SaleReturnAuthorityInput extends ErpScope {
   saleId: string;
   customerId: string;
   idempotencyKey: string;
-  payloadHash: string;
   amount?: number;
   currency?: string;
   occurredAt: string;
@@ -60,8 +58,7 @@ export function assertSaleDraftAuthorityInput(
 ): void {
   if (
     !text(input.saleId) ||
-    !text(input.customerId) ||
-    !text(input.payloadHash)
+    !text(input.customerId)
   ) {
     throw new Error("SALE_AUTHORITY_REQUIRED_FIELD_MISSING");
   }
@@ -96,7 +93,6 @@ export function assertSaleReturnAuthorityInput(
     !text(input.saleId) ||
     !text(input.customerId) ||
     !text(input.idempotencyKey) ||
-    !text(input.payloadHash) ||
     !text(input.occurredAt)
   ) {
     throw new Error("SALE_RETURN_AUTHORITY_REQUIRED_FIELD_MISSING");

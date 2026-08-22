@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import {
   CheckCircle2,
@@ -48,6 +48,10 @@ import {
 import {
   persistApprovedSaleLineSourceClientV1
 } from "@/lib/saleLineSourceProducerClient";
+import {
+  approveSaleServerAuthority,
+} from "@/lib/salesAuthorityRuntimeClient";
+
 export default function SatisPage() {
   const { customers } = useStore();
 
@@ -172,6 +176,11 @@ export default function SatisPage() {
       const now =
         new Date().toISOString();
 
+      // SERVER_AUTHORITY_RUNTIME_V1
+      await approveSaleServerAuthority({
+        saleId: sale.id,
+        scope,
+      });
       const transition =
         requestSaleStatusTransition({
           saleId: sale.id,

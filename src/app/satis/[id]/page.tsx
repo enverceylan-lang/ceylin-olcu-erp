@@ -21,6 +21,10 @@ import { fetchActiveCompanyDisplayName } from "@/lib/activeCompanyDisplayNameCli
 import { getSaleRemainingBalance } from "@/lib/salesFinance";
 import { useAuthStore } from "@/store/useAuthStore";
 import { canViewSale } from "@/lib/salesVisibility";
+import {
+  approveSaleServerAuthority,
+  persistDraftSaleServerAuthority,
+} from "@/lib/salesAuthorityRuntimeClient";
 import OpenMeasurementsNotice from "@/components/sales/OpenMeasurementsNotice";
 import { createDraftSaleFromCustomer } from "@/lib/salesAdapter";
 import { useErpRuntimeContext } from "@/lib/useErpRuntimeContext";
@@ -516,6 +520,23 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
         return;
       }
 
+      if (
+        persistedSaleForSave.status === "TASLAK" ||
+        persistedSaleForSave.status === "TEKLİF"
+      ) {
+        await persistDraftSaleServerAuthority({
+          sale: updatedSale,
+          scope,
+          sourceStatus: persistedSaleForSave.status,
+        });
+
+        if (updatedSale.status === "ONAYLANDI") {
+          await approveSaleServerAuthority({
+            saleId: updatedSale.id,
+            scope,
+          });
+        }
+      }
       if (
         updatedSale.status === "ONAYLANDI" &&
         (

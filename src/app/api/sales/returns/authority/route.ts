@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAuth } from "@/lib/authHelper";
+import { stableFinanceOperationHash } from "@/lib/finance/stableFinanceOperationHash";
 import {
   assertSaleAuthorityScope,
   assertSaleReturnAuthorityInput,
@@ -60,13 +61,15 @@ export async function POST(request: NextRequest) {
 
     assertSaleAuthorityScope(body, context.scope);
 
+    const serverCommand = {
+      ...body,
+      ...context.scope,
+    };
+
     const result = await persistSaleReturnAuthority(client, {
-      command: {
-        ...body,
-        ...context.scope,
-      },
+      command: serverCommand,
       actorUserId: user.id,
-      payloadHash: body.payloadHash,
+      payloadHash: stableFinanceOperationHash(serverCommand),
     });
 
     return json({ success: true, result });

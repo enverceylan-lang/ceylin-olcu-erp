@@ -59,7 +59,6 @@ assert.doesNotThrow(() =>
     status: "TASLAK",
     totalAmount: 0,
     currency: "TRY",
-    payloadHash: "hash",
   }),
 );
 
@@ -71,7 +70,6 @@ assert.doesNotThrow(() =>
     saleId: "sale-1",
     customerId: "cust-1",
     idempotencyKey: "idem-1",
-    payloadHash: "hash",
     amount: 10,
     currency: "TRY",
     occurredAt: new Date().toISOString(),

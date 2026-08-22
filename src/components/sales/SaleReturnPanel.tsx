@@ -41,6 +41,10 @@ import type {
   SaleReturnDocument
 } from "@/lib/saleReturnService";
 
+import {
+  persistSaleReturnServerAuthority,
+} from "@/lib/salesAuthorityRuntimeClient";
+
 interface SaleReturnPanelProps {
   scope: ErpScope;
   saleId: string;
@@ -308,6 +312,18 @@ export default function SaleReturnPanel({
             occurredAt
           ].join(":")
         });
+      // SERVER_RETURN_START_RUNTIME_V1
+      if (
+        result.outcome === "CREATED" ||
+        result.outcome === "REPLAY"
+      ) {
+        await persistSaleReturnServerAuthority({
+          action: "START",
+          saleReturn: result.saleReturn,
+          scope,
+          occurredAt: result.saleReturn.occurredAt,
+        });
+      }
 
       if (
         result.outcome ===
@@ -369,6 +385,14 @@ export default function SaleReturnPanel({
     setMessage(null);
 
     try {
+      // SERVER_RETURN_APPROVE_RUNTIME_V1
+      await persistSaleReturnServerAuthority({
+        action: "APPROVE",
+        saleReturn,
+        scope,
+        occurredAt: new Date().toISOString(),
+      });
+
       const result =
         await approveSaleReturnWorkflow({
           scope,
@@ -431,6 +455,14 @@ export default function SaleReturnPanel({
     setMessage(null);
 
     try {
+      // SERVER_RETURN_REJECT_RUNTIME_V1
+      await persistSaleReturnServerAuthority({
+        action: "REJECT",
+        saleReturn,
+        scope,
+        occurredAt: new Date().toISOString(),
+      });
+
       const result =
         await rejectSaleReturnWorkflow({
           scope,
@@ -480,6 +512,14 @@ export default function SaleReturnPanel({
     setMessage(null);
 
     try {
+      // SERVER_RETURN_COMPLETE_RUNTIME_V1
+      await persistSaleReturnServerAuthority({
+        action: "COMPLETE",
+        saleReturn,
+        scope,
+        occurredAt: new Date().toISOString(),
+      });
+
       const result =
         await completeSaleReturnWorkflow({
           scope,
