@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useEffect } from "react";
 import { ArrowLeft, Save, Trash2 } from "lucide-react";
@@ -724,7 +724,24 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
   };
 
   const handleSave = async () => {
-    await persistSale(sale);
+    const isAdmin =
+      currentUser?.role === "ADMIN";
+
+    const shouldAdminApproveDirectly =
+      isAdmin &&
+      (
+        sale.status === "TASLAK" ||
+        sale.status === "TEKLİF"
+      );
+
+    await persistSale(
+      shouldAdminApproveDirectly
+        ? {
+            ...sale,
+            status: "ONAYLANDI"
+          }
+        : sale
+    );
   };
 
   const handleApproveSale = async () => {
