@@ -4,6 +4,11 @@ interface FinanceTransactionTableProps {
   transactions: readonly FinanceTransaction[];
   currency: string;
   emptyMessage?: string;
+  documentHeader?: string;
+  sourceHeader?: string;
+  getDocumentLabel?: (transaction: FinanceTransaction) => string;
+  getSourceLabel?: (transaction: FinanceTransaction) => string;
+  onDocumentClick?: (transaction: FinanceTransaction) => void;
 }
 
 function formatMoney(value: number, currency: string): string {
@@ -17,6 +22,11 @@ export function FinanceTransactionTable({
   transactions,
   currency,
   emptyMessage = "Finans hareketi bulunamadı.",
+  documentHeader = "Satış",
+  sourceHeader = "Kaynak",
+  getDocumentLabel,
+  getSourceLabel,
+  onDocumentClick,
 }: FinanceTransactionTableProps) {
   return (
     <div className="overflow-x-auto">
@@ -24,8 +34,8 @@ export function FinanceTransactionTable({
         <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:bg-gray-800/50 dark:text-gray-400">
           <tr>
             <th className="px-4 py-3">Tarih</th>
-            <th className="px-4 py-3">Satış</th>
-            <th className="px-4 py-3">Kaynak</th>
+            <th className="px-4 py-3">{documentHeader}</th>
+            <th className="px-4 py-3">{sourceHeader}</th>
             <th className="px-4 py-3">Açıklama</th>
             <th className="px-4 py-3 text-right">Borç</th>
             <th className="px-4 py-3 text-right">Tahsilat</th>
@@ -53,10 +63,20 @@ export function FinanceTransactionTable({
                   )}
                 </td>
                 <td className="px-4 py-3 font-medium">
-                  {transaction.saleId}
+                  {onDocumentClick ? (
+                    <button
+                      type="button"
+                      onClick={() => onDocumentClick(transaction)}
+                      className="font-semibold text-blue-700 underline-offset-2 hover:underline dark:text-blue-300"
+                    >
+                      {getDocumentLabel?.(transaction) ?? transaction.saleId}
+                    </button>
+                  ) : (
+                    getDocumentLabel?.(transaction) ?? transaction.saleId
+                  )}
                 </td>
                 <td className="px-4 py-3">
-                  {transaction.sourceDocumentType}
+                  {getSourceLabel?.(transaction) ?? transaction.sourceDocumentType}
                 </td>
                 <td className="max-w-xs truncate px-4 py-3">
                   {transaction.description || "—"}

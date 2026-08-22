@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useFinanceRuntimeContext } from "@/lib/finance/useFinanceRuntimeContext";
 import { selectFinanceReadModel } from "@/lib/finance/financeReadSelector";
@@ -26,6 +26,23 @@ function formatMoney(value: number, currency: string): string {
   }).format(value);
 }
 
+function financeSourceLabel(source: string): string {
+  switch (source) {
+    case "SALE":
+      return "Satış";
+    case "SALE_PAYMENT":
+      return "Satış Tahsilatı";
+    case "SALE_RETURN":
+      return "Satış İadesi";
+    case "OPENING_BALANCE":
+      return "Devir / Açılış Bakiyesi";
+    case "MANUAL":
+      return "Manuel Finans İşlemi";
+    default:
+      return source.replaceAll("_", " ");
+  }
+}
+
 function riskLabel(dashboard: CustomerFinanceDashboard): string {
   if (dashboard.riskLevel === "RISKLI") {
     return "Gecikmiş borç var";
@@ -45,6 +62,15 @@ export function CustomerFinancePanel({
   const loadSales = useSalesStore((state) => state.loadSales);
   const isLoading = useSalesStore((state) => state.isLoading);
   const [projectionAt] = useState(() => new Date().toISOString());
+  const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
+
+  const saleById = useMemo(
+    () => new Map(sales.map((sale) => [sale.id, sale] as const)),
+    [sales],
+  );
+
+  const selectedSale =
+    selectedSaleId === null ? null : saleById.get(selectedSaleId) ?? null;
 
   useEffect(() => {
     if (runtime.state !== "ready") {
@@ -161,8 +187,144 @@ export function CustomerFinancePanel({
           transactions={financeCenterMirror.transactions}
           currency={currency}
           emptyMessage="Bu cariye ait Finans Merkezi hareketi bulunamadı."
+          documentHeader="Belge No"
+          sourceHeader="İşlem Türü"
+          getDocumentLabel={(transaction) =>
+            saleById.get(transaction.saleId)?.saleNo ?? transaction.saleId
+          }
+          getSourceLabel={(transaction) =>
+            financeSourceLabel(transaction.sourceDocumentType)
+          }
+          onDocumentClick={(transaction) => setSelectedSaleId(transaction.saleId)}
         />
       </section>
+
+      {selectedSale ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Satış detayı ${selectedSale.saleNo}`}
+          onClick={() => setSelectedSaleId(null)}
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white shadow-2xl dark:bg-gray-900"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-gray-200 p-5 dark:border-gray-800">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  Satış Detayı — Salt Okunur
+                </p>
+                <h3 className="mt-1 text-xl font-bold text-gray-950 dark:text-white">
+                  {selectedSale.saleNo}
+                </h3>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  Durum: {selectedSale.status}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedSaleId(null)}
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                Kapat
+              </button>
+            </div>
+
+            <div className="p-5">
+              <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
+                <table className="w-full min-w-[760px] text-left text-sm">
+                  <thead className="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:bg-gray-800/50 dark:text-gray-400">
+                    <tr>
+                      <th className="px-4 py-3">Oda</th>
+                      <th className="px-4 py-3">Ürün</th>
+                      <th className="px-4 py-3 text-right">Miktar</th>
+                      <th className="px-4 py-3 text-right">Birim Fiyat</th>
+                      <th className="px-4 py-3 text-right">Tutar</th>
+                    </tr>
+                  </thead>
+
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {selectedSale.items.map((item) => (
+                      <tr key={item.id}>
+                        <td className="px-4 py-3">{item.roomName || "—"}</td>
+
+                        <td className="px-4 py-3">
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {item.productType || "Ürün"}
+                          </div>
+                          {item.windowName ? (
+                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                              {item.windowName}
+                            </div>
+                          ) : null}
+                        </td>
+
+                        <td className="px-4 py-3 text-right">
+                          {Number(item.metricSize || 0).toLocaleString("tr-TR")}{" "}
+                          {item.metricUnit || ""}
+                          {Number(item.quantity || 1) !== 1
+                            ? ` × ${Number(item.quantity || 1).toLocaleString("tr-TR")}`
+                            : ""}
+                        </td>
+
+                        <td className="px-4 py-3 text-right">
+                          {formatMoney(Number(item.unitPrice || 0), currency)}
+                        </td>
+
+                        <td className="px-4 py-3 text-right font-semibold">
+                          {formatMoney(Number(item.rowTotal || 0), currency)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-5 ml-auto grid max-w-md gap-2 text-sm">
+                <div className="flex items-center justify-between border-b border-gray-100 py-2 dark:border-gray-800">
+                  <span className="text-gray-500 dark:text-gray-400">
+                    Satış Toplamı
+                  </span>
+                  <span className="font-semibold text-gray-950 dark:text-white">
+                    {formatMoney(Number(selectedSale.totalAmount || 0), currency)}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between border-b border-gray-100 py-2 dark:border-gray-800">
+                  <span className="text-gray-500 dark:text-gray-400">
+                    Tahsil Edilen
+                  </span>
+                  <span className="font-semibold text-gray-950 dark:text-white">
+                    {formatMoney(
+                      (selectedSale.payments ?? []).reduce(
+                        (total, payment) => total + Number(payment.amount || 0),
+                        0,
+                      ),
+                      currency,
+                    )}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between py-2 text-base">
+                  <span className="font-semibold text-gray-700 dark:text-gray-300">
+                    Kalan
+                  </span>
+                  <span className="font-bold text-gray-950 dark:text-white">
+                    {formatMoney(Number(selectedSale.remainingBalance || 0), currency)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-100">
+                Bu panel yalnız görüntüleme içindir. Satış üzerinde değişiklik yapılamaz.
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
