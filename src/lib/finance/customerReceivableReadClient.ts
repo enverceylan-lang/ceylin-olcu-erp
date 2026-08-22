@@ -2,6 +2,7 @@ import {
   parseCustomerReceivableSnapshot,
   type CustomerReceivableSnapshot,
 } from "@/lib/finance/customerReceivableReadContracts";
+import { useAuthStore } from "@/store/useAuthStore";
 
 interface ReadCustomerReceivableSnapshotOptions {
   signal?: AbortSignal;
@@ -22,6 +23,13 @@ export async function readCustomerReceivableSnapshot(
     throw new Error("FINANCE_CUSTOMER_RECEIVABLE_CURRENCY_INVALID");
   }
 
+  const sessionToken =
+    useAuthStore.getState().sessionToken?.trim();
+
+  if (!sessionToken) {
+    throw new Error("UNAUTHORIZED");
+  }
+
   const params = new URLSearchParams({
     customerId: normalizedCustomerId,
     currency: normalizedCurrency,
@@ -29,6 +37,9 @@ export async function readCustomerReceivableSnapshot(
 
   const response = await fetch(`/api/finance/customer-receivable?${params.toString()}`, {
     method: "GET",
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+    },
     cache: "no-store",
     signal: options.signal,
   });
