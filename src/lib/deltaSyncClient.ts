@@ -1,4 +1,7 @@
+import { loadVerifiedClientErpScope } from './clientErpScope';
+import { erpScopeMatches, validateErpScope, type ErpScope } from './erpScope';
 import { useMeasurementStore } from "@/store/measurementStore";
+import { getLocalMeasurementById } from "./localMeasurementDb";
 import { useStore } from "@/store/useStore";
 import { loadLocalCustomers, saveLocalCustomerWithoutSync } from "./localCustomerDb";
 import {
@@ -75,6 +78,10 @@ interface DeltaChange {
   sourceTable: InboundMeasurement["sourceTable"];
   user_id?: string;
   device_id?: string;
+  tenant_id?: string;
+  company_id?: string;
+  branch_id?: string;
+  accounting_period_id?: string;
   patch?: DeltaChangePatch;
 }
 
@@ -104,6 +111,12 @@ interface DeltaPushResponse {
   syncedIds?: string[];
   errorIds?: string[];
   errors?: string[] | string;
+  measurementResults?: Array<{
+    changeId?: string;
+    entityId?: string;
+    entityVersion?: number;
+    outcome?: string;
+  }>;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -405,6 +418,18 @@ export async function pushDeltaSyncEvents(): Promise<{
     }
 
     const token = sessionToken;
+    const activeScope = await loadVerifiedClientErpScope(sessionToken);
+    const activeScopeEvents = pendingEvents.filter((event) =>
+      erpScopeMatches(event.scope, activeScope),
+    );
+    if (activeScopeEvents.length === 0) {
+      return {
+        success: true,
+        pushedCount: 0,
+        errors: [],
+        debug: { pendingCount: pendingEvents.length, apiStatus: 'SCOPE_FILTERED', syncedCount: 0, errorCount: 0, firstStatus },
+      };
+    }
 
     // Call the server-side API route which uses the Service Role Key
 
@@ -436,7 +461,7 @@ export async function pushDeltaSyncEvents(): Promise<{
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ events: pendingEvents }),
+      body: JSON.stringify({ events: activeScopeEvents }),
     });
 
     let data: DeltaPushResponse = {};
@@ -465,29 +490,103 @@ export async function pushDeltaSyncEvents(): Promise<{
 
     data = await response.json();
 
-    const { success, syncedIds, errorIds, errors } = data;
+    const {
+      success,
+      syncedIds,
+      errorIds,
+      errors,
+      measurementResults,
+    } = data;
 
-    // Update Local Queue based on the server response
-    if (syncedIds && syncedIds.length > 0) {
-      await markSyncEventsSynced(syncedIds);
+    const resultByChangeId = new Map(
+      (measurementResults || []).map((result) => [
+        String(result.changeId || ""),
+        result,
+      ]),
+    );
+
+    const pendingByChangeId = new Map(
+      activeScopeEvents.map((event) => [event.changeId, event]),
+    );
+
+    const safeSyncedIds: string[] = [];
+    const clientRejectedIds: string[] = [];
+
+    for (const changeId of syncedIds || []) {
+      const pendingEvent = pendingByChangeId.get(changeId);
+
+      if (pendingEvent?.entityType !== "MEASUREMENT") {
+        safeSyncedIds.push(changeId);
+        continue;
+      }
+
+      const authorityResult = resultByChangeId.get(changeId);
+      const entityId = String(authorityResult?.entityId || "").trim();
+      const entityVersion = Number(authorityResult?.entityVersion);
+
+      if (
+        !authorityResult ||
+        entityId !== pendingEvent.entityId ||
+        !Number.isInteger(entityVersion) ||
+        entityVersion < 1
+      ) {
+        clientRejectedIds.push(changeId);
+        continue;
+      }
+
+      const localMeasurement =
+        useMeasurementStore
+          .getState()
+          .measurements.find(
+            (measurement) => measurement.id === entityId,
+          ) ??
+        await getLocalMeasurementById(entityId);
+      if (!localMeasurement) {
+        clientRejectedIds.push(changeId);
+        continue;
+      }
+
+      await useMeasurementStore
+        .getState()
+        .batchUpsertMeasurements([
+          {
+            ...localMeasurement,
+            version: entityVersion,
+          },
+        ]);
+
+      safeSyncedIds.push(changeId);
     }
 
-    if (errorIds && errorIds.length > 0) {
+    if (safeSyncedIds.length > 0) {
+      await markSyncEventsSynced(safeSyncedIds);
+    }
+
+    const combinedErrorIds = Array.from(
+      new Set([...(errorIds || []), ...clientRejectedIds]),
+    );
+
+    if (combinedErrorIds.length > 0) {
       const errMsgs = Array.isArray(errors)
         ? errors.join(", ")
-        : errors || "Unknown error";
-      await markSyncEventsError(errorIds, errMsgs);
+        : errors || "Measurement canonical ACK validation failed";
+      await markSyncEventsError(combinedErrorIds, errMsgs);
     }
 
     return {
-      success: Boolean(success) && (errorIds || []).length === 0,
-      pushedCount: (syncedIds || []).length,
-      errors: Array.isArray(errors) ? errors : errors ? [String(errors)] : [],
+      success: Boolean(success) && combinedErrorIds.length === 0,
+      pushedCount: safeSyncedIds.length,
+      errors: [
+        ...(Array.isArray(errors) ? errors : errors ? [String(errors)] : []),
+        ...(clientRejectedIds.length > 0
+          ? ["Measurement canonical ACK validation failed"]
+          : []),
+      ],
       debug: {
         pendingCount: pendingEvents.length,
         apiStatus: response.status,
-        syncedCount: (syncedIds || []).length,
-        errorCount: (errorIds || []).length,
+        syncedCount: safeSyncedIds.length,
+        errorCount: combinedErrorIds.length,
         firstStatus,
       },
     };
@@ -532,6 +631,7 @@ export async function pullInboundMeasurements(
     }
 
     const token = sessionToken;
+    const activeScope = await loadVerifiedClientErpScope(sessionToken);
     const draftCursor = await getSyncCursor("draft_changes_cursor");
     const measurementCursor = await getSyncCursor("measurement_changes_cursor");
 
@@ -563,6 +663,23 @@ export async function pullInboundMeasurements(
     }
 
     const rawChanges: DeltaChange[] = data.changes || [];
+    for (const change of rawChanges) {
+      const changeScope: ErpScope = {
+        tenantId: change.tenant_id ?? "",
+        companyId: change.company_id ?? "",
+        branchId: change.branch_id ?? "",
+        accountingPeriodId: change.accounting_period_id ?? "",
+      };
+      const changeScopeValidation = validateErpScope(changeScope);
+      if (!changeScopeValidation.valid) {
+        throw new Error(
+          `DELTA_PULL_SCOPE_INVALID::`,
+        );
+      }
+      if (!erpScopeMatches(changeScope, activeScope)) {
+        throw new Error(`DELTA_PULL_SCOPE_MISMATCH:`);
+      }
+    }
     let maxDraftRevision = draftCursor;
     let maxMeasurementRevision = measurementCursor;
 
@@ -735,6 +852,7 @@ export async function pullInboundMeasurements(
             const openingId = getOpeningId(canonical);
             const measurementToPersist = {
               ...canonical,
+              ...activeScope,
               customerId: resolvedCustomerId,
               openingId,
               windowId: openingId,
@@ -758,6 +876,7 @@ export async function pullInboundMeasurements(
 
               if (validationIssues.length > 0) {
                 const quarantine: InboundMeasurement = {
+                  ...activeScope,
                   changeId: `quarantine-${change.change_id}`,
                   revision: change.revision,
                   entityType: "MEASUREMENT_QUARANTINE",
@@ -963,6 +1082,7 @@ export async function pullInboundMeasurements(
         );
 
         const inbound: InboundMeasurement = {
+          ...activeScope,
           changeId: change.change_id,
           revision: change.revision,
           entityType: change.entity_type,

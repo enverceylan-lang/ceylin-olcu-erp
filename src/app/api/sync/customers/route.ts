@@ -1,3 +1,5 @@
+import { customerTreeScopeIssue, readErpScope, stampCustomerTreeScope } from '@/lib/customerTreeScope';
+import { erpScopeMatches } from '@/lib/erpScope';
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyAuth } from "@/lib/authHelper";
@@ -204,6 +206,23 @@ export async function POST(req: NextRequest) {
                 "string",
           )
         : [];
+
+    for (const customer of localCustomers) {
+      const scopeIssue = customerTreeScopeIssue(
+        customer,
+        erpContext.scope,
+      );
+      if (scopeIssue) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "SYNC_ENTITY_SCOPE_FORBIDDEN",
+            reason: scopeIssue,
+          },
+          { status: 403 },
+        );
+      }
+    }
     
     let incomingRoomsCount = 0;
     let incomingOpeningsCount = 0;
@@ -239,8 +258,32 @@ export async function POST(req: NextRequest) {
     // 1. Process deletions (Soft deleted customers are synced as isDeleted=true, not deleted via pendingDeletes)
     if (Array.isArray(pendingDeletes)) {
       for (const del of pendingDeletes) {
-        // Only allow hard deleting child structures related to sync
-        if (["rooms", "openings", "measurements"].includes(del.table)) {
+        const deleteScope = readErpScope(del);
+        if (
+          !deleteScope ||
+          !erpScopeMatches(deleteScope, erpContext.scope)
+        ) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: "SYNC_DELETE_SCOPE_FORBIDDEN",
+            },
+            { status: 403 },
+          );
+        }
+
+        if (del.table === "measurements") {
+          return NextResponse.json(
+            {
+              success: false,
+              error: "MEASUREMENT_PHYSICAL_DELETE_UNSUPPORTED",
+            },
+            { status: 409 },
+          );
+        }
+
+        // Legacy hard delete remains limited to non-measurement child structures.
+        if (["rooms", "openings"].includes(del.table)) {
           const { error } = await supabaseServer
             .from(del.table)
             .delete()
@@ -252,7 +295,6 @@ export async function POST(req: NextRequest) {
         }
       }
     }
-
     // 2. Pull all entities from Supabase with error checks
     const { data: remoteCustomers, error: errCustomers } = await supabaseServer.from("customers").select("*").match(scopeColumns);
     const { data: remoteRooms, error: errRooms } = await supabaseServer.from("rooms").select("*").match(scopeColumns);
@@ -426,7 +468,9 @@ export async function POST(req: NextRequest) {
       }
     });
 
-    const finalCustomers = Array.from(mergedCustomersMap.values());
+    const finalCustomers = Array.from(mergedCustomersMap.values()).map(
+      (customer) => stampCustomerTreeScope(customer, erpContext.scope),
+    );
 
     for (const c of finalCustomers) {
       const localRooms = c.rooms || [];
@@ -524,6 +568,12 @@ export async function POST(req: NextRequest) {
           dbMeasurements.forEach((dm: SyncRecord) => {
             const lm = mergedMeasurementsMap.get(dm.id);
             const normalizedMeasuredDate = dm.measuredDate ? new Date(dm.measuredDate).toISOString() : new Date().toISOString();
+            const normalizedEntityVersion = Number(dm.entity_version);
+            const canonicalVersion =
+              Number.isInteger(normalizedEntityVersion) &&
+              normalizedEntityVersion > 0
+                ? normalizedEntityVersion
+                : undefined;
 
             if (!lm) {
               mergedMeasurementsMap.set(dm.id, {
@@ -543,6 +593,7 @@ export async function POST(req: NextRequest) {
                 createdById: dm.createdById || undefined,
                 measuredDate: normalizedMeasuredDate,
                 notesHistory: dm.notesHistory || [],
+                ...(canonicalVersion ? { version: canonicalVersion } : {}),
                 photos: dm.photos || [],
                 videos: dm.videos || [],
                 createdAt: dm.createdAt,
@@ -574,6 +625,7 @@ export async function POST(req: NextRequest) {
                   createdById: dm.createdById || undefined,
                   measuredDate: normalizedMeasuredDate,
                   notesHistory: dm.notesHistory || [],
+                ...(canonicalVersion ? { version: canonicalVersion } : {}),
                   createdAt: dm.createdAt,
                   updatedAt: dm.updatedAt
                 });
@@ -594,7 +646,7 @@ export async function POST(req: NextRequest) {
     let customersUpsertedCount = 0;
     let roomsUpsertedCount = 0;
     let openingsUpsertedCount = 0;
-    let measurementsUpsertedCount = 0;
+    const measurementsUpsertedCount = 0;
 
     for (const c of finalCustomers) {
       // Customer
@@ -684,45 +736,13 @@ export async function POST(req: NextRequest) {
             openingsUpsertedCount++;
           }
 
-          // Measurements
-          for (const m of o.products ?? []) {
-            const dbMeasurement = remoteMeasurements?.find(dm => dm.id === m.id);
-            if (!dbMeasurement || new Date(m.updatedAt || 0) > new Date(dbMeasurement.updatedAt)) {
-              const { error } = await supabaseServer.from("measurements").upsert({
-                ...scopeColumns,
-                id: m.id,
-                openingId: o.id,
-                templateType: m.templateType,
-                rawValues: m.rawValues || {},
-                productId: m.productId || null,
-                productGroup: m.productGroup || null,
-                productType: m.productType || null,
-                calculatedWidth: m.calculatedWidth || null,
-                calculatedHeight: m.calculatedHeight || null,
-                details: m.details || {},
-                notes: m.notes || "",
-                status: m.status || "",
-                measuredBy: m.measuredBy || "",
-                measuredById: m.measuredById || null,
-                createdById: m.createdById || null,
-                measuredDate: m.measuredDate || new Date().toISOString(),
-                createdAt: m.createdAt,
-                updatedAt: m.updatedAt,
-                notesHistory: m.notesHistory || [],
-                photos: (m.photos && m.photos.length > 0) ? m.photos : (dbMeasurement?.photos || []),
-                videos: (m.videos && m.videos.length > 0) ? m.videos : (dbMeasurement?.videos || [])
-              });
-              if (error) {
-                console.error(`[Sync DB Error] Measurement upsert failed for ${m.id}:`, error);
-                throw new Error(`Measurement upsert failed: ${error.message}`);
-              }
-              measurementsUpsertedCount++;
-            }
-          }
+          // Measurements are read/merged here for legacy response compatibility only.
+          // Canonical measurement writes are owned exclusively by
+          // persist_measurement_authority_v1 through delta-sync/push.
+          // A second timestamp-based writer here would reintroduce dual authority.
         }
       }
     }
-
     console.log("[Sync API POST] upserted counts:", {
       customers: customersUpsertedCount,
       rooms: roomsUpsertedCount,

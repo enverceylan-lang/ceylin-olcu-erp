@@ -1,7 +1,9 @@
+import { readErpScope } from './customerTreeScope';
 import Dexie, { type Table } from 'dexie';
 import { MeasurementRecord } from '@/store/measurementStore';
 import {
-  enqueueSyncEvent,
+  activateBlockedSyncEvent,
+  discardBlockedSyncEvent,
   enqueueSyncEventDetailed
 } from './localSyncQueueDb';
 import {
@@ -173,14 +175,24 @@ class LocalMeasurementDatabase extends Dexie {
 export const localMeasurementDb = new LocalMeasurementDatabase();
 
 function normalizeMeasurementLinks(measurement: MeasurementRecord): MeasurementRecord {
-  const openingId = measurement.openingId || measurement.windowId || '';
+  const openingId = String(measurement.openingId || "").trim();
+  const windowId = String(measurement.windowId || "").trim();
+
+  if (openingId && windowId && openingId !== windowId) {
+    throw new Error("MEASUREMENT_OPENING_WINDOW_MISMATCH");
+  }
+
+  const canonicalOpeningId = openingId || windowId;
+  if (!canonicalOpeningId) {
+    throw new Error("MEASUREMENT_OPENING_ID_MISSING");
+  }
+
   return {
     ...measurement,
-    openingId,
-    windowId: measurement.windowId || openingId
+    openingId: canonicalOpeningId,
+    windowId: windowId || canonicalOpeningId
   };
 }
-
 export async function loadLocalMeasurements(): Promise<MeasurementRecord[]> {
   try {
     return await localMeasurementDb.measurements.toArray();
@@ -190,6 +202,16 @@ export async function loadLocalMeasurements(): Promise<MeasurementRecord[]> {
   }
 }
 
+export async function getLocalMeasurementById(
+  id: string
+): Promise<MeasurementRecord | undefined> {
+  try {
+    return await localMeasurementDb.measurements.get(id);
+  } catch (error: unknown) {
+    console.error("Local ölçü ID ile okunurken hata:", error);
+    return undefined;
+  }
+}
 export async function saveLocalMeasurement(measurement: MeasurementRecord): Promise<void> {
   try {
     await localMeasurementDb.measurements.put(normalizeMeasurementLinks(measurement));
@@ -204,97 +226,231 @@ export async function saveLocalMeasurementWithSync(
   username: string
 ): Promise<void> {
   void username;
-  try {
-    const normalizedMeasurement = normalizeMeasurementLinks(measurement);
-    await localMeasurementDb.measurements.put(normalizedMeasurement);
 
-    const sanitizedMeasurement =
-      deepSyncSanitize(
-        normalizedMeasurement,
-      ) as MeasurementRecord;
+  const existingMeasurement =
+    await localMeasurementDb.measurements.get(measurement.id);
+  const normalizedMeasurement = normalizeMeasurementLinks(measurement);
 
-    const payload = {
-      id: normalizedMeasurement.id,
-      customerId: normalizedMeasurement.customerId,
-      roomId: normalizedMeasurement.roomId,
-      openingId: normalizedMeasurement.openingId,
-      windowId: normalizedMeasurement.windowId,
-      entity: 'measurement',
-      data: {
-        ...sanitizedMeasurement,
-        syncIntegrity:
-          buildMeasurementSyncIntegrity(
-            normalizedMeasurement,
-          ),
-      },
-      timestamp: new Date().toISOString()
-    };
+  const operation = existingMeasurement ? 'UPDATE' : 'INSERT';
+  const expectedVersion = existingMeasurement
+    ? Number(existingMeasurement.version)
+    : 0;
 
-    const enqueueResult = await enqueueSyncEventDetailed(
-      'MEASUREMENT',
-      measurement.id,
-      'UPDATE',
-      payload
-    );
+  if (
+    existingMeasurement &&
+    (!Number.isInteger(expectedVersion) || expectedVersion < 1)
+  ) {
+    throw new Error("MEASUREMENT_EXPECTED_VERSION_MISSING");
+  }
 
-    if (
-      enqueueResult.success &&
-      enqueueResult.changeId &&
-      enqueueResult.deviceId &&
-      enqueueResult.userId &&
-      enqueueResult.createdAt
-    ) {
-      const receipt: TransferReceipt = {
-        transferId: enqueueResult.changeId,
-        entityType: 'MEASUREMENT',
-        entityId: measurement.id,
-        senderUserId: enqueueResult.userId,
-        senderDeviceId: enqueueResult.deviceId,
-        status: 'SENT',
-        sentAt: enqueueResult.createdAt,
-        entityVersion: Number(
-          (measurement as MeasurementRecord & { version?: number }).version || 1
+  const measurementScope = readErpScope(normalizedMeasurement);
+
+  if (!measurementScope) {
+    throw new Error("MEASUREMENT_SCOPE_MISSING");
+  }
+
+  const sanitizedMeasurement =
+    deepSyncSanitize(
+      normalizedMeasurement,
+    ) as MeasurementRecord;
+
+  const payload = {
+    ...measurementScope,
+    id: normalizedMeasurement.id,
+    customerId: normalizedMeasurement.customerId,
+    roomId: normalizedMeasurement.roomId,
+    openingId: normalizedMeasurement.openingId,
+    windowId: normalizedMeasurement.windowId,
+    entity: 'measurement',
+    data: {
+      ...sanitizedMeasurement,
+      syncIntegrity:
+        buildMeasurementSyncIntegrity(
+          normalizedMeasurement,
         ),
-        createdAt: enqueueResult.createdAt,
-        updatedAt: enqueueResult.createdAt
-      };
+    },
+    timestamp: new Date().toISOString()
+  };
 
-      await saveTransferReceipt(receipt);
-    }
-  } catch (err) {
-    console.error('Local ölçü sync ile kaydedilirken hata:', err);
-    throw err;
+  const enqueueResult = await enqueueSyncEventDetailed(
+    'MEASUREMENT',
+    measurement.id,
+    operation,
+    payload,
+    expectedVersion,
+    'BLOCKED'
+  );
+
+  if (
+    !enqueueResult.success ||
+    !enqueueResult.changeId ||
+    !enqueueResult.deviceId ||
+    !enqueueResult.userId ||
+    !enqueueResult.createdAt
+  ) {
+    throw new Error("MEASUREMENT_SYNC_QUEUE_CREATE_FAILED");
   }
-}
 
-export async function deleteLocalMeasurement(id: string, username: string): Promise<void> {
   try {
-    const existing = await localMeasurementDb.measurements.get(id);
-    if (!existing) return;
+    await localMeasurementDb.measurements.put(normalizedMeasurement);
+  } catch (error: unknown) {
+    if (enqueueResult.createdNew) {
+      const discarded =
+        await discardBlockedSyncEvent(enqueueResult.changeId);
 
-    const deleted = {
-      ...existing,
-      isDeleted: true,
-      deletedAt: new Date().toISOString(),
-      deletedBy: username
-    };
+      if (!discarded) {
+        throw new Error("MEASUREMENT_SYNC_COMPENSATION_FAILED");
+      }
+    }
 
+    throw error;
+  }
+
+  if (enqueueResult.createdNew) {
+    const activated =
+      await activateBlockedSyncEvent(enqueueResult.changeId);
+
+    if (!activated) {
+      let rollbackSucceeded = false;
+
+      try {
+        if (existingMeasurement) {
+          await localMeasurementDb.measurements.put(existingMeasurement);
+        } else {
+          await localMeasurementDb.measurements.delete(measurement.id);
+        }
+
+        rollbackSucceeded = true;
+      } catch {
+        rollbackSucceeded = false;
+      }
+
+      if (!rollbackSucceeded) {
+        throw new Error("MEASUREMENT_SYNC_COMPENSATION_FAILED");
+      }
+
+      const discarded =
+        await discardBlockedSyncEvent(enqueueResult.changeId);
+
+      if (!discarded) {
+        throw new Error("MEASUREMENT_SYNC_COMPENSATION_FAILED");
+      }
+
+      throw new Error("MEASUREMENT_SYNC_QUEUE_ACTIVATION_FAILED");
+    }
+  }
+
+  const receipt: TransferReceipt = {
+    transferId: enqueueResult.changeId,
+    entityType: 'MEASUREMENT',
+    entityId: measurement.id,
+    senderUserId: enqueueResult.userId,
+    senderDeviceId: enqueueResult.deviceId,
+    status: 'SENT',
+    sentAt: enqueueResult.createdAt,
+    entityVersion: expectedVersion,
+    createdAt: enqueueResult.createdAt,
+    updatedAt: enqueueResult.createdAt
+  };
+
+  await saveTransferReceipt(receipt);
+}
+export async function deleteLocalMeasurement(
+  id: string,
+  username: string
+): Promise<void> {
+  const existing = await localMeasurementDb.measurements.get(id);
+  if (!existing) return;
+
+  const expectedVersion = Number(existing.version);
+
+  if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
+    throw new Error("MEASUREMENT_EXPECTED_VERSION_MISSING");
+  }
+
+  const deleted = {
+    ...existing,
+    isDeleted: true,
+    deletedAt: new Date().toISOString(),
+    deletedBy: username
+  };
+
+  const deletedScope = readErpScope(deleted);
+
+  if (!deletedScope) {
+    throw new Error("MEASUREMENT_SCOPE_MISSING");
+  }
+
+  const payload = {
+    ...deletedScope,
+    id,
+    customerId: deleted.customerId,
+    roomId: deleted.roomId,
+    openingId: deleted.openingId,
+    windowId: deleted.windowId,
+    entity: 'measurement',
+    isDeleted: true,
+    deletedAt: deleted.deletedAt,
+    timestamp: new Date().toISOString()
+  };
+
+  const enqueueResult = await enqueueSyncEventDetailed(
+    'MEASUREMENT',
+    deleted.id,
+    'SOFT_DELETE',
+    payload,
+    expectedVersion,
+    'BLOCKED'
+  );
+
+  if (!enqueueResult.success || !enqueueResult.changeId) {
+    throw new Error("MEASUREMENT_SYNC_QUEUE_CREATE_FAILED");
+  }
+
+  try {
     await localMeasurementDb.measurements.put(deleted);
+  } catch (error: unknown) {
+    if (enqueueResult.createdNew) {
+      const discarded =
+        await discardBlockedSyncEvent(enqueueResult.changeId);
 
-    const payload = {
-      id,
-      entity: 'measurement',
-      isDeleted: true,
-      deletedAt: deleted.deletedAt,
-      timestamp: new Date().toISOString()
-    };
+      if (!discarded) {
+        throw new Error("MEASUREMENT_SYNC_COMPENSATION_FAILED");
+      }
+    }
 
-    await enqueueSyncEvent('MEASUREMENT', deleted.id, 'UPDATE', payload);
-  } catch (err) {
-    console.error("Local ölçü silinirken hata:", err);
+    throw error;
+  }
+
+  if (enqueueResult.createdNew) {
+    const activated =
+      await activateBlockedSyncEvent(enqueueResult.changeId);
+
+    if (!activated) {
+      let rollbackSucceeded = false;
+
+      try {
+        await localMeasurementDb.measurements.put(existing);
+        rollbackSucceeded = true;
+      } catch {
+        rollbackSucceeded = false;
+      }
+
+      if (!rollbackSucceeded) {
+        throw new Error("MEASUREMENT_SYNC_COMPENSATION_FAILED");
+      }
+
+      const discarded =
+        await discardBlockedSyncEvent(enqueueResult.changeId);
+
+      if (!discarded) {
+        throw new Error("MEASUREMENT_SYNC_COMPENSATION_FAILED");
+      }
+
+      throw new Error("MEASUREMENT_SYNC_QUEUE_ACTIVATION_FAILED");
+    }
   }
 }
-
 export async function clearLocalMeasurements(): Promise<void> {
   try {
     await localMeasurementDb.measurements.clear();

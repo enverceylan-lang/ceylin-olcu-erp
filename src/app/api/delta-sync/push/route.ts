@@ -1,8 +1,10 @@
+import { erpScopeMatches, validateErpScope, type ErpScope } from '@/lib/erpScope';
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyAuth } from "@/lib/authHelper";
 import { loadShadowErpContext } from "@/lib/serverErpContext";
 import { readRequestedErpScopeId } from "@/lib/erpActiveScopeCookie";
+import { persistMeasurementAuthorityCommand } from "@/lib/serverMeasurementAuthority";
 
 const ALLOWED_PUSH_ROLES = new Set([
   "ADMIN",
@@ -186,10 +188,18 @@ export async function POST(req: NextRequest) {
     }
 
     const event = rawEvent as Record<string, unknown>;
+    const eventScopeCandidate = event.scope as Partial<ErpScope> | undefined;
+    const eventScopeValidation = validateErpScope(eventScopeCandidate ?? {});
+    if (!eventScopeValidation.valid) {
+      errors.push('Missing or invalid ERP scope on sync event');
+      continue;
+    }
+    const eventScope = eventScopeCandidate as ErpScope;
     const changeId = cleanString(event.changeId, MAX_CHANGE_ID_LENGTH);
     const entityId = cleanString(event.entityId, MAX_ID_LENGTH);
     const entityType = cleanString(event.entityType, 40).toUpperCase();
     const operation = cleanString(event.operation, 40).toUpperCase();
+    const expectedVersion = event.expectedVersion;
     const deviceId =
       cleanString(event.deviceId, MAX_DEVICE_ID_LENGTH) || "unknown";
 
@@ -216,6 +226,33 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
+    if (entityType === "MEASUREMENT") {
+      if (operation === "DELETE") {
+        rejectedIds.push(changeId);
+        errors.push(`Physical measurement delete is unsupported for event ${changeId}`);
+        continue;
+      }
+
+      if (
+        typeof expectedVersion !== "number" ||
+        !Number.isInteger(expectedVersion) ||
+        expectedVersion < 0
+      ) {
+        rejectedIds.push(changeId);
+        errors.push(`Missing or invalid expectedVersion for measurement event ${changeId}`);
+        continue;
+      }
+
+      if (
+        (operation === "INSERT" && expectedVersion !== 0) ||
+        (operation !== "INSERT" && expectedVersion < 1)
+      ) {
+        rejectedIds.push(changeId);
+        errors.push(`Invalid expectedVersion for measurement operation ${changeId}`);
+        continue;
+      }
+    }
+
     const payload = {
       change_id: changeId,
       operation,
@@ -223,6 +260,8 @@ export async function POST(req: NextRequest) {
       device_id: deviceId,
       user_id: user.id,
       created_at: normalizeCreatedAt(event.createdAt),
+      expected_version: expectedVersion,
+      _event_scope: eventScope,
     };
 
     if (entityType === "DRAFT") {
@@ -248,6 +287,12 @@ export async function POST(req: NextRequest) {
 
   const syncedIds: string[] = [];
   const errorIds: string[] = [...rejectedIds];
+  const measurementResults: Array<{
+    changeId: string;
+    entityId: string;
+    entityVersion: number;
+    outcome: string;
+  }> = [];
 
   try {
     const erpContext = await loadShadowErpContext(
@@ -275,6 +320,14 @@ export async function POST(req: NextRequest) {
         erpContext.scope.accountingPeriodId,
     };
 
+    for (const change of [...measurementChanges, ...draftChanges]) {
+      const eventScope = change._event_scope as ErpScope | undefined;
+      if (!eventScope || !erpScopeMatches(eventScope, erpContext.scope)) {
+        return NextResponse.json({ success: false, error: 'ERP_SCOPE_MISMATCH' }, { status: 409 });
+      }
+      delete change._event_scope;
+    }
+
     for (const change of measurementChanges) {
       Object.assign(change, scopeColumns);
     }
@@ -282,26 +335,63 @@ export async function POST(req: NextRequest) {
       Object.assign(change, scopeColumns);
     }
 
-    if (measurementChanges.length > 0) {
+    const canonicalMeasurementChanges = measurementChanges.filter(
+      (change) => String(change.entity_type || "").toUpperCase() === "MEASUREMENT",
+    );
+    const eventOnlyChanges = measurementChanges.filter(
+      (change) => String(change.entity_type || "").toUpperCase() !== "MEASUREMENT",
+    );
+
+    for (const change of canonicalMeasurementChanges) {
+      const changeId = String(change.change_id || "");
+      try {
+        const result = await persistMeasurementAuthorityCommand({
+          supabase: supabaseServer,
+          actorUserId: user.id,
+          scope: erpContext.scope,
+          change: {
+            change_id: change.change_id,
+            entity_id: change.entity_id,
+            operation: change.operation,
+            patch: change.patch,
+            device_id: change.device_id,
+            expected_version: change.expected_version,
+          },
+        });
+        measurementResults.push(result);
+        syncedIds.push(changeId);
+      } catch (error: unknown) {
+        console.error("[Delta Push] Canonical measurement commit failed.");
+        errorIds.push(changeId);
+
+        const publicError =
+          error instanceof Error &&
+          /^MEASUREMENT_[A-Z0-9_]+$/.test(error.message)
+            ? error.message
+            : `Failed to commit measurement ${changeId}`;
+
+        errors.push(publicError);      }
+    }
+
+    if (eventOnlyChanges.length > 0) {
       const { error } = await supabaseServer
         .from("measurement_changes")
-        .upsert(measurementChanges, {
+        .upsert(eventOnlyChanges, {
           onConflict: "change_id",
         });
 
       if (error) {
-        console.error("[Delta Push] Measurement write failed.");
-        errors.push("Failed to push measurement changes");
+        console.error("[Delta Push] Non-measurement event write failed.");
+        errors.push("Failed to push non-measurement changes");
         errorIds.push(
-          ...measurementChanges.map((change) => String(change.change_id)),
+          ...eventOnlyChanges.map((change) => String(change.change_id)),
         );
       } else {
         syncedIds.push(
-          ...measurementChanges.map((change) => String(change.change_id)),
+          ...eventOnlyChanges.map((change) => String(change.change_id)),
         );
       }
     }
-
     if (draftChanges.length > 0) {
       const { error } = await supabaseServer
         .from("draft_changes")
@@ -323,6 +413,7 @@ export async function POST(req: NextRequest) {
       syncedIds,
       errorIds: Array.from(new Set(errorIds)),
       errors,
+      measurementResults,
     });
   } catch {
     console.error("[Delta Push] Internal error.");

@@ -1,3 +1,5 @@
+import type { ErpScope } from './erpScope';
+import { readErpScope } from './customerTreeScope';
 import Dexie, { type Table } from 'dexie';
 import { getDeviceId } from './deviceIdentity';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -26,16 +28,19 @@ export interface SyncPatch {
   timestamp?: string;
   customerId?: string;
   roomId?: string;
+  openingId?: string;
   windowId?: string;
   syncIntent?: string;
   rooms?: SyncPatchRoom[];
 }
 
 export interface SyncEvent {
+  scope: ErpScope;
   changeId: string;
   entityType: 'CUSTOMER' | 'ROOM' | 'OPENING' | 'MEASUREMENT' | 'DRAFT';
   entityId: string;
   operation: 'INSERT' | 'UPDATE' | 'SOFT_DELETE';
+  expectedVersion?: number;
   patch: SyncPatch;
   deviceId: string;
   userId: string;
@@ -131,13 +136,16 @@ export interface EnqueueSyncResult {
   deviceId?: string;
   userId?: string;
   createdAt?: string;
+  createdNew?: boolean;
 }
 
 export async function enqueueSyncEventDetailed(
   entityType: SyncEvent['entityType'],
   entityId: string,
   operation: SyncEvent['operation'],
-  patch: SyncPatch
+  patch: SyncPatch,
+  expectedVersion?: number,
+  initialSyncStatus: SyncEvent['syncStatus'] = 'PENDING'
 ): Promise<EnqueueSyncResult> {
   try {
     if (
@@ -157,9 +165,20 @@ export async function enqueueSyncEventDetailed(
         return { success: false };
       }
     }
+
     const now = new Date().toISOString();
     const deviceId = getDeviceId();
     const sanitizedPatch = sanitizePatch(patch);
+    const eventScope = readErpScope(sanitizedPatch);
+
+    if (!eventScope) {
+      console.warn(
+        '[SyncQueue] ERP scope missing; event kept local-only.',
+        entityType,
+        entityId
+      );
+      return { success: false };
+    }
 
     const comparableSignature =
       getComparablePatchSignature(sanitizedPatch);
@@ -170,6 +189,7 @@ export async function enqueueSyncEventDetailed(
       .filter((event) =>
         event.entityType === entityType &&
         event.operation === operation &&
+        event.expectedVersion === expectedVersion &&
         event.deviceId === deviceId
       )
       .toArray();
@@ -184,6 +204,24 @@ export async function enqueueSyncEventDetailed(
       latestEvent &&
       getComparablePatchSignature(latestEvent.patch) === comparableSignature
     ) {
+      if (initialSyncStatus === 'BLOCKED') {
+        if (
+          latestEvent.syncStatus === 'BLOCKED' ||
+          latestEvent.syncStatus === 'SYNCED'
+        ) {
+          return { success: false };
+        }
+
+        return {
+          success: true,
+          changeId: latestEvent.changeId,
+          deviceId: latestEvent.deviceId,
+          userId: latestEvent.userId,
+          createdAt: latestEvent.createdAt,
+          createdNew: false
+        };
+      }
+
       if (latestEvent.syncStatus === 'ERROR') {
         await localSyncQueueDb.pendingSyncEvents.update(
           latestEvent.changeId,
@@ -199,7 +237,8 @@ export async function enqueueSyncEventDetailed(
         changeId: latestEvent.changeId,
         deviceId: latestEvent.deviceId,
         userId: latestEvent.userId,
-        createdAt: latestEvent.createdAt
+        createdAt: latestEvent.createdAt,
+        createdNew: false
       };
     }
 
@@ -207,6 +246,7 @@ export async function enqueueSyncEventDetailed(
       typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
         : `chg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
     const currentUser = useAuthStore.getState().currentUser;
     const userId = currentUser?.id || 'unknown';
 
@@ -215,12 +255,14 @@ export async function enqueueSyncEventDetailed(
       entityType,
       entityId,
       operation,
+      expectedVersion,
       patch: sanitizedPatch,
+      scope: eventScope,
       deviceId,
       userId,
       createdAt: now,
       updatedAt: now,
-      syncStatus: 'PENDING',
+      syncStatus: initialSyncStatus,
       retryCount: 0
     };
 
@@ -237,7 +279,8 @@ export async function enqueueSyncEventDetailed(
       changeId,
       deviceId,
       userId,
-      createdAt: now
+      createdAt: now,
+      createdNew: true
     };
   } catch (err: unknown) {
     if (typeof window !== 'undefined') {
@@ -252,37 +295,114 @@ export async function enqueueSyncEventDetailed(
   }
 }
 
+export async function activateBlockedSyncEvent(
+  changeId: string
+): Promise<boolean> {
+  try {
+    const event = await localSyncQueueDb.pendingSyncEvents.get(changeId);
+
+    if (!event) return false;
+    if (event.syncStatus === 'PENDING') return true;
+    if (event.syncStatus !== 'BLOCKED') return false;
+
+    const updated = await localSyncQueueDb.pendingSyncEvents.update(
+      changeId,
+      {
+        syncStatus: 'PENDING',
+        updatedAt: new Date().toISOString()
+      }
+    );
+
+    return updated === 1;
+  } catch (error: unknown) {
+    console.error('[SyncQueue] Blocked event activation failed.', error);
+    return false;
+  }
+}
+
+export async function discardBlockedSyncEvent(
+  changeId: string
+): Promise<boolean> {
+  try {
+    const event = await localSyncQueueDb.pendingSyncEvents.get(changeId);
+
+    if (!event) return true;
+    if (event.syncStatus !== 'BLOCKED') return false;
+
+    await localSyncQueueDb.pendingSyncEvents.delete(changeId);
+    return true;
+  } catch (error: unknown) {
+    console.error('[SyncQueue] Blocked event discard failed.', error);
+    return false;
+  }
+}
 export async function enqueueSyncEvent(
   entityType: SyncEvent['entityType'],
   entityId: string,
   operation: SyncEvent['operation'],
-  patch: SyncPatch
+  patch: SyncPatch,
+  expectedVersion?: number
 ): Promise<boolean> {
   const result = await enqueueSyncEventDetailed(
     entityType,
     entityId,
     operation,
-    patch
+    patch,
+    expectedVersion
   );
 
   return result.success;
 }
-
 export async function getPendingSyncEvents(limit: number = 50): Promise<SyncEvent[]> {
   try {
     const retryableEvents = await localSyncQueueDb.pendingSyncEvents
       .where('syncStatus')
       .anyOf(['PENDING', 'ERROR'])
       .sortBy('createdAt');
+    const legacyMeasurementEventIds = retryableEvents
+      .filter((event) => {
+        if (event.entityType !== 'MEASUREMENT') return false;
+
+        const expectedVersion = event.expectedVersion;
+        const hasValidIntegerVersion =
+          typeof expectedVersion === 'number' &&
+          Number.isInteger(expectedVersion) &&
+          expectedVersion >= 0;
+
+        if (!hasValidIntegerVersion) return true;
+        if (event.operation === 'INSERT') return expectedVersion !== 0;
+
+        return expectedVersion < 1;
+      })
+      .map((event) => event.changeId);
+
+    if (legacyMeasurementEventIds.length > 0) {
+      const blockedAt = new Date().toISOString();
+
+      await localSyncQueueDb.pendingSyncEvents.bulkUpdate(
+        legacyMeasurementEventIds.map((changeId) => ({
+          key: changeId,
+          changes: {
+            syncStatus: 'BLOCKED',
+            updatedAt: blockedAt
+          }
+        }))
+      );
+    }
+
+    const eligibleRetryableEvents = retryableEvents.filter(
+      (event) => !legacyMeasurementEventIds.includes(event.changeId)
+    );
 
     const latestBySignature = new Map<string, SyncEvent>();
     const duplicateChangeIds: string[] = [];
 
-    for (const event of retryableEvents) {
+    for (const event of eligibleRetryableEvents) {
       const duplicateKey = [
         event.entityType,
         event.entityId,
         event.operation,
+        String(event.expectedVersion ?? ""),
         event.deviceId,
         getComparablePatchSignature(event.patch)
       ].join('|');
@@ -352,6 +472,15 @@ export async function getPendingSyncEvents(limit: number = 50): Promise<SyncEven
           );
           continue;
         }
+      }
+
+      const queuedScope = readErpScope(event.scope);
+      if (!queuedScope) {
+        await localSyncQueueDb.pendingSyncEvents.update(event.changeId, {
+          syncStatus: 'BLOCKED',
+          updatedAt: new Date().toISOString(),
+        });
+        continue;
       }
 
       sendableEvents.push(event);
