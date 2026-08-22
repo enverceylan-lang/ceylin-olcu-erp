@@ -1,180 +1,159 @@
 "use client";
 
-import {
-  useEffect,
-  useState
-} from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
-  selectFinanceReadModel
-} from "@/lib/finance/financeReadSelector";
-
+  readCustomerReceivableSnapshot,
+} from "@/lib/finance/customerReceivableReadClient";
+import type {
+  CustomerReceivableSnapshot,
+} from "@/lib/finance/customerReceivableReadContracts";
 import {
-  useFinanceRuntimeContext
+  useFinanceRuntimeContext,
 } from "@/lib/finance/useFinanceRuntimeContext";
 
-import {
-  calculateCustomerFinanceDashboard,
-  type CustomerFinanceDashboard
-} from "@/lib/finance/customerFinanceDashboardService";
-
-import {
-  listLocalFinanceTransactions
-} from "@/lib/localFinanceDb";
-
-import type {
-  FinanceTransaction
-} from "@/lib/finance/financeContracts";
-
-import {
-  useSalesStore
-} from "@/store/salesStore";
-
-import {
-  FinanceAccessState
-} from "./FinanceAccessState";
-
-import {
-  FinanceIssueList
-} from "./FinanceIssueList";
-
-import {
-  FinanceTransactionTable
-} from "./FinanceTransactionTable";
+import { FinanceAccessState } from "./FinanceAccessState";
 
 interface CustomerFinancePanelProps {
   customerId: string;
   currency?: string;
 }
 
-function formatMoney(
-  value: number,
-  currency: string
-): string {
-  return new Intl.NumberFormat(
-    "tr-TR",
-    {
-      style: "currency",
-      currency
-    }
-  ).format(value);
+interface StatementLine {
+  id: string;
+  occurredAt: string;
+  documentNumber: string;
+  description: string;
+  debitAmount: number;
+  creditAmount: number;
+  runningBalance: number;
 }
 
-function riskLabel(
-  dashboard:
-    CustomerFinanceDashboard
-): string {
-  if (
-    dashboard.riskLevel ===
-    "RISKLI"
-  ) {
-    return "Gecikmiş borç var";
+function formatMoney(value: number, currency: string): string {
+  return new Intl.NumberFormat("tr-TR", {
+    style: "currency",
+    currency,
+  }).format(value);
+}
+
+function formatDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("tr-TR").format(date);
+}
+
+function buildStatement(snapshot: CustomerReceivableSnapshot): StatementLine[] {
+  const metadata = new Map(
+    snapshot.transactionMetadata.map((row) => [row.transactionId, row] as const),
+  );
+
+  const events: Array<Omit<StatementLine, "runningBalance">> = [];
+
+  for (const item of snapshot.openItems) {
+    if (item.status === "REVERSED") continue;
+    events.push({
+      id: `SALE:${item.id}`,
+      occurredAt: item.createdAt,
+      documentNumber: item.documentNumber,
+      description:
+        item.installmentId === null
+          ? `Satış borcu: ${item.documentNumber}`
+          : `Taksit borcu: ${item.documentNumber} / ${item.sequenceNo}`,
+      debitAmount: item.originalAmount,
+      creditAmount: 0,
+    });
   }
 
-  if (
-    dashboard.riskLevel ===
-    "IZLE"
-  ) {
-    return "Bugün vadeli borç var";
+  for (const allocation of snapshot.allocations) {
+    if (allocation.reversedAt !== null) continue;
+    const tx = metadata.get(allocation.transactionId);
+    events.push({
+      id: `COLLECTION:${allocation.id}`,
+      occurredAt: tx?.createdAt || allocation.createdAt,
+      documentNumber: allocation.saleId,
+      description: tx?.description || "Tahsilat",
+      debitAmount: 0,
+      creditAmount: allocation.amount,
+    });
   }
 
-  return "Vade riski yok";
+  events.sort(
+    (left, right) =>
+      left.occurredAt.localeCompare(right.occurredAt) ||
+      left.id.localeCompare(right.id),
+  );
+
+  let runningBalance = 0;
+  return events.map((event) => {
+    runningBalance =
+      Math.round(
+        (runningBalance + event.debitAmount - event.creditAmount) * 100,
+      ) / 100;
+    return {
+      ...event,
+      runningBalance,
+    };
+  });
 }
 
 export function CustomerFinancePanel({
   customerId,
-  currency = "TRY"
+  currency = "TRY",
 }: CustomerFinancePanelProps) {
-  const runtime =
-    useFinanceRuntimeContext();
+  const runtime = useFinanceRuntimeContext();
+  const requestKey = `${customerId.trim()}|${currency.trim().toUpperCase()}`;
+  const [readState, setReadState] = useState<{
+    key: string;
+    snapshot: CustomerReceivableSnapshot | null;
+    error: string | null;
+  } | null>(null);
 
-  const sales =
-    useSalesStore(
-      state => state.sales
-    );
-
-  const loadSales =
-    useSalesStore(
-      state => state.loadSales
-    );
-
-  const isLoading =
-    useSalesStore(
-      state => state.isLoading
-    );
-
-  const [projectionAt] =
-    useState(
-      () =>
-        new Date().toISOString()
-    );
-
-  const [transactions, setTransactions] =
-    useState<FinanceTransaction[]>([]);
-
-  const [transactionsLoading, setTransactionsLoading] =
-    useState(true);
-
-  const [transactionsError, setTransactionsError] =
-    useState<string | null>(null);
+  const snapshot =
+    readState?.key === requestKey ? readState.snapshot : null;
+  const error =
+    readState?.key === requestKey ? readState.error : null;
+  const loading =
+    runtime.state === "ready" && readState?.key !== requestKey;
 
   useEffect(() => {
     if (runtime.state !== "ready") {
       return;
     }
 
-    void loadSales(runtime.scope);
-  }, [loadSales, runtime]);
+    const controller = new AbortController();
 
-  useEffect(() => {
-    if (runtime.state !== "ready") {
-      return;
-    }
-
-    let cancelled = false;
-
-    listLocalFinanceTransactions(
-      runtime.scope,
-      customerId
-    )
-      .then(records => {
-        if (cancelled) {
-          return;
-        }
-
-        setTransactions(records);
-        setTransactionsError(null);
+    readCustomerReceivableSnapshot(customerId, currency, {
+      signal: controller.signal,
+    })
+      .then((next) => {
+        if (controller.signal.aborted) return;
+        setReadState({
+          key: requestKey,
+          snapshot: next,
+          error: null,
+        });
       })
-      .catch(error => {
-        if (cancelled) {
-          return;
-        }
-
-        setTransactionsError(
-          error instanceof Error
-            ? error.message
-            : "Cari finans hareketleri okunamadı."
-        );
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setTransactionsLoading(false);
-        }
+      .catch((cause: unknown) => {
+        if (controller.signal.aborted) return;
+        setReadState({
+          key: requestKey,
+          snapshot: null,
+          error:
+            cause instanceof Error
+              ? cause.message
+              : "FINANCE_CUSTOMER_RECEIVABLE_READ_FAILED",
+        });
       });
 
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    runtime,
-    customerId
-  ]);
+    return () => controller.abort();
+  }, [customerId, currency, requestKey, runtime]);
 
-  if (
-    runtime.state === "loading" ||
-    isLoading ||
-    transactionsLoading
-  ) {
+  const statement = useMemo(
+    () => (snapshot ? buildStatement(snapshot) : []),
+    [snapshot],
+  );
+
+  if (runtime.state === "loading" || loading) {
     return (
       <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400">
         Cari finans verileri doğrulanıyor…
@@ -183,254 +162,174 @@ export function CustomerFinancePanel({
   }
 
   if (runtime.state !== "ready") {
-    return (
-      <FinanceAccessState
-        reason={runtime.reason}
-      />
-    );
+    return <FinanceAccessState reason={runtime.reason} />;
   }
 
-  const legacyResult =
-    selectFinanceReadModel({
-      scope: runtime.scope,
-      packageType:
-        runtime.packageType,
-      permissions:
-        runtime.permissions,
-      requestedCapability: "CUSTOMER_FINANCE",
-      sales,
-      customerId,
-      projectionAt,
-      currency
-    });
-
-  if (
-    !legacyResult
-      .accessDecision.allowed
-  ) {
-    return (
-      <FinanceAccessState
-        reason={
-          legacyResult
-            .accessDecision
-            .reasonCode
-        }
-      />
-    );
+  if (error) {
+    return <FinanceAccessState reason={error} />;
   }
 
-  if (transactionsError) {
+  if (!snapshot) {
     return (
-      <FinanceAccessState
-        reason={
-          transactionsError
-        }
-        title="Cari finans kayıtları okunamadı"
-      />
+      <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400">
+        Merkezi Cari Finans verisi alınamadı.
+      </div>
     );
   }
-
-  const dashboardResult =
-    calculateCustomerFinanceDashboard(
-      transactions,
-      runtime.scope,
-      customerId,
-      currency,
-      projectionAt.slice(0, 10)
-    );
-
-  if (
-    dashboardResult.outcome ===
-    "REJECTED"
-  ) {
-    return (
-      <FinanceAccessState
-        reason={
-          dashboardResult.reason
-        }
-        title="Cari Finans V1 hesaplanamadı"
-      />
-    );
-  }
-
-  const dashboard =
-    dashboardResult.dashboard;
 
   const cards = [
-    {
-      label: "Cari Bakiye",
-      value:
-        formatMoney(
-          dashboard.summary.balance,
-          currency
-        )
-    },
-    {
-      label: "Toplam Borç",
-      value:
-        formatMoney(
-          dashboard.summary.debitTotal,
-          currency
-        )
-    },
-    {
-      label: "Toplam Alacak",
-      value:
-        formatMoney(
-          dashboard.summary.creditTotal,
-          currency
-        )
-    },
-    {
-      label: "Gecikmiş",
-      value:
-        formatMoney(
-          dashboard.due.overdueAmount,
-          currency
-        )
-    },
-    {
-      label: "Bugün Vadeli",
-      value:
-        formatMoney(
-          dashboard.due.dueTodayAmount,
-          currency
-        )
-    },
-    {
-      label: "Gelecek Vadeli",
-      value:
-        formatMoney(
-          dashboard.due.futureAmount,
-          currency
-        )
-    }
-  ];
+    ["Cari Bakiye", snapshot.summary.currentBalance],
+    ["Toplam Borç", snapshot.summary.originalDebtTotal],
+    ["Toplam Alacak", snapshot.summary.allocatedCollectionTotal],
+    ["Gecikmiş", snapshot.due.overdueAmount],
+    ["Bugün Vadeli", snapshot.due.dueTodayAmount],
+    ["Gelecek Vadeli", snapshot.due.futureAmount],
+  ] as const;
+
+  const activeOpenItems = snapshot.openItems.filter(
+    (item) =>
+      (item.status === "OPEN" || item.status === "PARTIAL") &&
+      item.remainingAmount > 0,
+  );
 
   return (
     <div className="space-y-5">
       <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-lg font-bold text-gray-950 dark:text-white">
-              Cari Finans V1
-            </h2>
-
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Bakiye, ekstre ve vade bilgileri merkezi finans hareketlerinden türetilir.
-            </p>
-          </div>
-
-          <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-bold text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
-            {riskLabel(dashboard)}
-          </span>
-        </div>
-
-        <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {cards.map(card => (
-            <article
-              key={card.label}
-              className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-950/40"
-            >
-              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                {card.label}
-              </p>
-
-              <p className="mt-2 text-xl font-bold text-gray-950 dark:text-white">
-                {card.value}
-              </p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <FinanceIssueList
-        issues={legacyResult.issues}
-      />
-
-      <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <div className="border-b border-gray-200 p-5 dark:border-gray-800">
+        <div className="mb-4">
           <h3 className="font-semibold text-gray-950 dark:text-white">
-            Cari Ekstresi
+            Cari Finans
           </h3>
-
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            Açılış: {formatMoney(
-              dashboard.statement.openingBalance,
-              currency
-            )} · Kapanış: {formatMoney(
-              dashboard.statement.closingBalance,
-              currency
-            )}
+            Finans merkezindeki merkezi kayıtlardan okunur. Cari ekran ayrı finans
+            kaydı tutmaz.
           </p>
         </div>
 
-        <FinanceTransactionTable
-          transactions={transactions}
-          currency={currency}
-          emptyMessage="Bu cariye ait merkezi finans hareketi bulunamadı."
-        />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {cards.map(([label, value]) => (
+            <div
+              key={label}
+              className="rounded-lg border border-gray-200 px-4 py-3 dark:border-gray-800"
+            >
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                {label}
+              </div>
+              <div className="mt-1 text-lg font-bold text-gray-950 dark:text-white">
+                {formatMoney(value, currency)}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {snapshot.summary.reservedTotal > 0 ? (
+          <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">
+            Ayrılmış / rezerv tutar:{" "}
+            {formatMoney(snapshot.summary.reservedTotal, currency)}
+          </p>
+        ) : null}
       </section>
 
       <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <div className="border-b border-gray-200 p-5 dark:border-gray-800">
           <h3 className="font-semibold text-gray-950 dark:text-white">
-            Açık Vade Dağılımı
+            Cari Ekstre
+          </h3>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            Açılış: {formatMoney(0, currency)} · Kapanış:{" "}
+            {formatMoney(snapshot.summary.currentBalance, currency)}
+          </p>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left text-sm">
+            <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:bg-gray-800/50 dark:text-gray-400">
+              <tr>
+                <th className="px-4 py-3">Tarih</th>
+                <th className="px-4 py-3">Belge</th>
+                <th className="px-4 py-3">Açıklama</th>
+                <th className="px-4 py-3 text-right">Borç</th>
+                <th className="px-4 py-3 text-right">Alacak</th>
+                <th className="px-4 py-3 text-right">Bakiye</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+              {statement.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="px-4 py-8 text-center text-gray-500 dark:text-gray-400"
+                  >
+                    Bu cariye ait merkezi finans hareketi bulunamadı.
+                  </td>
+                </tr>
+              ) : (
+                statement.map((line) => (
+                  <tr key={line.id}>
+                    <td className="px-4 py-3">{formatDate(line.occurredAt)}</td>
+                    <td className="px-4 py-3">{line.documentNumber}</td>
+                    <td className="px-4 py-3">{line.description}</td>
+                    <td className="px-4 py-3 text-right">
+                      {line.debitAmount > 0
+                        ? formatMoney(line.debitAmount, currency)
+                        : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {line.creditAmount > 0
+                        ? formatMoney(line.creditAmount, currency)
+                        : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold">
+                      {formatMoney(line.runningBalance, currency)}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <div className="border-b border-gray-200 p-5 dark:border-gray-800">
+          <h3 className="font-semibold text-gray-950 dark:text-white">
+            Açık Vadeli Borçlar
           </h3>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-sm">
-            <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-gray-950/50 dark:text-gray-400">
+          <table className="w-full min-w-[700px] text-left text-sm">
+            <thead className="border-b border-gray-200 bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:bg-gray-800/50 dark:text-gray-400">
               <tr>
-                <th className="p-4">
-                  Satış
-                </th>
-                <th className="p-4">
-                  Vade
-                </th>
-                <th className="p-4">
-                  Durum
-                </th>
-                <th className="p-4 text-right">
-                  Açık Tutar
-                </th>
+                <th className="p-4">Belge</th>
+                <th className="p-4">Vade</th>
+                <th className="p-4 text-right">İlk Borç</th>
+                <th className="p-4 text-right">Tahsil Edilen</th>
+                <th className="p-4 text-right">Kalan</th>
               </tr>
             </thead>
-
-            <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-              {dashboard.due.lines.length === 0 ? (
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+              {activeOpenItems.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={4}
-                    className="p-6 text-center text-gray-500 dark:text-gray-400"
+                    colSpan={5}
+                    className="p-8 text-center text-gray-500 dark:text-gray-400"
                   >
                     Açık vadeli borç bulunmuyor.
                   </td>
                 </tr>
               ) : (
-                dashboard.due.lines.map(line => (
-                  <tr
-                    key={line.transactionId}
-                    className="hover:bg-gray-50/70 dark:hover:bg-gray-800/30"
-                  >
-                    <td className="p-4 font-medium text-gray-900 dark:text-white">
-                      {line.saleId || "—"}
+                activeOpenItems.map((item) => (
+                  <tr key={item.id}>
+                    <td className="p-4">{item.documentNumber}</td>
+                    <td className="p-4">{formatDate(item.dueDate)}</td>
+                    <td className="p-4 text-right">
+                      {formatMoney(item.originalAmount, currency)}
                     </td>
-
-                    <td className="p-4 text-gray-600 dark:text-gray-300">
-                      {line.dueDate || "Vadesiz"}
+                    <td className="p-4 text-right">
+                      {formatMoney(item.allocatedAmount, currency)}
                     </td>
-
-                    <td className="p-4 text-gray-600 dark:text-gray-300">
-                      {line.bucket}
-                    </td>
-
                     <td className="p-4 text-right font-bold text-gray-900 dark:text-white">
-                      {formatMoney(
-                        line.remainingAmount,
-                        currency
-                      )}
+                      {formatMoney(item.remainingAmount, currency)}
                     </td>
                   </tr>
                 ))
