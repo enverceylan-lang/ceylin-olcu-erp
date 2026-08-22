@@ -83,7 +83,11 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const searchParams = useSearchParams();
   const [salePreparationBridgeHandled, setSalePreparationBridgeHandled] =
     useState(false);
-  const { scope } = useErpRuntimeContext();
+  const {
+    scope,
+    loading: scopeLoading,
+    error: scopeError
+  } = useErpRuntimeContext();
 
   const normRole = user ? normalizeRole(user.role) : 'FIELD';
   const cariType = customer?.cariType || 'CUSTOMER';
@@ -1219,6 +1223,22 @@ showToast("Saha taslağı telefona kaydedildi.");
 
     }
 
+    if (scopeLoading) {
+      showToast(
+        "Şirket, şube ve muhasebe dönemi kapsamı yükleniyor. Lütfen tekrar deneyin."
+      );
+      return;
+    }
+
+    if (scopeError || !scope) {
+      showToast(
+        scopeError
+          ? `ERP kapsamı yüklenemedi: ${scopeError}`
+          : "Aktif şirket, şube ve muhasebe dönemi kapsamı bulunamadı."
+      );
+      return;
+    }
+
 
     try {
       setIsSaving(true);
@@ -1691,7 +1711,12 @@ showToast("Saha taslağı telefona kaydedildi.");
           {canTransferToSale && (
             <button
               onClick={handleTransferToSales}
-              disabled={isSaving}
+              disabled={
+                isSaving ||
+                scopeLoading ||
+                Boolean(scopeError) ||
+                !scope
+              }
               className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#ce805d] bg-[#ad5f3d] px-3 py-2 text-center text-sm font-bold leading-tight text-white shadow-sm transition-colors hover:bg-[#bf704c] disabled:cursor-wait disabled:opacity-50"
               title="Ölçüleri yeni satış/teklif taslağına kopyala"
             >
@@ -3309,6 +3334,28 @@ showToast("Saha taslağı telefona kaydedildi.");
 
               const returnSaleId =
                 searchParams.get("returnSaleId")?.trim();
+
+              const requiresSaleBridge =
+                Boolean(returnSaleId) ||
+                transferToSale;
+
+              if (
+                requiresSaleBridge &&
+                (
+                  scopeLoading ||
+                  scopeError ||
+                  !scope
+                )
+              ) {
+                showToast(
+                  scopeLoading
+                    ? "Şirket, şube ve muhasebe dönemi kapsamı yükleniyor. Satış aktarımı henüz başlatılmadı."
+                    : scopeError
+                      ? `ERP kapsamı yüklenemedi: ${scopeError}`
+                      : "Aktif şirket, şube ve muhasebe dönemi kapsamı bulunamadı."
+                );
+                return;
+              }
 
               if (returnSaleId) {
                 try {
