@@ -16,9 +16,9 @@ interface StockItemPickerProps {
   products: Product[];
   value?: string;
   disabled?: boolean;
-  onSelect(
-    product: Product,
-  ): void;
+  filterProduct?: (product: Product) => boolean;
+  restrictionMessage?: string;
+  onSelect(product: Product): void;
 }
 
 function searchText(
@@ -40,6 +40,8 @@ export function StockItemPicker({
   products,
   value,
   disabled = false,
+  filterProduct,
+  restrictionMessage = "Bu stok bu işlem için seçilemez.",
   onSelect,
 }: StockItemPickerProps) {
   const [query, setQuery] =
@@ -51,21 +53,24 @@ export function StockItemPicker({
       null,
     );
 
+  const allPhysicalProducts = useMemo(
+    () =>
+      products.filter(
+        product => product.productKind !== "SERVICE",
+      ),
+    [products],
+  );
+
   const stockProducts = useMemo(
     () =>
-      products
-        .filter(
-          product =>
-            product.productKind !==
-            "SERVICE",
+      allPhysicalProducts
+        .filter(product =>
+          filterProduct ? filterProduct(product) : true,
         )
         .sort((left, right) =>
-          left.name.localeCompare(
-            right.name,
-            "tr",
-          ),
+          left.name.localeCompare(right.name, "tr"),
         ),
-    [products],
+    [allPhysicalProducts, filterProduct],
   );
 
   const selected =
@@ -132,8 +137,17 @@ export function StockItemPicker({
     if (
       barcodeMatches.length === 0
     ) {
+      const excludedBarcodeMatch =
+        allPhysicalProducts.find(
+          product =>
+            product.barcode1?.trim() === normalized ||
+            product.barcode2?.trim() === normalized,
+        );
+
       setMessage(
-        `Barkodla eşleşen stok bulunamadı: ${normalized}`,
+        excludedBarcodeMatch
+          ? restrictionMessage
+          : `Barkodla eşleşen stok bulunamadı: ${normalized}`,
       );
       setOpen(true);
       return;

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   CheckCircle2,
@@ -45,6 +45,9 @@ import {
   executeSaleApprovalOperations
 } from "@/lib/saleApprovalOperationsCoordinator";
 
+import {
+  persistApprovedSaleLineSourceClientV1
+} from "@/lib/saleLineSourceProducerClient";
 export default function SatisPage() {
   const { customers } = useStore();
 
@@ -226,6 +229,16 @@ export default function SatisPage() {
         await executeSalesFinanceOutboxRecord(
           financeOutboxRecord
         );
+      const saleLineSourceResult =
+        await persistApprovedSaleLineSourceClientV1({
+          sale:
+            approvedSale,
+          scope,
+          currency:
+            "TRY"
+        });
+
+      void saleLineSourceResult;
 
       await loadSales(scope);
 
@@ -500,7 +513,7 @@ export default function SatisPage() {
                               <CheckCircle2 className="h-4 w-4" />
                               {isApproving
                                 ? "Onaylanıyor..."
-                                : "Onayla"}
+                                : "Satışı Onayla"}
                             </button>
                           )}
 
@@ -525,3 +538,4 @@ export default function SatisPage() {
     </div>
   );
 }
+

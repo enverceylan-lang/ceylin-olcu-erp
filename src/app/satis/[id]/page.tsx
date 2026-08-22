@@ -1,19 +1,22 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useEffect } from "react";
 import { ArrowLeft, Save, Trash2 } from "lucide-react";
 import { FileDown } from "lucide-react";
 import { MessageCircle } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useStore } from "@/store/useStore";
 import { StockItemPicker } from "@/components/stock/StockItemPicker";
+import {
+  isExternalSaleStockAllowed,
+  isStockAllowedForMeasuredSaleItem,
+} from "@/lib/saleStockSelectionPolicy";
 import { useSalesStore, Sale, SaleStatus, SaleItem, PaymentMethod } from "@/store/salesStore";
 import InstallmentPlanPanel from "@/components/sales/InstallmentPlanPanel";
 import PaymentTrackingPanel from "@/components/sales/PaymentTrackingPanel";
 import SaleReturnPanel from "@/components/sales/SaleReturnPanel";
-import { generateSalesPdfFile, openSalesPdfPreview } from "@/lib/salesPdfGenerator";
-import { prepareSaleForApproval } from "@/lib/salesApproval";
+import { downloadSalesPdfFile, generateSalesPdfFile, openSalesPdfPreview } from "@/lib/salesPdfGenerator";
 import { fetchActiveCompanyDisplayName } from "@/lib/activeCompanyDisplayNameClient";
 import { getSaleRemainingBalance } from "@/lib/salesFinance";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -41,11 +44,19 @@ import {
 import {
   executeSaleApprovalOperations
 } from "@/lib/saleApprovalOperationsCoordinator";
+import {
+  persistApprovedSaleLineSourceClientV1
+} from "@/lib/saleLineSourceProducerClient";
 export default function SaleDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const unwrappedParams = React.use(params);
   const id = unwrappedParams.id;
 
   const router = useRouter();
+
+  const [showExternalStockPicker, setShowExternalStockPicker] =
+
+    useState(false);
+  const searchParams = useSearchParams();
   const { customers, products } = useStore();
   const {
     sales,
@@ -86,6 +97,13 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
     isPaymentModalOpen,
     setIsPaymentModalOpen
   ] = useState(false);
+  useEffect(() => {
+    if (
+      searchParams.get("openInstallment") === "1"
+    ) {
+      setIsInstallmentModalOpen(true);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (!scope) {
@@ -221,7 +239,69 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
         )
       )
     );
+  const handleOpenPreparation = () => {
+    if (!customer || currentSaleMeasurementIds.length === 0) {
+      alert("Bu satışta Satışa Hazırlık ile bağlı ölçü bulunamadı.");
+      return;
+    }
 
+    if (sale.status !== "TASLAK" && sale.status !== "TEKLİF") {
+      alert("Onaylanan satışın Satışa Hazırlık kaynağı sessizce değiştirilemez.");
+      return;
+    }
+
+    router.push(
+      `/cariler/${customer.id}?openPreparation=1&returnSaleId=${encodeURIComponent(sale.id)}&measurementIds=${encodeURIComponent(currentSaleMeasurementIds.join(","))}`
+    );
+  };
+
+  const handleAddExternalStock = (
+    product: import("@/store/useStore").Product,
+  ) => {
+    if (!isExternalSaleStockAllowed(product)) {
+      alert("Bu ürün ölçü gerektiriyor. Satışa Hazırlık üzerinden ekleyin.");
+      return;
+    }
+
+    const unitPrice =
+      product.salePrice1 ??
+      product.cashPrice ??
+      0;
+
+    const externalItem: SaleItem = {
+      id: crypto.randomUUID(),
+      measurementId: undefined,
+      roomName: "Harici Ürün",
+      windowName: "Hazır / Adet Ürün",
+      productType: product.name,
+      productGroup: product.category || "Harici Ürün",
+      stockItemId: product.id,
+      width: 0,
+      height: 0,
+      calcWidth: 0,
+      calcHeight: 0,
+      quantity: 1,
+      metricSize: 1,
+      metricUnit: "adet",
+      unitPrice,
+      discount: 0,
+      rowTotal: unitPrice,
+    };
+
+    const items = [...sale.items, externalItem];
+
+    setSale({
+      ...sale,
+      items,
+      totalAmount: items.reduce(
+        (sum, item) => sum + Number(item.rowTotal || 0),
+        0,
+      ),
+      updatedAt: new Date().toISOString(),
+    });
+
+    setShowExternalStockPicker(false);
+  };
   const handleApplyMeasurements =
     async (
       measurementIds: string[]
@@ -322,7 +402,9 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
           new Date().toISOString()
       });
     };
-  const handleSave = async () => {
+  const persistSale = async (
+    saleToPersist: Sale
+  ) => {
     if (
       Number(downPayment || 0) > 0 &&
       !downPaymentMethod
@@ -347,7 +429,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
 
     try {
       const updatedSale: Sale = {
-        ...sale,
+        ...saleToPersist,
         cashPrice,
         installmentPrice,
         downPayment,
@@ -566,6 +648,24 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
           await executeSalesFinanceOutboxRecord(
             financeOutboxRecord
           );
+      const saleLineSourceResult =
+        updatedSale.status ===
+          "ONAYLANDI" &&
+        persistedSaleForSave.status !==
+          "ONAYLANDI"
+          ? await persistApprovedSaleLineSourceClientV1({
+              sale:
+                updatedSale,
+              scope,
+              currency:
+                "TRY"
+            })
+          : {
+              outcome:
+                "DISABLED" as const
+            };
+
+      void saleLineSourceResult;
 
         if (
           financeResult.outcome ===
@@ -622,36 +722,186 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
       );
     }
   };
-  const handleSendApprovalWhatsApp = async () => {
+
+  const handleSave = async () => {
+    await persistSale(sale);
+  };
+
+  const handleApproveSale = async () => {
+    const persistedSaleForApproval =
+      sales.find(
+        currentSale =>
+          currentSale.id === sale.id
+      );
+
+    if (!persistedSaleForApproval) {
+      alert(
+        "Satışın kayıtlı önceki hali bulunamadı."
+      );
+      return;
+    }
+
+    if (
+      persistedSaleForApproval.status !==
+        "TASLAK" &&
+      persistedSaleForApproval.status !==
+        "TEKLİF"
+    ) {
+      alert(
+        "Yalnız taslak veya teklif durumundaki satış onaylanabilir."
+      );
+      return;
+    }
+
+    if (
+      !canApproveSpecificSale(
+        currentUser,
+        persistedSaleForApproval
+      )
+    ) {
+      alert(
+        "Bu kullanıcı satış onaylama yetkisine sahip değil."
+      );
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `${persistedSaleForApproval.saleNo} numaralı satış ONAYLANDI durumuna geçirilecek. Devam edilsin mi?`
+      )
+    ) {
+      return;
+    }
+
+    await persistSale({
+      ...sale,
+      status: "ONAYLANDI"
+    });
+  };
+
+  const handleCreateInvoiceDraft = () => {
+    const sourceSaleId =
+      String(sale.id || "").trim();
+
+    if (!sourceSaleId) {
+      alert(
+        "Fatura taslağı için kaynak satış kimliği bulunamadı."
+      );
+      return;
+    }
+
+    /*
+     * Sales V1 mevcut canonical para akışı TRY/TL'dir.
+     * Sale modelinde currency alanı henüz bulunmadığı için
+     * para birimi route üzerinde AÇIKÇA taşınır.
+     * Bu bir sessiz fallback değildir.
+     */
+    const invoiceCurrency = "TRY";
+
+    router.push(
+      `/faturalar/yeni?saleId=${encodeURIComponent(
+        sourceSaleId
+      )}&currency=${encodeURIComponent(
+        invoiceCurrency
+      )}`
+    );
+  };
+  const handleShareSalesWhatsApp = async () => {
     try {
       if (!customer?.phone) {
         alert("Müşteri telefon numarası bulunamadı.");
         return;
       }
 
-      const prepared = prepareSaleForApproval({
-        sale: saleForFinance,
-        origin: window.location.origin,
-        customerName: customer.name || "Müşteri",
-        customerPhone: customer.phone
-      });
+      const activeCompanyName =
+        await fetchActiveCompanyDisplayName();
 
-      await updateSale(prepared.sale);
-      setSale(JSON.parse(JSON.stringify(prepared.sale)));
-      window.open(
-        prepared.whatsappUrl,
-        "_blank",
-        "noopener,noreferrer"
+      const currentSale: Sale = {
+        ...saleForFinance,
+        updatedAt: new Date().toISOString(),
+        pdfGeneratedAt: new Date().toISOString()
+      };
+
+      const file = await generateSalesPdfFile(
+        currentSale,
+        customer,
+        activeCompanyName
+      );
+
+      const isDraft =
+        currentSale.status === "TASLAK" ||
+        currentSale.status === "TEKLİF";
+
+      const message =
+        `Merhaba ${customer.name || ""}, ` +
+        `${isDraft ? "teklif" : "satış"} detayınız ve varsa ödeme planınız ekte yer almaktadır. ` +
+        "İyi günler dileriz.";
+
+      const shareData: ShareData = {
+        title: `${currentSale.saleNo} ${isDraft ? "Teklif" : "Satış"}`,
+        text: message,
+        files: [file]
+      };
+
+      if (
+        typeof navigator.share === "function" &&
+        typeof navigator.canShare === "function" &&
+        navigator.canShare({ files: [file] })
+      ) {
+        await navigator.share(shareData);
+        return;
+      }
+
+      downloadSalesPdfFile(file);
+
+      const rawPhone =
+        String(customer.phone || "")
+          .replace(/\D/g, "");
+
+      const whatsappPhone =
+        rawPhone.startsWith("90")
+          ? rawPhone
+          : rawPhone.startsWith("0")
+            ? `90${rawPhone.slice(1)}`
+            : `90${rawPhone}`;
+
+      const whatsappUrl =
+        `https://wa.me/${whatsappPhone}?text=${encodeURIComponent(message)}`;
+
+      const openedWindow =
+        window.open(
+          whatsappUrl,
+          "_blank",
+          "noopener,noreferrer"
+        );
+
+      if (!openedWindow) {
+        throw new Error(
+          "WHATSAPP_WINDOW_BLOCKED"
+        );
+      }
+
+      alert(
+        "PDF indirildi. WhatsApp mesajına dosyayı ekleyebilirsiniz."
       );
     } catch (error) {
+      if (
+        error instanceof DOMException &&
+        error.name === "AbortError"
+      ) {
+        return;
+      }
+
       console.error(
-        "[Sales Approval] WhatsApp onay bağlantısı hazırlanamadı.",
+        "[Sales Report] WhatsApp / PDF paylaşımı hazırlanamadı.",
         error
       );
-      alert("WhatsApp müşteri onayı hazırlanamadı.");
+
+      alert(
+        "Satış PDF / WhatsApp paylaşımı hazırlanamadı."
+      );
     }
   };
-
   const handlePreviewPdf = async () => {
     const previewWindow =
       window.open(
@@ -751,14 +1001,12 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
         index
     ).filter(
       status =>
-        status !== "ONAYLANDI" ||
-        (
-          persistedSale.status !== "TASLAK" &&
-          persistedSale.status !== "TEKLİF"
-        ) ||
-        canApproveSpecificSale(
-          currentUser,
-          persistedSale
+        !(
+          status === "ONAYLANDI" &&
+          (
+            persistedSale.status === "TASLAK" ||
+            persistedSale.status === "TEKLİF"
+          )
         )
     );
 
@@ -919,13 +1167,49 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
         </div>
 
         <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:flex-wrap md:w-auto">
+          {currentSaleMeasurementIds.length > 0 &&
+            (sale.status === "TASLAK" || sale.status === "TEKLİF") && (
+              <button
+                type="button"
+                onClick={handleOpenPreparation}
+                title="Bu satışın ölçü ve ürün hazırlığını aç"
+                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs font-bold text-amber-800 shadow-sm transition-colors hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300"
+              >
+                Satışa Hazırlığı Gör
+              </button>
+            )}
+          {(persistedSale.status === "TASLAK" ||
+            persistedSale.status === "TEKLİF") &&
+            canApproveSpecificSale(
+              currentUser,
+              persistedSale
+            ) && (
+              <button
+                type="button"
+                onClick={() =>
+                  void handleApproveSale()
+                }
+                title="Satışı yetkili olarak onayla"
+                className="inline-flex min-h-11 items-center justify-center rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm transition-colors hover:bg-emerald-700"
+              >
+                Satışı Onayla
+              </button>
+            )}
           <button
             type="button"
-            onClick={handleSendApprovalWhatsApp}
+            onClick={handleCreateInvoiceDraft}
+            title="Bu satıştan fatura taslağı oluştur"
+            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm transition-colors hover:bg-blue-700"
+          >
+            Fatura Oluştur
+          </button>
+          <button
+            type="button"
+            onClick={handleShareSalesWhatsApp}
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-xs font-bold text-emerald-700 shadow-sm transition-colors hover:bg-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-400 dark:hover:bg-emerald-900/40"
           >
             <MessageCircle className="w-4 h-4 shrink-0" />
-            <span>WhatsApp Onay</span>
+            <span>WhatsApp Paylaş</span>
           </button>
           <button
             type="button"
@@ -962,7 +1246,38 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
         {/* Main Content: Sale Items */}
         <div className="lg:col-span-3 space-y-6">
           <div className="overflow-hidden rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
-            <h2 className="font-semibold text-gray-900 dark:text-white mb-4">Ürün Kalemleri</h2>
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="font-semibold text-gray-900 dark:text-white">
+                Ürün Kalemleri
+              </h2>
+
+              {(sale.status === "TASLAK" || sale.status === "TEKLİF") && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowExternalStockPicker(previous => !previous)
+                  }
+                  className="inline-flex min-h-10 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300"
+                >
+                  + Harici Ürün / Stok Ekle
+                </button>
+              )}
+            </div>
+
+            {showExternalStockPicker && (
+              <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50/60 p-3 dark:border-blue-900 dark:bg-blue-950/20">
+                <div className="mb-2 text-xs font-semibold text-blue-800 dark:text-blue-300">
+                  Yalnız adet bazlı hazır ürün, aksesuar ve çeyizlik stoklar gösterilir.
+                </div>
+                <StockItemPicker
+                  products={products}
+                  filterProduct={isExternalSaleStockAllowed}
+                  restrictionMessage="Bu ürün ölçü gerektiriyor. Satışa Hazırlık üzerinden ekleyin."
+                  onSelect={handleAddExternalStock}
+                />
+              </div>
+            )}
+
             <div>
               <table className="block w-full text-left text-sm sm:table sm:whitespace-nowrap">
                 <thead className="hidden border-b border-gray-200 bg-gray-50 font-medium text-gray-500 dark:border-gray-800 dark:bg-gray-800/50 dark:text-gray-400 sm:table-header-group">
@@ -996,6 +1311,13 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
                         <StockItemPicker
                           products={products}
                           value={item.stockItemId}
+                          filterProduct={product =>
+                            isStockAllowedForMeasuredSaleItem(
+                              product,
+                              item,
+                            )
+                          }
+                          restrictionMessage="Bu ürün bu satış satırının ürün grubuna ait değil."
                           disabled={
                             sale.status === "ONAYLANDI" ||
                             sale.status === "SİPARİŞ" ||
@@ -1411,3 +1733,8 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
     </div>
   );
 }
+
+
+
+
+

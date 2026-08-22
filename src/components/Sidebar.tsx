@@ -26,7 +26,7 @@ import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { useAuthStore, ROLE_PERMISSIONS, canViewModule, normalizeUser, normalizeRole } from "@/store/useAuthStore";
 import { useUiStore } from "@/store/useUiStore";
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   normalizeCompanyAppPath,
   withCompanyPrefix,
@@ -42,18 +42,33 @@ const menuItems = [
   { name: "Ölçü", href: "/olculer", icon: Ruler },
   { name: "Görevler", href: "/gorevler", icon: ClipboardList },
   { name: "Stok", href: "/stok", icon: Package },
-  { name: "Satış", href: "/satis", icon: ShoppingCart },
+  { name: "Faturalar", href: "/satis", icon: ShoppingCart },
   { name: "Finans", href: "/finans", icon: Landmark },
   { name: "Operasyonlar", href: "/operasyonlar", icon: BriefcaseBusiness },
   { name: "Üretim", href: "/uretim", icon: Factory },
   { name: "Montaj", href: "/montaj", icon: Wrench },
   { name: "Bekleyen Hakedişler", href: "/bekleyen-hakedisler", icon: ReceiptText },
   { name: "Benim Hakedişlerim", href: "/hakedislerim", icon: ReceiptText },
-  { name: "Raporlar", href: "/raporlar", icon: FileText },
   { name: "Ajanda", href: "/ajanda", icon: CalendarDays },
   { name: "Destek", href: "/destek", icon: Headphones },
   { name: "Ayarlar", href: "/ayarlar", icon: Settings },
 ];
+
+const faturalarMenuItems = [
+  { name: "Satış", href: "/satis", enabled: true },
+  { name: "Satış İade", href: "/satis-iade", enabled: true },
+  { name: "Alış", href: "/alis", enabled: false },
+  { name: "Alış İade", href: "/alis-iade", enabled: false },
+  { name: "Raporlar", href: "/raporlar", enabled: true },
+] as const;
+
+const financeMenuItems = [
+  { name: "Genel Bakış", hash: "" },
+  { name: "Tahsilat", hash: "#tahsilat" },
+  { name: "Ödeme", hash: "#odeme" },
+  { name: "Hesaplar", hash: "#hesaplar" },
+  { name: "Raporlar", hash: "#raporlar" },
+] as const;
 
 const ROLE_COLORS: Record<string, string> = {
   ADMIN: 'bg-red-600',
@@ -77,11 +92,24 @@ export function Sidebar({
   const { currentUser: rawCurrentUser, switchUser, users, logout } = useAuthStore();
   const { isMobileMenuOpen, setMobileMenuOpen } = useUiStore();
   const [showUserPicker, setShowUserPicker] = useState(false);
+  const [financeHash, setFinanceHash] = useState("");
   const mounted = useSyncExternalStore(
     subscribeToHydration,
     getClientSnapshot,
     getServerSnapshot,
   );
+
+  useEffect(() => {
+    const syncHash = () => setFinanceHash(window.location.hash);
+    const initialSync = window.setTimeout(syncHash, 0);
+    window.addEventListener("hashchange", syncHash);
+    window.addEventListener("popstate", syncHash);
+    return () => {
+      window.clearTimeout(initialSync);
+      window.removeEventListener("hashchange", syncHash);
+      window.removeEventListener("popstate", syncHash);
+    };
+  }, [appPathname]);
 
 
   if (!rawCurrentUser) return null;
@@ -181,12 +209,31 @@ export function Sidebar({
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-3">
         {visibleMenuItems.map((item) => {
-          const isActive = appPathname === item.href || (appPathname.startsWith(item.href) && item.href !== "/");
+          const isFaturalarRoute =
+            item.href === "/satis" &&
+            (
+              appPathname === "/satis" ||
+              appPathname.startsWith("/satis/") ||
+              appPathname === "/satis-iade" ||
+              appPathname.startsWith("/satis-iade/") ||
+              appPathname === "/raporlar" ||
+              appPathname.startsWith("/raporlar/")
+            );
+          const isActive =
+            isFaturalarRoute ||
+            appPathname === item.href ||
+            (
+              appPathname.startsWith(item.href) &&
+              item.href !== "/"
+            );
           return (
+            <div key={item.name}>
 <Link
-              key={item.name}
               href={withCompanyPrefix(pathname, item.href)}
-              onClick={() => setMobileMenuOpen(false)}
+              onClick={() => {
+                if (item.href === "/finans") setFinanceHash("");
+                setMobileMenuOpen(false);
+              }}
               className={twMerge(
                 clsx(
                   "flex min-h-10 items-center gap-3 rounded-xl px-3 py-2 text-sm font-semibold transition-colors",
@@ -198,7 +245,72 @@ export function Sidebar({
             >
               <item.icon className={clsx("w-5 h-5", isActive ? "text-blue-700 dark:text-blue-400" : "text-gray-500 dark:text-gray-400")} />
               {item.name}
-            </Link>
+</Link>
+              {item.href === "/satis" && isActive ? (
+                <div className="ml-7 mt-1 space-y-1 border-l border-slate-200 pl-3 dark:border-slate-700" aria-label="Faturalar hızlı erişim">
+                  {faturalarMenuItems.map((faturaItem) => {
+                    const faturaItemActive =
+                      faturaItem.enabled &&
+                      (
+                        appPathname === faturaItem.href ||
+                        appPathname.startsWith(`${faturaItem.href}/`)
+                      );
+
+                    return faturaItem.enabled ? (
+                      <Link
+                        key={faturaItem.name}
+                        href={withCompanyPrefix(pathname, faturaItem.href)}
+                        onClick={() => setMobileMenuOpen(false)}
+                        className={clsx(
+                          "flex min-h-9 items-center rounded-lg px-3 text-xs font-semibold transition-colors",
+                          faturaItemActive
+                            ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                            : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white",
+                        )}
+                      >
+                        {faturaItem.name}
+                      </Link>
+                    ) : (
+                      <div
+                        key={faturaItem.name}
+                        className="flex min-h-9 items-center justify-between rounded-lg px-3 text-xs font-semibold text-slate-400 dark:text-slate-600"
+                        title="Kaynak otoritesi tamamlanmadan açılmaz"
+                      >
+                        <span>{faturaItem.name}</span>
+                        <span className="text-[9px] font-bold uppercase tracking-wide">
+                          Hazırlanıyor
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {item.href === "/finans" && isActive ? (
+                <div className="ml-7 mt-1 space-y-1 border-l border-slate-200 pl-3 dark:border-slate-700" aria-label="Finans hızlı erişim">
+                  {financeMenuItems.map((financeItem) => {
+                    const financeItemActive = financeHash === financeItem.hash;
+                    return (
+                      <Link
+                        key={financeItem.name}
+                        href={withCompanyPrefix(pathname, `/finans${financeItem.hash}`)}
+                        onClick={() => {
+                          setFinanceHash(financeItem.hash);
+                          setMobileMenuOpen(false);
+                        }}
+                        className={clsx(
+                          "flex min-h-9 items-center rounded-lg px-3 text-xs font-semibold transition-colors",
+                          financeItemActive
+                            ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                            : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white",
+                        )}
+                      >
+                        {financeItem.name}
+                      </Link>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
           );
         })}
 </nav>
@@ -277,3 +389,5 @@ export function Sidebar({
     </>
   );
 }
+
+

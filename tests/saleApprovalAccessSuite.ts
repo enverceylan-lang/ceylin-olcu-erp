@@ -86,7 +86,7 @@ assert.equal(
       createdByUserId: "approver-1"
     }
   ),
-  false
+  true
 );
 
 assert.equal(
