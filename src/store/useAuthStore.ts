@@ -41,6 +41,7 @@ export interface MockUser {
   isActive: boolean;
   permissions?: string[];
   financePermissions?: string[];
+  stockPermissions?: string[];
   storedPermissions?: string[];
   permissionVersion?: number;
   createdAt?: string;

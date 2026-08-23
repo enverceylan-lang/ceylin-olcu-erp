@@ -19,6 +19,8 @@ import ErpContextShadowCard from "@/components/admin/ErpContextShadowCard";
 import FinancePermissionEditor from "@/components/admin/FinancePermissionEditor";
 import type { FinancePermission } from "@/lib/finance/financeAccessPolicy";
 import { isFinancePermission } from "@/lib/finance/financeRoleDefaults";
+import StockPermissionEditor from "@/components/admin/StockPermissionEditor";
+import { isStockPermission, type StockPermission } from "@/lib/stock/stockPermissionCatalog";
 
 type BackupPayload =
   FullSystemBackupPayload;
@@ -72,6 +74,7 @@ export default function AyarlarPage() {
   const [editAddress, setEditAddress] = useState("");
   const [editProviderCustomerId, setEditProviderCustomerId] = useState("");
   const [editFinancePermissions, setEditFinancePermissions] = useState<FinancePermission[]>([]);
+  const [editStockPermissions, setEditStockPermissions] = useState<StockPermission[]>([]);
   const [userLoading, setUserLoading] = useState(false);
   const [userFilter, setUserFilter] = useState<'ACTIVE' | 'PASSIVE' | 'ALL'>('ACTIVE');
 
@@ -412,6 +415,9 @@ export default function AyarlarPage() {
     setEditFinancePermissions(
       (u.permissions || []).filter(isFinancePermission),
     );
+    setEditStockPermissions(
+      (u.permissions || []).filter(isStockPermission),
+    );
   };
 
   const handleSaveEdit = async (id: string) => {
@@ -439,6 +445,7 @@ export default function AyarlarPage() {
       tcNo: editTcNo.trim(),
       address: editAddress.trim(),
       financePermissions: editFinancePermissions,
+      stockPermissions: editStockPermissions,
       providerCustomerId: isProviderRole(editRole)
         ? editProviderCustomerId
         : undefined
@@ -1163,6 +1170,12 @@ export default function AyarlarPage() {
                               role={editRole}
                               selectedPermissions={editFinancePermissions}
                               onChange={setEditFinancePermissions}
+                              isSelf={u.id === currentUser?.id}
+                            />
+                            <StockPermissionEditor
+                              role={editRole}
+                              selectedPermissions={editStockPermissions}
+                              onChange={setEditStockPermissions}
                               isSelf={u.id === currentUser?.id}
                             />
                           </td>

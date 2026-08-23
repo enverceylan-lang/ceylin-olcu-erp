@@ -17,6 +17,7 @@ import {
 import {
   mergeSelectedFinancePermissions,
 } from "@/lib/finance/userFinancePermissions";
+import { isKnownStockLikePermission, mergeSelectedStockPermissions } from "@/lib/stock/stockPermissionCatalog";
 
 const supabaseUrl =
   process.env.SUPABASE_URL ||
@@ -237,6 +238,8 @@ export async function POST(req: NextRequest) {
     const isSelfUpdate = !isCreate && targetId === caller.id;
     const hasFinancePermissionUpdate =
       Object.prototype.hasOwnProperty.call(body, "financePermissions");
+    const hasStockPermissionUpdate =
+      Object.prototype.hasOwnProperty.call(body, "stockPermissions");
 
     // Admin herkes üzerinde işlem yapabilir.
     // Personel yalnız kendi eksik profilini tamamlayabilir.
@@ -266,6 +269,17 @@ export async function POST(req: NextRequest) {
           success: false,
           code: "FINANCE_PERMISSION_UPDATE_FORBIDDEN",
           error: "Finans yetkilerini yalnız yönetici güncelleyebilir.",
+        },
+        { status: 403 }
+      );
+    }
+
+    if (hasStockPermissionUpdate && !isAdmin) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: "STOCK_PERMISSION_UPDATE_FORBIDDEN",
+          error: "Stok yetkilerini yalnız yönetici güncelleyebilir.",
         },
         { status: 403 }
       );
@@ -329,6 +343,9 @@ export async function POST(req: NextRequest) {
       const unknownFinancePermissions = initialPermissions
         .filter(isKnownFinanceLikePermission)
         .map(String);
+      const unknownStockPermissions = initialPermissions
+        .filter(isKnownStockLikePermission)
+        .map(String);
 
       if (unknownFinancePermissions.length > 0) {
         return NextResponse.json(
@@ -337,6 +354,13 @@ export async function POST(req: NextRequest) {
             code: "UNKNOWN_FINANCE_PERMISSION",
             error: "Bilinmeyen finans yetkisi gönderildi.",
           },
+          { status: 400 }
+        );
+      }
+
+      if (unknownStockPermissions.length > 0) {
+        return NextResponse.json(
+          { success: false, code: "UNKNOWN_STOCK_PERMISSION", error: "Bilinmeyen stok yetkisi gönderildi." },
           { status: 400 }
         );
       }
@@ -381,6 +405,23 @@ export async function POST(req: NextRequest) {
       nextPermissions = permissionUpdate.permissions;
     }
 
+
+    if (hasStockPermissionUpdate) {
+      const stockPermissionUpdate = mergeSelectedStockPermissions({
+        existingPermissions: nextPermissions ?? (isCreate ? [] : existingUser?.permissions),
+        selectedStockPermissions: body.stockPermissions,
+        targetRole,
+      });
+
+      if (!stockPermissionUpdate.ok) {
+        return NextResponse.json(
+          { success: false, code: stockPermissionUpdate.code, error: "Stok yetkisi isteği geçersiz." },
+          { status: stockPermissionUpdate.code === "PLATFORM_STOCK_DENIED" ? 403 : 400 },
+        );
+      }
+
+      nextPermissions = stockPermissionUpdate.permissions;
+    }
     // Kullanıcı adı yalnız admin tarafından belirlenebilir.
     if (
       !isAdmin &&
