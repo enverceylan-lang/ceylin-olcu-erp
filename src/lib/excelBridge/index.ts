@@ -4,3 +4,4 @@ export * from './excelImportEngine';
 export * from './excelExportEngine';
 export * from './profiles/customerExcelProfile';
 export * from './profiles/stockExcelProfile';
+export * from './stockExcelTemplate';
