@@ -21,11 +21,11 @@ assert.match(panel, /useSalesStore/);
 assert.match(panel, /selectFinanceReadModel/);
 assert.match(panel, /customerId,/);
 assert.match(panel, /requestedCapability:\s*"CUSTOMER_FINANCE"/);
-assert.match(panel, /calculateCustomerFinanceDashboard/);
+assert.doesNotMatch(panel, /calculateCustomerFinanceDashboard/);
 assert.match(panel, /FinanceTransactionTable/);
 
-assert.doesNotMatch(panel, /readCustomerReceivableSnapshot/);
-assert.doesNotMatch(panel, /CustomerReceivableSnapshot/);
+assert.match(panel, /readCustomerReceivableSnapshot/);
+assert.match(panel, /CustomerReceivableSnapshot/);
 assert.doesNotMatch(panel, /localFinanceDb|listLocalFinanceTransactions/);
 
 console.log("[PASS] customer finance mirrors finance center read model");

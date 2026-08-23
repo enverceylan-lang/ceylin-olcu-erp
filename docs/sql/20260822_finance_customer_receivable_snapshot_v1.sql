@@ -82,17 +82,23 @@ begin
       ft.transaction_date,
       ft.created_at,
       ft.status,
-      ft.reversed_at
+      ft.reversed_at,
+      ft.transaction_type,
+      ft.net_amount
     from public.finance_transactions ft
     where ft.tenant_id = v_tenant
       and ft.company_id = v_company
       and ft.branch_id = v_branch
       and ft.accounting_period_id = v_period
+      and ft.customer_id = v_customer
       and ft.currency = v_currency
-      and exists (
-        select 1
-        from scoped_allocations ca
-        where ca.transaction_id = ft.transaction_id
+      and (
+        ft.transaction_type = 'COLLECTION'
+        or exists (
+          select 1
+          from scoped_allocations ca
+          where ca.transaction_id = ft.transaction_id
+        )
       )
   ),
   open_metrics as (
@@ -115,6 +121,21 @@ begin
       coalesce(sum(amount) filter (where reversed_at is null),0::numeric) as active_allocation_total,
       count(*) filter (where amount <= 0)::integer as invalid_allocation_count
     from scoped_allocations
+  ),
+  transaction_metrics as (
+    select
+      coalesce(sum(net_amount) filter (
+        where transaction_type = 'COLLECTION'
+          and status = 'POSTED'
+          and reversed_at is null
+      ),0::numeric) as active_collection_total,
+      count(*) filter (
+        where transaction_type = 'COLLECTION'
+          and status = 'POSTED'
+          and reversed_at is null
+          and net_amount <= 0
+      )::integer as invalid_collection_count
+    from scoped_transactions
   ),
   due_metrics as (
     select
@@ -192,7 +213,9 @@ begin
           'transactionDate', transaction_date,
           'createdAt', created_at,
           'status', status,
-          'reversedAt', reversed_at
+          'reversedAt', reversed_at,
+          'transactionType', transaction_type,
+          'netAmount', net_amount
         )
         order by transaction_date, created_at, transaction_id
       ),
@@ -207,8 +230,12 @@ begin
     'summary', jsonb_build_object(
       'originalDebtTotal', om.original_debt_total,
       'allocatedCollectionTotal', am.active_allocation_total,
+      'unallocatedCreditTotal',
+        greatest(tm.active_collection_total - am.active_allocation_total,0::numeric),
       'reservedTotal', om.reserved_total,
-      'currentBalance', om.current_balance,
+      'currentBalance',
+        om.current_balance -
+        greatest(tm.active_collection_total - am.active_allocation_total,0::numeric),
       'openItemCount', om.open_item_count,
       'closedItemCount', om.closed_item_count
     ),
@@ -225,16 +252,20 @@ begin
       'ok',
         om.invalid_item_count = 0 and
         am.invalid_allocation_count = 0 and
+        tm.invalid_collection_count = 0 and
         mi.missing_metadata_count = 0 and
         om.allocated_amount_total is not distinct from am.active_allocation_total and
+        tm.active_collection_total >= am.active_allocation_total and
         dm.total_open_amount is not distinct from om.current_balance,
       'reason',
         case
           when om.invalid_item_count <> 0 then 'OPEN_ITEM_AMOUNT_INTEGRITY_FAILED'
           when am.invalid_allocation_count <> 0 then 'ALLOCATION_AMOUNT_INTEGRITY_FAILED'
+          when tm.invalid_collection_count <> 0 then 'COLLECTION_AMOUNT_INTEGRITY_FAILED'
           when mi.missing_metadata_count <> 0 then 'ALLOCATION_TRANSACTION_METADATA_MISSING'
           when om.allocated_amount_total is distinct from am.active_allocation_total then 'ALLOCATED_TOTAL_MISMATCH'
-          when dm.total_open_amount is distinct from om.current_balance then 'DUE_BALANCE_MISMATCH'
+          when tm.active_collection_total < am.active_allocation_total then 'COLLECTION_TOTAL_BELOW_ALLOCATION'
+          when dm.total_open_amount is distinct from om.current_balance then 'DUE_OPEN_BALANCE_MISMATCH'
           else null
         end
     )
@@ -242,6 +273,7 @@ begin
   into v_result
   from open_metrics om
   cross join allocation_metrics am
+  cross join transaction_metrics tm
   cross join due_metrics dm
   cross join metadata_integrity mi
   cross join open_items_json oij

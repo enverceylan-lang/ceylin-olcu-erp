@@ -49,6 +49,7 @@ export interface CustomerReceivableSnapshot {
   summary: {
     originalDebtTotal: number;
     allocatedCollectionTotal: number;
+    unallocatedCreditTotal: number;
     reservedTotal: number;
     currentBalance: number;
     openItemCount: number;
@@ -90,6 +91,13 @@ function nullableText(value: unknown, code: string): string | null {
 
 function money(value: unknown, code: string): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new Error(code);
+  }
+  return value;
+}
+
+function signedMoney(value: unknown, code: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new Error(code);
   }
   return value;
@@ -251,11 +259,15 @@ export function parseCustomerReceivableSnapshot(
         summary.allocatedCollectionTotal,
         "FINANCE_CUSTOMER_RECEIVABLE_COLLECTION_TOTAL_INVALID",
       ),
+      unallocatedCreditTotal: money(
+        summary.unallocatedCreditTotal,
+        "FINANCE_CUSTOMER_RECEIVABLE_UNALLOCATED_CREDIT_INVALID",
+      ),
       reservedTotal: money(
         summary.reservedTotal,
         "FINANCE_CUSTOMER_RECEIVABLE_RESERVED_TOTAL_INVALID",
       ),
-      currentBalance: money(
+      currentBalance: signedMoney(
         summary.currentBalance,
         "FINANCE_CUSTOMER_RECEIVABLE_BALANCE_INVALID",
       ),

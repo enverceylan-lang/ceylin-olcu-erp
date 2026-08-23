@@ -508,7 +508,7 @@ test(
 );
 
 test(
-  "supplier overpayment is rejected",
+  "supplier overpayment is carried as reverse-direction cari balance",
   () => {
     reset();
 
@@ -563,24 +563,14 @@ test(
 
     assert.equal(
       result.outcome,
-      "REJECTED"
+      "CREATED"
     );
-
-    if (
-      result.outcome ===
-      "REJECTED"
-    ) {
-      assert.equal(
-        result.reason,
-        "PAYMENT_EXCEEDS_OPEN_AMOUNT"
-      );
-    }
 
     assert.equal(
       useCounterpartyPayableStore
         .getState()
         .movements.length,
-      1
+      2
     );
   }
 );

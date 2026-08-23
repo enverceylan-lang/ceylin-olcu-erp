@@ -27,16 +27,17 @@ const customerPage =
   );
 
 const requiredPanelContracts = [
-  "calculateCustomerFinanceDashboard",
-  "listLocalFinanceTransactions",
+  "readCustomerReceivableSnapshot",
+  "CustomerReceivableSnapshot",
   'requestedCapability: "CUSTOMER_FINANCE"',
-  "Cari Finans V1",
-  "Cari Ekstresi",
-  "Açık Vade Dağılımı",
-  "dashboard.summary.balance",
-  "dashboard.due.overdueAmount",
-  "dashboard.due.dueTodayAmount",
-  "dashboard.due.futureAmount",
+  "Finans merkezindeki merkezi kayıtlardan okunur",
+  "snapshot.summary.originalDebtTotal",
+  "snapshot.summary.allocatedCollectionTotal",
+  "snapshot.summary.unallocatedCreditTotal",
+  "snapshot.summary.currentBalance",
+  "snapshot.due.overdueAmount",
+  "snapshot.due.dueTodayAmount",
+  "snapshot.due.futureAmount",
   "<FinanceTransactionTable"
 ];
 
@@ -46,7 +47,7 @@ for (
 ) {
   assert.ok(
     panel.includes(requirement),
-    `Missing panel contract: ${requirement}`
+    `Missing canonical panel contract: ${requirement}`
   );
 }
 
@@ -74,10 +75,18 @@ assert.equal(
 
 assert.equal(
   panel.includes(
-    "remainingBalance"
+    "listLocalFinanceTransactions"
   ),
   false,
-  "UI must not use a mutable remaining balance field."
+  "Canonical panel must not read the local finance ledger."
+);
+
+assert.equal(
+  panel.includes(
+    "calculateCustomerFinanceDashboard"
+  ),
+  false,
+  "Canonical panel must not recalculate customer balance from the sales mirror."
 );
 
 assert.equal(

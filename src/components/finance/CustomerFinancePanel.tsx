@@ -4,10 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useFinanceRuntimeContext } from "@/lib/finance/useFinanceRuntimeContext";
 import { selectFinanceReadModel } from "@/lib/finance/financeReadSelector";
-import {
-  calculateCustomerFinanceDashboard,
-  type CustomerFinanceDashboard,
-} from "@/lib/finance/customerFinanceDashboardService";
+import { readCustomerReceivableSnapshot } from "@/lib/finance/customerReceivableReadClient";
+import type { CustomerReceivableSnapshot } from "@/lib/finance/customerReceivableReadContracts";
 import { useSalesStore } from "@/store/salesStore";
 
 import { FinanceAccessState } from "./FinanceAccessState";
@@ -43,11 +41,11 @@ function financeSourceLabel(source: string): string {
   }
 }
 
-function riskLabel(dashboard: CustomerFinanceDashboard): string {
-  if (dashboard.riskLevel === "RISKLI") {
+function riskLabel(snapshot: CustomerReceivableSnapshot): string {
+  if (snapshot.due.overdueAmount > 0) {
     return "Gecikmiş borç var";
   }
-  if (dashboard.riskLevel === "IZLE") {
+  if (snapshot.due.dueTodayAmount > 0) {
     return "Bugün vadeli borç var";
   }
   return "Vade riski yok";
@@ -63,6 +61,11 @@ export function CustomerFinancePanel({
   const isLoading = useSalesStore((state) => state.isLoading);
   const [projectionAt] = useState(() => new Date().toISOString());
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
+  const [canonicalSnapshot, setCanonicalSnapshot] =
+    useState<CustomerReceivableSnapshot | null>(null);
+  const [canonicalState, setCanonicalState] =
+    useState<"IDLE" | "LOADING" | "READY" | "ERROR">("IDLE");
+  const [canonicalError, setCanonicalError] = useState<string | null>(null);
 
   const saleById = useMemo(
     () => new Map(sales.map((sale) => [sale.id, sale] as const)),
@@ -78,8 +81,58 @@ export function CustomerFinancePanel({
     }
     void loadSales(runtime.scope);
   }, [loadSales, runtime]);
+  useEffect(() => {
+    if (runtime.state !== "ready") {
+      setCanonicalSnapshot(null);
+      setCanonicalState("IDLE");
+      setCanonicalError(null);
+      return;
+    }
 
-  if (runtime.state === "loading" || isLoading) {
+    let cancelled = false;
+
+    setCanonicalSnapshot(null);
+    setCanonicalState("LOADING");
+    setCanonicalError(null);
+
+    void (async () => {
+      try {
+        const result = await readCustomerReceivableSnapshot(
+          customerId,
+          currency,
+        );
+        const snapshot = result;
+        if (cancelled) {
+          return;
+        }
+
+        setCanonicalSnapshot(snapshot);
+        setCanonicalState("READY");
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setCanonicalSnapshot(null);
+        setCanonicalState("ERROR");
+        setCanonicalError(
+          error instanceof Error
+            ? error.message
+            : "FINANCE_CUSTOMER_RECEIVABLE_READ_FAILED",
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [customerId, currency, runtime]);
+
+  if (
+    runtime.state === "loading" ||
+    isLoading ||
+    canonicalState === "LOADING"
+  ) {
     return (
       <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400">
         Cari finans verileri doğrulanıyor…
@@ -89,6 +142,15 @@ export function CustomerFinancePanel({
 
   if (runtime.state !== "ready") {
     return <FinanceAccessState reason={runtime.reason} />;
+  }
+
+  if (canonicalState === "ERROR" || !canonicalSnapshot) {
+    return (
+      <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-900 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-100">
+        Cari finans merkezi kaydı okunamadı:{" "}
+        {canonicalError || "FINANCE_CUSTOMER_RECEIVABLE_READ_FAILED"}
+      </div>
+    );
   }
 
   const financeCenterMirror = selectFinanceReadModel({
@@ -110,25 +172,15 @@ export function CustomerFinancePanel({
     );
   }
 
-  const dashboardResult = calculateCustomerFinanceDashboard(
-    financeCenterMirror.transactions,
-    runtime.scope,
-    customerId,
-    currency,
-    projectionAt.slice(0, 10),
-  );
-
-  if (dashboardResult.outcome === "REJECTED") {
-    return <FinanceAccessState reason={dashboardResult.reason} />;
-  }
-
-  const dashboard = dashboardResult.dashboard;
-
-  return (
+  const snapshot = canonicalSnapshot;
+  const totalCollection =
+    snapshot.summary.allocatedCollectionTotal +
+    snapshot.summary.unallocatedCreditTotal;
+return (
     <div className="space-y-6">
       <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-100">
-        Bu alan Finans Merkezi&apos;ndeki bu müşteriye ait kayıtların
-        salt okunur görünümüdür.
+        Finans merkezindeki merkezi kayıtlardan okunur. Bu alan bu müşteriye
+        ait canonical cari finans kaydının salt okunur görünümüdür.
       </div>
 
       {financeCenterMirror.issues.length > 0 ? (
@@ -141,7 +193,7 @@ export function CustomerFinancePanel({
             Toplam Borç / Satış
           </p>
           <p className="mt-2 text-2xl font-bold text-gray-950 dark:text-white">
-            {formatMoney(dashboard.summary.debitTotal, currency)}
+            {formatMoney(snapshot.summary.originalDebtTotal, currency)}
           </p>
         </div>
 
@@ -150,7 +202,7 @@ export function CustomerFinancePanel({
             Tahsilat
           </p>
           <p className="mt-2 text-2xl font-bold text-gray-950 dark:text-white">
-            {formatMoney(dashboard.summary.creditTotal, currency)}
+            {formatMoney(totalCollection, currency)}
           </p>
         </div>
 
@@ -159,7 +211,7 @@ export function CustomerFinancePanel({
             Kalan Bakiye
           </p>
           <p className="mt-2 text-2xl font-bold text-gray-950 dark:text-white">
-            {formatMoney(dashboard.summary.balance, currency)}
+            {formatMoney(snapshot.summary.currentBalance, currency)}
           </p>
         </div>
 
@@ -168,10 +220,19 @@ export function CustomerFinancePanel({
             Vade Durumu
           </p>
           <p className="mt-2 text-lg font-bold text-gray-950 dark:text-white">
-            {riskLabel(dashboard)}
+            {riskLabel(snapshot)}
           </p>
         </div>
       </section>
+
+      {snapshot.summary.unallocatedCreditTotal > 0 ? (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-100">
+          Müşteri alacağı / fazla tahsilat:{" "}
+          <strong>
+            {formatMoney(snapshot.summary.unallocatedCreditTotal, currency)}
+          </strong>
+        </div>
+      ) : null}
 
       <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <div className="border-b border-gray-200 p-5 dark:border-gray-800">
@@ -332,7 +393,7 @@ export function CustomerFinancePanel({
             Gecikmiş
           </p>
           <p className="mt-2 text-xl font-bold text-gray-950 dark:text-white">
-            {formatMoney(dashboard.due.overdueAmount, currency)}
+            {formatMoney(snapshot.due.overdueAmount, currency)}
           </p>
         </div>
 
@@ -341,7 +402,7 @@ export function CustomerFinancePanel({
             Bugün Vadeli
           </p>
           <p className="mt-2 text-xl font-bold text-gray-950 dark:text-white">
-            {formatMoney(dashboard.due.dueTodayAmount, currency)}
+            {formatMoney(snapshot.due.dueTodayAmount, currency)}
           </p>
         </div>
 
@@ -350,7 +411,7 @@ export function CustomerFinancePanel({
             İleri Vadeli
           </p>
           <p className="mt-2 text-xl font-bold text-gray-950 dark:text-white">
-            {formatMoney(dashboard.due.futureAmount, currency)}
+            {formatMoney(snapshot.due.futureAmount, currency)}
           </p>
         </div>
       </section>

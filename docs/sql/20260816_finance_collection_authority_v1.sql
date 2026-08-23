@@ -513,19 +513,10 @@ begin
     and oi.status in ('OPEN','PARTIAL')
   order by oi.due_date,oi.document_number,oi.sequence_no,oi.id for update;
 
-  select coalesce(sum(original_amount-allocated_amount-reserved_amount),0)
-  into v_available from public.finance_receivable_open_items_v1 oi
-  where oi.tenant_id=v_tenant and oi.company_id=v_company and oi.branch_id=v_branch
-    and oi.accounting_period_id=v_period and oi.customer_id=v_customer and oi.currency=v_currency
-    and oi.status in ('OPEN','PARTIAL');
-  if v_available < v_amount then
-    update public.finance_operation_requests_v1 set outcome='REJECT',
-      result_json=jsonb_build_object('reason','FINANCE_COLLECTION_EXCEEDS_OPEN_RECEIVABLE'),completed_at=v_now
-    where tenant_id=v_tenant and company_id=v_company and branch_id=v_branch
-      and accounting_period_id=v_period and idempotency_key=v_idem;
-    return query select 'REJECT',v_operation::text,array[]::text[],null::text,'[]'::jsonb,'FINANCE_COLLECTION_EXCEEDS_OPEN_RECEIVABLE',v_now;
-    return;
-  end if;
+  -- V7: A collection may exceed the customer's currently open receivables.
+  -- Open items are closed only up to their own remaining amounts.
+  -- Any residual amount is intentionally left unallocated at the cari level.
+  -- CHEQUE/NOTE keeps its separate nominal-allocation integrity gate below.
 
   if v_channel in ('CHEQUE','NOTE') then
     begin v_instrument := coalesce(nullif(p_command#>>'{instrument,instrumentId}','')::uuid,gen_random_uuid());
@@ -841,8 +832,13 @@ begin
       'receivableId',v_item.id,'saleId',v_item.sale_id,'installmentId',v_item.installment_id,'amount',v_line));
     v_remaining:=v_remaining-v_line;
   end loop;
-  v_result:=jsonb_build_object('transactionIds',jsonb_build_array(v_tx),'instrumentId',null,
-    'allocations',v_allocations,'occurredAt',v_now);
+  v_result:=jsonb_build_object(
+    'transactionIds',jsonb_build_array(v_tx),
+    'instrumentId',null,
+    'allocations',v_allocations,
+    'unallocatedCreditAmount',greatest(v_remaining,0),
+    'occurredAt',v_now
+  );
   update public.finance_operation_requests_v1 set outcome='CREATED',result_json=v_result,completed_at=v_now
   where tenant_id=v_tenant and company_id=v_company and branch_id=v_branch
     and accounting_period_id=v_period and idempotency_key=v_idem;
@@ -929,11 +925,7 @@ begin
   end if;
 
   begin
-    perform 1 from public.finance_collection_allocations_v1 a
-    where a.tenant_id=v_tenant and a.company_id=v_company and a.branch_id=v_branch
-      and a.accounting_period_id=v_period and a.operation_id=v_target
-    order by a.open_item_id for update;
-    if not found then raise exception 'FINANCE_COLLECTION_REVERSAL_ALLOCATION_NOT_FOUND'; end if;
+
     if exists (
       select 1 from public.finance_collection_allocations_v1 a
       where a.tenant_id=v_tenant and a.company_id=v_company and a.branch_id=v_branch

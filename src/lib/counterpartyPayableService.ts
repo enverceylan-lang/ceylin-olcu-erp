@@ -331,25 +331,6 @@ export function registerCounterpartyPayment(
       "kind"
     >
 ): CounterpartyPayableResult {
-  const openAmount =
-    calculateCounterpartyPayableBalance(
-      state.movements,
-      request,
-      request.counterpartyCustomerId
-    );
-
-  if (
-    request.amount >
-    openAmount
-  ) {
-    return {
-      outcome:
-        "REJECTED",
-      state,
-      reason:
-        "PAYMENT_EXCEEDS_OPEN_AMOUNT"
-    };
-  }
 
   return createCounterpartyPayableMovement(
     state,

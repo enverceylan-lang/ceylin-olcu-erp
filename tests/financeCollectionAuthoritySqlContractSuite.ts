@@ -89,7 +89,15 @@ assert.match(sql, /persist_finance_collection_v1/i);
 assert.match(sql, /reverse_finance_collection_v1/i);
 assert.match(sql, /transition_finance_receivable_instrument_v1/i);
 assert.match(sql, /order by oi\.due_date,oi\.document_number,oi\.sequence_no,oi\.id for update/i);
-assert.match(sql, /FINANCE_COLLECTION_EXCEEDS_OPEN_RECEIVABLE/i);
+assert.doesNotMatch(
+  sql,
+  /FINANCE_COLLECTION_EXCEEDS_OPEN_RECEIVABLE/i
+);
+
+assert.match(
+  sql,
+  /unallocatedCreditAmount/i
+);
 assert.match(sql, /FINANCE_INSTRUMENT_NOMINAL_ALLOCATION_MISMATCH/i);
 assert.match(sql, /fa\.account_type=case when v_channel='CHEQUE' then 'CHEQUE_RECEIVABLE' else 'NOTE_RECEIVABLE' end/i);
 const instrumentReceipt = sql.split("if v_channel in ('CHEQUE','NOTE') then")[1]?.split("if v_channel='CASH' then")[0] || "";
