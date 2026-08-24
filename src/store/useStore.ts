@@ -5,6 +5,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { useAuthStore, normalizeRole } from './useAuthStore';
 import { saveLocalCustomer, saveLocalCustomers, loadLocalCustomers } from '@/lib/localCustomerDb';
 import { shouldCreateTailorProductionItem } from '@/lib/productionRouting';
+import { applyErpScope, inheritConsistentErpScope } from '@/lib/customerTreeScope';
 
 
 // ─── Store Change Notification for Sync ───
@@ -1343,12 +1344,24 @@ export const useStore = create<AppState>()(
         }
 
         const now = new Date().toISOString();
-        const newMeas: ProductMeasurement = {
+        const inheritedMeasurementScope = inheritConsistentErpScope(
+          targetCustomer,
+          targetRoom,
+          targetOpening,
+        );
+        if (!inheritedMeasurementScope) {
+          throw new Error('MEASUREMENT_SCOPE_MISSING');
+        }
+        const measurementBase: ProductMeasurement = {
           ...measurement,
           id: generateUUID(),
           createdAt: now,
           updatedAt: now
         };
+        const newMeas: ProductMeasurement = applyErpScope(
+          measurementBase,
+          inheritedMeasurementScope,
+        );
 
         // Single-write: bağımsız ölçü deposuna yapısal adlarla yaz.
         const { useMeasurementStore } = await import('@/store/measurementStore');
