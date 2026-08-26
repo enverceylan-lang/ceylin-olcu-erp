@@ -9,7 +9,8 @@ export type FinanceChannel =
   | "POS"
   | "CHEQUE"
   | "NOTE"
-  | "TRANSFER";
+  | "TRANSFER"
+  | "OPENING";
 
 export type FinanceChannelOperation =
   | "COLLECTION"
@@ -17,7 +18,8 @@ export type FinanceChannelOperation =
   | "REFUND"
   | "RECEIPT"
   | "ISSUE"
-  | "TRANSFER";
+  | "TRANSFER"
+  | "OPENING_BALANCE";
 
 export type FinanceOperationDirection = "CREATE" | "REVERSE";
 
@@ -120,6 +122,10 @@ const CHANNEL_PERMISSION_MAPPINGS = {
   "TRANSFER:TRANSFER:REVERSE": {
     permission: "finance.transfer.reverse",
     capability: "TRANSFER_REVERSE",
+  },
+  "OPENING:OPENING_BALANCE:CREATE": {
+    permission: "finance.opening_balance.create",
+    capability: "OPENING_BALANCE_CREATE",
   },
 } as const satisfies Record<
   string,

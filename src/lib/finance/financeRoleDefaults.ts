@@ -9,6 +9,7 @@ export const FINANCE_PERMISSION_ORDER = [
   "finance.payment.reverse",
   "finance.transfer.create",
   "finance.transfer.reverse",
+  "finance.opening_balance.create",
   "finance.cash.collection.create",
   "finance.cash.collection.reverse",
   "finance.cash.payment.create",

@@ -52,6 +52,7 @@ const metadata: Record<FinancePermission, CatalogMetadata> = {
   "finance.payment.reverse": legacy("Genel ödemeyi ters kayıt yapabilir"),
   "finance.transfer.create": m("TRANSFER", "Hesaplar arası transfer yapabilir", "Kapsam içindeki hesaplar arasında transfer oluşturur.", "TRANSFER", "TRANSFER", "CREATE", "HIGH"),
   "finance.transfer.reverse": m("TRANSFER", "Transferi ters kayıt yapabilir", "Mevcut transfer için ters kayıt oluşturur.", "TRANSFER", "TRANSFER", "REVERSE", "CRITICAL"),
+  "finance.opening_balance.create": m("GENERAL", "Açılış bakiyesi girebilir", "Müşteri açılış veya devir bakiyesi oluşturabilir.", "OPENING", "OPENING_BALANCE", "CREATE", "CRITICAL"),
   "finance.cash.collection.create": m("CASH", "Nakit tahsilat alabilir", "Kasaya nakit tahsilat kaydedebilir.", "CASH", "COLLECTION", "CREATE", "MEDIUM"),
   "finance.cash.collection.reverse": m("CASH", "Nakit tahsilatı ters kayıt yapabilir", "Nakit tahsilat için ters kayıt oluşturabilir.", "CASH", "COLLECTION", "REVERSE", "HIGH"),
   "finance.cash.payment.create": m("CASH", "Kasadan ödeme yapabilir", "Kasadan para çıkışı kaydedebilir.", "CASH", "PAYMENT", "CREATE", "HIGH"),

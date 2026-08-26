@@ -31,6 +31,11 @@ import {
   normalizeCompanyAppPath,
   withCompanyPrefix,
 } from "@/lib/companyRouting";
+import type { FinancePermission } from "@/lib/finance/financeAccessPolicy";
+import {
+  canOpenFinanceCenter,
+  visibleFinanceSections,
+} from "@/lib/finance/financeNavigationPolicy";
 
 const subscribeToHydration = () => () => {};
 const getClientSnapshot = () => true;
@@ -68,6 +73,7 @@ const financeMenuItems = [
   { name: "Ödeme", hash: "#odeme" },
   { name: "Hesaplar", hash: "#hesaplar" },
   { name: "Raporlar", hash: "#raporlar" },
+  { name: "Devir / Açılış", hash: "#devir-acilis" },
 ] as const;
 
 const ROLE_COLORS: Record<string, string> = {
@@ -118,6 +124,17 @@ export function Sidebar({
 
   const permissions = ROLE_PERMISSIONS[currentUser.role] || { label: 'Kullanıcı' };
 
+  const financePermissions = (currentUser.permissions || []).filter(
+    (permission): permission is FinancePermission =>
+      typeof permission === "string" &&
+      (
+        permission.startsWith("finance.") ||
+        permission === "customerFinance.view"
+      ),
+  );
+
+  const allowedFinanceSections = visibleFinanceSections(financePermissions);
+
   const visibleMenuItems = menuItems.filter((item) => {
     const role = normalizeRole(currentUser.role);
 
@@ -126,7 +143,7 @@ export function Sidebar({
     }
 
     if (item.href === "/finans") {
-      return role === "ADMIN";
+      return canOpenFinanceCenter(financePermissions);
     }
 
     if (item.href === "/operasyonlar") {
@@ -287,7 +304,13 @@ export function Sidebar({
               ) : null}
               {item.href === "/finans" && isActive ? (
                 <div className="ml-7 mt-1 space-y-1 border-l border-slate-200 pl-3 dark:border-slate-700" aria-label="Finans hızlı erişim">
-                  {financeMenuItems.map((financeItem) => {
+                  {financeMenuItems
+                    .filter((financeItem) =>
+                      allowedFinanceSections.includes(
+                        financeItem.name as (typeof allowedFinanceSections)[number],
+                      ),
+                    )
+                    .map((financeItem) => {
                     const financeItemActive = financeHash === financeItem.hash;
                     return (
                       <Link

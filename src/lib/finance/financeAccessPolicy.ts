@@ -18,6 +18,7 @@ export type FinancePermission =
   | "finance.payment.reverse"
   | "finance.transfer.create"
   | "finance.transfer.reverse"
+  | "finance.opening_balance.create"
   | "finance.cash.collection.create"
   | "finance.cash.collection.reverse"
   | "finance.cash.payment.create"
@@ -56,6 +57,7 @@ export type FinanceCapability =
   | "PAYMENT_REVERSE"
   | "TRANSFER_CREATE"
   | "TRANSFER_REVERSE"
+  | "OPENING_BALANCE_CREATE"
   | "CASH_COLLECTION_CREATE"
   | "CASH_COLLECTION_REVERSE"
   | "CASH_PAYMENT_CREATE"
@@ -161,6 +163,10 @@ const CAPABILITY_REQUIREMENTS: Record<
   TRANSFER_REVERSE: {
     permission: "finance.transfer.reverse",
     feature: "customerFinance",
+  },
+  OPENING_BALANCE_CREATE: {
+    permission: "finance.opening_balance.create",
+    feature: "basicFinance",
   },
   CASH_COLLECTION_CREATE: {
     permission: "finance.cash.collection.create",
