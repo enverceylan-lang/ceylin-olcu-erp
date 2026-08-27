@@ -5,6 +5,7 @@ import { getLocalMeasurementById } from "./localMeasurementDb";
 import { useStore } from "@/store/useStore";
 import { loadLocalCustomers, saveLocalCustomerWithoutSync } from "./localCustomerDb";
 import {
+  activateDeferredMeasurementUpdateAfterInsert,
   getPendingSyncEvents,
   markSyncEventsSynced,
   markSyncEventsError,
@@ -554,6 +555,21 @@ export async function pushDeltaSyncEvents(): Promise<{
             version: entityVersion,
           },
         ]);
+
+      if (pendingEvent.operation === "INSERT") {
+        const deferredActivated =
+          await activateDeferredMeasurementUpdateAfterInsert(
+            entityId,
+            pendingEvent.deviceId,
+            entityVersion,
+            pendingEvent.scope,
+          );
+
+        if (!deferredActivated) {
+          clientRejectedIds.push(changeId);
+          continue;
+        }
+      }
 
       safeSyncedIds.push(changeId);
     }

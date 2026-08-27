@@ -4,7 +4,9 @@ import { MeasurementRecord } from '@/store/measurementStore';
 import {
   activateBlockedSyncEvent,
   discardBlockedSyncEvent,
-  enqueueSyncEventDetailed
+  enqueueDeferredMeasurementUpdateAfterInsert,
+  enqueueSyncEventDetailed,
+  rollbackDeferredMeasurementUpdate
 } from './localSyncQueueDb';
 import {
   saveTransferReceipt,
@@ -231,17 +233,21 @@ export async function saveLocalMeasurementWithSync(
     await localMeasurementDb.measurements.get(measurement.id);
   const normalizedMeasurement = normalizeMeasurementLinks(measurement);
 
-  const operation = existingMeasurement ? 'UPDATE' : 'INSERT';
-  const expectedVersion = existingMeasurement
+  const existingVersion = existingMeasurement
     ? Number(existingMeasurement.version)
     : 0;
 
-  if (
-    existingMeasurement &&
-    (!Number.isInteger(expectedVersion) || expectedVersion < 1)
-  ) {
-    throw new Error("MEASUREMENT_EXPECTED_VERSION_MISSING");
-  }
+  const hasCanonicalVersion =
+    !existingMeasurement ||
+    (
+      Number.isInteger(existingVersion) &&
+      existingVersion >= 1
+    );
+
+  const operation = existingMeasurement ? 'UPDATE' : 'INSERT';
+  const expectedVersion = existingMeasurement
+    ? existingVersion
+    : 0;
 
   const measurementScope = readErpScope(normalizedMeasurement);
 
@@ -272,6 +278,43 @@ export async function saveLocalMeasurementWithSync(
     timestamp: new Date().toISOString()
   };
 
+  if (existingMeasurement && !hasCanonicalVersion) {
+    const deferredResult =
+      await enqueueDeferredMeasurementUpdateAfterInsert(
+        measurement.id,
+        payload,
+      );
+
+    if (
+      !deferredResult.success ||
+      !deferredResult.changeId
+    ) {
+      throw new Error(
+        "MEASUREMENT_EXPECTED_VERSION_MISSING",
+      );
+    }
+
+    try {
+      await localMeasurementDb.measurements.put(
+        normalizedMeasurement,
+      );
+    } catch (error: unknown) {
+      const rolledBack =
+        await rollbackDeferredMeasurementUpdate(
+          deferredResult,
+        );
+
+      if (!rolledBack) {
+        throw new Error(
+          "MEASUREMENT_SYNC_COMPENSATION_FAILED",
+        );
+      }
+
+      throw error;
+    }
+
+    return;
+  }
   const enqueueResult = await enqueueSyncEventDetailed(
     'MEASUREMENT',
     measurement.id,

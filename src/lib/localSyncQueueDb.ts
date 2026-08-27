@@ -1,5 +1,6 @@
 import type { ErpScope } from './erpScope';
 import { readErpScope } from './customerTreeScope';
+import { erpScopeMatches } from './erpScope';
 import Dexie, { type Table } from 'dexie';
 import { getDeviceId } from './deviceIdentity';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -295,6 +296,310 @@ export async function enqueueSyncEventDetailed(
   }
 }
 
+export interface DeferredMeasurementUpdateResult
+  extends EnqueueSyncResult {
+  previousPatch?: SyncPatch;
+  previousUpdatedAt?: string;
+  appliedUpdatedAt?: string;
+}
+
+export async function enqueueDeferredMeasurementUpdateAfterInsert(
+  entityId: string,
+  patch: SyncPatch,
+): Promise<DeferredMeasurementUpdateResult> {
+  try {
+    const now = new Date().toISOString();
+    const deviceId = getDeviceId();
+    const sanitizedPatch = sanitizePatch(patch);
+    const patchScope = readErpScope(sanitizedPatch);
+
+    if (!patchScope) {
+      return { success: false };
+    }
+
+    const currentUser = useAuthStore.getState().currentUser;
+    const userId = currentUser?.id || 'unknown';
+
+    return await localSyncQueueDb.transaction(
+      'rw',
+      localSyncQueueDb.pendingSyncEvents,
+      async () => {
+        const entityEvents =
+          await localSyncQueueDb.pendingSyncEvents
+            .where('entityId')
+            .equals(entityId)
+            .toArray();
+
+        const unresolvedInsert = entityEvents.some((event) => {
+          if (
+            event.entityType !== 'MEASUREMENT' ||
+            event.operation !== 'INSERT' ||
+            event.expectedVersion !== 0 ||
+            event.deviceId !== deviceId ||
+            !['PENDING', 'ERROR'].includes(event.syncStatus)
+          ) {
+            return false;
+          }
+
+          const eventScope = readErpScope(event.scope);
+          return Boolean(
+            eventScope &&
+            erpScopeMatches(eventScope, patchScope)
+          );
+        });
+
+        if (!unresolvedInsert) {
+          return { success: false };
+        }
+
+        const deferredCandidates = entityEvents
+          .filter((event) => {
+            if (
+              event.entityType !== 'MEASUREMENT' ||
+              event.operation !== 'UPDATE' ||
+              event.expectedVersion !== 0 ||
+              event.deviceId !== deviceId ||
+              event.syncStatus !== 'BLOCKED'
+            ) {
+              return false;
+            }
+
+            const eventScope = readErpScope(event.scope);
+            return Boolean(
+              eventScope &&
+              erpScopeMatches(eventScope, patchScope)
+            );
+          })
+          .sort((a, b) =>
+            String(b.updatedAt || b.createdAt).localeCompare(
+              String(a.updatedAt || a.createdAt),
+            ),
+          );
+
+        if (deferredCandidates.length > 1) {
+          return { success: false };
+        }
+
+        const existingDeferred = deferredCandidates[0];
+
+        if (existingDeferred) {
+          const previousPatch = existingDeferred.patch;
+          const previousUpdatedAt = existingDeferred.updatedAt;
+
+          const updated =
+            await localSyncQueueDb.pendingSyncEvents.update(
+              existingDeferred.changeId,
+              {
+                patch: sanitizedPatch,
+                scope: patchScope,
+                userId,
+                updatedAt: now,
+              },
+            );
+
+          if (updated !== 1) {
+            return { success: false };
+          }
+
+          return {
+            success: true,
+            changeId: existingDeferred.changeId,
+            deviceId,
+            userId,
+            createdAt: existingDeferred.createdAt,
+            createdNew: false,
+            previousPatch,
+            previousUpdatedAt,
+            appliedUpdatedAt: now,
+          };
+        }
+
+        const changeId =
+          typeof crypto !== 'undefined' && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `chg-${Date.now()}-${Math.random()
+                .toString(36)
+                .slice(2, 9)}`;
+
+        const fullEvent: SyncEvent = {
+          changeId,
+          entityType: 'MEASUREMENT',
+          entityId,
+          operation: 'UPDATE',
+          expectedVersion: 0,
+          patch: sanitizedPatch,
+          scope: patchScope,
+          deviceId,
+          userId,
+          createdAt: now,
+          updatedAt: now,
+          syncStatus: 'BLOCKED',
+          retryCount: 0,
+        };
+
+        await localSyncQueueDb.pendingSyncEvents.put(fullEvent);
+
+        return {
+          success: true,
+          changeId,
+          deviceId,
+          userId,
+          createdAt: now,
+          createdNew: true,
+          appliedUpdatedAt: now,
+        };
+      },
+    );
+  } catch (error: unknown) {
+    console.error(
+      '[SyncQueue] Deferred measurement update enqueue failed.',
+      error,
+    );
+
+    return { success: false };
+  }
+}
+
+export async function rollbackDeferredMeasurementUpdate(
+  result: DeferredMeasurementUpdateResult,
+): Promise<boolean> {
+  try {
+    if (!result.changeId || !result.appliedUpdatedAt) {
+      return false;
+    }
+
+    return await localSyncQueueDb.transaction(
+      'rw',
+      localSyncQueueDb.pendingSyncEvents,
+      async () => {
+        const event =
+          await localSyncQueueDb.pendingSyncEvents.get(
+            result.changeId!,
+          );
+
+        if (!event || event.syncStatus !== 'BLOCKED') {
+          return false;
+        }
+
+        if (event.updatedAt !== result.appliedUpdatedAt) {
+          return false;
+        }
+
+        if (result.createdNew) {
+          await localSyncQueueDb.pendingSyncEvents.delete(
+            result.changeId!,
+          );
+          return true;
+        }
+
+        if (
+          !result.previousPatch ||
+          !result.previousUpdatedAt
+        ) {
+          return false;
+        }
+
+        const restored =
+          await localSyncQueueDb.pendingSyncEvents.update(
+            result.changeId!,
+            {
+              patch: result.previousPatch,
+              updatedAt: result.previousUpdatedAt,
+            },
+          );
+
+        return restored === 1;
+      },
+    );
+  } catch (error: unknown) {
+    console.error(
+      '[SyncQueue] Deferred measurement update rollback failed.',
+      error,
+    );
+
+    return false;
+  }
+}
+
+export async function activateDeferredMeasurementUpdateAfterInsert(
+  entityId: string,
+  deviceId: string,
+  canonicalVersion: number,
+  scopeSource: unknown,
+): Promise<boolean> {
+  try {
+    if (
+      !Number.isInteger(canonicalVersion) ||
+      canonicalVersion < 1
+    ) {
+      return false;
+    }
+
+    const canonicalScope = readErpScope(scopeSource);
+
+    if (!canonicalScope) {
+      return false;
+    }
+
+    return await localSyncQueueDb.transaction(
+      'rw',
+      localSyncQueueDb.pendingSyncEvents,
+      async () => {
+        const entityEvents =
+          await localSyncQueueDb.pendingSyncEvents
+            .where('entityId')
+            .equals(entityId)
+            .toArray();
+
+        const deferred = entityEvents.filter((event) => {
+          if (
+            event.entityType !== 'MEASUREMENT' ||
+            event.operation !== 'UPDATE' ||
+            event.expectedVersion !== 0 ||
+            event.deviceId !== deviceId ||
+            event.syncStatus !== 'BLOCKED'
+          ) {
+            return false;
+          }
+
+          const eventScope = readErpScope(event.scope);
+
+          return Boolean(
+            eventScope &&
+            erpScopeMatches(eventScope, canonicalScope)
+          );
+        });
+
+        if (deferred.length === 0) {
+          return true;
+        }
+
+        if (deferred.length !== 1) {
+          return false;
+        }
+
+        const activated =
+          await localSyncQueueDb.pendingSyncEvents.update(
+            deferred[0].changeId,
+            {
+              expectedVersion: canonicalVersion,
+              syncStatus: 'PENDING',
+              updatedAt: new Date().toISOString(),
+            },
+          );
+
+        return activated === 1;
+      },
+    );
+  } catch (error: unknown) {
+    console.error(
+      '[SyncQueue] Deferred measurement update activation failed.',
+      error,
+    );
+
+    return false;
+  }
+}
 export async function activateBlockedSyncEvent(
   changeId: string
 ): Promise<boolean> {
