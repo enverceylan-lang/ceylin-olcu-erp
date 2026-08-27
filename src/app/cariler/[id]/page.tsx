@@ -300,6 +300,75 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     }, 4000);
   };
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (!customer) return;
+
+      if (
+        salePreparationBridgeHandled ||
+        searchParams.get("openPreparation") !== "1"
+      ) {
+        return;
+      }
+
+      const measurementIds =
+        String(searchParams.get("measurementIds") || "")
+          .split(",")
+          .map(value => value.trim())
+          .filter(Boolean);
+
+      if (measurementIds.length === 0) {
+        setSalePreparationBridgeHandled(true);
+        return;
+      }
+
+      const sourceMeasurement =
+        measurementStore.measurements.find(
+          measurement => measurementIds.includes(measurement.id)
+        );
+
+      if (!sourceMeasurement?.roomId) {
+        setSalePreparationBridgeHandled(true);
+        showToast("Satışa bağlı ölçünün odası bulunamadı.");
+        return;
+      }
+
+      const sourceRoom =
+        customer.rooms?.find(
+          room => room.id === sourceMeasurement.roomId
+        );
+
+      setSalePreparationBridgeHandled(true);
+
+      if (!sourceRoom) {
+        showToast("Satışa bağlı oda bulunamadı.");
+        return;
+      }
+
+      const validationMessage = roomPreparationValidationMessage(
+        sourceRoom,
+        customer.id,
+        measurementStore.measurements,
+      );
+
+      if (validationMessage) {
+        showToast(validationMessage);
+        return;
+      }
+
+      setSelectedRoomForPrep(sourceRoom);
+      setIsPrepModalOpen(true);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    customer,
+    measurementStore.measurements,
+    salePreparationBridgeHandled,
+    searchParams,
+  ]);
+
+
   const executeDelete = async () => {
     if (!deleteConfirm) return;
 
@@ -628,73 +697,6 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     setSelectedRoomForPrep(room);
     setIsPrepModalOpen(true);
   };
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      if (!customer) return;
-
-      if (
-        salePreparationBridgeHandled ||
-        searchParams.get("openPreparation") !== "1"
-      ) {
-        return;
-      }
-
-      const measurementIds =
-        String(searchParams.get("measurementIds") || "")
-          .split(",")
-          .map(value => value.trim())
-          .filter(Boolean);
-
-      if (measurementIds.length === 0) {
-        setSalePreparationBridgeHandled(true);
-        return;
-      }
-
-      const sourceMeasurement =
-        measurementStore.measurements.find(
-          measurement => measurementIds.includes(measurement.id)
-        );
-
-      if (!sourceMeasurement?.roomId) {
-        setSalePreparationBridgeHandled(true);
-        showToast("Satışa bağlı ölçünün odası bulunamadı.");
-        return;
-      }
-
-      const sourceRoom =
-        customer.rooms?.find(
-          room => room.id === sourceMeasurement.roomId
-        );
-
-      setSalePreparationBridgeHandled(true);
-
-      if (!sourceRoom) {
-        showToast("Satışa bağlı oda bulunamadı.");
-        return;
-      }
-
-      const validationMessage = roomPreparationValidationMessage(
-        sourceRoom,
-        customer.id,
-        measurementStore.measurements,
-      );
-
-      if (validationMessage) {
-        showToast(validationMessage);
-        return;
-      }
-
-      setSelectedRoomForPrep(sourceRoom);
-      setIsPrepModalOpen(true);
-    }, 0);
-
-    return () => window.clearTimeout(timer);
-  }, [
-    customer,
-    measurementStore.measurements,
-    salePreparationBridgeHandled,
-    searchParams,
-  ]);
   const toggleRoom = (roomId: string) => {
     setExpandedRooms(prev => ({ ...prev, [roomId]: !prev[roomId] }));
   };

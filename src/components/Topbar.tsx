@@ -134,7 +134,7 @@ firstStatus: ${result.debug.firstStatus}
               <button
                 onClick={handleManualPush}
                 disabled={isPushing}
-                className={`ml-1 flex min-h-10 items-center gap-1 rounded-lg border px-2 text-xs font-semibold transition-colors sm:ml-2 ${
+                className={`ml-1 flex min-h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-lg border px-2 text-xs font-semibold transition-colors sm:ml-2 ${
                   isPushing 
                     ? 'bg-gray-200 text-gray-500 border-gray-300 cursor-wait'
                     : 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50'

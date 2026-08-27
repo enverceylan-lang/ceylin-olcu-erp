@@ -87,6 +87,19 @@ export default function SuperAdminPage() {
     useState<string | null>(null);
   const [supportOpen, setSupportOpen] =
     useState(false);
+  const [globalMediaEnabled, setGlobalMediaEnabled] =
+    useState(false);
+  const [mediaCompanies, setMediaCompanies] =
+    useState<Array<{
+      tenantId: string;
+      companyId: string;
+      name: string;
+      mediaEnabled: boolean;
+    }>>([]);
+  const [mediaEntitlementLoading, setMediaEntitlementLoading] =
+    useState(true);
+  const [mediaEntitlementSaving, setMediaEntitlementSaving] =
+    useState(false);
   const [searchValue, setSearchValue] =
     useState("");
   const [statusFilter, setStatusFilter] =
@@ -122,6 +135,150 @@ export default function SuperAdminPage() {
       email: "",
       phone: ""
     });
+
+
+  const loadMediaEntitlements = useCallback(
+    async (): Promise<void> => {
+      try {
+        const response = await fetch(
+          "/api/platform/media-entitlement",
+          {
+            method: "GET",
+            cache: "no-store",
+            credentials: "same-origin",
+            headers: {
+              Authorization: `Bearer ${useAuthStore.getState().sessionToken || ""}`,
+            },
+          },
+        );
+
+        const payload =
+          (await response.json()) as {
+            success?: boolean;
+            globalMediaEnabled?: boolean;
+            companies?: Array<{
+              tenantId: string;
+              companyId: string;
+              name: string;
+              mediaEnabled: boolean;
+            }>;
+          };
+
+        if (
+          !response.ok ||
+          payload.success !== true ||
+          !Array.isArray(payload.companies)
+        ) {
+          setGlobalMediaEnabled(false);
+          setMediaCompanies([]);
+          setNotice("Medya yetki bilgisi alinamadi.");
+          return;
+        }
+
+        setGlobalMediaEnabled(
+          payload.globalMediaEnabled === true,
+        );
+        setMediaCompanies(payload.companies);
+      } catch {
+        setGlobalMediaEnabled(false);
+        setMediaCompanies([]);
+        setNotice("Medya yetki bilgisi alinamadi.");
+      } finally {
+        setMediaEntitlementLoading(false);
+      }
+    },
+    [],
+  );
+
+
+  const saveGlobalMediaEntitlement = useCallback(
+    async (enabled: boolean): Promise<void> => {
+      setMediaEntitlementSaving(true);
+      try {
+        const response = await fetch(
+          "/api/platform/media-entitlement",
+          {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+              Authorization: `Bearer ${useAuthStore.getState().sessionToken || ""}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              scope: "GLOBAL",
+              enabled,
+            }),
+          },
+        );
+
+        if (!response.ok) {
+          setNotice("Global medya ayari kaydedilemedi.");
+          return;
+        }
+
+        await loadMediaEntitlements();
+        setNotice("Global medya ayari kaydedildi.");
+      } catch {
+        setNotice("Global medya ayari kaydedilemedi.");
+      } finally {
+        setMediaEntitlementSaving(false);
+      }
+    },
+    [loadMediaEntitlements],
+  );
+
+
+  const saveCompanyMediaEntitlement = useCallback(
+    async (
+      tenantId: string,
+      companyId: string,
+      enabled: boolean,
+    ): Promise<void> => {
+      setMediaEntitlementSaving(true);
+      try {
+        const response = await fetch(
+          "/api/platform/media-entitlement",
+          {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+              Authorization: `Bearer ${useAuthStore.getState().sessionToken || ""}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              scope: "COMPANY",
+              tenantId,
+              companyId,
+              enabled,
+            }),
+          },
+        );
+
+        if (!response.ok) {
+          setNotice("Sirket medya ayari kaydedilemedi.");
+          return;
+        }
+
+        await loadMediaEntitlements();
+        setNotice("Sirket medya ayari kaydedildi.");
+      } catch {
+        setNotice("Sirket medya ayari kaydedilemedi.");
+      } finally {
+        setMediaEntitlementSaving(false);
+      }
+    },
+    [loadMediaEntitlements],
+  );
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void loadMediaEntitlements();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [loadMediaEntitlements]);
 
   const loadCompanies = useCallback(
     async (): Promise<void> => {
@@ -600,6 +757,59 @@ export default function SuperAdminPage() {
           </button>
         </div>
       )}
+
+      <section className="rounded-2xl border border-cyan-200 bg-cyan-50/60 p-5 shadow-sm dark:border-cyan-500/20 dark:bg-cyan-500/5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold text-slate-950 dark:text-white">Medya Yetkisi</h2>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+              Global ana anahtar ve tenant/company bazlı şirket yetkisi birlikte uygulanır.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={mediaEntitlementLoading || mediaEntitlementSaving}
+            onClick={() => void saveGlobalMediaEntitlement(!globalMediaEnabled)}
+            className="rounded-lg border border-cyan-300 bg-white px-3 py-2 text-sm font-semibold text-cyan-800 disabled:opacity-50 dark:border-cyan-500/30 dark:bg-slate-900 dark:text-cyan-200"
+          >
+            {globalMediaEnabled ? "Global Medya: AÇIK" : "Global Medya: KAPALI"}
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-2">
+          {mediaCompanies.map(company => (
+            <div
+              key={`${company.tenantId}:${company.companyId}`}
+              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900"
+            >
+              <div>
+                <p className="font-semibold text-slate-800 dark:text-slate-100">{company.name}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {company.tenantId} / {company.companyId}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={mediaEntitlementLoading || mediaEntitlementSaving}
+                onClick={() => void saveCompanyMediaEntitlement(
+                  company.tenantId,
+                  company.companyId,
+                  !company.mediaEnabled,
+                )}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50 dark:border-slate-600 dark:text-slate-200"
+              >
+                {company.mediaEnabled ? "Medya: AÇIK" : "Medya: KAPALI"}
+              </button>
+            </div>
+          ))}
+
+          {!mediaEntitlementLoading && mediaCompanies.length === 0 && (
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Şirket medya kaydı bulunamadı.
+            </p>
+          )}
+        </div>
+      </section>
 
       <section aria-label="Platform ├Âzeti" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {summaryCards.map(card => {

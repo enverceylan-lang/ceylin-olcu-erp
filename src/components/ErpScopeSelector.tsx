@@ -59,14 +59,14 @@ export function ErpScopeSelector() {
   };
 
   return (
-    <label className="flex min-w-0 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 dark:border-gray-700 dark:bg-gray-800">
+    <label className="flex min-w-0 max-w-[150px] items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 dark:border-gray-700 dark:bg-gray-800 sm:max-w-none sm:gap-2">
       <Building2 className="h-4 w-4 shrink-0 text-indigo-600" />
       <span className="sr-only">Aktif şirket, şube ve dönem</span>
       <select
         value={selected}
         disabled={!canSelect || busy || scopes.length < 2}
         onChange={(event) => void changeScope(event.target.value)}
-        className="max-w-48 min-w-0 bg-transparent text-xs font-semibold text-gray-700 outline-none disabled:cursor-default dark:text-gray-200 sm:max-w-64"
+        className="max-w-[112px] min-w-0 truncate bg-transparent text-xs font-semibold text-gray-700 outline-none disabled:cursor-default dark:text-gray-200 sm:max-w-48 lg:max-w-64"
         title="Aktif şirket, şube ve muhasebe dönemi"
       >
         {scopes.map((scope) => (
