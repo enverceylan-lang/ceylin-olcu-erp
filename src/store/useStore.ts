@@ -3,9 +3,10 @@ import { create } from 'zustand';
 import { normalizeCariAddress, normalizeCariName, normalizeCariRegion } from '@/lib/stringUtils';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { useAuthStore, normalizeRole } from './useAuthStore';
-import { saveLocalCustomer, saveLocalCustomers, loadLocalCustomers } from '@/lib/localCustomerDb';
+import { saveLocalCustomer, saveLocalCustomerWithoutSync, saveLocalCustomers, loadLocalCustomers } from '@/lib/localCustomerDb';
 import { shouldCreateTailorProductionItem } from '@/lib/productionRouting';
-import { applyErpScope, inheritConsistentErpScope } from '@/lib/customerTreeScope';
+import { applyErpScope, inheritConsistentErpScope, readErpScope } from '@/lib/customerTreeScope';
+import { loadVerifiedClientErpScope } from '@/lib/clientErpScope';
 
 
 // ─── Store Change Notification for Sync ───
@@ -1344,13 +1345,55 @@ export const useStore = create<AppState>()(
         }
 
         const now = new Date().toISOString();
+        const authState = useAuthStore.getState();
+        const activeMeasurementScope = await loadVerifiedClientErpScope(
+          authState.sessionToken,
+        );
         const inheritedMeasurementScope = inheritConsistentErpScope(
           targetCustomer,
           targetRoom,
           targetOpening,
+          activeMeasurementScope,
         );
         if (!inheritedMeasurementScope) {
           throw new Error('MEASUREMENT_SCOPE_MISSING');
+        }
+
+        const requiresLegacyScopeRehydrate =
+          !readErpScope(targetCustomer) ||
+          !readErpScope(targetRoom) ||
+          !readErpScope(targetOpening);
+
+        if (requiresLegacyScopeRehydrate) {
+          const rehydratedOpening = applyErpScope(
+            targetOpening,
+            inheritedMeasurementScope,
+          );
+          const rehydratedRoom = applyErpScope(
+            {
+              ...targetRoom,
+              windows: targetRoom.windows.map(opening =>
+                opening.id === windowId ? rehydratedOpening : opening
+              ),
+            },
+            inheritedMeasurementScope,
+          );
+          const rehydratedCustomer = applyErpScope(
+            {
+              ...targetCustomer,
+              rooms: targetCustomer.rooms.map(room =>
+                room.id === roomId ? rehydratedRoom : room
+              ),
+            },
+            inheritedMeasurementScope,
+          );
+
+          await saveLocalCustomerWithoutSync(rehydratedCustomer);
+          set(state => ({
+            customers: state.customers.map(customer =>
+              customer.id === customerId ? rehydratedCustomer : customer
+            ),
+          }));
         }
         const measurementBase: ProductMeasurement = {
           ...measurement,
