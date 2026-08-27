@@ -279,6 +279,8 @@ async function assertTargetAuthority(
     );
   }
 
+  if (!isAdmin(context)) return false;
+
   const table =
     targetType === "CUSTOMER"
       ? "customers"
@@ -286,24 +288,43 @@ async function assertTargetAuthority(
         ? "rooms"
         : "openings";
 
-  const { data, error } = await context.supabase
-    .from(table)
-    .select("id")
-    .eq("id", targetId)
-    .eq("tenant_id", scope.tenant_id)
-    .eq("company_id", scope.company_id)
-    .eq("branch_id", scope.branch_id)
-    .eq(
-      "accounting_period_id",
-      scope.accounting_period_id,
-    )
-    .maybeSingle();
+  const { data: canonicalTarget, error: canonicalError } =
+    await context.supabase
+      .from(table)
+      .select("id")
+      .eq("id", targetId)
+      .eq("tenant_id", scope.tenant_id)
+      .eq("company_id", scope.company_id)
+      .eq("branch_id", scope.branch_id)
+      .eq(
+        "accounting_period_id",
+        scope.accounting_period_id,
+      )
+      .maybeSingle();
 
-  if (error || !data) return false;
+  if (canonicalError) return false;
+  if (canonicalTarget) return true;
 
-  return isAdmin(context);
+  const { data: scopedEvent, error: scopedEventError } =
+    await context.supabase
+      .from("measurement_changes")
+      .select("change_id")
+      .eq("entity_type", targetType)
+      .eq("entity_id", targetId)
+      .eq("tenant_id", scope.tenant_id)
+      .eq("company_id", scope.company_id)
+      .eq("branch_id", scope.branch_id)
+      .eq(
+        "accounting_period_id",
+        scope.accounting_period_id,
+      )
+      .limit(1)
+      .maybeSingle();
+
+  if (scopedEventError || !scopedEvent) return false;
+
+  return true;
 }
-
 function rpcScope(context: AuthContext) {
   return {
     p_actor_user_id: context.user.id,

@@ -137,7 +137,7 @@ export function CanonicalMediaPanel({
       setMessage(
         error instanceof Error
           ? error.message
-          : "Medya listesi alÃƒâ€Ã‚Â±namadÃƒâ€Ã‚Â±.",
+          : "Medya listesi alınamadı.",
       );
     }
   }, [isAdmin, mediaEnabled, sessionToken, targetId, targetType]);
@@ -163,7 +163,7 @@ export function CanonicalMediaPanel({
           setMessage(
             error instanceof Error
               ? error.message
-              : "Medya listesi alÃƒâ€Ã‚Â±namadÃƒâ€Ã‚Â±.",
+              : "Medya listesi alınamadı.",
           );
         }
       });
@@ -193,14 +193,14 @@ export function CanonicalMediaPanel({
         await refresh();
       } else {
         setMessage(
-          "FotoÃƒâ€Ã…Â¸raf gÃƒÆ’Ã‚Â¼venli Ãƒâ€¦Ã…Â¸ekilde gÃƒÆ’Ã‚Â¶nderildi. ÃƒÆ’Ã¢â‚¬â€œlÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â¼ fotoÃƒâ€Ã…Â¸raflarÃƒâ€Ã‚Â± yalnÃƒâ€Ã‚Â±z ADMIN tarafÃƒâ€Ã‚Â±ndan gÃƒÆ’Ã‚Â¶rÃƒÆ’Ã‚Â¼ntÃƒÆ’Ã‚Â¼lenebilir.",
+          "Fotoğraf güvenli şekilde gönderildi. Ölçü fotoğrafları yalnız ADMIN tarafından görüntülenebilir.",
         );
       }
     } catch (error) {
       setMessage(
         error instanceof Error
           ? error.message
-          : "FotoÃƒâ€Ã…Â¸raf yÃƒÆ’Ã‚Â¼klenemedi.",
+          : "Fotoğraf yüklenemedi.",
       );
     } finally {
       setBusy(false);
@@ -222,7 +222,7 @@ export function CanonicalMediaPanel({
       setMessage(
         error instanceof Error
           ? error.message
-          : "FotoÃƒâ€Ã…Â¸raf arÃƒâ€¦Ã…Â¸ivlenemedi.",
+          : "Fotoğraf arşivlenemedi.",
       );
     } finally {
       setBusy(false);
@@ -251,7 +251,7 @@ export function CanonicalMediaPanel({
             >
               <Image
                 src={item.signedUrl}
-                alt="Canonical fotoÃƒâ€Ã…Â¸raf"
+                alt="Canonical fotoğraf"
                 fill
                 unoptimized
                 sizes="64px"
@@ -264,7 +264,7 @@ export function CanonicalMediaPanel({
                   void archive(item.linkId)
                 }
                 className="absolute right-0 top-0 rounded-bl bg-red-600 p-1 text-white disabled:opacity-50"
-                aria-label="FotoÃƒâ€Ã…Â¸rafÃƒâ€Ã‚Â± gÃƒÆ’Ã‚Â¶rÃƒÆ’Ã‚Â¼nÃƒÆ’Ã‚Â¼mden kaldÃƒâ€Ã‚Â±r"
+                aria-label="Fotoğrafı görünümden kaldır"
               >
                 <Trash2 className="h-3 w-3" />
               </button>
@@ -300,7 +300,7 @@ export function CanonicalMediaPanel({
             ) : (
               <Camera className="h-3.5 w-3.5" />
             )}
-            FotoÃƒâ€Ã…Â¸raf Ekle
+            Fotoğraf Ekle
           </button>
         </>
       )}
