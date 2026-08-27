@@ -1,0 +1,88 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+const sql = readFileSync(
+  "docs/sql/20260827_finance_counterparty_payment_atomic_v1.sql",
+  "utf8",
+);
+
+assert.match(
+  sql,
+  /create or replace function public\.persist_finance_counterparty_payment_v1\(/i,
+);
+
+assert.match(sql, /security definer/i);
+assert.match(sql, /set search_path = pg_catalog,\s*public/i);
+assert.match(sql, /auth\.role\(\) is distinct from 'service_role'/i);
+
+assert.match(
+  sql,
+  /v_kind <> 'PAYMENT'[\s\S]*v_action <> 'CREATE'[\s\S]*v_channel not in \('CASH','BANK'\)/i,
+);
+
+assert.match(
+  sql,
+  /FINANCE_COUNTERPARTY_PAYMENT_CROSS_AUTHORITY_MISMATCH/i,
+);
+
+assert.match(
+  sql,
+  /SYS-COUNTERPARTY-PAYABLE-/i,
+);
+
+assert.match(
+  sql,
+  /account_type,[\s\S]*'CLEARING'/i,
+);
+
+assert.match(
+  sql,
+  /jsonb_set\([\s\S]*\{accounts,counterAccountId\}/i,
+);
+
+assert.match(
+  sql,
+  /public\.persist_finance_operation_v1\(/i,
+);
+
+assert.match(
+  sql,
+  /public\.persist_counterparty_payable_movement_v1\(/i,
+);
+
+assert.match(
+  sql,
+  /FINANCE_COUNTERPARTY_PAYMENT_PAYABLE_FAILED/i,
+);
+
+assert.match(
+  sql,
+  /FINANCE_COUNTERPARTY_PAYMENT_OUTCOME_MISMATCH/i,
+);
+
+assert.match(
+  sql,
+  /v_finance_outcome not in \('CREATED','REPLAY'\)/i,
+);
+
+assert.match(
+  sql,
+  /v_payable_outcome not in \('CREATED','REPLAY'\)/i,
+);
+
+assert.match(
+  sql,
+  /revoke all[\s\S]*from public,\s*anon,\s*authenticated,\s*service_role/i,
+);
+
+assert.match(
+  sql,
+  /grant execute[\s\S]*to service_role/i,
+);
+
+assert.doesNotMatch(
+  sql,
+  /\bdelete\s+from\s+public\.(finance_transactions|counterparty_payable_movements)/i,
+);
+
+console.log("FINANCE_COUNTERPARTY_PAYMENT_ATOMIC_SQL_CONTRACT: PAK");

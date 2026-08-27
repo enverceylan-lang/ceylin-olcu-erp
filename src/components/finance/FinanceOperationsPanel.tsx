@@ -13,6 +13,7 @@ import {
 import type { ErpScope } from "@/lib/erpScope";
 import type { FinancePermission } from "@/lib/finance/financeAccessPolicy";
 import { CollectionWorkspace } from "@/components/finance/CollectionWorkspace";
+import { PaymentWorkspace } from "@/components/finance/PaymentWorkspace";
 import {
   visibleFinanceCollectionItems,
   visibleFinancePaymentItems,
@@ -281,6 +282,13 @@ export default function FinanceOperationsPanel({
 
           {activeItem && section === "Tahsilat" ? (
             <CollectionWorkspace
+              key={activeItem}
+              activeItem={activeItem}
+              scope={scope}
+              permissions={permissions}
+            />
+          ) : activeItem && section === "Ödeme" ? (
+            <PaymentWorkspace
               key={activeItem}
               activeItem={activeItem}
               scope={scope}

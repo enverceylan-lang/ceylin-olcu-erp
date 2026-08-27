@@ -11,6 +11,10 @@ import {
   persistFinanceOperationV1,
   type FinanceOperationsRpcClient
 } from "@/lib/finance/financeOperationsSupabaseGateway";
+import {
+  persistFinanceCounterpartyPaymentV1,
+  type FinanceCounterpartyPaymentRpcClient
+} from "@/lib/finance/financeCounterpartyPaymentSupabaseGateway";
 import { decidePosServerAuthorityContract } from "@/lib/finance/posServerAuthorityPolicy";
 import {
   persistFinancePosAuthorityV1,
@@ -35,6 +39,27 @@ function hasPosCommand(body: unknown): boolean {
     !Array.isArray(body) &&
     Object.prototype.hasOwnProperty.call(body, "posCommand")
   );
+}
+
+type PaymentCounterpartyType =
+  | "SUPPLIER"
+  | "TAILOR"
+  | "INSTALLER";
+
+function readPaymentCounterpartyType(
+  body: unknown,
+): PaymentCounterpartyType | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return null;
+  }
+
+  const value = (body as { counterpartyType?: unknown }).counterpartyType;
+
+  return value === "SUPPLIER" ||
+    value === "TAILOR" ||
+    value === "INSTALLER"
+    ? value
+    : null;
 }
 
 export async function POST(request: NextRequest) {
@@ -184,13 +209,89 @@ export async function POST(request: NextRequest) {
     accountingPeriodId: context.scope.accountingPeriodId
   };
 
-  try {
-    const result = await persistFinanceOperationV1(
-      supabaseServer as unknown as FinanceOperationsRpcClient,
-      serverOperation as unknown as Record<string, unknown>,
-      user.id,
-      stableFinanceOperationHash(serverOperation)
+  const atomicCounterpartyPayment =
+    serverOperation.kind === "PAYMENT" &&
+    (
+      serverOperation.channel === "CASH" ||
+      serverOperation.channel === "BANK"
+    ) &&
+    serverOperation.action === "CREATE";
+
+  const paymentCounterpartyType =
+    atomicCounterpartyPayment
+      ? readPaymentCounterpartyType(body)
+      : null;
+
+  if (
+    atomicCounterpartyPayment &&
+    (
+      !paymentCounterpartyType ||
+      !serverOperation.source.counterpartyId ||
+      !serverOperation.source.sourceDocumentId
+    )
+  ) {
+    return json(
+      {
+        success: false,
+        error: "FINANCE_COUNTERPARTY_PAYMENT_SOURCE_INVALID"
+      },
+      422
     );
+  }
+
+  if (
+    serverOperation.kind === "PAYMENT" &&
+    !atomicCounterpartyPayment
+  ) {
+    return json(
+      {
+        success: false,
+        error: "FINANCE_COUNTERPARTY_PAYMENT_ATOMIC_AUTHORITY_REQUIRED"
+      },
+      422
+    );
+  }
+
+  try {
+    const result = atomicCounterpartyPayment
+      ? await persistFinanceCounterpartyPaymentV1(
+          supabaseServer as unknown as FinanceCounterpartyPaymentRpcClient,
+          serverOperation as unknown as Record<string, unknown>,
+          {
+            movementId: `${serverOperation.operationId}:PAYABLE`,
+            idempotencyKey: `${serverOperation.idempotencyKey}:PAYABLE`,
+            tenantId: context.scope.tenantId,
+            companyId: context.scope.companyId,
+            branchId: context.scope.branchId,
+            accountingPeriodId: context.scope.accountingPeriodId,
+            counterpartyCustomerId: serverOperation.source.counterpartyId,
+            counterpartyType: paymentCounterpartyType,
+            kind: "PAYMENT",
+            amount: serverOperation.amount,
+            currency: serverOperation.currency,
+            occurredAt: serverOperation.occurredAt,
+            recordedAt: serverOperation.occurredAt,
+            sourceDocumentId: serverOperation.source.sourceDocumentId,
+            operationId: serverOperation.operationId,
+            sourcePaymentId: serverOperation.operationId,
+            note: serverOperation.description || null
+          },
+          {
+            actorUserId: user.id,
+            action: "CREATE",
+            occurredAt: serverOperation.occurredAt,
+            operationId: serverOperation.operationId,
+            sourceDocumentId: serverOperation.source.sourceDocumentId
+          },
+          user.id,
+          stableFinanceOperationHash(serverOperation)
+        )
+      : await persistFinanceOperationV1(
+          supabaseServer as unknown as FinanceOperationsRpcClient,
+          serverOperation as unknown as Record<string, unknown>,
+          user.id,
+          stableFinanceOperationHash(serverOperation)
+        );
 
     if (result.outcome === "CONFLICT") {
       return json(
