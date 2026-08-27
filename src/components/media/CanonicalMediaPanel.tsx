@@ -23,6 +23,11 @@ import {
   type CanonicalPhotoPurpose,
   type CanonicalPhotoTargetType,
 } from "@/lib/mediaCanonicalClient";
+import {
+  canAccessAdminManagedMedia,
+  canCreateMeasurementMedia,
+  canEditFinalizedMedia,
+} from "@/lib/mediaLifecycleAuthority";
 
 type Props = {
   targetType: CanonicalPhotoTargetType;
@@ -39,7 +44,7 @@ export function CanonicalMediaPanel({
   actorRole,
   compact = false,
 }: Props) {
-  const { sessionToken } = useAuthStore();
+  const { sessionToken, currentUser } = useAuthStore();
   const role = String(actorRole || "").toUpperCase();
   const isAdmin = role === "ADMIN";
   const [mediaEntitlement, setMediaEntitlement] =
@@ -56,9 +61,22 @@ export function CanonicalMediaPanel({
   const mediaEnabled =
     mediaEntitlementReady &&
     mediaEntitlement.enabled;
+  const lifecycleUser = {
+    role,
+    permissions: currentUser?.permissions,
+  };
+
   const canUpload =
     mediaEnabled &&
-    (isAdmin || targetType === "MEASUREMENT");
+    (
+      targetType === "MEASUREMENT"
+        ? canCreateMeasurementMedia(lifecycleUser)
+        : canAccessAdminManagedMedia(lifecycleUser)
+    );
+
+  const canArchive =
+    mediaEnabled &&
+    canEditFinalizedMedia(lifecycleUser);
 
   const [items, setItems] = useState<
     CanonicalMediaItem[]
@@ -211,7 +229,7 @@ export function CanonicalMediaPanel({
   }
 
   async function archive(linkId: string) {
-    if (!isAdmin || busy) return;
+    if (!canArchive || busy) return;
 
     setBusy(true);
     setMessage(null);

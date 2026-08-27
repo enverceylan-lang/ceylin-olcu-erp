@@ -7,6 +7,11 @@ import { readRequestedErpScopeId } from "@/lib/erpActiveScopeCookie";
 import { loadShadowErpContext } from "@/lib/serverErpContext";
 import { loadMediaEntitlement } from "@/lib/serverMediaEntitlement";
 
+import {
+  canAccessAdminManagedMedia,
+  canEditFinalizedMedia,
+  canMutateMeasurementMedia,
+} from "@/lib/mediaLifecycleAuthority";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -195,9 +200,6 @@ async function loadContext(
   };
 }
 
-function isAdmin(context: AuthContext): boolean {
-  return String(context.user.role || "").toUpperCase() === "ADMIN";
-}
 
 function normalizeTargetType(value: unknown): MediaTargetType | null {
   const clean = String(value || "").trim().toUpperCase();
@@ -241,89 +243,89 @@ function purposeMatchesTarget(
   );
 }
 
+async function loadMediaLifecycleUser(
+  context: AuthContext,
+): Promise<{
+  role?: string | null;
+  permissions: string[];
+} | null> {
+  const { data, error } = await context.supabase
+    .from("users")
+    .select("role,permissions")
+    .eq("id", context.user.id)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  const rawPermissions = Array.isArray(data.permissions)
+    ? data.permissions
+    : [];
+
+  return {
+    role:
+      typeof data.role === "string"
+        ? data.role
+        : context.user.role,
+    permissions: rawPermissions
+      .filter(
+        (permission): permission is string =>
+          typeof permission === "string",
+      )
+      .map((permission) => permission.trim())
+      .filter(Boolean),
+  };
+}
+
 async function assertTargetAuthority(
   context: AuthContext,
   targetType: MediaTargetType,
   targetId: string,
   operation: "UPLOAD" | "READ" | "MUTATE",
 ): Promise<boolean> {
-  const scope = {
-    tenant_id: context.tenantId,
-    company_id: context.companyId,
-    branch_id: context.branchId,
-    accounting_period_id: context.accountingPeriodId,
-  };
-
-  if (targetType === "MEASUREMENT") {
-    const { data, error } = await context.supabase
-      .from("measurements")
-      .select("id,measuredById")
-      .eq("id", targetId)
-      .eq("tenant_id", scope.tenant_id)
-      .eq("company_id", scope.company_id)
-      .eq("branch_id", scope.branch_id)
-      .eq(
-        "accounting_period_id",
-        scope.accounting_period_id,
-      )
-      .maybeSingle();
-
-    if (error || !data) return false;
-
-    if (isAdmin(context)) return true;
-    if (operation !== "UPLOAD") return false;
-
-    return (
-      String(data.measuredById || "") ===
-      String(context.user.id)
-    );
+  if (operation === "READ") {
+    return true;
   }
 
-  if (!isAdmin(context)) return false;
+  const user = await loadMediaLifecycleUser(context);
 
-  const table =
-    targetType === "CUSTOMER"
-      ? "customers"
-      : targetType === "ROOM"
-        ? "rooms"
-        : "openings";
+  if (!user) {
+    return false;
+  }
 
-  const { data: canonicalTarget, error: canonicalError } =
-    await context.supabase
-      .from(table)
-      .select("id")
-      .eq("id", targetId)
-      .eq("tenant_id", scope.tenant_id)
-      .eq("company_id", scope.company_id)
-      .eq("branch_id", scope.branch_id)
-      .eq(
-        "accounting_period_id",
-        scope.accounting_period_id,
-      )
-      .maybeSingle();
+  if (targetType !== "MEASUREMENT") {
+    if (operation === "MUTATE") {
+      return canEditFinalizedMedia(user);
+    }
 
-  if (canonicalError) return false;
-  if (canonicalTarget) return true;
+    return canAccessAdminManagedMedia(user);
+  }
 
-  const { data: scopedEvent, error: scopedEventError } =
-    await context.supabase
-      .from("measurement_changes")
-      .select("change_id")
-      .eq("entity_type", targetType)
-      .eq("entity_id", targetId)
-      .eq("tenant_id", scope.tenant_id)
-      .eq("company_id", scope.company_id)
-      .eq("branch_id", scope.branch_id)
-      .eq(
-        "accounting_period_id",
-        scope.accounting_period_id,
-      )
-      .limit(1)
-      .maybeSingle();
+  const {
+    data: canonicalMeasurement,
+    error: canonicalMeasurementError,
+  } = await context.supabase
+    .from("measurements")
+    .select("id")
+    .eq("id", targetId)
+    .eq("tenant_id", context.tenantId)
+    .eq("company_id", context.companyId)
+    .eq("branch_id", context.branchId)
+    .eq(
+      "accounting_period_id",
+      context.accountingPeriodId,
+    )
+    .maybeSingle();
 
-  if (scopedEventError || !scopedEvent) return false;
+  if (canonicalMeasurementError) {
+    return false;
+  }
 
-  return true;
+  const finalized = Boolean(canonicalMeasurement);
+
+  return canMutateMeasurementMedia(
+    user,
+    finalized,
+  );
 }
 function rpcScope(context: AuthContext) {
   return {
@@ -825,15 +827,6 @@ async function listMedia(
   req: NextRequest,
   context: AuthContext,
 ): Promise<NextResponse> {
-  if (!isAdmin(context)) {
-    return json(
-      {
-        success: false,
-        error: "MEDIA_READ_ADMIN_ONLY",
-      },
-      403,
-    );
-  }
 
   const targetType = normalizeTargetType(
     req.nextUrl.searchParams.get("targetType"),
@@ -947,11 +940,18 @@ async function mutateLink(
   body: Record<string, unknown>,
   action: "archive" | "restore",
 ): Promise<NextResponse> {
-  if (!isAdmin(context)) {
+
+  const lifecycleUser =
+    await loadMediaLifecycleUser(context);
+
+  if (
+    !lifecycleUser ||
+    !canEditFinalizedMedia(lifecycleUser)
+  ) {
     return json(
       {
         success: false,
-        error: "MEDIA_MUTATION_ADMIN_ONLY",
+        error: "MEDIA_FINALIZED_EDIT_FORBIDDEN",
       },
       403,
     );
