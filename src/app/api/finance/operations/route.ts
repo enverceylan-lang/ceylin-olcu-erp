@@ -13,7 +13,9 @@ import {
 } from "@/lib/finance/financeOperationsSupabaseGateway";
 import {
   persistFinanceCounterpartyPaymentV1,
-  type FinanceCounterpartyPaymentRpcClient
+  persistFinanceCounterpartyPaymentReversalV1,
+  type FinanceCounterpartyPaymentRpcClient,
+  type FinanceCounterpartyPaymentReversalRpcClient
 } from "@/lib/finance/financeCounterpartyPaymentSupabaseGateway";
 import { decidePosServerAuthorityContract } from "@/lib/finance/posServerAuthorityPolicy";
 import {
@@ -209,6 +211,61 @@ export async function POST(request: NextRequest) {
     accountingPeriodId: context.scope.accountingPeriodId
   };
 
+  const atomicCounterpartyPaymentReverse =
+    serverOperation.kind === "PAYMENT" &&
+    (serverOperation.channel === "CASH" ||
+      serverOperation.channel === "BANK") &&
+    serverOperation.action === "REVERSE";
+
+  if (atomicCounterpartyPaymentReverse) {
+    const result = await persistFinanceCounterpartyPaymentReversalV1(
+      supabaseServer as unknown as FinanceCounterpartyPaymentReversalRpcClient,
+      serverOperation as unknown as Record<string, unknown>,
+      {
+        actorUserId: user.id,
+        action: "CREATE",
+        occurredAt: serverOperation.occurredAt,
+        note: serverOperation.description ?? null
+      },
+      user.id,
+      stableFinanceOperationHash(serverOperation)
+    );
+
+    if (result.outcome === "CONFLICT") {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: result.reason ?? "FINANCE_COUNTERPARTY_PAYMENT_REVERSAL_CONFLICT",
+          operationId: result.operation_id
+        },
+        { status: 409 }
+      );
+    }
+
+    if (result.outcome === "REJECT") {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: result.reason ?? "FINANCE_COUNTERPARTY_PAYMENT_REVERSAL_REJECTED",
+          operationId: result.operation_id
+        },
+        { status: 422 }
+      );
+    }
+
+    return NextResponse.json(
+      {
+        ok: true,
+        outcome: result.outcome,
+        operationId: result.operation_id,
+        transactionIds: result.transaction_ids,
+        movementId: result.movement_id
+      },
+      {
+        status: result.outcome === "CREATED" ? 201 : 200
+      }
+    );
+  }
   const atomicCounterpartyPayment =
     serverOperation.kind === "PAYMENT" &&
     (
