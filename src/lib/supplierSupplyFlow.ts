@@ -30,6 +30,7 @@ export type SupplierOrderPurpose =
 export interface SupplierOrderRequest extends ErpScope {
   id: string;
   idempotencyKey: string;
+  supplierOrderLineId?: string;
   allocationId: string;
   supplierId: string;
   purchaseOrderId: string;
@@ -79,6 +80,7 @@ export interface SupplierReceiptRequest extends ErpScope {
   id: string;
   idempotencyKey: string;
   supplierOrderId: string;
+  supplierOrderLineId?: string;
   receivedQuantity: number;
   receivedByUserId: string;
   receivedAt: string;
@@ -150,6 +152,8 @@ function sameSupplierPayload(
 ): boolean {
   return (
     request.id === order.id &&
+    (request.supplierOrderLineId ?? "") ===
+      (order.supplierOrderLineId ?? "") &&
     request.allocationId === order.allocationId &&
     request.supplierId === order.supplierId &&
     request.purchaseOrderId === order.purchaseOrderId &&
@@ -300,6 +304,8 @@ export function decideSupplierReceipt(
       replay.id !== request.id ||
       replay.supplierOrderId !==
         request.supplierOrderId ||
+      (replay.supplierOrderLineId ?? "") !==
+        (request.supplierOrderLineId ?? "") ||
       Math.abs(
         replay.receivedQuantity -
           request.receivedQuantity

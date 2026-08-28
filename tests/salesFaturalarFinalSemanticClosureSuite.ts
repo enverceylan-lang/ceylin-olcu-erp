@@ -21,8 +21,8 @@ assert.match(access, /SALE_APPROVE_PERMISSION/);
 
 assert.match(sidebar, /\{\s*name:\s*"Faturalar",\s*href:\s*"\/satis"/);
 assert.match(sidebar, /"Satış İade",\s*href:\s*"\/satis-iade",\s*enabled:\s*true/);
-assert.match(sidebar, /"Alış",\s*href:\s*"\/alis",\s*enabled:\s*false/);
-assert.match(sidebar, /"Alış İade",\s*href:\s*"\/alis-iade",\s*enabled:\s*false/);
+assert.match(sidebar, /"Alış",\s*href:\s*"\/alis",\s*enabled:\s*true/);
+assert.match(sidebar, /"Alış İade",\s*href:\s*"\/alis-iade",\s*enabled:\s*true/);
 assert.doesNotMatch(sidebar, /\{\s*name:\s*"Raporlar",\s*href:\s*"\/raporlar",\s*icon:\s*FileText/);
 assert.match(sidebar, /appPathname === "\/satis-iade"/);
 assert.match(sidebar, /appPathname === "\/raporlar"/);

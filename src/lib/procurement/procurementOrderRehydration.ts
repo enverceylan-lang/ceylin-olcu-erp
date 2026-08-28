@@ -4,7 +4,7 @@ import type { SupplierOrder, SupplierOrderPurpose, SupplierOrderUnit } from "@/l
 
 const EPSILON = 0.000001;
 export interface CentralProcurementLine {
-  supplierOrderId:string;saleId:string;saleItemId:string;stockItemId:string;supplierId:string;
+  supplierOrderId:string;supplierOrderLineId:string;saleId:string;saleItemId:string;stockItemId:string;supplierId:string;
   productionOrderId:string;allocationId:string;purpose:SupplierOrderPurpose;
   orderedQuantity:number;orderedUnit:SupplierOrderUnit;receivedQuantity:number;
   idempotencyKey:string;createdByUserId:string;createdAt:string;scope:ErpScope;
@@ -18,6 +18,7 @@ export function rehydrateCentralProcurementLine(x:CentralProcurementLine){
   if(x.purpose!=="TAILOR_MATERIAL"&&x.purpose!=="MECHANICAL_PRODUCT")throw new Error("PROCUREMENT_PURPOSE_INVALID");
   const ready=r>=q-EPSILON;
   const order:SupplierOrder={...x.scope,id:txt(x.supplierOrderId,"PROCUREMENT_ORDER_ID_REQUIRED"),
+    supplierOrderLineId:txt(x.supplierOrderLineId,"PROCUREMENT_ORDER_LINE_ID_REQUIRED"),
     idempotencyKey:txt(x.idempotencyKey,"PROCUREMENT_IDEMPOTENCY_REQUIRED"),
     allocationId:txt(x.allocationId,"PROCUREMENT_ALLOCATION_REQUIRED"),supplierId:txt(x.supplierId,"PROCUREMENT_SUPPLIER_REQUIRED"),
     purchaseOrderId:x.supplierOrderId,saleId:txt(x.saleId,"PROCUREMENT_SALE_REQUIRED"),

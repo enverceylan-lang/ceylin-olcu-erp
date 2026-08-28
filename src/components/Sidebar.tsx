@@ -62,8 +62,8 @@ const menuItems = [
 const faturalarMenuItems = [
   { name: "Satış", href: "/satis", enabled: true },
   { name: "Satış İade", href: "/satis-iade", enabled: true },
-  { name: "Alış", href: "/alis", enabled: false },
-  { name: "Alış İade", href: "/alis-iade", enabled: false },
+  { name: "Alış", href: "/alis", enabled: true },
+  { name: "Alış İade", href: "/alis-iade", enabled: true },
   { name: "Raporlar", href: "/raporlar", enabled: true },
 ] as const;
 

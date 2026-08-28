@@ -48,7 +48,8 @@ const request:
         unit: "mt",
         unitPrice: 100,
         discountRate: 10,
-        taxRate: 20
+        taxRate: 20,
+        taxIncluded: false
       },
       {
         id: "line-2",
@@ -58,7 +59,8 @@ const request:
         unit: "hizmet",
         unitPrice: 250,
         discountRate: 0,
-        taxRate: 20
+        taxRate: 20,
+        taxIncluded: false
       }
     ],
 

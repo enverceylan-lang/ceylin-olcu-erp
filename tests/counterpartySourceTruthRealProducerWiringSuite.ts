@@ -12,9 +12,9 @@ function read(relativePath: string): string {
   );
 }
 
-const supplierBridge =
+const materialCutDecisionPanel =
   read(
-    "src/lib/supplierReceiptPayableBridge.ts"
+    "src/components/operations/MaterialCutDecisionPanel.tsx"
   );
 
 const operationsStore =
@@ -27,52 +27,28 @@ const producerBridge =
     "src/lib/finance/counterpartySourceTruthProducerBridge.ts"
   );
 
-const supplierProjectionCount =
-  (
-    supplierBridge.match(
-      /const sourceTruth\s*=\s*projectSupplierReceiptSourceTruth\(/g
-    ) || []
-  ).length;
-
-assert.equal(
-  supplierProjectionCount,
-  1,
-  "Supplier receipt source truth must be projected exactly once."
+assert.doesNotMatch(
+  materialCutDecisionPanel,
+  /registerSupplierReceiptPayable/,
+  "Supplier receipt / mal kabul must not create supplier payable."
 );
 
-assert.match(
-  supplierBridge,
-  /receivedQuantity:\s*receipt\.receivedQuantity/
+assert.doesNotMatch(
+  materialCutDecisionPanel,
+  /supplierReceiptPayableBridge/,
+  "Supplier receipt UI must not import the legacy receipt-to-payable bridge."
 );
 
-assert.match(
-  supplierBridge,
-  /actualPurchaseUnitPrice:\s*input\.unitPrice/
+assert.doesNotMatch(
+  materialCutDecisionPanel,
+  /Gerçek Alış Birim Fiyatı/,
+  "Physical receipt must not require invoice/purchase pricing."
 );
 
-assert.match(
-  supplierBridge,
-  /purchaseVatRate:\s*input\.purchaseVatRate/
-);
-
-assert.match(
-  supplierBridge,
-  /receivedAt:\s*receipt\.receivedAt/
-);
-
-assert.match(
-  supplierBridge,
-  /kind:\s*"SUPPLIER_RECEIPT"[\s\S]*source:\s*sourceTruth\.value/
-);
-
-assert.match(
-  producerBridge,
-  /const netAmount\s*=[\s\S]*input\.receivedQuantity\s*\*\s*input\.actualPurchaseUnitPrice/
-);
-
-assert.match(
-  producerBridge,
-  /const payableAmount\s*=[\s\S]*netAmount\s*\*[\s\S]*input\.purchaseVatRate\s*\/\s*100/
+assert.doesNotMatch(
+  materialCutDecisionPanel,
+  /Stok kartında geçerli Alış KDV oranı/,
+  "Physical receipt must not require purchase VAT to complete stock receipt."
 );
 
 assert.match(
@@ -82,7 +58,12 @@ assert.match(
 
 assert.match(
   operationsStore,
-  /assignmentType:\s*request\.operation\.party[\s\S]*\|\|\s*"INTERNAL"/
+  /request\.operation\.party[\s\S]*\?\.assignmentType\s*!==[\s\S]*"EXTERNAL"/
+);
+
+assert.match(
+  operationsStore,
+  /assignmentType:\s*[\r\n\s]*"EXTERNAL"/
 );
 
 assert.match(

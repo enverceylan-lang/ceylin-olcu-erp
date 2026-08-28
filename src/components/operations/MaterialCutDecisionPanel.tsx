@@ -2,6 +2,7 @@
 import ProcurementDecisionPanel from "@/components/operations/ProcurementDecisionPanel";
 
 import {
+  useEffect,
   useMemo,
   useState
 } from "react";
@@ -47,11 +48,14 @@ import {
   executeMechanicalSupplierReceiptToInstallation
 } from "@/lib/mechanicalSupplierReceiptInstallationCoordinator";
 import {
-  registerSupplierReceiptPayable
-} from "@/lib/supplierReceiptPayableBridge";
+  persistSupplierReceiptStockAuthority
+} from "@/lib/supplierReceiptStockRuntimeClient";
 import {
-  useStore
-} from "@/store/useStore";
+  readCentralSupplierReceiptLines
+} from "@/lib/procurement/centralSupplierReceiptReadClient";
+import {
+  rehydrateCentralProcurementLine
+} from "@/lib/procurement/procurementOrderRehydration";
 
 interface MaterialSupplierOption {
   id: string;
@@ -258,11 +262,55 @@ export default function MaterialCutDecisionPanel({
       state => state.supplierOrders
     );
 
-  const products =
-    useStore(
-      state => state.products
-    );
+  useEffect(() => {
+    if (
+      !sale ||
+      sale.status !== "ONAYLANDI"
+    ) {
+      return;
+    }
 
+    let cancelled = false;
+
+    void readCentralSupplierReceiptLines(
+      sale.id
+    ).then(result => {
+      if (
+        cancelled ||
+        !result.ok
+      ) {
+        return;
+      }
+
+      const store =
+        useSupplyChainStore
+          .getState();
+
+      for (
+        const line of result.lines
+      ) {
+        const hydrated =
+          rehydrateCentralProcurementLine(
+            line
+          );
+
+        store
+          .rehydrateCentralSupplierOrder(
+            hydrated.order
+          );
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    sale,
+    operation.tenantId,
+    operation.companyId,
+    operation.branchId,
+    operation.accountingPeriodId
+  ]);
   const productionPlans =
     useProductionMaterialStore(
       state => state.plans
@@ -280,14 +328,6 @@ export default function MaterialCutDecisionPanel({
     >({});
 
   const [supplierReceiptDrafts, setSupplierReceiptDrafts] =
-    useState<
-      Record<string, string>
-    >({});
-
-  const [
-    supplierReceiptUnitPriceDrafts,
-    setSupplierReceiptUnitPriceDrafts
-  ] =
     useState<
       Record<string, string>
     >({});
@@ -497,7 +537,7 @@ export default function MaterialCutDecisionPanel({
       operation
     ]);
 
-  const handleReceiveSupplierMaterial = (
+  const handleReceiveSupplierMaterial = async (
     supplierOrder:
       (typeof pendingSupplierReceipts)[number]
   ) => {
@@ -564,70 +604,6 @@ export default function MaterialCutDecisionPanel({
       return;
     }
 
-    const unitPrice =
-      Number(
-        (
-          supplierReceiptUnitPriceDrafts[
-            supplierOrder.id
-          ] ??
-          ""
-        ).replace(",", ".")
-      );
-
-    if (
-      !Number.isFinite(
-        unitPrice
-      ) ||
-      unitPrice <= 0
-    ) {
-      window.alert(
-        "Tedarikçi teslimi için gerçek alış birim fiyatı zorunludur."
-      );
-      return;
-    }
-
-    const product =
-      products.find(
-        current =>
-          current.id ===
-          supplierOrder.stockItemId
-      );
-
-    const purchaseVatRate =
-      Number(
-        product?.purchaseVatRate
-      );
-
-    if (
-      ![
-        0,
-        1,
-        10,
-        20
-      ].includes(
-        purchaseVatRate
-      )
-    ) {
-      window.alert(
-        "Stok kartında geçerli Alış KDV oranı (0, 1, 10 veya 20) bulunmalıdır."
-      );
-      return;
-    }
-
-    const supplier =
-      suppliers.find(
-        current =>
-          current.id ===
-          supplierOrder.supplierId
-      );
-
-    if (!supplier) {
-      window.alert(
-        "Siparişin bağlı olduğu tedarikçi cari bulunamadı."
-      );
-      return;
-    }
-
     const confirmed =
       window.confirm(
         [
@@ -650,6 +626,18 @@ export default function MaterialCutDecisionPanel({
       const now =
         new Date().toISOString();
 
+      const supplierOrderLineId =
+        supplierOrder
+          .supplierOrderLineId
+          ?.trim();
+
+      if (!supplierOrderLineId) {
+        window.alert(
+          "Tedarikçi sipariş satır kimliği bulunamadı. Mal kabul durduruldu."
+        );
+        return;
+      }
+
       const request = {
         tenantId:
           supplierOrder.tenantId,
@@ -661,16 +649,118 @@ export default function MaterialCutDecisionPanel({
           supplierOrder
             .accountingPeriodId,
         id:
-          `supplier-receipt:${supplierOrder.id}:${supplierOrder.receivedQuantity}:${receivedQuantity}`,
+          `supplier-receipt:${supplierOrderLineId}:${supplierOrder.receivedQuantity}:${receivedQuantity}`,
         idempotencyKey:
-          `SUPPLIER_RECEIPT:${supplierOrder.id}:${supplierOrder.receivedQuantity}:${receivedQuantity}`,
+          `SUPPLIER_RECEIPT:${supplierOrderLineId}:${supplierOrder.receivedQuantity}:${receivedQuantity}`,
         supplierOrderId:
           supplierOrder.id,
+        supplierOrderLineId,
         receivedQuantity,
         receivedByUserId:
           currentUserId,
         receivedAt: now
       };
+
+      const authority =
+        await persistSupplierReceiptStockAuthority({
+          receiptId:
+            request.id,
+          idempotencyKey:
+            request.idempotencyKey,
+          supplierOrderId:
+            supplierOrder.id,
+          supplierOrderLineId,
+          allocationId:
+            supplierOrder.allocationId,
+          stockItemId:
+            supplierOrder.stockItemId,
+          receivedQuantity,
+          receivedUnit:
+            unit,
+          receivedAt:
+            now
+        });
+
+      if (!authority.ok) {
+        window.alert(
+          [
+            "Mal kabul kalıcı olarak kaydedilemedi.",
+            authority.error
+          ].join("\n")
+        );
+        return;
+      }
+
+      const supplier =
+        suppliers.find(
+          current =>
+            current.id ===
+            supplierOrder.supplierId
+        );
+
+      const pendingPurchase =
+        useSupplyChainStore
+          .getState()
+          .createPurchaseDocument({
+            tenantId:
+              supplierOrder.tenantId,
+            companyId:
+              supplierOrder.companyId,
+            branchId:
+              supplierOrder.branchId,
+            accountingPeriodId:
+              supplierOrder.accountingPeriodId,
+            id:
+              `purchase-receipt:${request.id}`,
+            idempotencyKey:
+              `PENDING_PURCHASE:${request.id}`,
+            documentNo: null,
+            supplierId:
+              supplierOrder.supplierId,
+            supplierName:
+              supplier?.name ?? null,
+            documentDate: null,
+            lines: [
+              {
+                id:
+                  `purchase-line:${request.id}`,
+                kind: "GOODS",
+                stockItemId:
+                  supplierOrder.stockItemId,
+                description:
+                  supplierOrder.stockItemId,
+                quantity:
+                  receivedQuantity,
+                unit,
+                unitPrice: null,
+                taxRate: null,
+                taxIncluded: null,
+                receivedQuantity
+              }
+            ],
+            sourceOperationId:
+              operation.id,
+            supplierOrderId:
+              supplierOrder.id,
+            supplierReceiptId:
+              request.id,
+            createdByUserId:
+              currentUserId,
+            now
+          });
+
+      if (
+        pendingPurchase.outcome ===
+        "REJECTED"
+      ) {
+        window.alert(
+          [
+            "Mal kabul ve stok kaydı tamamlandı.",
+            `Bekleyen Alış oluşturulamadı: ${pendingPurchase.reason}`,
+            "Finansal borç oluşturulmadı; fiziksel stok kaydı korunur."
+          ].join("\n")
+        );
+      }
 
       if (isMechanical) {
         const result =
@@ -683,9 +773,21 @@ export default function MaterialCutDecisionPanel({
           result.outcome ===
           "REJECTED"
         ) {
+          const projection =
+            useSupplyChainStore
+              .getState()
+              .receiveSupplierMaterial(
+                request
+              );
+
           window.alert(
             [
-              "Mekanik ürün teslimi reddedildi.",
+              "Mal kabul kalıcı olarak kaydedildi.",
+              projection.outcome ===
+                "REJECTED"
+                ? `Yerel görünüm güncellenemedi: ${projection.reason}`
+                : "Yerel mal kabul görünümü korundu.",
+              "Montaj/operasyon yönlendirmesi tamamlanamadı.",
               ...result.errors
             ].join("\n")
           );
@@ -762,69 +864,23 @@ export default function MaterialCutDecisionPanel({
         result.outcome ===
         "REJECTED"
       ) {
+        const projection =
+          useSupplyChainStore
+            .getState()
+            .receiveSupplierMaterial(
+              request
+            );
+
         window.alert(
           [
-            "Tedarikçi teslimi reddedildi.",
+            "Mal kabul kalıcı olarak kaydedildi.",
+            projection.outcome ===
+              "REJECTED"
+              ? `Yerel görünüm güncellenemedi: ${projection.reason}`
+              : "Yerel mal kabul görünümü korundu.",
+            "Üretim yönlendirmesi tamamlanamadı.",
             ...result.errors
           ].join("\n")
-        );
-        return;
-      }
-
-      const persistedReceipt =
-        useSupplyChainStore
-          .getState()
-          .supplierReceipts
-          .filter(
-            receipt =>
-              receipt.supplierOrderId ===
-                supplierOrder.id &&
-              receipt.receivedAt ===
-                now &&
-              receipt.receivedQuantity ===
-                receivedQuantity
-          )
-          .sort(
-            (
-              left,
-              right
-            ) =>
-              right.id.localeCompare(
-                left.id
-              )
-          )[0];
-
-      if (!persistedReceipt) {
-        window.alert(
-          "Teslim kaydedildi ancak finans köprüsü için teslim kaydı bulunamadı."
-        );
-        return;
-      }
-
-      const payable =
-        registerSupplierReceiptPayable({
-          order:
-            supplierOrder,
-          receipt:
-            persistedReceipt,
-          supplierName:
-            supplier.name,
-          unitPrice,
-          purchaseVatRate,
-          stockCode:
-            product?.stockCode,
-          stockName:
-            product?.name,
-          createdByUserId:
-            currentUserId
-        });
-
-      if (
-        payable.outcome ===
-        "REJECTED"
-      ) {
-        window.alert(
-          `Teslim kaydedildi ancak tedarikçi cari borcu oluşturulamadı: ${payable.reason}`
         );
         return;
       }
@@ -837,20 +893,6 @@ export default function MaterialCutDecisionPanel({
           delete next[
             supplierOrder.id
           ];
-          return next;
-        }
-      );
-
-      setSupplierReceiptUnitPriceDrafts(
-        current => {
-          const next = {
-            ...current
-          };
-
-          delete next[
-            supplierOrder.id
-          ];
-
           return next;
         }
       );
@@ -1617,36 +1659,6 @@ export default function MaterialCutDecisionPanel({
                           }
                           className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
                         />
-                      </label>
-
-                      <label className="mt-3 block text-sm font-semibold text-slate-800">
-                        Gerçek Alış Birim Fiyatı (KDV hariç)
-
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={
-                            supplierReceiptUnitPriceDrafts[
-                              supplierOrder.id
-                            ] ??
-                            ""
-                          }
-                          onChange={event =>
-                            setSupplierReceiptUnitPriceDrafts(
-                              current => ({
-                                ...current,
-                                [supplierOrder.id]:
-                                  event.target.value
-                              })
-                            )
-                          }
-                          placeholder="Örn. 198,00"
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
-                        />
-
-                        <span className="mt-1 block text-xs font-normal text-slate-500">
-                          Teslim tarihindeki gerçek alış fiyatı snapshot olarak saklanır; sonraki stok kartı fiyat değişiklikleri geçmiş borcu değiştirmez.
-                        </span>
                       </label>
 
                       <button

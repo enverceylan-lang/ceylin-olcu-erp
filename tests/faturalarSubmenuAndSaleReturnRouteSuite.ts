@@ -43,16 +43,16 @@ for (const label of [
 
 assert(
   sidebar.includes(
-    '{ name: "Alış", href: "/alis", enabled: false }',
+    '{ name: "Alış", href: "/alis", enabled: true }',
   ),
-  "Alış must remain disabled until source authority is complete.",
+  "Alış must be enabled after purchase authority and UI closure.",
 );
 
 assert(
   sidebar.includes(
-    '{ name: "Alış İade", href: "/alis-iade", enabled: false }',
+    '{ name: "Alış İade", href: "/alis-iade", enabled: true }',
   ),
-  "Alış İade must remain disabled until source authority is complete.",
+  "Alış İade must be enabled after purchase return authority and UI closure.",
 );
 
 assert(

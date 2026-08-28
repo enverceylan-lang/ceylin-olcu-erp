@@ -94,6 +94,10 @@ interface SupplyChainState {
     request: SupplierOrderRequest
   ): SupplyStoreResult<SupplierOrder>;
 
+  rehydrateCentralSupplierOrder(
+    order: SupplierOrder
+  ): void;
+
   receiveSupplierMaterial(
     request: SupplierReceiptRequest
   ): SupplyStoreResult<SupplierReceipt>;
@@ -375,6 +379,43 @@ export const useSupplyChainStore =
             };
           },
 
+        rehydrateCentralSupplierOrder:
+          order => {
+            const lineId =
+              order.supplierOrderLineId?.trim();
+
+            if (!lineId) {
+              return;
+            }
+
+            const exists =
+              get().supplierOrders.some(
+                current =>
+                  current.id === order.id &&
+                  current.supplierOrderLineId ===
+                    lineId &&
+                  sameScope(current, order)
+              );
+
+            set({
+              supplierOrders:
+                exists
+                  ? get().supplierOrders.map(
+                      current =>
+                        current.id === order.id &&
+                        current.supplierOrderLineId ===
+                          lineId &&
+                        sameScope(current, order)
+                          ? order
+                          : current
+                    )
+                  : [
+                      ...get().supplierOrders,
+                      order
+                    ]
+            });
+          },
+
         receiveSupplierMaterial:
           request => {
             const order =
@@ -383,6 +424,11 @@ export const useSupplyChainStore =
                   current.id ===
                     request
                       .supplierOrderId &&
+                  (
+                    !request.supplierOrderLineId ||
+                    current.supplierOrderLineId ===
+                      request.supplierOrderLineId
+                  ) &&
                   sameScope(
                     current,
                     request
@@ -422,6 +468,11 @@ export const useSupplyChainStore =
                   current =>
                     current.id ===
                       decision.order.id &&
+                    (
+                      !decision.order.supplierOrderLineId ||
+                      current.supplierOrderLineId ===
+                        decision.order.supplierOrderLineId
+                    ) &&
                     sameScope(
                       current,
                       request
@@ -449,6 +500,11 @@ export const useSupplyChainStore =
                   current =>
                     current.id ===
                       input.supplierOrder.id &&
+                    (
+                      !input.supplierOrder.supplierOrderLineId ||
+                      current.supplierOrderLineId ===
+                        input.supplierOrder.supplierOrderLineId
+                    ) &&
                     sameScope(
                       current,
                       input.scope
