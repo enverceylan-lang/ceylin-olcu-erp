@@ -22,6 +22,17 @@ import {
   persistFinancePosAuthorityV1,
   type PosServerAuthorityRpcClient
 } from "@/lib/finance/posServerAuthoritySupabaseGateway";
+import {
+  decideCollectionServerContract,
+  decideCollectionReversalServerContract,
+  decideInstrumentTransitionServerContract
+} from "@/lib/finance/collectionServerContract";
+import {
+  persistFinanceCollectionV1,
+  persistCollectionMutationV1,
+  type CollectionRpcClient,
+  type CollectionMutationRpcClient
+} from "@/lib/finance/collectionSupabaseGateway";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,6 +51,20 @@ function hasPosCommand(body: unknown): boolean {
     typeof body === "object" &&
     !Array.isArray(body) &&
     Object.prototype.hasOwnProperty.call(body, "posCommand")
+  );
+}
+
+function hasCollectionCommand(body: unknown): boolean {
+  return Boolean(
+    body && typeof body === "object" && !Array.isArray(body) &&
+    Object.prototype.hasOwnProperty.call(body, "collectionCommand")
+  );
+}
+
+function hasCommand(body: unknown, key: string): boolean {
+  return Boolean(
+    body && typeof body === "object" && !Array.isArray(body) &&
+    Object.prototype.hasOwnProperty.call(body, key)
   );
 }
 
@@ -98,6 +123,127 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => null);
+
+  if (hasCommand(body, "collectionReversalCommand")) {
+    const decision = decideCollectionReversalServerContract(body, context.scope);
+    if (!decision.allowed) return json({ success: false, error: decision.code }, decision.status);
+    const access = guardServerFinanceChannelAccess({
+      authenticatedUser: {
+        id: user.id, role: user.role, storedPermissions: user.permissions,
+        permissionVersion: user.permissionVersion,
+        sessionPermissionVersion: user.sessionPermissionVersion
+      },
+      channel: decision.command.channel,
+      operation: decision.operation,
+      direction: "REVERSE",
+      requestedPermission: decision.requestedPermission as never,
+      packageType: context.package,
+      actorScope: context.scope,
+      resourceScope: context.scope
+    });
+    if (!access.allowed) return json({ success: false, error: "FINANCE_ACCESS_DENIED", reason: access.reasonCode }, 403);
+    const serverCommand = { ...decision.command, ...context.scope };
+    try {
+      const result = await persistCollectionMutationV1(
+        supabaseServer as unknown as CollectionMutationRpcClient,
+        "reverse_finance_collection_v1",
+        serverCommand as unknown as Record<string, unknown>,
+        user.id,
+        stableFinanceOperationHash(serverCommand)
+      );
+      const status = result.outcome === "CREATED" ? 201 : result.outcome === "REPLAY" ? 200 :
+        result.outcome === "CONFLICT" ? 409 : 422;
+      return json({ success: result.outcome === "CREATED" || result.outcome === "REPLAY", ...result }, status);
+    } catch {
+      console.error("[Finance Collection Reversal API] Persistence failed.");
+      return json({ success: false, error: "FINANCE_COLLECTION_REVERSAL_PERSISTENCE_FAILED" }, 503);
+    }
+  }
+
+  if (hasCommand(body, "instrumentTransitionCommand")) {
+    const decision = decideInstrumentTransitionServerContract(body, context.scope);
+    if (!decision.allowed) return json({ success: false, error: decision.code }, decision.status);
+    const access = guardServerFinanceChannelAccess({
+      authenticatedUser: {
+        id: user.id, role: user.role, storedPermissions: user.permissions,
+        permissionVersion: user.permissionVersion,
+        sessionPermissionVersion: user.sessionPermissionVersion
+      },
+      channel: decision.command.instrumentType,
+      operation: decision.operation,
+      direction: decision.direction,
+      requestedPermission: decision.requestedPermission as never,
+      packageType: context.package,
+      actorScope: context.scope,
+      resourceScope: context.scope
+    });
+    if (!access.allowed) return json({ success: false, error: "FINANCE_ACCESS_DENIED", reason: access.reasonCode }, 403);
+    const serverCommand = { ...decision.command, ...context.scope };
+    try {
+      const result = await persistCollectionMutationV1(
+        supabaseServer as unknown as CollectionMutationRpcClient,
+        "transition_finance_receivable_instrument_v1",
+        serverCommand as unknown as Record<string, unknown>,
+        user.id,
+        stableFinanceOperationHash(serverCommand)
+      );
+      const status = result.outcome === "CREATED" ? 201 : result.outcome === "REPLAY" ? 200 :
+        result.outcome === "CONFLICT" ? 409 : 422;
+      return json({ success: result.outcome === "CREATED" || result.outcome === "REPLAY", ...result }, status);
+    } catch {
+      console.error("[Finance Instrument Transition API] Persistence failed.");
+      return json({ success: false, error: "FINANCE_INSTRUMENT_TRANSITION_PERSISTENCE_FAILED" }, 503);
+    }
+  }
+
+  if (hasCollectionCommand(body)) {
+    const decision = decideCollectionServerContract(body, context.scope);
+    if (!decision.allowed) {
+      return json({ success: false, error: decision.code }, decision.status);
+    }
+    const access = guardServerFinanceChannelAccess({
+      authenticatedUser: {
+        id: user.id,
+        role: user.role,
+        storedPermissions: user.permissions,
+        permissionVersion: user.permissionVersion,
+        sessionPermissionVersion: user.sessionPermissionVersion
+      },
+      channel: decision.command.channel,
+      operation: decision.operation,
+      direction: "CREATE",
+      requestedPermission: decision.requestedPermission as never,
+      packageType: context.package,
+      actorScope: context.scope,
+      resourceScope: context.scope,
+      customerId: decision.command.customerId
+    });
+    if (!access.allowed) {
+      return json({ success: false, error: "FINANCE_ACCESS_DENIED", reason: access.reasonCode }, 403);
+    }
+    const serverCommand = {
+      ...decision.command,
+      tenantId: context.scope.tenantId,
+      companyId: context.scope.companyId,
+      branchId: context.scope.branchId,
+      accountingPeriodId: context.scope.accountingPeriodId
+    };
+    try {
+      const result = await persistFinanceCollectionV1(
+        supabaseServer as unknown as CollectionRpcClient,
+        serverCommand as unknown as Record<string, unknown>,
+        user.id,
+        stableFinanceOperationHash(serverCommand)
+      );
+      const status = result.outcome === "CREATED" ? 201 :
+        result.outcome === "REPLAY" ? 200 :
+        result.outcome === "CONFLICT" ? 409 : 422;
+      return json({ success: result.outcome === "CREATED" || result.outcome === "REPLAY", ...result }, status);
+    } catch {
+      console.error("[Finance Collection API] Persistence failed.");
+      return json({ success: false, error: "FINANCE_COLLECTION_PERSISTENCE_FAILED" }, 503);
+    }
+  }
 
   if (hasPosCommand(body)) {
     const decision = decidePosServerAuthorityContract(body, context.scope);
