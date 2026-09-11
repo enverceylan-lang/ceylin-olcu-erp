@@ -309,11 +309,21 @@ export default function FinanceOverviewPage() {
 
     syncSection();
     window.addEventListener("hashchange", syncSection);
+    window.addEventListener("enverp:finance-section-change", syncSection);
     window.addEventListener("popstate", syncSection);
+
+    let lastHash = window.location.hash;
+    const hashObserver = window.setInterval(() => {
+      if (window.location.hash === lastHash) return;
+      lastHash = window.location.hash;
+      syncSection();
+    }, 100);
 
     return () => {
       window.removeEventListener("hashchange", syncSection);
+      window.removeEventListener("enverp:finance-section-change", syncSection);
       window.removeEventListener("popstate", syncSection);
+      window.clearInterval(hashObserver);
     };
   }, [
     allowedSections,
@@ -341,6 +351,7 @@ export default function FinanceOverviewPage() {
       `${window.location.pathname}${window.location.search}${nextHash}`;
 
     window.history.pushState(null, "", nextUrl);
+    window.dispatchEvent(new Event("enverp:finance-section-change"));
     setActiveSection(section);
   };
 
