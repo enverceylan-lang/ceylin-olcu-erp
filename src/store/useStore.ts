@@ -219,6 +219,7 @@ export interface SelectedProductItem {
 }
 
 export interface ProductMeasurement {
+  customerAddressId?: string;
   id: string;
   templateType: string;
   // Legacy measurement templates use dynamic keys; narrow at each consumer.
@@ -316,7 +317,26 @@ export interface RoomProductIntent {
   updatedAt: string;
 }
 
+export interface CustomerAddress {
+  id: string;
+  customerId: string;
+  title?: string;
+  normalizedTitle?: string;
+  legacyPrimary?: boolean;
+  phone?: string;
+  province?: string;
+  district?: string;
+  address: string;
+  mapLocation?: string;
+  latitude?: number;
+  longitude?: number;
+  isDeleted?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface Customer {
+  addresses?: CustomerAddress[];
   id: string;
   name: string;
   phone: string;
