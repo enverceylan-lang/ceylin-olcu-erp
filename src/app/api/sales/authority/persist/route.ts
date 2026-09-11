@@ -57,6 +57,8 @@ export async function POST(request: NextRequest) {
       accountingPeriodId: context.scope.accountingPeriodId,
       saleId: body.saleId,
       customerId: body.customerId,
+      customerAddressId: body.customerAddressId ?? null,
+      customerAddressSnapshot: body.customerAddressSnapshot ?? null,
       saleNumber: body.saleNumber ?? null,
       status: body.status,
       totalAmount: body.totalAmount,

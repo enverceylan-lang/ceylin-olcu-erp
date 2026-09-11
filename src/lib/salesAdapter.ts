@@ -361,7 +361,8 @@ export function createDraftSaleFromCustomer(
   customer: Customer,
   actor: SalesActor,
   scope: ErpScope,
-  selectedMeasurementIds?: string[]
+  selectedMeasurementIds?: string[],
+  customerAddressId?: string
 ): Sale {
   const items: SaleItem[] = [];
 
@@ -374,22 +375,7 @@ export function createDraftSaleFromCustomer(
         )
       : null;
 
-  const measurements =
-    useMeasurementStore
-      .getState()
-      .measurements
-      .filter(
-        measurement =>
-          measurement.customerId === customer.id &&
-          !measurement.isDeleted &&
-          !measurement.isArchived &&
-          (
-            !selectedMeasurementIdSet ||
-            selectedMeasurementIdSet.has(
-              measurement.id
-            )
-          )
-      );
+  const candidateMeasurements =     useMeasurementStore       .getState()       .measurements       .filter(         measurement =>           measurement.customerId === customer.id &&           !measurement.isDeleted &&           !measurement.isArchived &&           (             !selectedMeasurementIdSet ||             selectedMeasurementIdSet.has(measurement.id)           )       );    const requestedCustomerAddressId = String(customerAddressId || '').trim();   const measurements = requestedCustomerAddressId     ? candidateMeasurements.filter(         measurement => measurement.customerAddressId === requestedCustomerAddressId       )     : candidateMeasurements;    const measurementAddressIds = Array.from(     new Set(       measurements         .map(measurement => String(measurement.customerAddressId || '').trim())         .filter(Boolean)     )   );    if (!requestedCustomerAddressId && measurements.some(measurement => !String(measurement.customerAddressId || '').trim())) {     throw new Error('SALE_CUSTOMER_ADDRESS_REQUIRED');   }   if (!requestedCustomerAddressId && measurementAddressIds.length > 1) {     throw new Error('SALE_MIXED_CUSTOMER_ADDRESSES_UNSUPPORTED');   }    const resolvedCustomerAddressId =     requestedCustomerAddressId || measurementAddressIds[0] || '';   const resolvedCustomerAddress = resolvedCustomerAddressId     ? (customer.addresses || []).find(         address =>           address.id === resolvedCustomerAddressId &&           !address.isDeleted       )     : undefined;   if (resolvedCustomerAddressId && !resolvedCustomerAddress) {     throw new Error('SALE_CUSTOMER_ADDRESS_NOT_FOUND');   }   const addressCapturedAt = new Date().toISOString();
   measurements.forEach(m => {
     const room = customer.rooms?.find(r => r.id === m.roomId);
     const win = room?.windows?.find(w => w.id === (m.openingId || m.windowId));
@@ -919,6 +905,23 @@ export function createDraftSaleFromCustomer(
     id: crypto.randomUUID(),
     saleNo,
     customerId: customer.id,
+    ...(resolvedCustomerAddressId ? { customerAddressId: resolvedCustomerAddressId } : {}),
+    ...(resolvedCustomerAddress
+      ? {
+          customerAddressSnapshot: {
+            customerAddressId: resolvedCustomerAddress.id,
+            title: resolvedCustomerAddress.title,
+            phone: resolvedCustomerAddress.phone,
+            province: resolvedCustomerAddress.province,
+            district: resolvedCustomerAddress.district,
+            address: resolvedCustomerAddress.address || '',
+            mapLocation: resolvedCustomerAddress.mapLocation,
+            latitude: resolvedCustomerAddress.latitude,
+            longitude: resolvedCustomerAddress.longitude,
+            capturedAt: addressCapturedAt,
+          },
+        }
+      : {}),
     createdByUserId: actor.id,
     createdByUsername: actor.username,
     createdByName: actor.name,
@@ -941,7 +944,8 @@ export async function syncOrCreateDraftSale(
   salesStore: DraftSalesStore,
   actor: SalesActor | null,
   scope: ErpScope | null,
-  targetSaleId?: string
+  targetSaleId?: string,
+  customerAddressId?: string
 ): Promise<string> {
   if (
     !actor?.id ||
@@ -965,6 +969,7 @@ export async function syncOrCreateDraftSale(
           sale =>
             sale.id === cleanTargetSaleId &&
             sale.customerId === customer.id &&
+            (               !customerAddressId ||               sale.customerAddressId === customerAddressId             ) &&
             (
               sale.status === 'TASLAK' ||
               sale.status === 'TEKLİF'
@@ -974,6 +979,7 @@ export async function syncOrCreateDraftSale(
       : salesStore.sales.find(
           sale =>
             sale.customerId === customer.id &&
+            (               !customerAddressId ||               sale.customerAddressId === customerAddressId             ) &&
             (
               sale.status === 'TASLAK' ||
               sale.status === 'TEKLİF'
@@ -989,7 +995,9 @@ export async function syncOrCreateDraftSale(
     createDraftSaleFromCustomer(
       customer,
       actor,
-      scope
+      scope,
+      undefined,
+      customerAddressId
     );
 
   /*

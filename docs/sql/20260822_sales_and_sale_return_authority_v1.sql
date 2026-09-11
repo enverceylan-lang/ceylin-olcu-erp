@@ -52,6 +52,35 @@ create table if not exists public.sale_documents_v1 (
   constraint sale_documents_v1_version_ck check (source_version > 0)
 );
 
+alter table public.sale_documents_v1
+  add column if not exists customer_address_id text null;
+
+alter table public.sale_documents_v1
+  add column if not exists customer_address_snapshot jsonb null;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_catalog.pg_constraint
+    where conname = 'sale_documents_v1_address_pair_ck'
+      and conrelid = 'public.sale_documents_v1'::regclass
+  ) then
+    alter table public.sale_documents_v1
+      add constraint sale_documents_v1_address_pair_ck
+      check (
+        (customer_address_id is null and customer_address_snapshot is null)
+        or
+        (
+          btrim(coalesce(customer_address_id,'')) <> ''
+          and pg_catalog.jsonb_typeof(customer_address_snapshot) = 'object'
+          and btrim(coalesce(customer_address_snapshot->>'customerAddressId','')) = customer_address_id
+        )
+      );
+  end if;
+end
+$$;
+
 create index if not exists sale_documents_v1_customer_idx
 on public.sale_documents_v1 (
   tenant_id,company_id,branch_id,accounting_period_id,customer_id,updated_at
@@ -148,11 +177,14 @@ declare
   v_period text := btrim(coalesce(p_sale->>'accountingPeriodId',''));
   v_sale_id text := btrim(coalesce(p_sale->>'saleId',''));
   v_customer_id text := btrim(coalesce(p_sale->>'customerId',''));
+  v_customer_address_id text := nullif(btrim(coalesce(p_sale->>'customerAddressId','')),'');
+  v_customer_address_snapshot jsonb := p_sale->'customerAddressSnapshot';
   v_sale_number text := nullif(btrim(coalesce(p_sale->>'saleNumber','')),'');
   v_status text := btrim(coalesce(p_sale->>'status',''));
   v_currency text := upper(btrim(coalesce(p_sale->>'currency','TRY')));
   v_amount numeric := coalesce(nullif(p_sale->>'totalAmount','')::numeric,0);
   v_existing public.sale_documents_v1%rowtype;
+  v_canonical_address public.customer_addresses%rowtype;
 begin
   if v_tenant='' or v_company='' or v_branch='' or v_period='' then
     raise exception 'SALE_AUTHORITY_SCOPE_REQUIRED';
@@ -170,6 +202,45 @@ begin
     raise exception 'SALE_AUTHORITY_AMOUNT_OR_CURRENCY_INVALID';
   end if;
 
+  if (v_customer_address_id is null) <> (v_customer_address_snapshot is null) then
+    raise exception 'SALE_AUTHORITY_ADDRESS_PAIR_REQUIRED';
+  end if;
+
+  if v_customer_address_id is not null then
+    if pg_catalog.jsonb_typeof(v_customer_address_snapshot) is distinct from 'object'
+       or btrim(coalesce(v_customer_address_snapshot->>'customerAddressId','')) <> v_customer_address_id then
+      raise exception 'SALE_AUTHORITY_ADDRESS_SNAPSHOT_INVALID';
+    end if;
+
+    select * into v_canonical_address
+    from public.customer_addresses a
+    where a.id = v_customer_address_id
+      and a."customerId" = v_customer_id
+      and a.tenant_id::text = v_tenant
+      and a.company_id::text = v_company
+      and a.branch_id::text = v_branch
+      and a.accounting_period_id::text = v_period
+      and a."isDeleted" = false
+    for update;
+
+    if not found then
+      raise exception 'SALE_AUTHORITY_CUSTOMER_ADDRESS_PARENT_MISMATCH';
+    end if;
+
+    v_customer_address_snapshot := pg_catalog.jsonb_build_object(
+      'customerAddressId', v_canonical_address.id,
+      'title', v_canonical_address.title,
+      'phone', v_canonical_address.phone,
+      'province', v_canonical_address.province,
+      'district', v_canonical_address.district,
+      'address', v_canonical_address.address,
+      'mapLocation', v_canonical_address."mapLocation",
+      'latitude', v_canonical_address.latitude,
+      'longitude', v_canonical_address.longitude,
+      'capturedAt', pg_catalog.now()
+    );
+  end if;
+
   select * into v_existing
   from public.sale_documents_v1 s
   where s.tenant_id=v_tenant and s.company_id=v_company
@@ -179,7 +250,8 @@ begin
 
   if found then
     if v_existing.created_by_user_id is distinct from btrim(p_actor_user_id)
-       or v_existing.customer_id is distinct from v_customer_id then
+       or v_existing.customer_id is distinct from v_customer_id
+       or v_existing.customer_address_id is distinct from v_customer_address_id then
       raise exception 'SALE_AUTHORITY_IDENTITY_CONFLICT';
     end if;
 
@@ -206,11 +278,13 @@ begin
 
   insert into public.sale_documents_v1 (
     tenant_id,company_id,branch_id,accounting_period_id,
-    sale_id,customer_id,sale_number,created_by_user_id,status,
+    sale_id,customer_id,customer_address_id,customer_address_snapshot,
+    sale_number,created_by_user_id,status,
     total_amount,currency,payload_hash,source_version
   ) values (
     v_tenant,v_company,v_branch,v_period,
-    v_sale_id,v_customer_id,v_sale_number,btrim(p_actor_user_id),v_status,
+    v_sale_id,v_customer_id,v_customer_address_id,v_customer_address_snapshot,
+    v_sale_number,btrim(p_actor_user_id),v_status,
     v_amount,v_currency,p_payload_hash,1
   );
 

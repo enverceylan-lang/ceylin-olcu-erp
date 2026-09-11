@@ -118,10 +118,25 @@ export interface SaleItem {
   isJumboComponent?: boolean;
 }
 
+export interface SaleCustomerAddressSnapshot {
+  customerAddressId: string;
+  title?: string;
+  phone?: string;
+  province?: string;
+  district?: string;
+  address: string;
+  mapLocation?: string;
+  latitude?: number;
+  longitude?: number;
+  capturedAt: string;
+}
+
 export interface Sale extends ErpScope {
   id: string;
   saleNo: string;
   customerId: string;
+  customerAddressId?: string;
+  customerAddressSnapshot?: SaleCustomerAddressSnapshot;
   createdByUserId?: string;
   createdByUsername?: string;
   createdByName?: string;
@@ -387,6 +402,16 @@ export const useSalesStore = create<SalesState>((set, get) => ({
   },
 
   transferSales: async (sourceCustomerId: string, targetCustomerId: string) => {
+    const addressBoundSourceSale = get().sales.find(
+      (sale) =>
+        sale.customerId === sourceCustomerId &&
+        Boolean(sale.customerAddressId || sale.customerAddressSnapshot),
+    );
+
+    if (addressBoundSourceSale) {
+      throw new Error('SALE_TRANSFER_ADDRESS_BOUND_REQUIRES_EXPLICIT_REBIND');
+    }
+
     try {
       const sales = get().sales;
       const updatedSales = [...sales];
