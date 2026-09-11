@@ -24,6 +24,7 @@ import { ShoppingCart, Edit, Merge, Archive } from "lucide-react";
 import { CariEditModal } from "@/components/modals/CariEditModal";
 import { MergeCustomerModal } from "@/components/modals/MergeCustomerModal";
 import { MoveRoomModal } from "@/components/modals/MoveRoomModal";
+import { activeCustomerAddresses, customerAddressDisplayTitle } from "@/lib/customerAddressModel";
 import { FacadeSegmentsEditor } from "@/components/measurements/FacadeSegmentsEditor";
 import { PlicellCamListEditor } from "@/components/measurements/PlicellCamListEditor";
 import { FieldTaskAssignButton } from "@/components/FieldTaskAssignButton";
@@ -136,7 +137,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
   const store = useStore();
   const measurementStore = useMeasurementStore();
-  const { customers, updateCustomer, addRoom, deleteRoom, addWindow, deleteWindow, updateWindowItem, addProductMeasurement, updateProductMeasurement, deleteProductMeasurement } = store;
+  const { customers, updateCustomer, addRoom, deleteRoom, addWindow, deleteWindow, updateWindowItem, addProductMeasurement, updateProductMeasurement, deleteProductMeasurement, ensureCustomerAddressIdentity } = store;
   const { currentUser, addAuditEntry, users } = useAuthStore();
   const user = currentUser!;
   const customer = customers.find(c => c.id === id);
@@ -150,6 +151,40 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     error: scopeError
   } = useErpRuntimeContext();
 
+  const [selectedCustomerAddressId, setSelectedCustomerAddressId] = useState<string | null>(null);
+  const activeAddresses = activeCustomerAddresses(customer?.addresses);
+  const selectedCustomerAddress =
+    activeAddresses.find(address => address.id === selectedCustomerAddressId) ||
+    activeAddresses[0] ||
+    null;
+  const selectedAddressTitle = selectedCustomerAddress
+    ? customerAddressDisplayTitle(selectedCustomerAddress)
+    : "Belirtilmemiş";
+  const selectedAddressProvince =
+    selectedCustomerAddress?.province || customer?.province || "";
+  const selectedAddressDistrict =
+    selectedCustomerAddress?.district || customer?.district || "";
+  const selectedAddressText =
+    selectedCustomerAddress?.address || customer?.address || "";
+  const visibleCustomerRooms = (customer?.rooms || []).filter(room =>
+    !selectedCustomerAddressId ||
+    !room.customerAddressId ||
+    room.customerAddressId === selectedCustomerAddressId
+  );
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const active = activeCustomerAddresses(customer?.addresses);
+      if (active.length === 0) {
+        if (selectedCustomerAddressId !== null) setSelectedCustomerAddressId(null);
+        return;
+      }
+      if (!active.some(address => address.id === selectedCustomerAddressId)) {
+        setSelectedCustomerAddressId(active[0].id);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [customer?.addresses, selectedCustomerAddressId]);
   const normRole = user ? normalizeRole(user.role) : 'FIELD';
   const cariType = customer?.cariType || 'CUSTOMER';
 
@@ -706,7 +741,16 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     if (newRoomName.trim()) {
       setIsSaving(true);
       try {
-        const newRoomId = await addRoom(customer.id, newRoomName.trim());
+        let roomAddressId = selectedCustomerAddressId;
+        if (!roomAddressId) {
+          roomAddressId = await ensureCustomerAddressIdentity(customer.id);
+          if (roomAddressId) setSelectedCustomerAddressId(roomAddressId);
+        }
+        if (!roomAddressId) {
+          showToast("Önce Ölçü / İş Adresi ekleyin.");
+          return;
+        }
+        const newRoomId = await addRoom(customer.id, newRoomName.trim(), roomAddressId);
         await syncNow();
         setIsAddingRoom(false);
         setNewRoomName("");
@@ -978,6 +1022,12 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     };
 
   const handleSaveMeasurement = async (roomId: string, windowId: string) => {
+    const measurementCustomerAddressId =
+      customer.rooms.find(room => room.id === roomId)?.customerAddressId;
+    if (!measurementCustomerAddressId) {
+      showToast("Bu oda bir Ölçü / İş Adresine bağlı değil. Önce oda adresini belirleyin.");
+      return;
+    }
     if (isSaving) return;
     const measurementIssues = validateMeasurementRecord(
       {
@@ -1084,6 +1134,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
       if (editingMeasurementId) {
         await updateProductMeasurement(customer.id, roomId, windowId, editingMeasurementId, {
+          customerAddressId: measurementCustomerAddressId,
           templateType: selectedTemplate,
           rawValues: parsedRawValues,
           notes: savedMeasurementNotes,
@@ -1093,6 +1144,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
         });
       } else {
         await addProductMeasurement(customer.id, roomId, windowId, {
+          customerAddressId: measurementCustomerAddressId,
           templateType: selectedTemplate,
           rawValues: parsedRawValues,
           notes: savedMeasurementNotes,
@@ -1280,7 +1332,9 @@ showToast("Saha taslağı telefona kaydedildi.");
         customer,
         useSalesStore.getState(),
         currentUser,
-        scope
+        scope,
+        undefined,
+        selectedCustomerAddressId || undefined
       );
       router.push(`/satis/${draftId}`);
     } catch (err) {
@@ -1629,6 +1683,48 @@ showToast("Saha taslağı telefona kaydedildi.");
               </div>
             )}
 
+            <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50/60 p-3 dark:border-blue-900/40 dark:bg-blue-950/20">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">Ölçü / İş Adresi</span>
+                <span className="truncate text-[10px] font-semibold text-gray-500 dark:text-gray-400">
+                  {[selectedAddressProvince, selectedAddressDistrict].filter(Boolean).join(" / ") || "İl / İlçe belirtilmemiş"}
+                </span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+                <select
+                  value={selectedCustomerAddressId || ""}
+                  onChange={(e) => setSelectedCustomerAddressId(e.target.value || null)}
+                  disabled={activeAddresses.length === 0}
+                  className="min-h-9 w-full rounded-lg border border-blue-200 bg-white px-3 text-xs font-semibold text-gray-800 outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 dark:border-blue-900/60 dark:bg-gray-900 dark:text-gray-100 dark:disabled:bg-gray-800"
+                >
+                  {activeAddresses.length === 0 ? (
+                    <option value="">{selectedAddressTitle}</option>
+                  ) : (
+                    activeAddresses.map(address => (
+                      <option key={address.id} value={address.id}>
+                        {customerAddressDisplayTitle(address)}
+                        {[address.province, address.district].filter(Boolean).length
+                          ? ` - ${[address.province, address.district].filter(Boolean).join(" / ")}`
+                          : ""}
+                      </option>
+                    ))
+                  )}
+                </select>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => setIsEditModalOpen(true)}
+                    className="min-h-9 rounded-lg border border-blue-200 bg-white px-3 text-xs font-bold text-blue-700 hover:bg-blue-100 dark:border-blue-900/60 dark:bg-gray-900 dark:text-blue-300"
+                  >
+                    Adres Değiştir
+                  </button>
+                )}
+
+              </div>
+              <div className="mt-2 line-clamp-2 text-xs font-medium text-gray-600 dark:text-gray-300">
+                {selectedAddressText || "Adres belirtilmemiş"}
+              </div>
+            </div>
             <div className="mt-3 flex flex-wrap gap-1.5">
               {canViewCustomerContactFields(currentUser, customer) && customer.phone && (
                 <a href={`tel:${customer.phone}`} className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-[11px] font-semibold text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-750">
@@ -2217,14 +2313,14 @@ showToast("Saha taslağı telefona kaydedildi.");
 
           {activeTab === "rooms" && (
             <>
-              {customer.rooms.length === 0 ? (
+              {visibleCustomerRooms.length === 0 ? (
                 <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-12 text-center text-gray-500">
                   <Layers className="w-12 h-12 text-gray-300 mb-4 mx-auto" />
                   <p>Oda bulunamadı. Lütfen yeni oda ekleyin.</p>
                 </div>
               ) : null}
 
-          {([...(customer.rooms || [])].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())).map((room) => {
+          {([...visibleCustomerRooms].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())).map((room) => {
             const isExpanded = expandedRooms[room.id] !== false;
             const windowHasMeasurement = (
               window: WindowItem

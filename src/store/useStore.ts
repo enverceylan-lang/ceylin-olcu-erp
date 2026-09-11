@@ -1,3 +1,4 @@
+import { activeCustomerAddresses, validateCustomerAddressTitle } from '@/lib/customerAddressModel';
 import { formatDefaultDeliveryPromiseDate } from "@/lib/deliveryPromise";
 import { create } from 'zustand';
 import { normalizeCariAddress, normalizeCariName, normalizeCariRegion } from '@/lib/stringUtils';
@@ -281,6 +282,7 @@ export interface WindowItem {
 }
 
 export interface Room {
+  customerAddressId?: string;
   id: string;
   name: string;
   photos: string[];
@@ -622,9 +624,12 @@ interface AppState {
     restoreCustomerFromTrash: (id: string, user: StoreActor | null) => Promise<void>;
   mergeCustomers: (sourceId: string, targetId: string) => Promise<void>;
 
-  addRoom: (customerId: string, roomName: string) => Promise<string>;
+  addRoom: (customerId: string, roomName: string, customerAddressId?: string) => Promise<string>;
   deleteRoom: (customerId: string, roomId: string) => Promise<void>;
   moveRoom: (sourceCustomerId: string, targetCustomerId: string, roomId: string) => Promise<void>;
+  ensureCustomerAddressIdentity: (customerId: string) => Promise<string | null>;
+  addCustomerAddress: (customerId: string, data: Omit<CustomerAddress, 'id' | 'customerId' | 'normalizedTitle' | 'createdAt' | 'updatedAt'>) => Promise<string>;
+  updateCustomerAddress: (customerId: string, addressId: string, data: Partial<Omit<CustomerAddress, 'id' | 'customerId' | 'normalizedTitle' | 'createdAt'>>) => Promise<void>;
 
   addWindow: (customerId: string, roomId: string, windowName: string) => Promise<string | null>;
   deleteWindow: (customerId: string, roomId: string, windowId: string) => Promise<void>;
@@ -1108,6 +1113,191 @@ export const useStore = create<AppState>()(
         });
       },
 
+      ensureCustomerAddressIdentity: async (customerId) => {
+        const state = get();
+        const customer = state.customers.find(c => c.id === customerId && !c.isDeleted);
+        if (!customer) throw new Error('CUSTOMER_NOT_FOUND_FOR_ADDRESS');
+
+        const existing = activeCustomerAddresses(customer.addresses);
+        if (existing.length > 0) return existing[0].id;
+
+        const legacyAddress = String(customer.address || '').trim();
+        const legacyMapLocation = String(customer.mapLocation || '').trim();
+        const hasLegacyAddress =
+          Boolean(legacyAddress) ||
+          Boolean(legacyMapLocation) ||
+          Boolean(customer.province) ||
+          Boolean(customer.district) ||
+          typeof customer.latitude === 'number' ||
+          typeof customer.longitude === 'number';
+
+        if (!hasLegacyAddress) return null;
+
+        const now = new Date().toISOString();
+        const baseAddress: CustomerAddress = {
+          id: generateUUID(),
+          customerId,
+          legacyPrimary: true,
+          address: normalizeCariAddress(legacyAddress),
+          province: normalizeCariRegion(customer.province || ''),
+          district: normalizeCariRegion(customer.district || ''),
+          mapLocation: legacyMapLocation || undefined,
+          latitude: customer.latitude,
+          longitude: customer.longitude,
+          isDeleted: false,
+          createdAt: now,
+          updatedAt: now,
+        };
+        const scope = readErpScope(customer);
+        if (!scope) {
+          throw new Error('CUSTOMER_SCOPE_MISSING_FOR_ADDRESS');
+        }
+        const legacyIdentity = applyErpScope(baseAddress, scope);
+        const updatedCustomer: Customer = {
+          ...customer,
+          addresses: [legacyIdentity, ...(customer.addresses || [])],
+          updatedAt: now,
+        };
+
+        await saveLocalCustomer(updatedCustomer);
+        set(current => ({
+          customers: current.customers.map(c => c.id === customerId ? updatedCustomer : c),
+          syncStatus: 'pending',
+        }));
+        notifyStoreChanges();
+        return legacyIdentity.id;
+      },
+      addCustomerAddress: async (customerId, data) => {
+        const state = get();
+        const customer = state.customers.find(c => c.id === customerId && !c.isDeleted);
+        if (!customer) throw new Error('CUSTOMER_NOT_FOUND_FOR_ADDRESS');
+        const customerScope = readErpScope(customer);
+        if (!customerScope) {
+          throw new Error('CUSTOMER_SCOPE_MISSING_FOR_ADDRESS');
+        }
+
+        let workingAddresses = [...(customer.addresses || [])];
+        if (activeCustomerAddresses(workingAddresses).length === 0) {
+          const legacyAddress = String(customer.address || '').trim();
+          const legacyMapLocation = String(customer.mapLocation || '').trim();
+          const hasLegacyAddress =
+            Boolean(legacyAddress) ||
+            Boolean(legacyMapLocation) ||
+            Boolean(customer.province) ||
+            Boolean(customer.district) ||
+            typeof customer.latitude === 'number' ||
+            typeof customer.longitude === 'number';
+
+          if (hasLegacyAddress) {
+            const legacyNow = new Date().toISOString();
+            const legacyBase: CustomerAddress = {
+              id: generateUUID(),
+              customerId,
+              legacyPrimary: true,
+              address: normalizeCariAddress(legacyAddress),
+              province: normalizeCariRegion(customer.province || ''),
+              district: normalizeCariRegion(customer.district || ''),
+              mapLocation: legacyMapLocation || undefined,
+              latitude: customer.latitude,
+              longitude: customer.longitude,
+              isDeleted: false,
+              createdAt: legacyNow,
+              updatedAt: legacyNow,
+            };
+            workingAddresses = [
+              applyErpScope(legacyBase, customerScope),
+              ...workingAddresses,
+            ];
+          }
+        }
+
+        const validation = validateCustomerAddressTitle(workingAddresses, { title: data.title });
+        if (!validation.ok) throw new Error(validation.message);
+
+        const now = new Date().toISOString();
+        const baseAddress: CustomerAddress = {
+          ...data,
+          id: generateUUID(),
+          customerId,
+          title: String(data.title || '').trim() || undefined,
+          normalizedTitle: validation.normalizedTitle,
+          phone: String(data.phone || '').trim() || undefined,
+          province: normalizeCariRegion(data.province || ''),
+          district: normalizeCariRegion(data.district || ''),
+          address: normalizeCariAddress(data.address || ''),
+          isDeleted: false,
+          createdAt: now,
+          updatedAt: now,
+        };
+        const newAddress = applyErpScope(baseAddress, customerScope);
+        const updatedCustomer: Customer = {
+          ...customer,
+          addresses: [...workingAddresses, newAddress],
+          updatedAt: now,
+        };
+
+        await saveLocalCustomer(updatedCustomer);
+        set(current => ({
+          customers: current.customers.map(c => c.id === customerId ? updatedCustomer : c),
+          syncStatus: 'pending',
+        }));
+        notifyStoreChanges();
+        return newAddress.id;
+      },
+
+      updateCustomerAddress: async (customerId, addressId, data) => {
+        const state = get();
+        const customer = state.customers.find(c => c.id === customerId && !c.isDeleted);
+        if (!customer) throw new Error('CUSTOMER_NOT_FOUND_FOR_ADDRESS');
+
+        const existing = (customer.addresses || []).find(a => a.id === addressId && !a.isDeleted);
+        if (!existing) throw new Error('CUSTOMER_ADDRESS_NOT_FOUND');
+
+        const nextTitle = data.title === undefined ? existing.title : data.title;
+        const validation = validateCustomerAddressTitle(customer.addresses, {
+          id: addressId,
+          title: nextTitle,
+        });
+        if (!validation.ok) throw new Error(validation.message);
+
+        const now = new Date().toISOString();
+        const updatedAddress: CustomerAddress = {
+          ...existing,
+          ...data,
+          id: existing.id,
+          customerId: existing.customerId,
+          title: String(nextTitle || '').trim() || undefined,
+          normalizedTitle: validation.normalizedTitle,
+          phone: data.phone === undefined ? existing.phone : String(data.phone || '').trim() || undefined,
+          province: data.province === undefined ? existing.province : normalizeCariRegion(data.province || ''),
+          district: data.district === undefined ? existing.district : normalizeCariRegion(data.district || ''),
+          address: data.address === undefined ? existing.address : normalizeCariAddress(data.address || ''),
+          updatedAt: now,
+        };
+
+        const updatedCustomer: Customer = {
+          ...customer,
+          ...(existing.legacyPrimary
+            ? {
+                address: updatedAddress.address,
+                province: updatedAddress.province,
+                district: updatedAddress.district,
+                mapLocation: updatedAddress.mapLocation,
+                latitude: updatedAddress.latitude,
+                longitude: updatedAddress.longitude,
+              }
+            : {}),
+          addresses: (customer.addresses || []).map(a => a.id === addressId ? updatedAddress : a),
+          updatedAt: now,
+        };
+
+        await saveLocalCustomer(updatedCustomer);
+        set(current => ({
+          customers: current.customers.map(c => c.id === customerId ? updatedCustomer : c),
+          syncStatus: 'pending',
+        }));
+        notifyStoreChanges();
+      },
       moveRoom: async (sourceCustomerId, targetCustomerId, roomId) => {
         const state = get();
         const sourceCustomer = state.customers.find(c => c.id === sourceCustomerId);
@@ -1148,11 +1338,12 @@ export const useStore = create<AppState>()(
         });
       },
 
-      addRoom: async (customerId, roomName) => {
+      addRoom: async (customerId, roomName, customerAddressId) => {
         const state = get();
         const now = new Date().toISOString();
         const newRoom: Room = {
           id: generateUUID(),
+          ...(customerAddressId ? { customerAddressId } : {}),
           name: roomName,
           photos: [],
           videos: [],
@@ -1163,10 +1354,27 @@ export const useStore = create<AppState>()(
 
         const target = state.customers.find(c => c.id === customerId);
         if (target) {
+          const roomScope = readErpScope(target);
+          if (!roomScope) {
+            throw new Error('CUSTOMER_SCOPE_MISSING_FOR_ROOM');
+          }
+          const activeAddresses = activeCustomerAddresses(target.addresses);
+          if (activeAddresses.length > 0 && !customerAddressId) {
+            throw new Error('CUSTOMER_ADDRESS_REQUIRED_FOR_ROOM');
+          }
+          if (
+            customerAddressId &&
+            !activeAddresses.some(address => address.id === customerAddressId)
+          ) {
+            throw new Error('CUSTOMER_ADDRESS_INVALID_FOR_ROOM');
+          }
           const updatedCustomer = {
             ...target,
             updatedAt: now,
-            rooms: [newRoom, ...target.rooms]
+            rooms: [
+              applyErpScope(newRoom, roomScope),
+              ...target.rooms
+            ]
           };
           await saveLocalCustomer(updatedCustomer);
           set((state) => {

@@ -11,6 +11,7 @@ type SyncRecord = Record<string, unknown> & {
   roomId?: string;
   openingId?: string;
   rooms?: SyncRecord[];
+  addresses?: SyncRecord[];
   windows?: SyncRecord[];
   products?: SyncRecord[];
   photos?: unknown[];
@@ -300,6 +301,7 @@ export async function POST(req: NextRequest) {
     const { data: remoteRooms, error: errRooms } = await supabaseServer.from("rooms").select("*").match(scopeColumns);
     const { data: remoteOpenings, error: errOpenings } = await supabaseServer.from("openings").select("*").match(scopeColumns);
     const { data: remoteMeasurements, error: errMeasurements } = await supabaseServer.from("measurements").select("*").match(scopeColumns);
+    const { data: remoteAddresses, error: errAddresses } = await supabaseServer.from("customer_addresses").select("*").match(scopeColumns);
     const {
       data: scopedUserRows,
       error: errUserScopes,
@@ -335,6 +337,7 @@ export async function POST(req: NextRequest) {
       errRooms ||
       errOpenings ||
       errMeasurements ||
+      errAddresses ||
       errUserScopes ||
       errUsers;
     if (fetchError) {
@@ -371,6 +374,35 @@ export async function POST(req: NextRequest) {
       roomsByCustomer.set(r.customerId, arr);
     });
 
+    const addressesByCustomer = new Map<string, SyncRecord[]>();
+    remoteAddresses?.forEach((rawAddress: SyncRecord) => {
+      const customerId = String(rawAddress.customerId || "").trim();
+      if (!customerId) {
+        return;
+      }
+
+      const normalizedAddress: SyncRecord = {
+        id: rawAddress.id,
+        customerId,
+        title: rawAddress.title || "",
+        normalizedTitle: rawAddress.normalized_title || "",
+        legacyPrimary: rawAddress.legacyPrimary || false,
+        phone: rawAddress.phone || "",
+        province: rawAddress.province || "",
+        district: rawAddress.district || "",
+        address: rawAddress.address || "",
+        mapLocation: rawAddress.mapLocation || "",
+        latitude: rawAddress.latitude ?? undefined,
+        longitude: rawAddress.longitude ?? undefined,
+        isDeleted: rawAddress.isDeleted || false,
+        createdAt: rawAddress.createdAt,
+        updatedAt: rawAddress.updatedAt,
+      };
+
+      const arr = addressesByCustomer.get(customerId) || [];
+      arr.push(normalizedAddress);
+      addressesByCustomer.set(customerId, arr);
+    });
     const openingsByRoom = new Map<string, SyncRecord[]>();
     remoteOpenings?.forEach(o => {
       const arr = openingsByRoom.get(o.roomId) || [];
@@ -468,6 +500,32 @@ export async function POST(req: NextRequest) {
       }
     });
 
+    for (const customer of mergedCustomersMap.values()) {
+      const localAddresses = Array.isArray(customer.addresses)
+        ? (customer.addresses as SyncRecord[])
+        : [];
+      const remoteScopedAddresses = addressesByCustomer.get(customer.id) || [];
+      const mergedAddresses = new Map<string, SyncRecord>();
+
+      localAddresses.forEach((address) => {
+        if (address && typeof address.id === "string" && address.id) {
+          mergedAddresses.set(address.id, address);
+        }
+      });
+
+      remoteScopedAddresses.forEach((remoteAddress) => {
+        const localAddress = mergedAddresses.get(remoteAddress.id);
+        if (
+          !localAddress ||
+          new Date(remoteAddress.updatedAt || 0) >
+            new Date(localAddress.updatedAt || 0)
+        ) {
+          mergedAddresses.set(remoteAddress.id, remoteAddress);
+        }
+      });
+
+      customer.addresses = Array.from(mergedAddresses.values());
+    }
     const finalCustomers = Array.from(mergedCustomersMap.values()).map(
       (customer) => stampCustomerTreeScope(customer, erpContext.scope),
     );
@@ -487,6 +545,7 @@ export async function POST(req: NextRequest) {
             name: dr.name,
             photos: dr.photos || [],
             videos: dr.videos || [],
+            customerAddressId: dr.customerAddressId || undefined,
             windows: [],
             createdAt: dr.createdAt,
             updatedAt: dr.updatedAt
@@ -503,6 +562,7 @@ export async function POST(req: NextRequest) {
             mergedRoomsMap.set(dr.id, {
               ...lr,
               name: dr.name,
+              customerAddressId: dr.customerAddressId || undefined,
               createdAt: dr.createdAt,
               updatedAt: dr.updatedAt
             });
@@ -645,6 +705,7 @@ export async function POST(req: NextRequest) {
     // 5. Push local modifications to Supabase
     let customersUpsertedCount = 0;
     let roomsUpsertedCount = 0;
+    let addressesPersistedCount = 0;
     let openingsUpsertedCount = 0;
     const measurementsUpsertedCount = 0;
 
@@ -691,6 +752,90 @@ export async function POST(req: NextRequest) {
         customersUpsertedCount++;
       }
 
+      // Customer addresses: canonical RPC only; never raw customer_addresses mutation.
+      for (const a of c.addresses ?? []) {
+        const dbAddress = remoteAddresses?.find(
+          (remoteAddress) => remoteAddress.id === a.id,
+        );
+
+        const localUpdatedAt = new Date(a.updatedAt || 0).getTime();
+        const remoteUpdatedAt = new Date(dbAddress?.updatedAt || 0).getTime();
+
+        if (dbAddress && localUpdatedAt <= remoteUpdatedAt) {
+          continue;
+        }
+
+        let operation: "INSERT" | "UPDATE" | "SOFT_DELETE";
+        if (a.isDeleted) {
+          if (!dbAddress || dbAddress.isDeleted) {
+            continue;
+          }
+          operation = "SOFT_DELETE";
+        } else {
+          operation = dbAddress ? "UPDATE" : "INSERT";
+        }
+
+        const addressExpectedVersion = dbAddress
+          ? Number(dbAddress.entity_version ?? dbAddress.entityVersion)
+          : 0;
+
+        if (
+          dbAddress &&
+          (!Number.isInteger(addressExpectedVersion) ||
+            addressExpectedVersion <= 0)
+        ) {
+          throw new Error("CUSTOMER_ADDRESS_EXPECTED_VERSION_MISSING");
+        }
+
+        const addressChangeId = [
+          "customer-address",
+          operation,
+          a.id,
+          String(a.updatedAt || a.createdAt || ""),
+        ].join(":");
+
+        const { error: addressError } = await supabaseServer.rpc(
+          "persist_customer_address_authority_v1",
+          {
+            p_operation: operation,
+            p_address: {
+              id: a.id,
+              customerId: c.id,
+              title: a.title || null,
+              phone: a.phone || null,
+              province: a.province || null,
+              district: a.district || null,
+              address: a.address || "",
+              mapLocation: a.mapLocation || null,
+              latitude: a.latitude ?? null,
+              longitude: a.longitude ?? null,
+              legacyPrimary: a.legacyPrimary || false,
+              createdAt: a.createdAt || null,
+            },
+            p_context: {
+              tenantId: erpContext.scope.tenantId,
+              companyId: erpContext.scope.companyId,
+              branchId: erpContext.scope.branchId,
+              accountingPeriodId: erpContext.scope.accountingPeriodId,
+              changeId: addressChangeId,
+              expectedVersion: addressExpectedVersion,
+              actorUserId: user.id,
+            },
+          },
+        );
+
+        if (addressError) {
+          console.error(
+            `[Sync DB Error] Customer address authority failed for ${c.id}/${a.id}:`,
+            addressError,
+          );
+          throw new Error(
+            `Customer address authority failed: ${addressError.message}`,
+          );
+        }
+
+        addressesPersistedCount++;
+      }
       // Rooms
       for (const r of c.rooms ?? []) {
         const dbRoom = remoteRooms?.find(dr => dr.id === r.id);
@@ -700,6 +845,10 @@ export async function POST(req: NextRequest) {
             id: r.id,
             name: r.name,
             customerId: c.id,
+            customerAddressId:
+              r.customerAddressId ||
+              dbRoom?.customerAddressId ||
+              null,
             photos: (r.photos && r.photos.length > 0) ? r.photos : (dbRoom?.photos || []),
             videos: (r.videos && r.videos.length > 0) ? r.videos : (dbRoom?.videos || []),
             createdAt: r.createdAt,
@@ -746,6 +895,7 @@ export async function POST(req: NextRequest) {
     console.log("[Sync API POST] upserted counts:", {
       customers: customersUpsertedCount,
       rooms: roomsUpsertedCount,
+      addresses: addressesPersistedCount,
       openings: openingsUpsertedCount,
       measurements: measurementsUpsertedCount
     });
