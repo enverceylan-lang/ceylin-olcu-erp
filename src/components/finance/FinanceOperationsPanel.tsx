@@ -14,6 +14,8 @@ import type { ErpScope } from "@/lib/erpScope";
 import type { FinancePermission } from "@/lib/finance/financeAccessPolicy";
 import { CollectionWorkspace } from "@/components/finance/CollectionWorkspace";
 import { PaymentWorkspace } from "@/components/finance/PaymentWorkspace";
+import { PayableInstrumentWorkspace } from "@/components/finance/PayableInstrumentWorkspace";
+import { PosAdminOperationsWorkspace } from "@/components/finance/PosAdminOperationsWorkspace";
 import {
   visibleFinanceCollectionItems,
   visibleFinancePaymentItems,
@@ -287,6 +289,13 @@ export default function FinanceOperationsPanel({
               scope={scope}
               permissions={permissions}
             />
+          ) : activeItem && section === "\u00d6deme" && (activeItem === "\u00c7ek ile \u00d6deme" || activeItem === "Senet ile \u00d6deme") ? (
+            <PayableInstrumentWorkspace
+              key={activeItem}
+              activeItem={activeItem}
+              scope={scope}
+              permissions={permissions}
+            />
           ) : activeItem && section === "Ödeme" ? (
             <PaymentWorkspace
               key={activeItem}
@@ -294,6 +303,8 @@ export default function FinanceOperationsPanel({
               scope={scope}
               permissions={permissions}
             />
+          ) : activeItem === "POS Cihazlar\u0131 ve S\u00f6zle\u015fmeleri" && section === "Hesaplar" ? (
+            <PosAdminOperationsWorkspace scope={scope} />
           ) : activeItem && section === "Hesaplar" ? (
             <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200">
               {permissions.includes("finance.account.manage")

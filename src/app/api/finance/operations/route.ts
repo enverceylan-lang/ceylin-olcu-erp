@@ -37,6 +37,9 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+import {decidePayableInstrumentCreateServerContract,decidePayableInstrumentTransitionServerContract} from "@/lib/finance/payableInstrumentServerContract";
+import {persistFinancePayableInstrumentV1,transitionFinancePayableInstrumentV1,type PayableInstrumentRpcClient} from "@/lib/finance/payableInstrumentSupabaseGateway";
+
 const NO_STORE_HEADERS = {
   "Cache-Control": "no-store, max-age=0"
 } as const;
@@ -194,6 +197,24 @@ export async function POST(request: NextRequest) {
       console.error("[Finance Instrument Transition API] Persistence failed.");
       return json({ success: false, error: "FINANCE_INSTRUMENT_TRANSITION_PERSISTENCE_FAILED" }, 503);
     }
+  }
+
+  if (hasCommand(body, "payableInstrumentCommand")) {
+    const decision=decidePayableInstrumentCreateServerContract(body,context.scope);
+    if(!decision.allowed)return json({success:false,error:decision.code},decision.status);
+    const access=guardServerFinanceChannelAccess({authenticatedUser:{id:user.id,role:user.role,storedPermissions:user.permissions,permissionVersion:user.permissionVersion,sessionPermissionVersion:user.sessionPermissionVersion},channel:decision.command.instrumentType,operation:"ISSUE",direction:"CREATE",requestedPermission:decision.requestedPermission as never,packageType:context.package,actorScope:context.scope,resourceScope:context.scope});
+    if(!access.allowed)return json({success:false,error:"FINANCE_ACCESS_DENIED",reason:access.reasonCode},403);
+    const command={...decision.command,...context.scope};
+    try{const result=await persistFinancePayableInstrumentV1(supabaseServer as unknown as PayableInstrumentRpcClient,command as unknown as Record<string,unknown>,user.id,stableFinanceOperationHash(command));const status=result.outcome==="CREATED"?201:result.outcome==="REPLAY"?200:result.outcome==="CONFLICT"?409:422;return json({success:result.outcome==="CREATED"||result.outcome==="REPLAY",...result},status)}catch{return json({success:false,error:"FINANCE_PAYABLE_INSTRUMENT_PERSISTENCE_FAILED"},503)}
+  }
+
+  if (hasCommand(body, "payableInstrumentTransitionCommand")) {
+    const decision=decidePayableInstrumentTransitionServerContract(body,context.scope);
+    if(!decision.allowed)return json({success:false,error:decision.code},decision.status);
+    const access=guardServerFinanceChannelAccess({authenticatedUser:{id:user.id,role:user.role,storedPermissions:user.permissions,permissionVersion:user.permissionVersion,sessionPermissionVersion:user.sessionPermissionVersion},channel:decision.command.instrumentType,operation:"ISSUE",direction:decision.direction,requestedPermission:decision.requestedPermission as never,packageType:context.package,actorScope:context.scope,resourceScope:context.scope});
+    if(!access.allowed)return json({success:false,error:"FINANCE_ACCESS_DENIED",reason:access.reasonCode},403);
+    const command={...decision.command,...context.scope};
+    try{const result=await transitionFinancePayableInstrumentV1(supabaseServer as unknown as PayableInstrumentRpcClient,command as unknown as Record<string,unknown>,user.id,stableFinanceOperationHash(command));const status=result.outcome==="CREATED"?201:result.outcome==="REPLAY"?200:result.outcome==="CONFLICT"?409:422;return json({success:result.outcome==="CREATED"||result.outcome==="REPLAY",...result},status)}catch{return json({success:false,error:"FINANCE_PAYABLE_INSTRUMENT_TRANSITION_PERSISTENCE_FAILED"},503)}
   }
 
   if (hasCollectionCommand(body)) {
