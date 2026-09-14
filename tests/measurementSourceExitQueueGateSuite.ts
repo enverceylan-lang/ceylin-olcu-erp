@@ -16,6 +16,10 @@ const db = fs.readFileSync(
   path.join(root, "src", "lib", "localDraftDb.ts"),
   "utf8",
 );
+const syncService = fs.readFileSync(
+  path.join(root, "src", "lib", "syncService.ts"),
+  "utf8",
+);
 
 assert(
   !page.includes("V1A Queue - Add to sync queue for push"),
@@ -56,4 +60,28 @@ const enqueueIndex = markReadyBlock.indexOf("enqueueSyncEvent('DRAFT'");
 assert(validationIndex >= 0, "SOURCE_EXIT validation bulunamadı");
 assert(enqueueIndex > validationIndex, "DRAFT enqueue validation sonrasında olmalı");
 
+
+assert(
+  syncService.includes("const autoSyncCustomers: Customer[]"),
+  "Auto-sync customer boundary bulunamadı",
+);
+
+assert(
+  syncService.includes("rooms: []"),
+  "Auto-sync measurement tree kesilmiyor",
+);
+
+assert(
+  syncService.includes(
+    "const sanitizedCustomers = stripMediaAndDataUrls(autoSyncCustomers);"
+  ),
+  "Auto-sync sanitized payload measurement-tree-free customer kaynağını kullanmıyor",
+);
+
+assert(
+  !syncService.includes(
+    "const sanitizedCustomers = stripMediaAndDataUrls(localCustomers);"
+  ),
+  "Legacy full customer tree auto-sync payloadı yeniden aktif",
+);
 console.log("[PASS] measurementSourceExitQueueGateSuite completed");

@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { X, Save, Shield } from "lucide-react";
-import { Customer } from "@/store/useStore";
+import { X, Save, Shield, Plus, MapPin, Edit3 } from "lucide-react";
+import { Customer, CustomerAddress, useStore } from "@/store/useStore";
+import { CustomerAddressModal } from "@/components/modals/CustomerAddressModal";
+import { activeCustomerAddresses, customerAddressDisplayTitle } from "@/lib/customerAddressModel";
 
 interface CariEditModalProps {
   isOpen: boolean;
@@ -14,6 +16,48 @@ interface CariEditModalProps {
 export function CariEditModal({ isOpen, onClose, customer, onSave }: CariEditModalProps) {
   const [formData, setFormData] = useState<Partial<Customer>>({ ...customer });
   const [isSaving, setIsSaving] = useState(false);
+  const [addressTab, setAddressTab] = useState<string>("PRIMARY");
+  const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
+  const [editingAddress, setEditingAddress] = useState<CustomerAddress | null>(null);
+
+  const liveCustomer =
+    useStore(state => state.customers.find(item => item.id === customer.id)) ||
+    customer;
+  const ensureCustomerAddressIdentity =
+    useStore(state => state.ensureCustomerAddressIdentity);
+  const addCustomerAddress =
+    useStore(state => state.addCustomerAddress);
+  const updateCustomerAddress =
+    useStore(state => state.updateCustomerAddress);
+  const activeAddresses =
+    activeCustomerAddresses(liveCustomer.addresses);
+  const selectedExtraAddress =
+    activeAddresses.find(address => address.id === addressTab) || null;
+
+  const openNewAddress = async () => {
+    await ensureCustomerAddressIdentity(customer.id);
+    setEditingAddress(null);
+    setIsAddressModalOpen(true);
+  };
+
+  const openEditAddress = (address: CustomerAddress) => {
+    setEditingAddress(address);
+    setIsAddressModalOpen(true);
+  };
+
+  const saveCustomerAddress = async (
+    data: Omit<CustomerAddress, "id" | "customerId" | "normalizedTitle" | "createdAt" | "updatedAt">,
+  ) => {
+    if (editingAddress) {
+      await updateCustomerAddress(customer.id, editingAddress.id, data);
+      setAddressTab(editingAddress.id);
+    } else {
+      const addressId = await addCustomerAddress(customer.id, data);
+      setAddressTab(addressId);
+    }
+    setIsAddressModalOpen(false);
+    setEditingAddress(null);
+  };
 
   if (!isOpen) return null;
 
@@ -66,6 +110,50 @@ export function CariEditModal({ isOpen, onClose, customer, onSave }: CariEditMod
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-6 bg-gray-50 dark:bg-gray-900/50">
+          <div
+            data-cari-edit-address-tabs-v1
+            className="mb-5 flex flex-wrap items-center gap-2"
+          >
+            <button
+              type="button"
+              onClick={() => setAddressTab("PRIMARY")}
+              className={`rounded-lg border px-3 py-2 text-sm font-semibold ${
+                addressTab === "PRIMARY"
+                  ? "border-blue-600 bg-blue-600 text-white"
+                  : "border-gray-300 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+              }`}
+            >
+              Ana Adres
+            </button>
+
+            {activeAddresses
+              .filter(address => !address.legacyPrimary)
+              .map(address => (
+                <button
+                  key={address.id}
+                  type="button"
+                  onClick={() => setAddressTab(address.id)}
+                  className={`rounded-lg border px-3 py-2 text-sm font-semibold ${
+                    addressTab === address.id
+                      ? "border-blue-600 bg-blue-600 text-white"
+                      : "border-gray-300 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                  }`}
+                >
+                  {customerAddressDisplayTitle(address)}
+                </button>
+              ))}
+
+            <button
+              type="button"
+              onClick={() => void openNewAddress()}
+              className="ml-auto inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+            >
+              <Plus className="h-4 w-4" />
+              + Adres Ekle
+            </button>
+          </div>
+
+          {addressTab === "PRIMARY" ? (
           <form id="cariEditForm" onSubmit={handleSubmit} className="space-y-8">
             
             {/* Temel Bilgiler */}
@@ -194,6 +282,59 @@ export function CariEditModal({ isOpen, onClose, customer, onSave }: CariEditMod
             </div>
 
           </form>
+          ) : selectedExtraAddress ? (
+            <section
+              data-cari-edit-extra-address-v1
+              className="rounded-xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900"
+            >
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 text-lg font-bold text-gray-900 dark:text-white">
+                    <MapPin className="h-5 w-5 text-blue-600" />
+                    {customerAddressDisplayTitle(selectedExtraAddress)}
+                  </div>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Bu adresin odalari bu adres kimligi ile bagli kalir.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => openEditAddress(selectedExtraAddress)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
+                >
+                  <Edit3 className="h-4 w-4" />
+                  D&uuml;zenle
+                </button>
+              </div>
+
+              <dl className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+                <div>
+                  <dt className="font-semibold text-gray-500">Telefon</dt>
+                  <dd className="mt-1 text-gray-900 dark:text-white">
+                    {selectedExtraAddress.phone || "-"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="font-semibold text-gray-500">Il / Ilce</dt>
+                  <dd className="mt-1 text-gray-900 dark:text-white">
+                    {[selectedExtraAddress.province, selectedExtraAddress.district]
+                      .filter(Boolean)
+                      .join(" / ") || "-"}
+                  </dd>
+                </div>
+                <div className="sm:col-span-2">
+                  <dt className="font-semibold text-gray-500">Adres</dt>
+                  <dd className="mt-1 text-gray-900 dark:text-white">
+                    {selectedExtraAddress.address || "-"}
+                  </dd>
+                </div>
+              </dl>
+            </section>
+          ) : (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+              Secili adres artik aktif degil. Ana Adres sekmesine donun.
+            </div>
+          )}
         </div>
 
         {/* Footer */}
@@ -206,7 +347,8 @@ export function CariEditModal({ isOpen, onClose, customer, onSave }: CariEditMod
           >
             İptal
           </button>
-          <button 
+          {addressTab === "PRIMARY" && (
+          <button
             type="submit"
             form="cariEditForm"
             disabled={isSaving}
@@ -215,8 +357,18 @@ export function CariEditModal({ isOpen, onClose, customer, onSave }: CariEditMod
             {isSaving ? "Kaydediliyor..." : "Tüm Değişiklikleri Kaydet"}
             {!isSaving && <Save className="w-4 h-4" />}
           </button>
+          )}
         </div>
       </div>
+      <CustomerAddressModal
+        isOpen={isAddressModalOpen}
+        onClose={() => {
+          setIsAddressModalOpen(false);
+          setEditingAddress(null);
+        }}
+        address={editingAddress}
+        onSave={saveCustomerAddress}
+      />
     </div>
   );
 }

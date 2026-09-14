@@ -13,7 +13,8 @@ export type MeasurementValidationIssueCode =
   | "OLC-VAL-001"
   | "OLC-VAL-002"
   | "OLC-VAL-003"
-  | "OLC-VAL-004";
+  | "OLC-VAL-004"
+  | "OLC-ADDR-001";
 
 export interface MeasurementValidationIssue {
   code: MeasurementValidationIssueCode;

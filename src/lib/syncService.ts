@@ -521,7 +521,13 @@ export async function syncNow(isManual: boolean = false) {
     });
 
     // ── Task B: Sanitizing outgoing sync payload by stripping media ──
-    const sanitizedCustomers = stripMediaAndDataUrls(localCustomers);
+    const autoSyncCustomers: Customer[] = localCustomers.map(
+      (customer): Customer => ({
+        ...customer,
+        rooms: [],
+      }),
+    );
+    const sanitizedCustomers = stripMediaAndDataUrls(autoSyncCustomers);
     // Exclude password field from outgoing users payload for security
     const outgoingUsers = (localUsers || []).map((user) => {
       const { password, ...userWithoutPassword } = user;

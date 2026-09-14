@@ -11,6 +11,7 @@ import {
   calculateSelectedProduct
 } from '@/lib/calculationEngine';
 export interface MeasurementRecord extends ProductMeasurement {
+  customerAddressId?: string;
   customerId: string;
   roomId: string;
   openingId: string;

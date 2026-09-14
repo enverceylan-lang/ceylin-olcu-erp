@@ -62,6 +62,8 @@ export async function persistDraftSaleServerAuthority(input: {
       ...input.scope,
       saleId: input.sale.id,
       customerId: input.sale.customerId,
+      customerAddressId: input.sale.customerAddressId || null,
+      customerAddressSnapshot: input.sale.customerAddressSnapshot || null,
       saleNumber: input.sale.saleNo || null,
       status: input.sourceStatus,
       totalAmount: Number(input.sale.totalAmount || 0),

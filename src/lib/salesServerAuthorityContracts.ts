@@ -1,9 +1,24 @@
 import type { ErpScope } from "@/lib/erpScope";
 import { validateErpScope } from "@/lib/erpScope";
 
+export interface SaleAuthorityAddressSnapshot {
+  customerAddressId: string;
+  title?: string | null;
+  phone?: string | null;
+  province?: string | null;
+  district?: string | null;
+  address: string;
+  mapLocation?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  capturedAt: string;
+}
+
 export interface SaleAuthorityDraftInput extends ErpScope {
   saleId: string;
   customerId: string;
+  customerAddressId?: string | null;
+  customerAddressSnapshot?: SaleAuthorityAddressSnapshot | null;
   saleNumber?: string | null;
   status: "TASLAK" | "TEKLİF";
   totalAmount: number;
@@ -68,6 +83,21 @@ export function assertSaleDraftAuthorityInput(
   if (!Number.isFinite(input.totalAmount) || input.totalAmount < 0) {
     throw new Error("SALE_AUTHORITY_AMOUNT_INVALID");
   }
+
+  const customerAddressId = text(input.customerAddressId);
+  const snapshot = input.customerAddressSnapshot;
+  if (!!customerAddressId !== !!snapshot) {
+    throw new Error("SALE_AUTHORITY_ADDRESS_PAIR_REQUIRED");
+  }
+  if (snapshot) {
+    if (
+      text(snapshot.customerAddressId) !== customerAddressId ||
+      !text(snapshot.capturedAt)
+    ) {
+      throw new Error("SALE_AUTHORITY_ADDRESS_SNAPSHOT_INVALID");
+    }
+  }
+
   if (input.status !== "TASLAK" && input.status !== "TEKLİF") {
     throw new Error("SALE_AUTHORITY_DRAFT_STATUS_REQUIRED");
   }
