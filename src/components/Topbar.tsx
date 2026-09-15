@@ -62,7 +62,14 @@ firstStatus: ${result.debug.firstStatus}
           alert(`Gönderilecek yeni ölçü yok.` + (isDev ? `\n\nDEBUG:\n${debugText}` : ''));
         }
       } else {
-        alert(`Ölçüler gönderilemedi. İnternet bağlantısını kontrol edip tekrar deneyin.` + (isDev ? `\n\nDETAY: ${result.errors.join(', ')}\n\nDEBUG:\n${debugText}` : ''));
+        const errorText = result.errors.length
+          ? result.errors.join(', ')
+          : 'SUNUCU_GONDERIM_BASARISIZ';
+        alert(`Ölçüler gönderilemedi. Hata: ${errorText}` +
+          (isDev ? `
+
+DEBUG:
+${debugText}` : ''));
       }
     } catch (error: unknown) {
       alert(`Beklenmeyen hata oluştu. Lütfen tekrar deneyin.`);

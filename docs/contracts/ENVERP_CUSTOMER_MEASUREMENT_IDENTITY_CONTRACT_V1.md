@@ -2,10 +2,23 @@
 
 ## Status
 
-Integration candidate: PAK
+Original Gate 4 integration candidate: PAK
 
-Production deployed behavior: KANITLANMADI
-Live end-to-end runtime: KANITLANMADI
+Production deployed commit:
+6352ce46fb4afcdeb7888b98c9adb368b06a25c4 = PAK
+
+Production deployment artifact: PAK
+
+Production manual measurement push at commit 6352ce4: DUR
+
+Observed live behavior:
+"Olculeri Gonder" returned failure while the production Topbar masked the
+underlying result as an internet-connection message.
+
+Current manual-push wiring fix candidate:
+source / regression / TypeScript / production build = PAK
+
+Live end-to-end retest of the current fix candidate: KANITLANMADI
 
 This contract records the canonical customer, address and measurement identity
 rules verified in the Customer Address Authority / Gate 4 integration candidate.
@@ -139,6 +152,8 @@ Verified source boundaries include:
 - src/lib/syncService.ts
 - src/app/api/sync/customers/route.ts
 - src/lib/measurementParentAckGate.ts
+- src/lib/deltaSyncClient.ts
+- src/components/Topbar.tsx
 
 ## Gate 4 regression evidence
 
@@ -154,6 +169,85 @@ PAK:
 - Next.js production build
 - git diff --check
 
+## Live runtime delta evidence
+
+The original Gate 4 candidate contained a canonical parent ACK helper and a
+passing helper contract test.
+
+Live production verification later proved that the real manual measurement
+producer did not use that helper.
+
+Exact observed producer path at deployed commit 6352ce4:
+
+Topbar
+-> pushDeltaSyncEvents
+-> /api/delta-sync/push
+-> persistMeasurementAuthorityCommand
+-> persist_measurement_authority_v1
+
+The real producer therefore bypassed the intended canonical parent ACK step.
+
+Classification:
+
+- parent ACK helper exists: PAK
+- parent ACK helper contract: PAK
+- real producer parent ACK wiring at deployed commit 6352ce4: DUR
+- generic production "internet connection" error classification: DUR
+- exact underlying phone event server error code: KANITLANMADI
+- root cause class: PRODUCER WIRING GAP / SAME-LINE REGRESSION
+
+The current fix candidate changes the real producer so that pending measurement
+events project only their required canonical parent chain:
+
+Customer
+-> referenced Room
+-> referenced Opening / Window
+-> products: []
+
+The parent projection is sent to /api/sync/customers first.
+
+Only after a successful canonical parent ACK may the existing delta measurement
+authority call continue.
+
+The normal automatic customer synchronization rule remains unchanged:
+
+rooms: []
+
+The fix does not authorize or perform:
+
+- live SQL
+- customer deletion
+- measurement deletion
+- queue deletion
+- queue cleanup
+- backfill
+
+The existing failed field measurement event must be preserved for live
+regression verification after deployment of the fix.
+
+Current fix candidate evidence:
+
+- tests/customerMeasurementParentAckContractSuite.ts: PAK
+- tests/measurementSourceExitQueueGateSuite.ts: PAK
+- tests/measurementSourceExitGateSuite.ts: PAK
+- tests/measurementPendingInsertDeferredUpdateSuite.ts: PAK
+- tests/cariEditMultiAddressContractSuite.ts: PAK
+- tests/addressModelFinalClosurePhaseCSuite.ts: PAK
+- targeted regression: 6/6 PAK
+- TypeScript noEmit: PAK
+- Next.js production build: PAK
+- git diff --check: PAK
+
+The current source mutation boundary before ledger update is exactly:
+
+- src/components/Topbar.tsx
+- src/lib/deltaSyncClient.ts
+- tests/customerMeasurementParentAckContractSuite.ts
+
+Live runtime acceptance of this fix remains:
+
+KANITLANMADI
+
 ## Explicit boundary
 
 tests/measurementAuthorityContinuationSuite.ts is not used as Gate 4 closure
@@ -168,13 +262,34 @@ No Media source mutation is authorized by this contract.
 
 ## Release state
 
-The verified state is an uncommitted integration candidate.
+Historical released state:
 
-This contract does not prove:
-- main merge
+- integration merge commit:
+  6352ce46fb4afcdeb7888b98c9adb368b06a25c4
+- integration branch push: PAK
+- origin/main fast-forward to 6352ce4: PAK
+- Vercel production deployment for 6352ce4: PAK
+- production artifact status: Ready
+
+Runtime evidence after that deployment:
+
+- manual measurement push: DUR
+- exact producer wiring defect: PAK
+- exact underlying phone event server error code: KANITLANMADI
+
+Current state:
+
+The manual-push parent ACK wiring correction is an uncommitted fix candidate.
+
+Current fix candidate source/test/build evidence is PAK.
+
+This contract does not yet prove for the current fix candidate:
+
+- commit
 - push
+- main update
 - deployment
 - production freshness
-- live end-to-end runtime
+- successful live retry of the preserved field measurement event
 
-Those require separate evidence and separate authorization.
+Those remain separate release and runtime gates.

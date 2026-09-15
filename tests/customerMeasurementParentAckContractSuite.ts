@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import {
   fetchDeltaAfterCanonicalParentAck,
   resolveMeasurementParentCustomerId,
@@ -138,6 +139,91 @@ async function main() {
       "/api/delta-sync/push",
     ]);
   }
+
+  const deltaClientSource = fs.readFileSync(
+    "src/lib/deltaSyncClient.ts",
+    "utf8",
+  );
+  const topbarSource = fs.readFileSync(
+    "src/components/Topbar.tsx",
+    "utf8",
+  );
+  const syncServiceSource = fs.readFileSync(
+    "src/lib/syncService.ts",
+    "utf8",
+  );
+
+  const pushStart = deltaClientSource.indexOf(
+    "export async function pushDeltaSyncEvents",
+  );
+  const pullStart = deltaClientSource.indexOf(
+    "export async function pullInboundMeasurements",
+  );
+
+  assert.ok(pushStart >= 0);
+  assert.ok(pullStart > pushStart);
+
+  const realPushSource = deltaClientSource.slice(
+    pushStart,
+    pullStart,
+  );
+
+  assert.match(
+    realPushSource,
+    /fetchDeltaAfterCanonicalParentAck/,
+  );
+  assert.match(
+    realPushSource,
+    /resolveMeasurementParentCustomerId/,
+  );
+  assert.match(
+    realPushSource,
+    /item\.id === roomId/,
+  );
+  assert.match(
+    realPushSource,
+    /item\.id === openingId/,
+  );
+  assert.match(
+    realPushSource,
+    /products:\s*\[\]/,
+  );
+  assert.match(
+    realPushSource,
+    /customers:\s*parentCustomers/,
+  );
+  assert.match(
+    realPushSource,
+    /pendingDeletes:\s*\[\]/,
+  );
+
+  const parentGateCall = realPushSource.indexOf(
+    "fetchDeltaAfterCanonicalParentAck",
+  );
+  const releasedResponse = realPushSource.indexOf(
+    "response = parentGate.response",
+  );
+
+  assert.ok(parentGateCall >= 0);
+  assert.ok(releasedResponse > parentGateCall);
+
+  assert.doesNotMatch(
+    topbarSource,
+    /İnternet bağlantısını kontrol edip tekrar deneyin/,
+  );
+  assert.match(
+    topbarSource,
+    /result\.errors\.length/,
+  );
+
+  assert.match(
+    syncServiceSource,
+    /const autoSyncCustomers:\s*Customer\[\]/,
+  );
+  assert.match(
+    syncServiceSource,
+    /rooms:\s*\[\]/,
+  );
 
   console.log("PAK customerMeasurementParentAckContractSuite");
 }
