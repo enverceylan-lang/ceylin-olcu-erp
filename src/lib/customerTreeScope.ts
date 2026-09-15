@@ -59,6 +59,84 @@ export function inheritConsistentErpScope(
   return first;
 }
 
+export type CustomerRootScopeClassification =
+  | "EXACT"
+  | "LEGACY_MISSING"
+  | "CONFLICT";
+
+const ERP_SCOPE_FIELDS = [
+  "tenantId",
+  "companyId",
+  "branchId",
+  "accountingPeriodId",
+] as const;
+
+export function classifyCustomerRootScope(
+  customer: unknown,
+  expected: ErpScope,
+): CustomerRootScopeClassification {
+  const customerRecord = asRecord(customer);
+  if (!customerRecord) return "CONFLICT";
+
+  let hasMissingField = false;
+  for (const field of ERP_SCOPE_FIELDS) {
+    const current =
+      typeof customerRecord[field] === "string"
+        ? String(customerRecord[field]).trim()
+        : "";
+
+    if (!current) {
+      hasMissingField = true;
+      continue;
+    }
+
+    if (current !== expected[field]) {
+      return "CONFLICT";
+    }
+  }
+
+  return hasMissingField ? "LEGACY_MISSING" : "EXACT";
+}
+
+export function migrateLegacyCustomerRootScope<T>(
+  customer: T,
+  expected: ErpScope,
+): T {
+  const classification = classifyCustomerRootScope(customer, expected);
+  if (classification === "CONFLICT") {
+    throw new Error("CUSTOMER_SCOPE_CONFLICT");
+  }
+  if (classification === "EXACT") {
+    return customer;
+  }
+
+  const customerRecord = asRecord(customer);
+  if (!customerRecord) {
+    throw new Error("CUSTOMER_SCOPE_CONFLICT");
+  }
+
+  return {
+    ...customerRecord,
+    tenantId:
+      typeof customerRecord.tenantId === "string" && customerRecord.tenantId.trim()
+        ? customerRecord.tenantId.trim()
+        : expected.tenantId,
+    companyId:
+      typeof customerRecord.companyId === "string" && customerRecord.companyId.trim()
+        ? customerRecord.companyId.trim()
+        : expected.companyId,
+    branchId:
+      typeof customerRecord.branchId === "string" && customerRecord.branchId.trim()
+        ? customerRecord.branchId.trim()
+        : expected.branchId,
+    accountingPeriodId:
+      typeof customerRecord.accountingPeriodId === "string" &&
+      customerRecord.accountingPeriodId.trim()
+        ? customerRecord.accountingPeriodId.trim()
+        : expected.accountingPeriodId,
+  } as T;
+}
+
 export function customerTreeScopeIssue(
   customer: unknown,
   expected: ErpScope,

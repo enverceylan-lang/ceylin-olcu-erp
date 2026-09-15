@@ -161,8 +161,40 @@ measurement records.
 
 No live customer deletion.
 No live measurement deletion.
-No backfill.
+No general backfill.
 No live SQL mutation.
+
+### Controlled pilot legacy Customer scope migration window
+
+A temporarily enabled controlled pilot migration window may canonicalize a legacy
+Customer whose ERP scope is incomplete only when all of the following are true:
+
+- ENVERP_PILOT_LEGACY_CUSTOMER_SCOPE_MIGRATION is exactly "true".
+- ENVERP_PILOT_LEGACY_CUSTOMER_SCOPE_COMPANY_ID is non-empty.
+- that configured companyId exactly equals the authenticated server ERP companyId.
+- every scope field already present on the legacy Customer matches the authenticated scope.
+- any explicit conflicting scope value rejects that Customer and is never overwritten.
+
+This window is not general multi-company ownership inference. When disabled or when
+the companyId does not match, incomplete legacy Customer scope remains unproven and must
+be rejected/quarantined without deleting the local record.
+
+The migration window is operationally temporary. Production closure requires all of
+the following evidence:
+
+1. the pilot companyId used for the migration window is recorded and verified;
+2. migration is enabled only for the approved pilot runtime window;
+3. accepted / migrated / rejected counts and rejected ids/reasons are reviewed;
+4. ENVERP_PILOT_LEGACY_CUSTOMER_SCOPE_MIGRATION is disabled after verification;
+5. a subsequent runtime check proves incomplete legacy Customers are again rejected as
+   CUSTOMER_SCOPE_LEGACY_UNPROVEN while the migration flag is disabled.
+
+The Customer migration workstream is not production-closure PAK until the flag-close
+proof in steps 4 and 5 exists. Source/test PAK does not substitute for runtime closure.
+
+Partial Customer sync is explicit: valid Customers may succeed while rejected Customer
+ids/reasons are returned to the client. The client must preserve rejected local records
+and must not mark the overall Customer sync fully synced while rejected Customers remain.
 
 Historical and field records remain valuable for diagnosis, regression,
 development and real-usage verification.

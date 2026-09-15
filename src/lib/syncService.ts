@@ -624,6 +624,13 @@ export async function syncNow(isManual: boolean = false) {
       reason?: string;
       customers?: Customer[];
       users?: Array<(typeof localUsers)[number]>;
+      customerScopeMigration?: {
+        received?: number;
+        accepted?: number;
+        migrated?: number;
+        rejected?: number;
+        rejectedCustomers?: Array<{ id: string; reason: string }>;
+      };
     };
     console.log('[Client Sync] response body success:', !!result.success);
     console.log('[Client Sync Target Diagnostic] Server response body success:', !!result.success);
@@ -786,8 +793,22 @@ export async function syncNow(isManual: boolean = false) {
     // Legacy Room/Opening pending deletes are intentionally quarantined.
     // Customer auto-sync does not send them, so they must not be cleared here.
 
-    // ── Only set "synced" after all of the above succeeded ──
-    store.setSyncStatus('synced');
+    const rejectedScopeCustomers =
+      result.customerScopeMigration?.rejectedCustomers || [];
+    const rejectedScopeCustomerCount =
+      result.customerScopeMigration?.rejected ??
+      rejectedScopeCustomers.length;
+
+    if (rejectedScopeCustomerCount > 0) {
+      console.warn("[Client Sync] Partial customer sync:", {
+        rejected: rejectedScopeCustomerCount,
+        rejectedCustomers: rejectedScopeCustomers,
+      });
+      store.setSyncStatus('pending');
+    } else {
+      // ── Only set "synced" after all of the above succeeded ──
+      store.setSyncStatus('synced');
+    }
 
   } catch (error) {
     console.error('[Client Sync] Unexpected error during sync:', error);

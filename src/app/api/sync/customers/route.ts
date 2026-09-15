@@ -1,4 +1,10 @@
-import { customerTreeScopeIssue, readErpScope, stampCustomerTreeScope } from '@/lib/customerTreeScope';
+import {
+  classifyCustomerRootScope,
+  customerTreeScopeIssue,
+  migrateLegacyCustomerRootScope,
+  readErpScope,
+  stampCustomerTreeScope,
+} from '@/lib/customerTreeScope';
 import { erpScopeMatches } from '@/lib/erpScope';
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -197,7 +203,7 @@ export async function POST(req: NextRequest) {
     const sanitizedLocalCustomers =
       sanitizeMediaValue(rawLocalCustomers);
 
-    const localCustomers: SyncRecord[] =
+    const incomingLocalCustomers: SyncRecord[] =
       Array.isArray(sanitizedLocalCustomers)
         ? sanitizedLocalCustomers.filter(
             (item): item is SyncRecord =>
@@ -208,21 +214,71 @@ export async function POST(req: NextRequest) {
           )
         : [];
 
-    for (const customer of localCustomers) {
-      const scopeIssue = customerTreeScopeIssue(
+    const localCustomers: SyncRecord[] = [];
+    const rejectedScopeCustomers: Array<{ id: string; reason: string }> = [];
+    let migratedLegacyCustomerScopeCount = 0;
+
+    const pilotLegacyMigrationCompanyId = String(
+      process.env.ENVERP_PILOT_LEGACY_CUSTOMER_SCOPE_COMPANY_ID || "",
+    ).trim();
+    const allowPilotLegacyCustomerScopeMigration =
+      process.env.ENVERP_PILOT_LEGACY_CUSTOMER_SCOPE_MIGRATION === "true" &&
+      Boolean(pilotLegacyMigrationCompanyId) &&
+      pilotLegacyMigrationCompanyId === erpContext.scope.companyId;
+
+    for (const customer of incomingLocalCustomers) {
+      const classification = classifyCustomerRootScope(
         customer,
         erpContext.scope,
       );
-      if (scopeIssue) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: "SYNC_ENTITY_SCOPE_FORBIDDEN",
-            reason: scopeIssue,
-          },
-          { status: 403 },
-        );
+
+      if (classification === "CONFLICT") {
+        rejectedScopeCustomers.push({
+          id: customer.id,
+          reason: "CUSTOMER_SCOPE_CONFLICT",
+        });
+        continue;
       }
+
+      if (
+        classification === "LEGACY_MISSING" &&
+        !allowPilotLegacyCustomerScopeMigration
+      ) {
+        rejectedScopeCustomers.push({
+          id: customer.id,
+          reason: "CUSTOMER_SCOPE_LEGACY_UNPROVEN",
+        });
+        continue;
+      }
+
+      const normalizedCustomer =
+        classification === "LEGACY_MISSING"
+          ? migrateLegacyCustomerRootScope(customer, erpContext.scope)
+          : customer;
+
+      const scopeIssue = customerTreeScopeIssue(
+        normalizedCustomer,
+        erpContext.scope,
+      );
+      if (scopeIssue) {
+        rejectedScopeCustomers.push({
+          id: customer.id,
+          reason: scopeIssue,
+        });
+        continue;
+      }
+
+      if (classification === "LEGACY_MISSING") {
+        migratedLegacyCustomerScopeCount++;
+      }
+      localCustomers.push(normalizedCustomer);
+    }
+
+    if (rejectedScopeCustomers.length > 0) {
+      console.warn("[Sync API POST] rejected customer scope records:", {
+        count: rejectedScopeCustomers.length,
+        rejectedScopeCustomers,
+      });
     }
     
     let incomingRoomsCount = 0;
@@ -936,6 +992,13 @@ export async function POST(req: NextRequest) {
     console.log("[Server Sync Diagnostic] final response status and reason:", 200, "Success");
     return NextResponse.json({
       success: true,
+      customerScopeMigration: {
+        received: incomingLocalCustomers.length,
+        accepted: localCustomers.length,
+        migrated: migratedLegacyCustomerScopeCount,
+        rejected: rejectedScopeCustomers.length,
+        rejectedCustomers: rejectedScopeCustomers,
+      },
       customers: sanitizeMediaValue(
         finalCustomers.map((c: SyncRecord) => ({
           ...c,
