@@ -966,10 +966,30 @@ export async function POST(req: NextRequest) {
       }
     });
 
-  } catch {
-    console.error("[Sync Customers API] Internal error.");
+  } catch (error: unknown) {
+    console.error("[Sync Customers API] Internal error.", error);
+
+    const message =
+      error instanceof Error ? error.message : "";
+
+    let publicError = "SYNC_CUSTOMERS_INTERNAL_ERROR";
+
+    if (message === "CUSTOMER_ADDRESS_EXPECTED_VERSION_MISSING") {
+      publicError = "CUSTOMER_ADDRESS_EXPECTED_VERSION_MISSING";
+    } else if (message.startsWith("Customer upsert failed:")) {
+      publicError = "SYNC_CUSTOMER_UPSERT_FAILED";
+    } else if (
+      message.startsWith("Customer address authority failed:")
+    ) {
+      publicError = "SYNC_CUSTOMER_ADDRESS_AUTHORITY_FAILED";
+    } else if (message.startsWith("Room upsert failed:")) {
+      publicError = "SYNC_ROOM_UPSERT_FAILED";
+    } else if (message.startsWith("Opening upsert failed:")) {
+      publicError = "SYNC_OPENING_UPSERT_FAILED";
+    }
+
     return NextResponse.json(
-      { success: false, error: "Internal server error" },
+      { success: false, error: publicError },
       { status: 500 }
     );
   }

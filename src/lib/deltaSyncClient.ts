@@ -637,6 +637,7 @@ export async function pushDeltaSyncEvents(): Promise<{
 
         parentCustomers.push({
           ...customer,
+          addresses: [],
           rooms: projectedRooms,
         });
       }

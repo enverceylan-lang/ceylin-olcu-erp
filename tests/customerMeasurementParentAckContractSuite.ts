@@ -152,6 +152,10 @@ async function main() {
     "src/lib/syncService.ts",
     "utf8",
   );
+  const customerSyncRouteSource = fs.readFileSync(
+    "src/app/api/sync/customers/route.ts",
+    "utf8",
+  );
 
   const pushStart = deltaClientSource.indexOf(
     "export async function pushDeltaSyncEvents",
@@ -190,6 +194,10 @@ async function main() {
   );
   assert.match(
     realPushSource,
+    /addresses:\s*\[\]/,
+  );
+  assert.match(
+    realPushSource,
     /customers:\s*parentCustomers/,
   );
   assert.match(
@@ -223,6 +231,27 @@ async function main() {
   assert.match(
     syncServiceSource,
     /rooms:\s*\[\]/,
+  );
+
+  assert.match(
+    customerSyncRouteSource,
+    /SYNC_CUSTOMER_UPSERT_FAILED/,
+  );
+  assert.match(
+    customerSyncRouteSource,
+    /SYNC_CUSTOMER_ADDRESS_AUTHORITY_FAILED/,
+  );
+  assert.match(
+    customerSyncRouteSource,
+    /SYNC_ROOM_UPSERT_FAILED/,
+  );
+  assert.match(
+    customerSyncRouteSource,
+    /SYNC_OPENING_UPSERT_FAILED/,
+  );
+  assert.match(
+    customerSyncRouteSource,
+    /SYNC_CUSTOMERS_INTERNAL_ERROR/,
   );
 
   console.log("PAK customerMeasurementParentAckContractSuite");

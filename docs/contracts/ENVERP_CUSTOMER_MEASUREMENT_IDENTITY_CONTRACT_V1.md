@@ -15,10 +15,21 @@ Observed live behavior:
 "Olculeri Gonder" returned failure while the production Topbar masked the
 underlying result as an internet-connection message.
 
-Current manual-push wiring fix candidate:
-source / regression / TypeScript / production build = PAK
+Manual-push wiring fix commit:
+058e5d18c312930efd2b90f7fe9e5aabd6867e7a
 
-Live end-to-end retest of the current fix candidate: KANITLANMADI
+Production deployment of 058e5d1: PAK
+
+Live retry of the preserved measurement event at 058e5d1: DUR
+
+Observed client error:
+
+MEASUREMENT_PARENT_CANONICAL_ACK_FAILED:Internal server error
+
+Current follow-up fix candidate:
+source / targeted regression / TypeScript / production build = PAK
+
+Live end-to-end retest of the current follow-up candidate: KANITLANMADI
 
 This contract records the canonical customer, address and measurement identity
 rules verified in the Customer Address Authority / Gate 4 integration candidate.
@@ -248,6 +259,89 @@ Live runtime acceptance of this fix remains:
 
 KANITLANMADI
 
+## Post-release runtime RCA — 058e5d1
+
+Historical source analysis identified the strongest first-bad architectural
+commit as:
+
+a840331 — feat: close measurement media authority and sync hardening
+
+At a840331:
+
+- persist_measurement_authority_v1 became the canonical measurement writer.
+- the legacy measurement writer inside /api/sync/customers was removed.
+- Customer / Room / Opening parent lifecycle closure was not wired into the
+  real manual measurement producer at the same time.
+
+Classification:
+
+- measurement authority split: PAK
+- required parent lifecycle closure at the split: DUR
+- parent lifecycle gap: PAK
+- CAB as the primary root cause: not supported by current evidence
+- CAB exposing the pre-existing parent lifecycle gap: supported
+
+At ef16bc9 a canonical parent ACK helper existed, but the real
+pushDeltaSyncEvents producer did not use it.
+
+At 058e5d1 the real producer was wired to the parent ACK flow.
+
+Production deployment of 058e5d1 was Ready, but retrying the same preserved
+field measurement event failed with:
+
+MEASUREMENT_PARENT_CANONICAL_ACK_FAILED:Internal server error
+
+Further exact-source review showed that the 058e5d1 parent projection used:
+
+...customer
+
+and therefore also carried customer addresses into /api/sync/customers.
+
+That caused the manual measurement parent preflight to be coupled to the
+Customer Address Authority even though address persistence is not required for
+the measurement parent ACK.
+
+Classification:
+
+- 058e5d1 producer wiring exists: PAK
+- 058e5d1 production manual measurement send: DUR
+- 058e5d1 parent projection minimality: DUR
+- measurement send -> Customer Address Authority coupling: DUR
+- /api/sync/customers outer catch hides the inner server failure: PAK
+
+The current follow-up candidate changes the parent projection to:
+
+Customer
+-> addresses: []
+-> exact referenced Room
+-> exact referenced Opening / Window
+-> products: []
+
+It also classifies /api/sync/customers server failures into safe public error
+codes without exposing raw database error text.
+
+Current follow-up candidate evidence:
+
+- tests/customerMeasurementParentAckContractSuite.ts: PAK
+- tests/measurementSourceExitQueueGateSuite.ts: PAK
+- tests/measurementSourceExitGateSuite.ts: PAK
+- tests/measurementPendingInsertDeferredUpdateSuite.ts: PAK
+- tests/cariEditMultiAddressContractSuite.ts: PAK
+- tests/addressModelFinalClosurePhaseCSuite.ts: PAK
+- targeted regression: 6/6 PAK
+- TypeScript noEmit: PAK
+- Next.js production build: PAK
+- git diff --check: PAK
+
+No live SQL, queue deletion, customer deletion, measurement deletion, cleanup
+or backfill is authorized or performed.
+
+The same existing failed field measurement event remains the required live
+runtime acceptance fixture.
+
+Live runtime acceptance of the current follow-up candidate remains:
+
+KANITLANMADI
 ## Explicit boundary
 
 tests/measurementAuthorityContinuationSuite.ts is not used as Gate 4 closure
@@ -279,11 +373,25 @@ Runtime evidence after that deployment:
 
 Current state:
 
-The manual-push parent ACK wiring correction is an uncommitted fix candidate.
+The first manual-push parent ACK wiring correction was released as:
 
-Current fix candidate source/test/build evidence is PAK.
+058e5d18c312930efd2b90f7fe9e5aabd6867e7a
 
-This contract does not yet prove for the current fix candidate:
+Release evidence for 058e5d1:
+
+- commit: PAK
+- integration branch push: PAK
+- origin/main fast-forward: PAK
+- Vercel production deployment: PAK
+- production status Ready: PAK
+- live retry of the preserved field measurement event: DUR
+
+The current follow-up parent-projection isolation and safe-diagnostic
+correction is an uncommitted candidate.
+
+Current follow-up source/test/build evidence is PAK.
+
+This contract does not yet prove for the current follow-up candidate:
 
 - commit
 - push
