@@ -172,9 +172,17 @@ async function main() {
     pullStart,
   );
 
-  assert.match(
+  assert.doesNotMatch(
     realPushSource,
     /fetchDeltaAfterCanonicalParentAck/,
+  );
+  assert.doesNotMatch(
+    realPushSource,
+    /customers:\s*parentCustomers/,
+  );
+  assert.doesNotMatch(
+    realPushSource,
+    /pendingDeletes:\s*\[\]/,
   );
   assert.match(
     realPushSource,
@@ -182,38 +190,20 @@ async function main() {
   );
   assert.match(
     realPushSource,
-    /item\.id === roomId/,
+    /parentPackage/,
   );
   assert.match(
     realPushSource,
-    /item\.id === openingId/,
+    /customerAddressId/,
   );
   assert.match(
     realPushSource,
-    /products:\s*\[\]/,
+    /events:\s*deltaPushEvents/,
   );
   assert.match(
     realPushSource,
-    /addresses:\s*\[\]/,
+    /"\/api\/delta-sync\/push"/,
   );
-  assert.match(
-    realPushSource,
-    /customers:\s*parentCustomers/,
-  );
-  assert.match(
-    realPushSource,
-    /pendingDeletes:\s*\[\]/,
-  );
-
-  const parentGateCall = realPushSource.indexOf(
-    "fetchDeltaAfterCanonicalParentAck",
-  );
-  const releasedResponse = realPushSource.indexOf(
-    "response = parentGate.response",
-  );
-
-  assert.ok(parentGateCall >= 0);
-  assert.ok(releasedResponse > parentGateCall);
 
   assert.doesNotMatch(
     topbarSource,

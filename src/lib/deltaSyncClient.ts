@@ -4,11 +4,7 @@ import { useMeasurementStore } from "@/store/measurementStore";
 import { getLocalMeasurementById } from "./localMeasurementDb";
 import { useStore } from "@/store/useStore";
 import { loadLocalCustomers, saveLocalCustomerWithoutSync } from "./localCustomerDb";
-import {
-  fetchDeltaAfterCanonicalParentAck,
-  resolveMeasurementParentCustomerId,
-  type MeasurementParentGateResponse,
-} from "./measurementParentAckGate";
+import { resolveMeasurementParentCustomerId } from "./measurementParentAckGate";
 import {
   activateDeferredMeasurementUpdateAfterInsert,
   getPendingSyncEvents,
@@ -461,236 +457,78 @@ export async function pushDeltaSyncEvents(): Promise<{
     console.log(
       `[SYNC-DIAGNOSTIC] Push API: eventCount=${pendingEvents.length}, roomsCount=${rCount}, productsCount=${pCount}, hasRawValues=${hasRaw}`,
     );
-    const deltaRequest: RequestInit = {
+    const measurementEvents = activeScopeEvents.filter(
+      (event) => event.entityType === "MEASUREMENT",
+    );
+    let deltaPushEvents = activeScopeEvents;
+    if (measurementEvents.length > 0) {
+      const localCustomers = await loadLocalCustomers();
+      const packagedEvents = [];
+      for (const event of activeScopeEvents) {
+        if (event.entityType !== "MEASUREMENT") {
+          packagedEvents.push(event);
+          continue;
+        }
+        const patch = event.patch as Record<string, unknown>;
+        const nested = patch.data && typeof patch.data === "object"
+          ? (patch.data as Record<string, unknown>)
+          : patch;
+        const customerIdentity = resolveMeasurementParentCustomerId(patch);
+        if (!customerIdentity.ok) {
+          return { success: false, pushedCount: 0, errors: [customerIdentity.error], debug: { pendingCount: pendingEvents.length, apiStatus: "PARENT_IDENTITY_INVALID", syncedCount: 0, errorCount: 1, firstStatus } };
+        }
+        const roomId = String(nested.roomId || patch.roomId || "").trim();
+        const openingId = String(nested.openingId || nested.windowId || patch.openingId || patch.windowId || "").trim();
+        if (!roomId || !openingId) {
+          return { success: false, pushedCount: 0, errors: ["MEASUREMENT_PARENT_ID_MISSING"], debug: { pendingCount: pendingEvents.length, apiStatus: "PARENT_IDENTITY_INVALID", syncedCount: 0, errorCount: 1, firstStatus } };
+        }
+        const customer = localCustomers.find((item) => !item.isDeleted && item.id === customerIdentity.customerId);
+        if (!customer) {
+          return { success: false, pushedCount: 0, errors: ["MEASUREMENT_PARENT_CUSTOMER_LOCAL_MISSING"], debug: { pendingCount: pendingEvents.length, apiStatus: "PARENT_LOCAL_MISSING", syncedCount: 0, errorCount: 1, firstStatus } };
+        }
+        const room = (customer.rooms || []).find((item) => !item.isDeleted && item.id === roomId);
+        if (!room) {
+          return { success: false, pushedCount: 0, errors: ["MEASUREMENT_PARENT_ROOM_LOCAL_MISSING"], debug: { pendingCount: pendingEvents.length, apiStatus: "PARENT_LOCAL_MISSING", syncedCount: 0, errorCount: 1, firstStatus } };
+        }
+        const opening = (room.windows || []).find((item) => !item.isDeleted && item.id === openingId);
+        if (!opening) {
+          return { success: false, pushedCount: 0, errors: ["MEASUREMENT_PARENT_OPENING_LOCAL_MISSING"], debug: { pendingCount: pendingEvents.length, apiStatus: "PARENT_LOCAL_MISSING", syncedCount: 0, errorCount: 1, firstStatus } };
+        }
+        packagedEvents.push({
+          ...event,
+          patch: {
+            ...event.patch,
+            parentPackage: {
+              room: {
+                id: room.id,
+                name: room.name,
+                customerAddressId: room.customerAddressId || null,
+                createdAt: room.createdAt || null,
+                updatedAt: room.updatedAt || null,
+              },
+              opening: {
+                id: opening.id,
+                name: opening.name,
+                width: opening.width ?? null,
+                height: opening.height ?? null,
+                fieldNotes: opening.fieldNotes || "",
+                createdAt: opening.createdAt || null,
+                updatedAt: opening.updatedAt || null,
+              },
+            },
+          },
+        });
+      }
+      deltaPushEvents = packagedEvents;
+    }
+    const response = await fetch("/api/delta-sync/push", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ events: activeScopeEvents }),
-    };
-
-    const measurementEvents = activeScopeEvents.filter(
-      (event) => event.entityType === "MEASUREMENT",
-    );
-
-    let response: MeasurementParentGateResponse;
-
-    if (measurementEvents.length > 0) {
-      const requiredParents = new Map<
-        string,
-        Map<string, Set<string>>
-      >();
-
-      for (const event of measurementEvents) {
-        const patch = event.patch as Record<string, unknown>;
-        const nested =
-          patch.data && typeof patch.data === "object"
-            ? (patch.data as Record<string, unknown>)
-            : patch;
-
-        const customerIdentity =
-          resolveMeasurementParentCustomerId(patch);
-
-        if (!customerIdentity.ok) {
-          return {
-            success: false,
-            pushedCount: 0,
-            errors: [customerIdentity.error],
-            debug: {
-              pendingCount: pendingEvents.length,
-              apiStatus: "PARENT_IDENTITY_INVALID",
-              syncedCount: 0,
-              errorCount: 1,
-              firstStatus,
-            },
-          };
-        }
-
-        const roomId = String(
-          nested.roomId || patch.roomId || "",
-        ).trim();
-
-        const openingId = String(
-          nested.openingId ||
-            nested.windowId ||
-            patch.openingId ||
-            patch.windowId ||
-            "",
-        ).trim();
-
-        if (!roomId || !openingId) {
-          return {
-            success: false,
-            pushedCount: 0,
-            errors: ["MEASUREMENT_PARENT_ID_MISSING"],
-            debug: {
-              pendingCount: pendingEvents.length,
-              apiStatus: "PARENT_IDENTITY_INVALID",
-              syncedCount: 0,
-              errorCount: 1,
-              firstStatus,
-            },
-          };
-        }
-
-        let roomMap = requiredParents.get(
-          customerIdentity.customerId,
-        );
-
-        if (!roomMap) {
-          roomMap = new Map<string, Set<string>>();
-          requiredParents.set(
-            customerIdentity.customerId,
-            roomMap,
-          );
-        }
-
-        let openingIds = roomMap.get(roomId);
-
-        if (!openingIds) {
-          openingIds = new Set<string>();
-          roomMap.set(roomId, openingIds);
-        }
-
-        openingIds.add(openingId);
-      }
-
-      const localCustomers = await loadLocalCustomers();
-      const parentCustomers = [];
-
-      for (const [customerId, roomMap] of requiredParents) {
-        const customer = localCustomers.find(
-          (item) => item.id === customerId,
-        );
-
-        if (!customer) {
-          return {
-            success: false,
-            pushedCount: 0,
-            errors: ["MEASUREMENT_PARENT_CUSTOMER_LOCAL_MISSING"],
-            debug: {
-              pendingCount: pendingEvents.length,
-              apiStatus: "PARENT_LOCAL_MISSING",
-              syncedCount: 0,
-              errorCount: 1,
-              firstStatus,
-            },
-          };
-        }
-
-        const projectedRooms = [];
-
-        for (const [roomId, openingIds] of roomMap) {
-          const room = (customer.rooms || []).find(
-            (item) => item.id === roomId,
-          );
-
-          if (!room) {
-            return {
-              success: false,
-              pushedCount: 0,
-              errors: ["MEASUREMENT_PARENT_ROOM_LOCAL_MISSING"],
-              debug: {
-                pendingCount: pendingEvents.length,
-                apiStatus: "PARENT_LOCAL_MISSING",
-                syncedCount: 0,
-                errorCount: 1,
-                firstStatus,
-              },
-            };
-          }
-
-          const projectedWindows = [];
-
-          for (const openingId of openingIds) {
-            const opening = (room.windows || []).find(
-              (item) => item.id === openingId,
-            );
-
-            if (!opening) {
-              return {
-                success: false,
-                pushedCount: 0,
-                errors: ["MEASUREMENT_PARENT_OPENING_LOCAL_MISSING"],
-                debug: {
-                  pendingCount: pendingEvents.length,
-                  apiStatus: "PARENT_LOCAL_MISSING",
-                  syncedCount: 0,
-                  errorCount: 1,
-                  firstStatus,
-                },
-              };
-            }
-
-            projectedWindows.push({
-              ...opening,
-              products: [],
-            });
-          }
-
-          projectedRooms.push({
-            ...room,
-            windows: projectedWindows,
-          });
-        }
-
-        parentCustomers.push({
-          ...customer,
-          addresses: [],
-          rooms: projectedRooms,
-        });
-      }
-
-      const parentRequest: RequestInit = {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(
-          {
-            customers: parentCustomers,
-            pendingDeletes: [],
-          },
-          (key, value) =>
-            key === "photos" ||
-            key === "videos" ||
-            key === "addressPhotos"
-              ? []
-              : value,
-        ),
-      };
-
-      const parentGate =
-        await fetchDeltaAfterCanonicalParentAck(
-          fetch,
-          parentRequest,
-          deltaRequest,
-        );
-
-      if (!parentGate.released) {
-        return {
-          success: false,
-          pushedCount: 0,
-          errors: [parentGate.error],
-          debug: {
-            pendingCount: pendingEvents.length,
-            apiStatus: parentGate.apiStatus,
-            syncedCount: 0,
-            errorCount: 1,
-            firstStatus,
-          },
-        };
-      }
-
-      response = parentGate.response;
-    } else {
-      response = await fetch(
-        "/api/delta-sync/push",
-        deltaRequest,
-      );
-    }
+      body: JSON.stringify({ events: deltaPushEvents }),
+    });
 
     let data: DeltaPushResponse = {};
     let errText = "";

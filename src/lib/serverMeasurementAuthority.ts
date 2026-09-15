@@ -22,6 +22,25 @@ export interface MeasurementAuthorityChange {
   expected_version?: unknown;
 }
 
+interface MeasurementParentPackage {
+  room: {
+    id: string;
+    name: string;
+    customerAddressId: string | null;
+    createdAt: string | null;
+    updatedAt: string | null;
+  };
+  opening: {
+    id: string;
+    name: string;
+    width: number | null;
+    height: number | null;
+    fieldNotes: string;
+    createdAt: string | null;
+    updatedAt: string | null;
+  };
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -29,6 +48,18 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function cleanId(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function optionalText(value: unknown): string | null {
+  const text = cleanId(value);
+  return text || null;
+}
+
+function optionalFiniteNumber(value: unknown, errorCode: string): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new Error(errorCode);
+  return parsed;
 }
 
 function sanitizeCanonicalPayload(
@@ -107,6 +138,40 @@ function normalizeCommandPayload(
   };
 }
 
+function normalizeParentPackage(rawPatch: unknown, payload: Record<string, unknown>): MeasurementParentPackage | null {
+  const wrapper = asRecord(rawPatch);
+  const parentPackage = asRecord(wrapper?.parentPackage);
+  if (!parentPackage) return null;
+  const room = asRecord(parentPackage.room);
+  const opening = asRecord(parentPackage.opening);
+  if (!room || !opening) throw new Error("MEASUREMENT_PARENT_PACKAGE_INVALID");
+  const payloadRoomId = cleanId(payload.roomId);
+  const payloadOpeningId = cleanId(payload.openingId) || cleanId(payload.windowId);
+  const roomId = cleanId(room.id);
+  const openingId = cleanId(opening.id);
+  if (!roomId || !openingId || roomId !== payloadRoomId || openingId !== payloadOpeningId) {
+    throw new Error("MEASUREMENT_PARENT_PACKAGE_ID_MISMATCH");
+  }
+  return {
+    room: {
+      id: roomId,
+      name: cleanId(room.name),
+      customerAddressId: optionalText(room.customerAddressId),
+      createdAt: optionalText(room.createdAt),
+      updatedAt: optionalText(room.updatedAt),
+    },
+    opening: {
+      id: openingId,
+      name: cleanId(opening.name),
+      width: optionalFiniteNumber(opening.width, "MEASUREMENT_OPENING_WIDTH_INVALID"),
+      height: optionalFiniteNumber(opening.height, "MEASUREMENT_OPENING_HEIGHT_INVALID"),
+      fieldNotes: typeof opening.fieldNotes === "string" ? opening.fieldNotes : "",
+      createdAt: optionalText(opening.createdAt),
+      updatedAt: optionalText(opening.updatedAt),
+    },
+  };
+}
+
 function parseExpectedVersion(
   operation: MeasurementAuthorityOperation,
   value: unknown,
@@ -131,7 +196,6 @@ function parseResult(value: unknown): MeasurementAuthorityResult {
   const entityId = cleanId(record?.entityId);
   const entityVersion = Number(record?.entityVersion);
   const outcome = cleanId(record?.outcome).toUpperCase();
-
   if (
     !changeId ||
     !entityId ||
@@ -159,7 +223,6 @@ export async function persistMeasurementAuthorityCommand(args: {
   const changeId = cleanId(args.change.change_id);
   const entityId = cleanId(args.change.entity_id);
   const operation = cleanId(args.change.operation).toUpperCase();
-
   if (!changeId || !entityId) {
     throw new Error("MEASUREMENT_COMMAND_IDENTITY_MISSING");
   }
@@ -173,6 +236,7 @@ export async function persistMeasurementAuthorityCommand(args: {
     args.change.expected_version,
   );
   const payload = normalizeCommandPayload(entityId, args.change.patch);
+  const parentPackage = normalizeParentPackage(args.change.patch, payload);
 
   const command = {
     changeId,
@@ -182,7 +246,6 @@ export async function persistMeasurementAuthorityCommand(args: {
     deviceId: cleanId(args.change.device_id) || "unknown",
     payload,
   };
-
   const context = {
     actorUserId: args.actorUserId,
     tenantId: args.scope.tenantId,
@@ -190,14 +253,24 @@ export async function persistMeasurementAuthorityCommand(args: {
     branchId: args.scope.branchId,
     accountingPeriodId: args.scope.accountingPeriodId,
   };
+  const rpcResponse = parentPackage
+    ? await args.supabase.rpc(
+        "persist_measurement_package_authority_v1",
+        {
+          p_command: command,
+          p_context: context,
+          p_parent_package: parentPackage,
+        },
+      )
+    : await args.supabase.rpc(
+        "persist_measurement_authority_v1",
+        {
+          p_command: command,
+          p_context: context,
+        },
+      );
 
-  const { data, error } = await args.supabase.rpc(
-    "persist_measurement_authority_v1",
-    {
-      p_command: command,
-      p_context: context,
-    },
-  );
+  const { data, error } = rpcResponse;
 
   if (error) {
     const publicCode =
@@ -205,7 +278,6 @@ export async function persistMeasurementAuthorityCommand(args: {
       /^MEASUREMENT_[A-Z0-9_]+$/.test(error.message)
         ? error.message
         : "MEASUREMENT_AUTHORITY_RPC_FAILED";
-
     console.error("[MeasurementAuthority] Canonical RPC failed.");
     throw new Error(publicCode);
   }

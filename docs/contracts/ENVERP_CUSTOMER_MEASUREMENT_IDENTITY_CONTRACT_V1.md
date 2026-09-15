@@ -401,3 +401,19 @@ This contract does not yet prove for the current follow-up candidate:
 - successful live retry of the preserved field measurement event
 
 Those remain separate release and runtime gates.
+
+## 2026-09-15 - Measurement Package Authority source candidate
+
+- Production commit `66fe80d306fba8e32f5a5b282aff5c95af7a1172` is Ready but the SAME preserved manual-measurement queue event still fails.
+- Exact live classification: `MEASUREMENT_PARENT_CANONICAL_ACK_FAILED:SYNC_CUSTOMER_UPSERT_FAILED`.
+- `/api/sync/customers` is rejected as measurement parent-preflight authority because it mutates customer master state before Room/Opening parent assurance.
+- Candidate: `persist_measurement_package_authority_v1` verifies Customer, creates missing Room/Opening only for INSERT, verifies-only for UPDATE/SOFT_DELETE, and delegates measurement persistence to `persist_measurement_authority_v1` in the same PostgreSQL transaction.
+- Existing Room/Opening rows are never updated by this package authority.
+- Measurement INSERT additionally requires the canonical Customer to be active (`isDeleted=false`); UPDATE/SOFT_DELETE keep scope/parent verification without an active-customer resurrection rule.
+- Non-null `customerAddressId` is verify-only against active same-customer same-scope `customer_addresses` before a missing Room is created.
+- Concurrent parent creation uses `ON CONFLICT (id) DO NOTHING` followed by exact owner/scope verification.
+- Legacy NULL scope rows fail closed with `IS DISTINCT FROM` checks.
+- Client manual push enriches measurement events from the current local customer tree and no longer calls `/api/sync/customers` as a parent gate.
+- Events without `parentPackage` keep the legacy `persist_measurement_authority_v1` server path for backward compatibility.
+- LIVE SQL, staging, commit, push and deploy are not part of this source mutation approval.
+- Global closure remains KANITLANMADI until separate LIVE SQL approval/application, production deployment, and success of the SAME preserved failed queue event without clearing/recreating it.
