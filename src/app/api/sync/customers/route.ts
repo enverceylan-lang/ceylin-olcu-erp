@@ -936,7 +936,12 @@ export async function POST(req: NextRequest) {
     console.log("[Server Sync Diagnostic] final response status and reason:", 200, "Success");
     return NextResponse.json({
       success: true,
-      customers: sanitizeMediaValue(finalCustomers),
+      customers: sanitizeMediaValue(
+        finalCustomers.map((c: SyncRecord) => ({
+          ...c,
+          rooms: [],
+        })),
+      ),
       users: sanitizedUsers,
       metrics: {
         incoming: {

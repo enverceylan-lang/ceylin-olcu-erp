@@ -38,13 +38,22 @@ for (const table of [
   "customers",
   "rooms",
   "openings",
-  "measurements",
 ]) {
   assert.match(
     customerSync,
     new RegExp(`from\\("${table}"\\)\\.upsert\\(\\{\\s*\\.\\.\\.scopeColumns`)
   );
 }
+
+assert.doesNotMatch(
+  customerSync,
+  /from\("measurements"\)\.upsert/,
+);
+
+assert.match(
+  customerSync,
+  /customers:\s*sanitizeMediaValue\(\s*finalCustomers\.map\(\(c:\s*SyncRecord\)\s*=>\s*\(\{\s*\.\.\.c,\s*rooms:\s*\[\],\s*\}\)\),\s*\),/,
+);
 
 assert.match(deltaPush, /Object\.assign\(change, scopeColumns\)/);
 assert.match(deltaPush, /from\("measurement_changes"\)/);

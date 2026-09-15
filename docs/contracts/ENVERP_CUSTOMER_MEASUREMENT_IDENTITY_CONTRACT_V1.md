@@ -31,6 +31,20 @@ source / targeted regression / TypeScript / production build = PAK
 
 Live end-to-end retest of the current follow-up candidate: KANITLANMADI
 
+2026-09-15 Cari otomatik senkronizasyon izolasyonu / yeniden acma source adayi: PAK
+
+PATCH-1 inbound nested-tree izolasyonu: PAK
+
+PATCH-2 legacy child-delete kuyruk karantinasi: PAK
+
+PATCH-3 CLOUD_SYNC_DISABLED=false source gate: PAK
+
+Business scope canonical contract duzeltmesi: PAK
+
+Mevcut source / hedefli regresyon / ESLint / TypeScript / diff hijyeni: PAK
+
+Yeni aday icin production runtime kabulu: KANITLANMADI
+
 This contract records the canonical customer, address and measurement identity
 rules verified in the Customer Address Authority / Gate 4 integration candidate.
 
@@ -417,3 +431,199 @@ Those remain separate release and runtime gates.
 - Events without `parentPackage` keep the legacy `persist_measurement_authority_v1` server path for backward compatibility.
 - LIVE SQL, staging, commit, push and deploy are not part of this source mutation approval.
 - Global closure remains KANITLANMADI until separate LIVE SQL approval/application, production deployment, and success of the SAME preserved failed queue event without clearing/recreating it.
+
+## 2026-09-15 - Cari Otomatik Senkronizasyonunun Yeniden Acilmasi
+
+### Sorunun kaynagi
+
+`CLOUD_SYNC_DISABLED=true` oldugu icin Cari otomatik senkronizasyonu calismiyordu.
+
+Canli durumda:
+
+- Telefonda / yerel store'da 24 Cari vardi.
+- Canonical server tarafinda yalniz 1 aktif Cari vardi.
+- Korunan manuel olcu kuyrugu olayi canonical Cari bulunamadigi icin
+  `MEASUREMENT_CUSTOMER_SCOPE_PARENT_MISMATCH` hatasina dusuyordu.
+
+Exact source ve Git gecmisi, cloud sync'in yerel PC verisini korumak icin
+gecici olarak kapatildigini gosterdi.
+
+Kok neden siniflandirmasi:
+
+- Measurement Package Authority birincil hata kaynagi degil: PAK
+- Eksik canonical Cari kaliciligi parent mismatch nedeni: PAK
+- Cari otomatik sync'in `CLOUD_SYNC_DISABLED=true` nedeniyle no-op olmasi: PAK
+
+### PATCH-1 - inbound olcu agaci izolasyonu
+
+`src/app/api/sync/customers/route.ts` cevabi artik nested olcu agacini geri dondurmuyor.
+
+Canonical davranis:
+
+    customers: sanitizeMediaValue(
+      finalCustomers.map((c: SyncRecord) => ({
+        ...c,
+        rooms: [],
+      })),
+    ),
+
+Amac:
+
+- Cari / master veri otomatik sync ile donebilir.
+- Room / Opening / Measurement otomatik olarak yerel olcu agacina geri karismaz.
+- Manuel olcu paketi authority siniri korunur.
+
+PATCH-1 sonucu: PAK
+
+### PATCH-2 - legacy child delete kuyrugu karantinasi
+
+Store'da aktif legacy `pendingDeletes` producer'lari Room ve Opening icin mevcuttur.
+
+Store yalniz tam kuyruk temizleme API'si sunmaktadir:
+
+    clearPendingDeletes: () => set({ pendingDeletes: [] })
+
+Bu nedenle customer auto-sync su davranisa alinmistir:
+
+    pendingDeletes: []
+
+ve basarili customer sync sonrasi `store.clearPendingDeletes()` artik bu hatta
+calistirilmaz.
+
+Amac:
+
+- Room / Opening delete kayitlari Customer auto-sync ile server'a gitmez.
+- Server'a gitmeyen legacy delete kayitlari yerelde kaybolmaz.
+- Tarihsel child-delete kayitlari yeni bir authority'ye sessizce tasinmaz.
+
+PATCH-2 sonucu: PAK
+
+### PATCH-3 - Cari cloud sync yeniden acildi
+
+PATCH-1 ve PATCH-2 PAK olduktan sonra gecici global gate:
+
+    export const CLOUD_SYNC_DISABLED = true;
+
+durumundan:
+
+    export const CLOUD_SYNC_DISABLED = false;
+
+durumuna getirildi.
+
+Bu degisiklik Cari + Adres otomatik sync'i yeniden acar; Room / Opening /
+Measurement manuel authority sinirini degistirmez.
+
+PATCH-3 sonucu: PAK
+
+### Canonical authority siniri
+
+OTOMATIK:
+
+- Cari
+- Adres
+- Cari / master metadata
+
+MANUEL OLCU PAKETI:
+
+- Room
+- Opening / Window
+- Measurement
+- measurement-bound details
+
+Customer / Address auto-sync, Room / Opening / Measurement icin alternatif
+bir yazma authority'si degildir.
+
+### Business scope contract duzeltmesi
+
+`tests/businessScopeApiContractSuite.ts` mevcut dosya icinde canonical gercege
+uygun hale getirildi.
+
+Yeni test dosyasi olusturulmadi.
+
+Duzeltilen contract artik sunlari zorunlu tutar:
+
+- Customer upsert authority `/api/sync/customers` icinde mevcut.
+- Room upsert legacy authority `/api/sync/customers` icinde mevcut.
+- Opening upsert legacy authority `/api/sync/customers` icinde mevcut.
+- Direct Measurement upsert `/api/sync/customers` icinde yok.
+- Customer auto-sync cevabinda nested `rooms` agaci strip edilir.
+- Measurement canonical persistence dedicated measurement authority hattindadir.
+
+### Kanit
+
+PAK:
+
+- `tests/businessScopeApiContractSuite.ts`
+- `tests/customerMeasurementParentAckContractSuite.ts`
+- `tests/addressModelFinalClosurePhaseCSuite.ts`
+- `tests/erpScopeSelectionContractSuite.ts`
+- ESLint owned files
+- TypeScript `--noEmit`
+- `git diff --check`
+- `businessScopeApiContractSuite.ts` minimal-diff hijyeni
+
+### Dokunulmayan alanlar
+
+Bu delta sunlari degistirmez:
+
+- `persist_measurement_package_authority_v1`
+- `persist_measurement_authority_v1`
+- `/api/delta-sync/push`
+- Room server writer
+- Opening server writer
+- Finance
+- live SQL
+- mevcut olcu kuyrugu
+- mevcut legacy Room / Opening pending-delete kayitlari
+
+Bu delta; Cari silme, Measurement silme, kuyruk temizleme, backfill veya veri
+yeniden yaratma yetkisi vermez.
+
+### Acik sinir
+
+Legacy Room / Opening `pendingDeletes` yerelde karantinada kalir.
+
+Canonical Room / Opening delete authority bu workstream icinde tasarlanmamistir.
+Bu konu ayri bir future authority kararidir ve Customer auto-sync icine sessizce
+eklenmemelidir.
+
+### Release ve runtime durumu
+
+Source adayi: PAK
+
+Hedefli regresyon: PAK
+
+Repo diff hijyeni: PAK
+
+Henuz kanitlanmayanlar:
+
+- staging
+- commit
+- push
+- main update
+- production deploy
+- production freshness
+- mevcut yerel Cari setinin canonical server'a basariyla persist edilmesi
+- ayni korunmus failed measurement kuyruk olayinin basarili retry edilmesi
+
+Runtime sonucu:
+
+KANITLANMADI
+
+### Runtime kabul kosullari
+
+Bu workstream ancak asagidakilerin tamami mevcut veriyi silmeden veya yeniden
+yaratmadan kanitlanirsa runtime PAK olur:
+
+1. Production exact approved source candidate'i calistiriyor.
+2. Customer automatic sync `/api/sync/customers` hattina ulasiyor.
+3. Mevcut local Cari kayitlari dogru canonical ERP scope'a persist ediliyor.
+4. Room / Opening / Measurement Customer auto-sync ile otomatik push edilmiyor.
+5. Legacy Room / Opening `pendingDeletes` kaybolmuyor.
+6. AYNI korunmus failed measurement queue event retry ediliyor.
+7. Retry canonical Customer parent eksikligi nedeniyle artik fail etmiyor.
+8. Teshis icin Customer, Room, Opening, Measurement veya queue verisi silinmiyor.
+
+Son kural:
+
+SOURCE PAK != RUNTIME PAK

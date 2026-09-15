@@ -68,7 +68,7 @@ Promise<void> {
 }
 
 // Flag to temporarily disable all cloud sync processes to protect local data
-export const CLOUD_SYNC_DISABLED = true;
+export const CLOUD_SYNC_DISABLED = false;
 
 // Track last 413 Payload Too Large error timestamp
 let last413Time = 0;
@@ -536,7 +536,7 @@ export async function syncNow(isManual: boolean = false) {
     });
     const sanitizedPayload = {
       customers: sanitizedCustomers,
-      pendingDeletes: pendingDeletes,
+      pendingDeletes: [],
       users: outgoingUsers
     };
     const sanitizedJsonSize = getObjSize(sanitizedPayload);
@@ -783,7 +783,8 @@ export async function syncNow(isManual: boolean = false) {
     }
 
     // ── Clear pending deletes only after a confirmed successful sync ──
-    store.clearPendingDeletes();
+    // Legacy Room/Opening pending deletes are intentionally quarantined.
+    // Customer auto-sync does not send them, so they must not be cleared here.
 
     // ── Only set "synced" after all of the above succeeded ──
     store.setSyncStatus('synced');
