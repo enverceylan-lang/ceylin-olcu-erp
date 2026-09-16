@@ -481,6 +481,12 @@ export async function POST(req: NextRequest) {
     }
 
     remoteCustomers?.forEach((remote: SyncRecord) => {
+      const remoteCanonical = remote as SyncRecord & {
+        location?: string | null;
+        createdBy?: string | null;
+        status?: string | null;
+        assignedTo?: string | null;
+      };
       const local = mergedCustomersMap.get(remote.id);
       if (!local) {
         mergedCustomersMap.set(remote.id, {
@@ -488,9 +494,9 @@ export async function POST(req: NextRequest) {
           name: remote.name,
           phone: remote.phone || "",
           address: remote.address || "",
-          mapLocation: remote.mapLocation || "",
+          mapLocation: remoteCanonical.location || remote.mapLocation || "",
           notes: remote.notes || "",
-          createdById: remote.createdById || "",
+          createdById: remoteCanonical.createdBy || remote.createdById || "",
           createdByName: remote.createdByName || "",
           assignedSalesId: remote.assignedSalesId || "",
           assignedSalesName: remote.assignedSalesName || "",
@@ -500,7 +506,7 @@ export async function POST(req: NextRequest) {
           assignedTailorName: remote.assignedTailorName || "",
           assignedInstallerId: remote.assignedInstallerId || "",
           assignedInstallerName: remote.assignedInstallerName || "",
-          workflowStatus: remote.workflowStatus || "YENI",
+          workflowStatus: remoteCanonical.status || remote.workflowStatus || "YENI",
           customerCode: remote.customerCode || "",
           taxNumber: remote.taxNumber || "",
           phone2: remote.phone2 || "",
@@ -527,28 +533,28 @@ export async function POST(req: NextRequest) {
             name: remote.name,
             phone: remote.phone || "",
             address: remote.address || "",
-            mapLocation: remote.mapLocation || "",
+            mapLocation: remoteCanonical.location || remote.mapLocation || local.mapLocation || "",
             notes: remote.notes || "",
-            createdById: remote.createdById || "",
-            createdByName: remote.createdByName || "",
-            assignedSalesId: remote.assignedSalesId || "",
-            assignedSalesName: remote.assignedSalesName || "",
-            assignedMeasureId: remote.assignedMeasureId || "",
-            assignedMeasureName: remote.assignedMeasureName || "",
-            assignedTailorId: remote.assignedTailorId || "",
-            assignedTailorName: remote.assignedTailorName || "",
-            assignedInstallerId: remote.assignedInstallerId || "",
-            assignedInstallerName: remote.assignedInstallerName || "",
-            workflowStatus: remote.workflowStatus || "YENI",
-            customerCode: remote.customerCode || "",
-            taxNumber: remote.taxNumber || "",
-            phone2: remote.phone2 || "",
-            extraDescription: remote.extraDescription || "",
-            generalNote: remote.generalNote || "",
-            cariType: remote.cariType || "CUSTOMER",
-            approvalStatus: remote.approvalStatus || "APPROVED",
+            createdById: remoteCanonical.createdBy || remote.createdById || local.createdById || "",
+            createdByName: remote.createdByName || local.createdByName || "",
+            assignedSalesId: remote.assignedSalesId || local.assignedSalesId || "",
+            assignedSalesName: remote.assignedSalesName || local.assignedSalesName || "",
+            assignedMeasureId: remote.assignedMeasureId || local.assignedMeasureId || "",
+            assignedMeasureName: remote.assignedMeasureName || local.assignedMeasureName || "",
+            assignedTailorId: remote.assignedTailorId || local.assignedTailorId || "",
+            assignedTailorName: remote.assignedTailorName || local.assignedTailorName || "",
+            assignedInstallerId: remote.assignedInstallerId || local.assignedInstallerId || "",
+            assignedInstallerName: remote.assignedInstallerName || local.assignedInstallerName || "",
+            workflowStatus: remoteCanonical.status || remote.workflowStatus || local.workflowStatus || "YENI",
+            customerCode: remote.customerCode || local.customerCode || "",
+            taxNumber: remote.taxNumber || local.taxNumber || "",
+            phone2: remote.phone2 || local.phone2 || "",
+            extraDescription: remote.extraDescription || local.extraDescription || "",
+            generalNote: remote.generalNote || local.generalNote || "",
+            cariType: remote.cariType || local.cariType || "CUSTOMER",
+            approvalStatus: remote.approvalStatus || local.approvalStatus || "APPROVED",
             isDeleted: remote.isDeleted || false,
-            deletedAt: remote.deletedAt || null,
+            deletedAt: remote.deletedAt || local.deletedAt || null,
             createdAt: remote.createdAt,
             updatedAt: remote.updatedAt
           });
@@ -769,37 +775,35 @@ export async function POST(req: NextRequest) {
       // Customer
       const dbCustomer = remoteCustomers?.find(dc => dc.id === c.id);
       if (!dbCustomer || new Date(c.updatedAt || 0) > new Date(dbCustomer.updatedAt)) {
+        const dbCustomerCanonical = dbCustomer as
+          | (SyncRecord & {
+              location?: string | null;
+              createdBy?: string | null;
+              status?: string | null;
+              assignedTo?: string | null;
+            })
+          | undefined;
+
         const { error } = await supabaseServer.from("customers").upsert({
           ...scopeColumns,
           id: c.id,
           name: c.name,
-          phone: c.phone,
-          address: c.address,
-          mapLocation: c.mapLocation,
-          notes: c.notes,
-          createdById: c.createdById || null,
-          createdByName: c.createdByName || null,
-          assignedSalesId: c.assignedSalesId || null,
-          assignedSalesName: c.assignedSalesName || null,
-          assignedMeasureId: c.assignedMeasureId || null,
-          assignedMeasureName: c.assignedMeasureName || null,
-          assignedTailorId: c.assignedTailorId || null,
-          assignedTailorName: c.assignedTailorName || null,
-          assignedInstallerId: c.assignedInstallerId || null,
-          assignedInstallerName: c.assignedInstallerName || null,
-          workflowStatus: c.workflowStatus || "YENI",
-          customerCode: c.customerCode || null,
-          taxNumber: c.taxNumber || null,
-          phone2: c.phone2 || null,
-          extraDescription: c.extraDescription || null,
-          generalNote: c.generalNote || null,
-          cariType: c.cariType || "CUSTOMER",
-          approvalStatus: c.approvalStatus || "APPROVED",
-          addressPhotos: (c.addressPhotos && c.addressPhotos.length > 0) ? c.addressPhotos : (dbCustomer?.addressPhotos || []),
+          phone: c.phone || null,
+          address: c.address || null,
+          location: c.mapLocation || dbCustomerCanonical?.location || null,
+          notes: c.notes || dbCustomer?.notes || null,
+          createdBy: c.createdById || dbCustomerCanonical?.createdBy || null,
+          status: c.workflowStatus || dbCustomerCanonical?.status || "YENI",
+
+          // FUTURE-ME:
+          // Local domain owns independent SALES/MEASURE/TAILOR/INSTALLER
+          // assignments. Remote canonical schema exposes only one assignedTo.
+          // Never collapse four role assignments into one lossy value.
+          assignedTo: dbCustomerCanonical?.assignedTo || null,
+
           isDeleted: c.isDeleted || false,
-          deletedAt: c.deletedAt || null,
-          createdAt: c.createdAt,
-          updatedAt: c.updatedAt
+          createdAt: c.createdAt || dbCustomer?.createdAt,
+          updatedAt: c.updatedAt || dbCustomer?.updatedAt
         });
         if (error) {
           console.error(`[Sync DB Error] Customer upsert failed for ${c.name} (${c.id}):`, error);

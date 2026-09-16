@@ -52,6 +52,101 @@ for (const table of [
   );
 }
 
+const customerUpsertStart = customerSync.indexOf(
+  'from("customers").upsert({',
+);
+const customerUpsertEnd = customerSync.indexOf(
+  "\n        });",
+  customerUpsertStart,
+);
+assert.ok(customerUpsertStart >= 0);
+assert.ok(customerUpsertEnd > customerUpsertStart);
+
+const customerUpsertSource = customerSync.slice(
+  customerUpsertStart,
+  customerUpsertEnd,
+);
+
+for (const canonicalWriterPattern of [
+  /location:\s*c\.mapLocation\s*\|\|\s*dbCustomerCanonical\?\.location\s*\|\|\s*null/,
+  /createdBy:\s*c\.createdById\s*\|\|\s*dbCustomerCanonical\?\.createdBy\s*\|\|\s*null/,
+  /status:\s*c\.workflowStatus\s*\|\|\s*dbCustomerCanonical\?\.status\s*\|\|\s*"YENI"/,
+  /assignedTo:\s*dbCustomerCanonical\?\.assignedTo\s*\|\|\s*null/,
+]) {
+  assert.match(customerUpsertSource, canonicalWriterPattern);
+}
+
+for (const legacyWriterKey of [
+  "mapLocation",
+  "createdById",
+  "createdByName",
+  "assignedSalesId",
+  "assignedSalesName",
+  "assignedMeasureId",
+  "assignedMeasureName",
+  "assignedTailorId",
+  "assignedTailorName",
+  "assignedInstallerId",
+  "assignedInstallerName",
+  "workflowStatus",
+  "customerCode",
+  "taxNumber",
+  "phone2",
+  "extraDescription",
+  "generalNote",
+  "cariType",
+  "approvalStatus",
+  "addressPhotos",
+  "deletedAt",
+]) {
+  assert.doesNotMatch(
+    customerUpsertSource,
+    new RegExp(`\\b${legacyWriterKey}\\s*:`),
+  );
+}
+
+assert.doesNotMatch(
+  customerUpsertSource,
+  /assignedTo:\s*[^,\n]*(assignedSales|assignedMeasure|assignedTailor|assignedInstaller)/,
+);
+
+assert.match(customerSync, /const remoteCanonical = remote as SyncRecord/);
+assert.match(
+  customerSync,
+  /mapLocation:\s*remoteCanonical\.location\s*\|\|\s*remote\.mapLocation/,
+);
+assert.match(
+  customerSync,
+  /createdById:\s*remoteCanonical\.createdBy\s*\|\|\s*remote\.createdById/,
+);
+assert.match(
+  customerSync,
+  /workflowStatus:\s*remoteCanonical\.status\s*\|\|\s*remote\.workflowStatus/,
+);
+
+for (const localRoleFallback of [
+  "assignedSalesId",
+  "assignedSalesName",
+  "assignedMeasureId",
+  "assignedMeasureName",
+  "assignedTailorId",
+  "assignedTailorName",
+  "assignedInstallerId",
+  "assignedInstallerName",
+]) {
+  assert.match(
+    customerSync,
+    new RegExp(
+      `${localRoleFallback}:\\s*remote\\.${localRoleFallback}\\s*\\|\\|\\s*local\\.${localRoleFallback}`,
+    ),
+  );
+}
+
+assert.doesNotMatch(
+  customerSync,
+  /assigned(Sales|Measure|Tailor|Installer)(Id|Name):\s*remoteCanonical\.assignedTo/,
+);
+
 assert.doesNotMatch(
   customerSync,
   /from\("measurements"\)\.upsert/,

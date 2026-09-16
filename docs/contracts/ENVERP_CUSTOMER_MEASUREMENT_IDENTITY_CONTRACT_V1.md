@@ -659,3 +659,61 @@ yaratmadan kanitlanirsa runtime PAK olur:
 Son kural:
 
 SOURCE PAK != RUNTIME PAK
+
+## 2026-09-16 - Customer canonical writer source-freshness correction
+
+Production and integration commit
+`9c417dcc56109a4932b994039b26b79ae4f074d6` was re-read from the clean
+`integration/customer-address-authority-v1` worktree.
+
+The exact Customer route blob before this delta was
+`f8cd681b155f5d36d390a8739e760753fda15ff5`. That source still sent legacy-only
+Customer properties, including `approvalStatus`, to the canonical live
+`customers` schema.
+
+The earlier `Source adayi: PAK` statement above records a historical candidate.
+It is not current-HEAD or production-freshness proof. Exact source review also
+proved that CAB commit `63852bb761cb6a7047a615b525f9ebc50c161c29`
+contains a stale Customer writer; that commit must not be treated as the source
+of the canonical alignment.
+
+The canonical live Customer writer field set is:
+
+- tenant_id
+- company_id
+- branch_id
+- accounting_period_id
+- id
+- name
+- phone
+- address
+- location
+- notes
+- createdBy
+- status
+- assignedTo
+- isDeleted
+- createdAt
+- updatedAt
+
+The local domain continues to own independent SALES, MEASURE, TAILOR and
+INSTALLER assignments. The single remote `assignedTo` field is not an authority
+for those four assignments. A Customer update preserves the existing remote
+`assignedTo`; it never collapses the four local assignments into one lossy
+value.
+
+Canonical pull mapping is part of the same source contract:
+
+- remote `location` maps to local `mapLocation`.
+- remote `createdBy` maps to local `createdById`.
+- remote `status` maps to local `workflowStatus`.
+- a remote-newer merge preserves independent local role fields when the
+  canonical remote schema does not own them.
+
+This delta does not change Customer Address Authority, Room/Opening writers,
+Measurement authority, pending-delete quarantine, finance, media, stock, live
+SQL, environment configuration or the controlled pilot migration flag.
+
+This source delta is not runtime closure. Exact owned diff, targeted tests,
+TypeScript, ESLint, diff hygiene, build, release approvals and the same
+preserved runtime event retry remain separate gates.
