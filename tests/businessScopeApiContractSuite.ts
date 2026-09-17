@@ -25,6 +25,13 @@ const fieldTasks = readSource(
   "src/app/api/field-tasks/route.ts"
 );
 
+const customerStore = readSource(
+  "src/store/useStore.ts"
+);
+const newCustomerPage = readSource(
+  "src/app/cariler/yeni/page.tsx"
+);
+
 for (const source of [
   customerSync,
   deltaPush,
@@ -179,6 +186,48 @@ for (const source of [
     /body\.(tenantId|companyId|branchId|accountingPeriodId)/
   );
 }
+
+const addCustomerStart = customerStore.indexOf(
+  "      addCustomer: async (data) => {",
+);
+const updateCustomerStart = customerStore.indexOf(
+  "      updateCustomer:",
+  addCustomerStart,
+);
+assert.ok(addCustomerStart >= 0);
+assert.ok(updateCustomerStart > addCustomerStart);
+
+const addCustomerSource = customerStore.slice(
+  addCustomerStart,
+  updateCustomerStart,
+);
+
+assert.match(
+  addCustomerSource,
+  /const customerScope = await loadVerifiedClientErpScope\(\s*authState\.sessionToken,?\s*\)/,
+);
+assert.match(
+  addCustomerSource,
+  /const newCustomer:\s*Customer\s*=\s*\{\s*\.\.\.data,\s*\.\.\.customerScope,\s*id:\s*newCustomerId/,
+);
+assert.ok(
+  addCustomerSource.indexOf(
+    "await loadVerifiedClientErpScope(",
+  ) < addCustomerSource.indexOf(
+    "await saveLocalCustomer(newCustomer)",
+  ),
+);
+assert.match(
+  customerStore,
+  /throw new Error\('CUSTOMER_SCOPE_MISSING_FOR_ROOM'\)/,
+);
+
+const newCustomerCalls =
+  newCustomerPage.match(/(?:await\s+)?addCustomer\(\{/g) || [];
+assert.deepEqual(
+  newCustomerCalls,
+  ["await addCustomer({"],
+);
 
 const expectedCustomerScope = {
   tenantId: "tenant-a",

@@ -145,7 +145,7 @@ export default function YeniCariPage() {
     console.log('[UI Diagnostic] generated customer id:', customerId);
     
     try {
-      addCustomer({
+      await addCustomer({
         ...formData,
         id: customerId
       });

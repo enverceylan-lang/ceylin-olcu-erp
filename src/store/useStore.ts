@@ -707,6 +707,11 @@ export const useStore = create<AppState>()(
       },
 
       addCustomer: async (data) => {
+        const authState = useAuthStore.getState();
+        const currentUser = authState.currentUser;
+        const customerScope = await loadVerifiedClientErpScope(
+          authState.sessionToken,
+        );
         const state = get();
         const newCustomerId = data.id || generateUUID();
 
@@ -731,7 +736,6 @@ export const useStore = create<AppState>()(
         }
 
         const now = new Date().toISOString();
-        const currentUser = useAuthStore.getState().currentUser;
 
         let initialApprovalStatus: 'PENDING_APPROVAL' | 'APPROVED' = 'APPROVED';
         if (currentUser) {
@@ -747,6 +751,7 @@ export const useStore = create<AppState>()(
         if (data.district) { data.district = normalizeCariRegion(data.district); }
         const newCustomer: Customer = {
           ...data,
+          ...customerScope,
           id: newCustomerId,
           rooms: [],
           createdAt: now,
