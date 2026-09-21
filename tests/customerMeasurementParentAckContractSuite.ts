@@ -148,6 +148,10 @@ async function main() {
     "src/components/Topbar.tsx",
     "utf8",
   );
+  const fieldTasksSource = fs.readFileSync(
+    "src/app/gorevler/page.tsx",
+    "utf8",
+  );
   const syncServiceSource = fs.readFileSync(
     "src/lib/syncService.ts",
     "utf8",
@@ -204,6 +208,42 @@ async function main() {
     realPushSource,
     /"\/api\/delta-sync\/push"/,
   );
+  assert.match(
+    realPushSource,
+    /markSyncEventsBlocked/,
+  );
+  assert.match(
+    realPushSource,
+    /PARENT_ROOM_MISSING/,
+  );
+  assert.match(
+    realPushSource,
+    /PARENT_OPENING_MISSING/,
+  );
+  assert.doesNotMatch(
+    realPushSource,
+    /MEASUREMENT_PARENT_ROOM_LOCAL_MISSING/,
+  );
+  assert.doesNotMatch(
+    realPushSource,
+    /MEASUREMENT_PARENT_OPENING_LOCAL_MISSING/,
+  );
+  assert.match(
+    realPushSource,
+    /if \(!room\) \{[\s\S]*?isolatedEvents\.push\([\s\S]*?PARENT_ROOM_MISSING[\s\S]*?continue;/,
+  );
+  assert.match(
+    realPushSource,
+    /if \(!opening\) \{[\s\S]*?isolatedEvents\.push\([\s\S]*?PARENT_OPENING_MISSING[\s\S]*?continue;/,
+  );
+  assert.match(
+    realPushSource,
+    /if \(deltaPushEvents\.length === 0\)/,
+  );
+
+  const blockIndex = realPushSource.indexOf("await markSyncEventsBlocked");
+  const deltaFetchIndex = realPushSource.indexOf('fetch("/api/delta-sync/push"');
+  assert.ok(blockIndex >= 0 && deltaFetchIndex > blockIndex);
 
   assert.doesNotMatch(
     topbarSource,
@@ -212,6 +252,22 @@ async function main() {
   assert.match(
     topbarSource,
     /result\.errors\.length/,
+  );
+  assert.match(
+    topbarSource,
+    /result\.isolatedCount/,
+  );
+  assert.match(
+    topbarSource,
+    /tarihsel kayıt incelemeye alındı/,
+  );
+  assert.match(
+    fieldTasksSource,
+    /result\.isolatedCount/,
+  );
+  assert.match(
+    fieldTasksSource,
+    /tarihsel kayıt incelemeye alındı/,
   );
 
   assert.match(

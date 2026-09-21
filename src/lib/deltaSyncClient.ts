@@ -13,8 +13,10 @@ import { resolveMeasurementParentCustomerId } from "./measurementParentAckGate";
 import {
   activateDeferredMeasurementUpdateAfterInsert,
   getPendingSyncEvents,
+  markSyncEventsBlocked,
   markSyncEventsSynced,
   markSyncEventsError,
+  type SyncEventBlockRequest,
   type SyncPatchRoom,
   type SyncPatchOpening,
   type SyncPatchProduct,
@@ -381,6 +383,7 @@ export function shouldOverwriteMeasurement(
 export async function pushDeltaSyncEvents(): Promise<{
   success: boolean;
   pushedCount: number;
+  isolatedCount: number;
   errors: string[];
   debug: {
     pendingCount: number;
@@ -390,12 +393,15 @@ export async function pushDeltaSyncEvents(): Promise<{
     firstStatus: string;
   };
 }> {
+  let isolatedCount = 0;
+
   try {
     const { currentUser, sessionToken } = useAuthStore.getState();
     if (!currentUser || !sessionToken) {
       return {
         success: false,
         pushedCount: 0,
+        isolatedCount,
         errors: ["Oturum anahtarı bulunamadı. Çıkış yapıp yeniden giriş yapın."],
         debug: {
           pendingCount: 0,
@@ -418,6 +424,7 @@ export async function pushDeltaSyncEvents(): Promise<{
       return {
         success: true,
         pushedCount: 0,
+        isolatedCount,
         errors: [],
         debug: {
           pendingCount: 0,
@@ -462,6 +469,7 @@ export async function pushDeltaSyncEvents(): Promise<{
     if (measurementEvents.length > 0) {
       const localCustomers = await loadLocalCustomers();
       const packagedEvents = [];
+      const isolatedEvents: SyncEventBlockRequest[] = [];
       for (const event of activeScopeEvents) {
         if (event.entityType !== "MEASUREMENT") {
           packagedEvents.push(event);
@@ -473,24 +481,32 @@ export async function pushDeltaSyncEvents(): Promise<{
           : patch;
         const customerIdentity = resolveMeasurementParentCustomerId(patch);
         if (!customerIdentity.ok) {
-          return { success: false, pushedCount: 0, errors: [customerIdentity.error], debug: { pendingCount: pendingEvents.length, apiStatus: "PARENT_IDENTITY_INVALID", syncedCount: 0, errorCount: 1, firstStatus } };
+          return { success: false, pushedCount: 0, isolatedCount, errors: [customerIdentity.error], debug: { pendingCount: pendingEvents.length, apiStatus: "PARENT_IDENTITY_INVALID", syncedCount: 0, errorCount: 1, firstStatus } };
         }
         const roomId = String(nested.roomId || patch.roomId || "").trim();
         const openingId = String(nested.openingId || nested.windowId || patch.openingId || patch.windowId || "").trim();
         if (!roomId || !openingId) {
-          return { success: false, pushedCount: 0, errors: ["MEASUREMENT_PARENT_ID_MISSING"], debug: { pendingCount: pendingEvents.length, apiStatus: "PARENT_IDENTITY_INVALID", syncedCount: 0, errorCount: 1, firstStatus } };
+          return { success: false, pushedCount: 0, isolatedCount, errors: ["MEASUREMENT_PARENT_ID_MISSING"], debug: { pendingCount: pendingEvents.length, apiStatus: "PARENT_IDENTITY_INVALID", syncedCount: 0, errorCount: 1, firstStatus } };
         }
         const customer = localCustomers.find((item) => !item.isDeleted && item.id === customerIdentity.customerId);
         if (!customer) {
-          return { success: false, pushedCount: 0, errors: ["MEASUREMENT_PARENT_CUSTOMER_LOCAL_MISSING"], debug: { pendingCount: pendingEvents.length, apiStatus: "PARENT_LOCAL_MISSING", syncedCount: 0, errorCount: 1, firstStatus } };
+          return { success: false, pushedCount: 0, isolatedCount, errors: ["MEASUREMENT_PARENT_CUSTOMER_LOCAL_MISSING"], debug: { pendingCount: pendingEvents.length, apiStatus: "PARENT_LOCAL_MISSING", syncedCount: 0, errorCount: 1, firstStatus } };
         }
         const room = (customer.rooms || []).find((item) => !item.isDeleted && item.id === roomId);
         if (!room) {
-          return { success: false, pushedCount: 0, errors: ["MEASUREMENT_PARENT_ROOM_LOCAL_MISSING"], debug: { pendingCount: pendingEvents.length, apiStatus: "PARENT_LOCAL_MISSING", syncedCount: 0, errorCount: 1, firstStatus } };
+          isolatedEvents.push({
+            changeId: event.changeId,
+            reason: "PARENT_ROOM_MISSING",
+          });
+          continue;
         }
         const opening = (room.windows || []).find((item) => !item.isDeleted && item.id === openingId);
         if (!opening) {
-          return { success: false, pushedCount: 0, errors: ["MEASUREMENT_PARENT_OPENING_LOCAL_MISSING"], debug: { pendingCount: pendingEvents.length, apiStatus: "PARENT_LOCAL_MISSING", syncedCount: 0, errorCount: 1, firstStatus } };
+          isolatedEvents.push({
+            changeId: event.changeId,
+            reason: "PARENT_OPENING_MISSING",
+          });
+          continue;
         }
         packagedEvents.push({
           ...event,
@@ -517,8 +533,31 @@ export async function pushDeltaSyncEvents(): Promise<{
           },
         });
       }
+
+      if (isolatedEvents.length > 0) {
+        await markSyncEventsBlocked(isolatedEvents, activeScope);
+        isolatedCount += isolatedEvents.length;
+      }
+
       deltaPushEvents = packagedEvents;
     }
+
+    if (deltaPushEvents.length === 0) {
+      return {
+        success: true,
+        pushedCount: 0,
+        isolatedCount,
+        errors: [],
+        debug: {
+          pendingCount: activeScopeEvents.length,
+          apiStatus: "ISOLATED_ONLY",
+          syncedCount: 0,
+          errorCount: 0,
+          firstStatus,
+        },
+      };
+    }
+
     const response = await fetch("/api/delta-sync/push", {
       method: "POST",
       headers: {
@@ -541,6 +580,7 @@ export async function pushDeltaSyncEvents(): Promise<{
       return {
         success: false,
         pushedCount: 0,
+        isolatedCount,
         errors: [`API returned ${response.status}: ${errText}`],
         debug: {
           pendingCount: pendingEvents.length,
@@ -570,7 +610,7 @@ export async function pushDeltaSyncEvents(): Promise<{
     );
 
     const pendingByChangeId = new Map(
-      activeScopeEvents.map((event) => [event.changeId, event]),
+      deltaPushEvents.map((event) => [event.changeId, event]),
     );
 
     const safeSyncedIds: string[] = [];
@@ -660,6 +700,7 @@ export async function pushDeltaSyncEvents(): Promise<{
     return {
       success: Boolean(success) && combinedErrorIds.length === 0,
       pushedCount: safeSyncedIds.length,
+      isolatedCount,
       errors: [
         ...(Array.isArray(errors) ? errors : errors ? [String(errors)] : []),
         ...(clientRejectedIds.length > 0
@@ -679,6 +720,7 @@ export async function pushDeltaSyncEvents(): Promise<{
     return {
       success: false,
       pushedCount: 0,
+      isolatedCount,
       errors: [getErrorMessage(err)],
       debug: {
         pendingCount: -1,

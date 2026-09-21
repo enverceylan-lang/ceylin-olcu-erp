@@ -35,6 +35,15 @@ export interface SyncPatch {
   rooms?: SyncPatchRoom[];
 }
 
+export type SyncBlockedReason =
+  | 'PARENT_ROOM_MISSING'
+  | 'PARENT_OPENING_MISSING';
+
+export interface SyncEventBlockRequest {
+  changeId: string;
+  reason: SyncBlockedReason;
+}
+
 export interface SyncEvent {
   scope: ErpScope;
   changeId: string;
@@ -49,6 +58,8 @@ export interface SyncEvent {
   updatedAt: string;
   syncStatus: 'PENDING' | 'SYNCED' | 'ERROR' | 'BLOCKED';
   retryCount: number;
+  blockedReason?: SyncBlockedReason;
+  blockedAt?: string;
 }
 
 class LocalSyncQueueDatabase extends Dexie {
@@ -879,6 +890,69 @@ export async function getPendingSyncEvents(
   }
 }
 
+export async function markSyncEventsBlocked(
+  requests: SyncEventBlockRequest[],
+  activeScope: ErpScope,
+): Promise<void> {
+  try {
+    const verifiedScope = readErpScope(activeScope);
+    if (!verifiedScope) {
+      throw new Error('SYNC_BLOCK_SCOPE_INVALID');
+    }
+
+    const uniqueRequests = Array.from(
+      new Map(requests.map((request) => [request.changeId, request])).values(),
+    );
+    if (uniqueRequests.length === 0) return;
+
+    await localSyncQueueDb.transaction(
+      'rw',
+      localSyncQueueDb.pendingSyncEvents,
+      async () => {
+        const events = await localSyncQueueDb.pendingSyncEvents.bulkGet(
+          uniqueRequests.map((request) => request.changeId),
+        );
+
+        const verified = events.every((event) => {
+          if (!event || event.entityType !== 'MEASUREMENT') return false;
+          if (event.syncStatus === 'SYNCED') return false;
+
+          const eventScope = readErpScope(event.scope);
+          return Boolean(
+            eventScope &&
+            erpScopeMatches(eventScope, verifiedScope),
+          );
+        });
+
+        if (!verified) {
+          throw new Error('SYNC_BLOCK_SCOPE_OR_AUTHORITY_MISMATCH');
+        }
+
+        const now = new Date().toISOString();
+        const updatedCount =
+          await localSyncQueueDb.pendingSyncEvents.bulkUpdate(
+            uniqueRequests.map((request, index) => ({
+              key: request.changeId,
+              changes: {
+                syncStatus: 'BLOCKED' as const,
+                blockedReason: request.reason,
+                blockedAt: events[index]?.blockedAt || now,
+                updatedAt: now,
+              },
+            })),
+          );
+
+        if (updatedCount !== uniqueRequests.length) {
+          throw new Error('SYNC_BLOCK_UPDATE_INCOMPLETE');
+        }
+      },
+    );
+  } catch (err) {
+    console.error('[SyncQueue] Failed to mark events as BLOCKED:', err);
+    throw err;
+  }
+}
+
 export async function markSyncEventsSynced(
   changeIds: string[],
   activeScope: ErpScope,
@@ -902,6 +976,7 @@ export async function markSyncEventsSynced(
         const verifiedIds = events
           .filter((event): event is SyncEvent => {
             if (!event) return false;
+            if (event.syncStatus === 'BLOCKED') return false;
             if (
               event.entityType !== 'DRAFT' &&
               event.entityType !== 'MEASUREMENT'

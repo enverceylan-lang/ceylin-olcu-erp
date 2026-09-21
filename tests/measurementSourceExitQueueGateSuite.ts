@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   getPendingSyncEvents,
   localSyncQueueDb,
+  markSyncEventsBlocked,
   markSyncEventsSynced,
   type SyncEvent,
 } from "../src/lib/localSyncQueueDb";
@@ -266,6 +267,97 @@ async function verifyScopeAwareQueueContract(): Promise<void> {
     (await localSyncQueueDb.pendingSyncEvents.get(canonicalA.changeId))
       ?.syncStatus === "SYNCED",
     "Canonical same-scope MEASUREMENT ACK uygulanmadı",
+  );
+
+  await localSyncQueueDb.pendingSyncEvents.clear();
+  const blockableA = queueEvent(
+    "blockable-a",
+    SCOPE_A,
+    "2026-09-19T00:04:00.000Z",
+  );
+  const blockablePatchBefore = JSON.stringify(blockableA.patch);
+  await localSyncQueueDb.pendingSyncEvents.put(blockableA);
+
+  await markSyncEventsBlocked(
+    [{ changeId: blockableA.changeId, reason: "PARENT_ROOM_MISSING" }],
+    SCOPE_A,
+  );
+
+  const blockedA = await localSyncQueueDb.pendingSyncEvents.get(
+    blockableA.changeId,
+  );
+  assert(blockedA, "BLOCKED event silindi");
+  assert(blockedA.syncStatus === "BLOCKED", "Event BLOCKED olmadı");
+  assert(
+    blockedA.blockedReason === "PARENT_ROOM_MISSING",
+    "BLOCKED nedeni korunmadı",
+  );
+  assert(Boolean(blockedA.blockedAt), "BLOCKED zamanı korunmadı");
+  assert(
+    JSON.stringify(blockedA.patch) === blockablePatchBefore,
+    "BLOCKED sırasında event patch değiştirildi",
+  );
+  const afterBlockPending = await getPendingSyncEvents(SCOPE_A, 50);
+  assert(
+    !afterBlockPending.some((event) => event.changeId === blockableA.changeId),
+    "BLOCKED event sonraki gönderimi yeniden zehirliyor",
+  );
+
+  let blockedAckRejected = false;
+  try {
+    await markSyncEventsSynced([blockableA.changeId], SCOPE_A);
+  } catch (error) {
+    blockedAckRejected =
+      error instanceof Error &&
+      error.message === "SYNC_ACK_SCOPE_OR_AUTHORITY_MISMATCH";
+  }
+  assert(blockedAckRejected, "BLOCKED event SYNCED yapılabildi");
+  assert(
+    (await localSyncQueueDb.pendingSyncEvents.get(blockableA.changeId))
+      ?.syncStatus === "BLOCKED",
+    "BLOCKED event ACK denemesinde değiştirildi",
+  );
+
+  await localSyncQueueDb.pendingSyncEvents.clear();
+  const sameScopeA = queueEvent(
+    "same-scope-a",
+    SCOPE_A,
+    "2026-09-19T00:05:00.000Z",
+  );
+  const foreignScopeB = queueEvent(
+    "foreign-scope-b",
+    SCOPE_B,
+    "2026-09-19T00:05:01.000Z",
+  );
+  await localSyncQueueDb.pendingSyncEvents.bulkPut([
+    sameScopeA,
+    foreignScopeB,
+  ]);
+
+  let foreignBlockRejected = false;
+  try {
+    await markSyncEventsBlocked(
+      [
+        { changeId: sameScopeA.changeId, reason: "PARENT_OPENING_MISSING" },
+        { changeId: foreignScopeB.changeId, reason: "PARENT_ROOM_MISSING" },
+      ],
+      SCOPE_A,
+    );
+  } catch (error) {
+    foreignBlockRejected =
+      error instanceof Error &&
+      error.message === "SYNC_BLOCK_SCOPE_OR_AUTHORITY_MISMATCH";
+  }
+  assert(foreignBlockRejected, "Foreign scope event BLOCKED edilebildi");
+  assert(
+    (await localSyncQueueDb.pendingSyncEvents.get(sameScopeA.changeId))
+      ?.syncStatus === "PENDING",
+    "Mixed-scope BLOCK atomik olmadan kısmen uygulandı",
+  );
+  assert(
+    (await localSyncQueueDb.pendingSyncEvents.get(foreignScopeB.changeId))
+      ?.syncStatus === "PENDING",
+    "Foreign scope event değiştirildi",
   );
 }
 

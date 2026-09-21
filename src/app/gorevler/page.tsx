@@ -321,7 +321,16 @@ export default function FieldTasksPage() {
       const result = await pushDeltaSyncEvents();
       if (!result.success) { alert(`Gönderme başarısız: ${result.errors?.length ? result.errors.join(", ") : "Ölçüler sunucuya gönderilemedi."}`); return; }
       await handleStatus(task, "MEASUREMENT_TAKEN");
-      alert(result.pushedCount > 0 ? `${result.pushedCount} kayıt mağazaya gönderildi.` : "Ölçü daha önce gönderilmiş. Görev güncellendi.");
+      const isolatedText = result.isolatedCount > 0
+        ? ` ${result.isolatedCount} tarihsel kayıt incelemeye alındı.`
+        : "";
+      alert(
+        result.pushedCount > 0
+          ? `${result.pushedCount} kayıt mağazaya gönderildi.${isolatedText}`
+          : result.isolatedCount > 0
+            ? `${result.isolatedCount} tarihsel kayıt incelemeye alındı. Gönderilecek geçerli yeni ölçü yok.`
+            : "Ölçü daha önce gönderilmiş. Görev güncellendi.",
+      );
     } catch (error) {
       console.error("[Field Task] Measurement send failed:", error);
       alert(error instanceof Error ? `Ölçü gönderilemedi: ${error.message}` : "Ölçü gönderilemedi.");

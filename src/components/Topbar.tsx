@@ -50,14 +50,21 @@ pendingCount: ${result.debug.pendingCount}
 apiStatus: ${result.debug.apiStatus}
 syncedCount: ${result.debug.syncedCount}
 errorCount: ${result.debug.errorCount}
+isolatedCount: ${result.isolatedCount}
 firstStatus: ${result.debug.firstStatus}
       `.trim();
 
       const isDev = process.env.NODE_ENV === 'development';
 
       if (result.success) {
+        const isolatedText = result.isolatedCount > 0
+          ? ` ${result.isolatedCount} tarihsel kayıt incelemeye alındı.`
+          : '';
+
         if (result.pushedCount > 0) {
-          alert(`Ölçüler gönderildi. ${result.pushedCount} kayıt aktarıldı.` + (isDev ? `\n\nDEBUG:\n${debugText}` : ''));
+          alert(`Ölçüler gönderildi. ${result.pushedCount} kayıt aktarıldı.${isolatedText}` + (isDev ? `\n\nDEBUG:\n${debugText}` : ''));
+        } else if (result.isolatedCount > 0) {
+          alert(`${result.isolatedCount} tarihsel kayıt incelemeye alındı. Gönderilecek geçerli yeni ölçü yok.` + (isDev ? `\n\nDEBUG:\n${debugText}` : ''));
         } else {
           alert(`Gönderilecek yeni ölçü yok.` + (isDev ? `\n\nDEBUG:\n${debugText}` : ''));
         }
@@ -65,7 +72,10 @@ firstStatus: ${result.debug.firstStatus}
         const errorText = result.errors.length
           ? result.errors.join(', ')
           : 'SUNUCU_GONDERIM_BASARISIZ';
-        alert(`Ölçüler gönderilemedi. Hata: ${errorText}` +
+        const isolatedText = result.isolatedCount > 0
+          ? ` ${result.isolatedCount} tarihsel kayıt incelemeye alındı.`
+          : '';
+        alert(`Ölçüler gönderilemedi. Hata: ${errorText}.${isolatedText}` +
           (isDev ? `
 
 DEBUG:
