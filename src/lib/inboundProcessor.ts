@@ -1,9 +1,19 @@
 import { useMeasurementStore } from "@/store/measurementStore";
-import { InboundMeasurement, localDraftDb } from "./localDraftDb";
+import {
+  InboundMeasurement,
+  listInboundMeasurements,
+  localDraftDb,
+} from "./localDraftDb";
 import { Customer, Room, generateUUID, useStore } from "@/store/useStore";
-import { saveLocalCustomer, loadLocalCustomers } from "./localCustomerDb";
+import {
+  localCustomerDb,
+  saveLocalCustomer,
+  loadLocalCustomers,
+} from "./localCustomerDb";
 import { ensureMeasurementId } from "./measurementIdHelper";
 import { localMeasurementDb } from "./localMeasurementDb";
+import { readErpScope } from "./customerTreeScope";
+import { erpScopeMatches, type ErpScope } from "./erpScope";
 
 type LocalMeasurement = ReturnType<
   typeof useMeasurementStore.getState
@@ -240,6 +250,7 @@ function normalizeStandaloneMeasurement(
 async function loadMeasurementsForInbound(
   sourceCustomerIds: string[],
   nestedMeasurements: MeasurementPayload[],
+  inboundScope: ErpScope,
 ): Promise<LocalMeasurement[]> {
   const byId = new Map<string, LocalMeasurement>();
 
@@ -249,9 +260,23 @@ async function loadMeasurementsForInbound(
   });
 
   const sourceIds = new Set(sourceCustomerIds);
+  const sourceCustomers = await localCustomerDb.customers.bulkGet(
+    Array.from(sourceIds),
+  );
+  const verifiedSourceIds = new Set(
+    sourceCustomers
+      .filter((customer): customer is Customer => {
+        if (!customer) return false;
+        const customerScope = readErpScope(customer);
+        return Boolean(
+          customerScope && erpScopeMatches(customerScope, inboundScope),
+        );
+      })
+      .map((customer) => customer.id),
+  );
   const localMeasurements = await localMeasurementDb.measurements.toArray();
   localMeasurements.forEach((measurement) => {
-    if (!sourceIds.has(measurement.customerId)) return;
+    if (!verifiedSourceIds.has(measurement.customerId)) return;
     const normalized = normalizeStandaloneMeasurement(measurement);
     if (normalized) byId.set(normalized.id, normalized);
   });
@@ -295,6 +320,7 @@ function mergeMeasurementsById(
 
 async function loadRelatedMeasurementGroups(
   sourceCustomerIds: string[],
+  inboundScope: ErpScope,
 ): Promise<{
   groups: InboundMeasurement[];
   measurements: LocalMeasurement[];
@@ -304,7 +330,7 @@ async function loadRelatedMeasurementGroups(
       .map((value) => String(value || "").trim())
       .filter(Boolean),
   );
-  const rows = await localDraftDb.inboundMeasurements.toArray();
+  const rows = await listInboundMeasurements(inboundScope);
   const groups = rows.filter((item) => {
     if (item.entityType !== "MEASUREMENT_GROUP") return false;
     if (item.status !== "NEW" && item.status !== "MATCH_PENDING") {
@@ -597,6 +623,74 @@ async function persistAndVerifyMeasurements(
   }
 }
 
+async function snapshotMeasurements(
+  ids: string[],
+): Promise<Map<string, LocalMeasurement | undefined>> {
+  const rows = await localMeasurementDb.measurements.bulkGet(ids);
+  return new Map(ids.map((id, index) => [id, rows[index]]));
+}
+
+async function restoreMeasurements(
+  snapshot: Map<string, LocalMeasurement | undefined>,
+): Promise<void> {
+  await localMeasurementDb.transaction(
+    "rw",
+    localMeasurementDb.measurements,
+    async () => {
+      for (const [id, measurement] of snapshot) {
+        if (measurement) {
+          await localMeasurementDb.measurements.put(measurement);
+        } else {
+          await localMeasurementDb.measurements.delete(id);
+        }
+      }
+    },
+  );
+  await useMeasurementStore.getState().loadMeasurements();
+}
+
+async function restoreCustomerAndMeasurements(
+  customerId: string,
+  customerSnapshot: Customer | undefined,
+  measurementSnapshot: Map<string, LocalMeasurement | undefined>,
+): Promise<void> {
+  if (customerSnapshot) {
+    await localCustomerDb.customers.put(customerSnapshot);
+  } else {
+    await localCustomerDb.customers.delete(customerId);
+  }
+  await restoreMeasurements(measurementSnapshot);
+}
+
+async function quarantineInbound(
+  changeId: string,
+  error: string,
+): Promise<void> {
+  await localDraftDb.inboundMeasurements.update(changeId, {
+    status: "QUARANTINE",
+    quarantineAt: new Date().toISOString(),
+    compensationError: error,
+  } as never);
+}
+
+function requireInboundScope(inbound: InboundMeasurement): ErpScope {
+  const scope = readErpScope(inbound);
+  if (!scope) {
+    throw new Error("INBOUND_ERP_SCOPE_MISSING");
+  }
+  return scope;
+}
+
+function requireCustomerScopeMatch(
+  customer: Customer,
+  inboundScope: ErpScope,
+): void {
+  const customerScope = readErpScope(customer);
+  if (!customerScope || !erpScopeMatches(customerScope, inboundScope)) {
+    throw new Error("INBOUND_CUSTOMER_SCOPE_MISMATCH");
+  }
+}
+
 function assignMeasurementsToCustomer(
   measurements: LocalMeasurement[],
   customerId: string,
@@ -633,6 +727,7 @@ export async function processAsNewCustomer(
   ) {
     throw new Error("Bu kayıt daha önce işlenmiş.");
   }
+  const inboundScope = requireInboundScope(inbound);
 
   const patch = (inbound.patch || {}) as InboundPatch;
   const patchData = patch?.data || {};
@@ -670,11 +765,12 @@ export async function processAsNewCustomer(
   const standaloneMeasurements =
     extractStandaloneMeasurementsFromPatch(patch);
   const relatedMeasurementGroups =
-    await loadRelatedMeasurementGroups(sourceCustomerIds);
+    await loadRelatedMeasurementGroups(sourceCustomerIds, inboundScope);
   const sourceMeasurements = mergeMeasurementsById(
     await loadMeasurementsForInbound(
       sourceCustomerIds,
       nestedMeasurements,
+      inboundScope,
     ),
     standaloneMeasurements,
     relatedMeasurementGroups.measurements,
@@ -705,10 +801,10 @@ export async function processAsNewCustomer(
     sourceMeasurements,
     pendingCustomerId,
   );
-  await persistAndVerifyMeasurements(approvedMeasurements);
 
   const now = new Date().toISOString();
   const structuralCustomer: Customer = {
+    ...inboundScope,
     id: pendingCustomerId,
     name: customerName,
     phone: customerPhone,
@@ -729,7 +825,37 @@ export async function processAsNewCustomer(
     isDeleted: false,
   };
 
+  const customerSnapshot = await localCustomerDb.customers.get(
+    structuralCustomer.id,
+  );
+  if (customerSnapshot) {
+    requireCustomerScopeMatch(customerSnapshot, inboundScope);
+  }
+  const measurementSnapshot = await snapshotMeasurements(
+    approvedMeasurements.map((measurement) => measurement.id),
+  );
+
   await saveLocalCustomer(structuralCustomer);
+  try {
+    await persistAndVerifyMeasurements(approvedMeasurements);
+  } catch (error: unknown) {
+    try {
+      await restoreCustomerAndMeasurements(
+        structuralCustomer.id,
+        customerSnapshot,
+        measurementSnapshot,
+      );
+    } catch (compensationError: unknown) {
+      const message =
+        compensationError instanceof Error
+          ? compensationError.message
+          : String(compensationError);
+      await quarantineInbound(inbound.changeId, message);
+      throw new Error("INBOUND_COMPENSATION_FAILED");
+    }
+    throw error;
+  }
+
   useStore.setState((state) => {
     const exists = state.customers.some(
       (customer) => customer.id === structuralCustomer.id,
@@ -782,12 +908,14 @@ export async function processAsMerge(
   ) {
     throw new Error("Bu kayıt daha önce işlenmiş.");
   }
+  const inboundScope = requireInboundScope(inbound);
 
   const customers = await loadLocalCustomers();
   const targetCustomer = customers.find((c) => c.id === customerId);
   if (!targetCustomer) {
     throw new Error("Hedef müşteri bulunamadı.");
   }
+  requireCustomerScopeMatch(targetCustomer, inboundScope);
 
   const patch = (inbound.patch || {}) as InboundPatch;
   const sourceCustomerIds = normalizeSourceCustomerIds(inbound, patch);
@@ -799,11 +927,12 @@ export async function processAsMerge(
   const standaloneMeasurements =
     extractStandaloneMeasurementsFromPatch(patch);
   const relatedMeasurementGroups =
-    await loadRelatedMeasurementGroups(sourceCustomerIds);
+    await loadRelatedMeasurementGroups(sourceCustomerIds, inboundScope);
   const sourceMeasurements = mergeMeasurementsById(
     await loadMeasurementsForInbound(
       sourceCustomerIds,
       nestedMeasurements,
+      inboundScope,
     ),
     standaloneMeasurements,
     relatedMeasurementGroups.measurements,
@@ -827,7 +956,6 @@ export async function processAsMerge(
     sourceMeasurements,
     targetCustomer.id,
   );
-  await persistAndVerifyMeasurements(approvedMeasurements);
 
   const structuralUpdatedCustomer: Customer = {
     ...targetCustomer,
@@ -835,7 +963,31 @@ export async function processAsMerge(
     updatedAt: new Date().toISOString(),
   };
 
+  const measurementSnapshot = await snapshotMeasurements(
+    approvedMeasurements.map((measurement) => measurement.id),
+  );
+
   await saveLocalCustomer(structuralUpdatedCustomer);
+  try {
+    await persistAndVerifyMeasurements(approvedMeasurements);
+  } catch (error: unknown) {
+    try {
+      await restoreCustomerAndMeasurements(
+        targetCustomer.id,
+        targetCustomer,
+        measurementSnapshot,
+      );
+    } catch (compensationError: unknown) {
+      const message =
+        compensationError instanceof Error
+          ? compensationError.message
+          : String(compensationError);
+      await quarantineInbound(inbound.changeId, message);
+      throw new Error("INBOUND_COMPENSATION_FAILED");
+    }
+    throw error;
+  }
+
   useStore.setState((state) => ({
     customers: state.customers.map((customer) =>
       customer.id === structuralUpdatedCustomer.id

@@ -71,6 +71,70 @@ const ERP_SCOPE_FIELDS = [
   "accountingPeriodId",
 ] as const;
 
+export function stripErpScope<T>(value: T): T {
+  const record = asRecord(value);
+  if (!record) return value;
+
+  const {
+    tenantId: _tenantId,
+    companyId: _companyId,
+    branchId: _branchId,
+    accountingPeriodId: _accountingPeriodId,
+    ...rest
+  } = record;
+
+  void _tenantId;
+  void _companyId;
+  void _branchId;
+  void _accountingPeriodId;
+
+  return rest as T;
+}
+
+export function optionalScopeConflicts(
+  value: unknown,
+  expected: ErpScope,
+): boolean {
+  const record = asRecord(value);
+  if (!record) return false;
+
+  return ERP_SCOPE_FIELDS.some((field) => {
+    const current =
+      typeof record[field] === "string"
+        ? String(record[field]).trim()
+        : "";
+
+    return Boolean(current) && current !== expected[field];
+  });
+}
+
+export function normalizeCustomerOwnershipTree<T>(customer: T): T {
+  const customerRecord = asRecord(customer);
+  if (!customerRecord) return customer;
+
+  const rooms = Array.isArray(customerRecord.rooms)
+    ? customerRecord.rooms.map((room) => {
+        const roomRecord = asRecord(room) ?? {};
+        const windows = Array.isArray(roomRecord.windows)
+          ? roomRecord.windows.map((opening) => {
+              const openingRecord = asRecord(opening) ?? {};
+              const products = Array.isArray(openingRecord.products)
+                ? openingRecord.products.map((measurement) =>
+                    stripErpScope(asRecord(measurement) ?? {})
+                  )
+                : [];
+
+              return stripErpScope({ ...openingRecord, products });
+            })
+          : [];
+
+        return stripErpScope({ ...roomRecord, windows });
+      })
+    : [];
+
+  return { ...customerRecord, rooms } as T;
+}
+
 export function classifyCustomerRootScope(
   customer: unknown,
   expected: ErpScope,
@@ -153,8 +217,7 @@ export function customerTreeScopeIssue(
 
   for (const room of rooms) {
     const roomRecord = asRecord(room);
-    const roomScope = readErpScope(roomRecord);
-    if (!roomScope || !erpScopeMatches(roomScope, expected)) {
+    if (optionalScopeConflicts(roomRecord, expected)) {
       return "ROOM_SCOPE_MISMATCH";
     }
 
@@ -164,8 +227,7 @@ export function customerTreeScopeIssue(
 
     for (const opening of openings) {
       const openingRecord = asRecord(opening);
-      const openingScope = readErpScope(openingRecord);
-      if (!openingScope || !erpScopeMatches(openingScope, expected)) {
+      if (optionalScopeConflicts(openingRecord, expected)) {
         return "OPENING_SCOPE_MISMATCH";
       }
 
@@ -174,11 +236,7 @@ export function customerTreeScopeIssue(
         : [];
 
       for (const measurement of measurements) {
-        const measurementScope = readErpScope(measurement);
-        if (
-          !measurementScope ||
-          !erpScopeMatches(measurementScope, expected)
-        ) {
+        if (optionalScopeConflicts(measurement, expected)) {
           return "MEASUREMENT_SCOPE_MISMATCH";
         }
       }

@@ -6,8 +6,14 @@ import {
 } from './localSyncQueueDb';
 import { loadLocalCustomers, saveLocalCustomer, localCustomerDb } from './localCustomerDb';
 import { validateMeasurementTransferTree, type MeasurementValidationIssue } from './measurementValidationEngine';
+import { erpScopeMatches, type ErpScope } from './erpScope';
+import { readErpScope } from './customerTreeScope';
 
 export interface InboundMeasurement {
+  tenantId?: string;
+  companyId?: string;
+  branchId?: string;
+  accountingPeriodId?: string;
   changeId: string;
   revision: number;
   entityType: string;
@@ -299,6 +305,11 @@ export type SaveInboundMeasurementOutcome =
 export async function saveInboundMeasurement(
   inbound: InboundMeasurement
 ): Promise<SaveInboundMeasurementOutcome> {
+  const inboundScope = readErpScope(inbound);
+  if (!inboundScope) {
+    throw new Error('INBOUND_ERP_SCOPE_MISSING');
+  }
+
   try {
     return await localDraftDb.transaction(
       'rw',
@@ -306,18 +317,38 @@ export async function saveInboundMeasurement(
       async () => {
   // Idempotency is based only on the immutable event identity.
   const existing = await localDraftDb.inboundMeasurements.get(inbound.changeId);
-  if (existing) return 'ALREADY_RECORDED';
+  if (existing) {
+    const existingScope = readErpScope(existing);
+    if (!existingScope || !erpScopeMatches(existingScope, inboundScope)) {
+      throw new Error('INBOUND_CHANGE_SCOPE_CONFLICT');
+    }
+    return 'ALREADY_RECORDED';
+  }
 
   const all = await localDraftDb.inboundMeasurements.toArray();
-  if (all.some((item) => item.latestChangeId === inbound.changeId)) {
+  const latestChangeOwner = all.find(
+    (item) => item.latestChangeId === inbound.changeId,
+  );
+  if (latestChangeOwner) {
+    const latestChangeScope = readErpScope(latestChangeOwner);
+    if (
+      !latestChangeScope ||
+      !erpScopeMatches(latestChangeScope, inboundScope)
+    ) {
+      throw new Error('INBOUND_CHANGE_SCOPE_CONFLICT');
+    }
     return 'ALREADY_RECORDED';
   }
 
   const existingEntity = all
-    .filter((item) =>
-      item.entityId === inbound.entityId &&
-      item.entityType === inbound.entityType
-    )
+    .filter((item) => {
+      const itemScope = readErpScope(item);
+      return (
+        item.entityId === inbound.entityId &&
+        item.entityType === inbound.entityType &&
+        Boolean(itemScope && erpScopeMatches(itemScope, inboundScope))
+      );
+    })
     .sort((a, b) => b.revision - a.revision)[0];
 
   // A newer revision may update an open work item, but it must never be swallowed
@@ -442,11 +473,35 @@ export async function saveInboundMeasurement(
   }
 }
 
-export async function listInboundMeasurements(status?: InboundMeasurement['status']): Promise<InboundMeasurement[]> {
-  if (status) {
-    return await localDraftDb.inboundMeasurements.where('status').equals(status).reverse().sortBy('revision');
-  }
-  return await localDraftDb.inboundMeasurements.reverse().sortBy('revision');
+export function listInboundMeasurements(
+  scope: ErpScope,
+  status?: InboundMeasurement['status'],
+): Promise<InboundMeasurement[]>;
+export function listInboundMeasurements(
+  status?: InboundMeasurement['status'],
+): Promise<InboundMeasurement[]>;
+export async function listInboundMeasurements(
+  scopeOrStatus?: ErpScope | InboundMeasurement['status'],
+  maybeStatus?: InboundMeasurement['status'],
+): Promise<InboundMeasurement[]> {
+  const scope =
+    typeof scopeOrStatus === 'object' ? scopeOrStatus : undefined;
+  const status =
+    typeof scopeOrStatus === 'string' ? scopeOrStatus : maybeStatus;
+  const rows = status
+    ? await localDraftDb.inboundMeasurements
+        .where('status')
+        .equals(status)
+        .reverse()
+        .sortBy('revision')
+    : await localDraftDb.inboundMeasurements.reverse().sortBy('revision');
+
+  if (!scope) return rows;
+
+  return rows.filter((item) => {
+    const itemScope = readErpScope(item);
+    return Boolean(itemScope && erpScopeMatches(itemScope, scope));
+  });
 }
 
 export async function updateInboundStatus(changeId: string, status: InboundMeasurement['status']): Promise<void> {
@@ -735,24 +790,42 @@ export async function forceRequeueAllMeasurementDrafts(): Promise<{
       continue;
     }
 
-    draft.recoveryQueuedAt = now;
-      (draft as FieldMeasurementDraft & { syncIntent?: string }).syncIntent =
-        'MEASUREMENT_TREE_RECOVERY';
-      draft.updatedAt = now;
-    
-    await localDraftDb.measurementDrafts.put(draft);
-    await enqueueSyncEvent('DRAFT', draft.id, 'UPDATE', draft);
+    const recoveryDraft = {
+      ...draft,
+      recoveryQueuedAt: now,
+      syncIntent: 'MEASUREMENT_TREE_RECOVERY',
+      updatedAt: now,
+    };
+    const queued = await enqueueSyncEvent(
+      'DRAFT',
+      draft.id,
+      'UPDATE',
+      recoveryDraft,
+    );
+    if (!queued) {
+      result.skipped++;
+      continue;
+    }
+
+    await localDraftDb.measurementDrafts.put(recoveryDraft);
     result.draftsRequeued++;
   }
 
   // 2. Process Customers
-  for (const customer of customers) {
-    let hasMeasurements = false;
-    if (customer.rooms && Array.isArray(customer.rooms) && customer.rooms.length > 0) {
-      hasMeasurements = true;
-    }
+  const {
+    localMeasurementDb,
+    requeueLocalMeasurementForSync,
+  } = await import('./localMeasurementDb');
 
-    if (!hasMeasurements) {
+  for (const customer of customers) {
+    const measurements = (
+      await localMeasurementDb.measurements
+        .where('customerId')
+        .equals(customer.id)
+        .toArray()
+    ).filter((measurement) => !measurement.isDeleted);
+
+    if (measurements.length === 0) {
       result.skipped++;
       continue;
     }
@@ -769,12 +842,15 @@ export async function forceRequeueAllMeasurementDrafts(): Promise<{
       continue;
     }
 
-    recoveryCustomer.recoveryQueuedAt = now;
-      recoveryCustomer.syncIntent = 'MEASUREMENT_TREE_RECOVERY';
-      customer.updatedAt = now;
+    for (const measurement of measurements) {
+      await requeueLocalMeasurementForSync(measurement.id);
+    }
 
-    await saveLocalCustomer(customer);
-    // enqueueSyncEvent is called inside saveLocalCustomer, so it will queue the full customer payload!
+    await saveLocalCustomer({
+      ...customer,
+      recoveryQueuedAt: now,
+      updatedAt: now,
+    } as Customer & { recoveryQueuedAt: string });
     result.customersRequeued++;
   }
 
@@ -820,38 +896,46 @@ export async function forceRequeueCustomerMeasurementTree(customerId: string): P
   }
 
   const counts = getMeasurementTreeCounts(customer);
-  if (counts.roomsCount === 0) {
-    return { success: false, message: "Bu caride yerel ölçü ağacı bulunamadı.", counts };
+  const {
+    localMeasurementDb,
+    requeueLocalMeasurementForSync,
+  } = await import('./localMeasurementDb');
+  const measurements = (
+    await localMeasurementDb.measurements
+      .where('customerId')
+      .equals(customerId)
+      .toArray()
+  ).filter((measurement) => !measurement.isDeleted);
+
+  if (measurements.length === 0) {
+    return {
+      success: false,
+      message: "Bu caride bağımsız yerel ölçü kaydı bulunamadı.",
+      counts,
+    };
   }
 
-  // Check if already queued
   const pending = await localSyncQueueDb.pendingSyncEvents
       .where('syncStatus')
       .equals('PENDING')
       .toArray();
-      
-  const isAlreadyQueued = pending.some(ev => 
-    ev.entityType === 'CUSTOMER' && 
-    ev.entityId === customerId && 
-    ev.operation === 'UPDATE' && 
-    ev.patch && 
-    ev.patch.syncIntent === 'MEASUREMENT_TREE_RECOVERY' &&
-    ev.patch.rooms && 
-    ev.patch.rooms.length > 0
+
+  const pendingMeasurementIds = new Set(
+    pending
+      .filter((event) => event.entityType === 'MEASUREMENT')
+      .map((event) => event.entityId),
+  );
+  const isAlreadyQueued = measurements.every((measurement) =>
+    pendingMeasurementIds.has(measurement.id),
   );
 
   if (isAlreadyQueued) {
     return { success: true, message: "Bu carinin ölçü kurtarma payload'ı zaten gönderim kuyruğunda.", counts, alreadyQueued: true, queued: false };
   }
 
-  const now = new Date().toISOString();
-  const recoveryPayload = {
-    ...customer,
-    syncIntent: 'MEASUREMENT_TREE_RECOVERY',
-    recoveryQueuedAt: now
-  };
+  for (const measurement of measurements) {
+    await requeueLocalMeasurementForSync(measurement.id);
+  }
 
-  await enqueueSyncEvent('CUSTOMER', customer.id, 'UPDATE', recoveryPayload);
-
-  return { success: true, message: "Bu carinin ölçü ağacı gönderim kuyruğuna alındı. Şimdi Ölçüleri Gönder butonuna basabilirsiniz.", counts, alreadyQueued: false, queued: true };
+  return { success: true, message: "Bu carinin bağımsız ölçü kayıtları gönderim kuyruğuna alındı. Şimdi Ölçüleri Gönder butonuna basabilirsiniz.", counts, alreadyQueued: false, queued: true };
 }

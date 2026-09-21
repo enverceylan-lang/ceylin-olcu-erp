@@ -15,7 +15,7 @@ import {
 import { useStore } from "@/store/useStore";
 import { useSalesStore } from "@/store/salesStore";
 import { useEffect, useMemo, useState } from "react";
-import { localDraftDb } from "@/lib/localDraftDb";
+import { listInboundMeasurements } from "@/lib/localDraftDb";
 import {
   canViewModule,
   normalizeRole,
@@ -23,37 +23,56 @@ import {
 } from "@/store/useAuthStore";
 import { getVisibleSales } from "@/lib/salesVisibility";
 import { useErpRuntimeContext } from "@/lib/useErpRuntimeContext";
+import { erpScopeKey } from "@/lib/erpScope";
 
 export default function Home() {
   const { scope } = useErpRuntimeContext();
   const { customers, products } = useStore();
   const { sales, loadSales } = useSalesStore();
   const currentUser = useAuthStore(state => state.currentUser);
-  const [inboundCount, setInboundCount] = useState(0);
+  const [inboundResult, setInboundResult] = useState<{
+    scopeKey: string;
+    count: number;
+  } | null>(null);
+  const activeScopeKey = scope ? erpScopeKey(scope) : null;
+  const inboundCount =
+    activeScopeKey && inboundResult?.scopeKey === activeScopeKey
+      ? inboundResult.count
+      : 0;
 
   useEffect(() => {
-    if (scope) {
-      void loadSales(scope);
-    }
+    if (!scope || !activeScopeKey) return;
 
-    localDraftDb.inboundMeasurements
-      .toArray()
-      .then(items => {
-        const pending = items.filter(
-          item =>
-            item.status === "NEW" ||
-            item.status === "MATCH_PENDING",
-        );
+    let cancelled = false;
 
-        setInboundCount(pending.length);
+    void loadSales(scope);
+    void listInboundMeasurements(scope)
+      .then((items) => {
+        if (cancelled) return;
+
+        setInboundResult({
+          scopeKey: activeScopeKey,
+          count: items.filter(
+            (item) =>
+              item.status === "NEW" ||
+              item.status === "MATCH_PENDING",
+          ).length,
+        });
       })
-      .catch(error => {
+      .catch((error) => {
         console.error(
-          "Failed to load inbound measurements for dashboard",
+          "Failed to load scoped inbound measurements for dashboard",
           error,
         );
+        if (!cancelled) {
+          setInboundResult({ scopeKey: activeScopeKey, count: 0 });
+        }
       });
-  }, [loadSales, scope]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeScopeKey, loadSales, scope]);
 
   const role = currentUser
     ? normalizeRole(currentUser.role)

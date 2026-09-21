@@ -1,5 +1,10 @@
 import { loadVerifiedClientErpScope } from './clientErpScope';
-import { erpScopeMatches, validateErpScope, type ErpScope } from './erpScope';
+import {
+  erpScopeKey,
+  erpScopeMatches,
+  validateErpScope,
+  type ErpScope,
+} from './erpScope';
 import { useMeasurementStore } from "@/store/measurementStore";
 import { getLocalMeasurementById } from "./localMeasurementDb";
 import { useStore } from "@/store/useStore";
@@ -17,9 +22,9 @@ import {
 import {
   getSyncCursor,
   setSyncCursor,
+  listInboundMeasurements,
   saveInboundMeasurement,
   saveTransferReceipt,
-  localDraftDb,
   type InboundMeasurement,
   type TransferReceipt,
 } from "./localDraftDb";
@@ -131,8 +136,10 @@ function getOpeningId(measurement: OpeningReference): string {
 }
 
 
-async function buildCompletedInboundCustomerMap(): Promise<Map<string, string>> {
-  const rows = await localDraftDb.inboundMeasurements.toArray();
+async function buildCompletedInboundCustomerMap(
+  activeScope: ErpScope,
+): Promise<Map<string, string>> {
+  const rows = await listInboundMeasurements(activeScope);
   const completed = rows
     .filter((item) =>
       (item.status === "LINKED_TO_CUSTOMER" ||
@@ -384,9 +391,30 @@ export async function pushDeltaSyncEvents(): Promise<{
   };
 }> {
   try {
-    const pendingEvents = await getPendingSyncEvents(50);
+    const { currentUser, sessionToken } = useAuthStore.getState();
+    if (!currentUser || !sessionToken) {
+      return {
+        success: false,
+        pushedCount: 0,
+        errors: ["Oturum anahtarı bulunamadı. Çıkış yapıp yeniden giriş yapın."],
+        debug: {
+          pendingCount: 0,
+          apiStatus: 401,
+          syncedCount: 0,
+          errorCount: 0,
+          firstStatus: "NONE",
+        },
+      };
+    }
 
-    if (pendingEvents.length === 0) {
+    const token = sessionToken;
+    const activeScope = await loadVerifiedClientErpScope(sessionToken);
+    const pendingEvents = await getPendingSyncEvents(activeScope, 50);
+    const activeScopeEvents = pendingEvents.filter((event) =>
+      erpScopeMatches(event.scope, activeScope),
+    );
+
+    if (activeScopeEvents.length === 0) {
       return {
         success: true,
         pushedCount: 0,
@@ -401,44 +429,14 @@ export async function pushDeltaSyncEvents(): Promise<{
       };
     }
 
-    const firstStatus = pendingEvents[0].syncStatus;
-
-    const { currentUser, sessionToken } = useAuthStore.getState();
-    if (!currentUser || !sessionToken) {
-      return {
-        success: false,
-        pushedCount: 0,
-        errors: ["Oturum anahtarÄ± bulunamadı. Ã‡Ä±kÄ±ÅŸ yapÄ±p yeniden giriÅŸ yapÄ±n."],
-        debug: {
-          pendingCount: pendingEvents.length,
-          apiStatus: 401,
-          syncedCount: 0,
-          errorCount: 0,
-          firstStatus,
-        },
-      };
-    }
-
-    const token = sessionToken;
-    const activeScope = await loadVerifiedClientErpScope(sessionToken);
-    const activeScopeEvents = pendingEvents.filter((event) =>
-      erpScopeMatches(event.scope, activeScope),
-    );
-    if (activeScopeEvents.length === 0) {
-      return {
-        success: true,
-        pushedCount: 0,
-        errors: [],
-        debug: { pendingCount: pendingEvents.length, apiStatus: 'SCOPE_FILTERED', syncedCount: 0, errorCount: 0, firstStatus },
-      };
-    }
+    const firstStatus = activeScopeEvents[0].syncStatus;
 
     // Call the server-side API route which uses the Service Role Key
 
     let rCount = 0,
       pCount = 0;
     let hasRaw = false;
-    pendingEvents.forEach((ev) => {
+    activeScopeEvents.forEach((ev) => {
       const p = ev.patch;
       if (p && p.rooms && Array.isArray(p.rooms)) {
         rCount += p.rooms.length;
@@ -455,7 +453,7 @@ export async function pushDeltaSyncEvents(): Promise<{
       }
     });
     console.log(
-      `[SYNC-DIAGNOSTIC] Push API: eventCount=${pendingEvents.length}, roomsCount=${rCount}, productsCount=${pCount}, hasRawValues=${hasRaw}`,
+      `[SYNC-DIAGNOSTIC] Push API: eventCount=${activeScopeEvents.length}, roomsCount=${rCount}, productsCount=${pCount}, hasRawValues=${hasRaw}`,
     );
     const measurementEvents = activeScopeEvents.filter(
       (event) => event.entityType === "MEASUREMENT",
@@ -581,8 +579,13 @@ export async function pushDeltaSyncEvents(): Promise<{
     for (const changeId of syncedIds || []) {
       const pendingEvent = pendingByChangeId.get(changeId);
 
-      if (pendingEvent?.entityType !== "MEASUREMENT") {
+      if (pendingEvent?.entityType === "DRAFT") {
         safeSyncedIds.push(changeId);
+        continue;
+      }
+
+      if (pendingEvent?.entityType !== "MEASUREMENT") {
+        clientRejectedIds.push(changeId);
         continue;
       }
 
@@ -640,7 +643,7 @@ export async function pushDeltaSyncEvents(): Promise<{
     }
 
     if (safeSyncedIds.length > 0) {
-      await markSyncEventsSynced(safeSyncedIds);
+      await markSyncEventsSynced(safeSyncedIds, activeScope);
     }
 
     const combinedErrorIds = Array.from(
@@ -664,7 +667,7 @@ export async function pushDeltaSyncEvents(): Promise<{
           : []),
       ],
       debug: {
-        pendingCount: pendingEvents.length,
+        pendingCount: activeScopeEvents.length,
         apiStatus: response.status,
         syncedCount: safeSyncedIds.length,
         errorCount: combinedErrorIds.length,
@@ -713,8 +716,11 @@ export async function pullInboundMeasurements(
 
     const token = sessionToken;
     const activeScope = await loadVerifiedClientErpScope(sessionToken);
-    const draftCursor = await getSyncCursor("draft_changes_cursor");
-    const measurementCursor = await getSyncCursor("measurement_changes_cursor");
+    const scopeKey = erpScopeKey(activeScope);
+    const draftCursorKey = `draft_changes_cursor:${scopeKey}`;
+    const measurementCursorKey = `measurement_changes_cursor:${scopeKey}`;
+    const draftCursor = await getSyncCursor(draftCursorKey);
+    const measurementCursor = await getSyncCursor(measurementCursorKey);
 
     const response = await fetch("/api/delta-sync/pull", {
       method: "POST",
@@ -778,7 +784,7 @@ export async function pullInboundMeasurements(
     // Permanent source->target reconciliation created by the admin's earlier
     // "Mevcut Cariye BaÄŸla" or "Yeni Cari AÃ§" decision.
     const completedInboundCustomerMap =
-      await buildCompletedInboundCustomerMap();
+      await buildCompletedInboundCustomerMap(activeScope);
 
     // Deduplicate changes by entity_id, merging properties for the same entity in order of revision
     rawChanges.sort((a, b) => a.revision - b.revision);
@@ -933,7 +939,6 @@ export async function pullInboundMeasurements(
             const openingId = getOpeningId(canonical);
             const measurementToPersist = {
               ...canonical,
-              ...activeScope,
               customerId: resolvedCustomerId,
               openingId,
               windowId: openingId,
@@ -1213,6 +1218,7 @@ export async function pullInboundMeasurements(
       );
 
       const inbound: InboundMeasurement = {
+        ...activeScope,
         changeId: `measurement-group-${change.change_id}`,
         revision: change.revision,
         entityType: "MEASUREMENT_GROUP",
@@ -1247,10 +1253,10 @@ export async function pullInboundMeasurements(
     }
 
     if (maxDraftRevision > draftCursor) {
-      await setSyncCursor("draft_changes_cursor", maxDraftRevision);
+      await setSyncCursor(draftCursorKey, maxDraftRevision);
     }
     if (!measurementCursorAdvanceBlocked && maxMeasurementRevision > measurementCursor) {
-      await setSyncCursor("measurement_changes_cursor", maxMeasurementRevision);
+      await setSyncCursor(measurementCursorKey, maxMeasurementRevision);
     }
 
     const fetchedCount = appliedMeasurements + newInboundItems;

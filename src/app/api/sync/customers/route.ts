@@ -766,9 +766,9 @@ export async function POST(req: NextRequest) {
 
     // 5. Push local modifications to Supabase
     let customersUpsertedCount = 0;
-    let roomsUpsertedCount = 0;
+    const roomsUpsertedCount = 0;
     let addressesPersistedCount = 0;
-    let openingsUpsertedCount = 0;
+    const openingsUpsertedCount = 0;
     const measurementsUpsertedCount = 0;
 
     for (const c of finalCustomers) {
@@ -896,61 +896,10 @@ export async function POST(req: NextRequest) {
 
         addressesPersistedCount++;
       }
-      // Rooms
-      for (const r of c.rooms ?? []) {
-        const dbRoom = remoteRooms?.find(dr => dr.id === r.id);
-        if (!dbRoom || new Date(r.updatedAt || 0) > new Date(dbRoom.updatedAt)) {
-          const { error } = await supabaseServer.from("rooms").upsert({
-            ...scopeColumns,
-            id: r.id,
-            name: r.name,
-            customerId: c.id,
-            customerAddressId:
-              r.customerAddressId ||
-              dbRoom?.customerAddressId ||
-              null,
-            photos: (r.photos && r.photos.length > 0) ? r.photos : (dbRoom?.photos || []),
-            videos: (r.videos && r.videos.length > 0) ? r.videos : (dbRoom?.videos || []),
-            createdAt: r.createdAt,
-            updatedAt: r.updatedAt
-          });
-          if (error) {
-            console.error(`[Sync DB Error] Room upsert failed for ${r.name} (${r.id}):`, error);
-            throw new Error(`Room upsert failed: ${error.message}`);
-          }
-          roomsUpsertedCount++;
-        }
-
-        // Openings
-        for (const o of r.windows ?? []) {
-          const dbOpening = remoteOpenings?.find(do_ => do_.id === o.id);
-          if (!dbOpening || new Date(o.updatedAt || 0) > new Date(dbOpening.updatedAt)) {
-            const { error } = await supabaseServer.from("openings").upsert({
-              ...scopeColumns,
-              id: o.id,
-              name: o.name,
-              roomId: r.id,
-              width: o.width || null,
-              height: o.height || null,
-              fieldNotes: o.fieldNotes || "",
-              photos: (o.photos && o.photos.length > 0) ? o.photos : (dbOpening?.photos || []),
-              videos: (o.videos && o.videos.length > 0) ? o.videos : (dbOpening?.videos || []),
-              createdAt: o.createdAt,
-              updatedAt: o.updatedAt
-            });
-            if (error) {
-              console.error(`[Sync DB Error] Opening upsert failed for ${o.name} (${o.id}):`, error);
-              throw new Error(`Opening upsert failed: ${error.message}`);
-            }
-            openingsUpsertedCount++;
-          }
-
-          // Measurements are read/merged here for legacy response compatibility only.
-          // Canonical measurement writes are owned exclusively by
-          // persist_measurement_authority_v1 through delta-sync/push.
-          // A second timestamp-based writer here would reintroduce dual authority.
-        }
-      }
+      // Room / Opening / Measurement rows are read and merged above only for
+      // legacy response compatibility. Their canonical write authority is the
+      // Measurement Package Authority; this Customer + Address route must not
+      // become a second writer.
     }
     console.log("[Sync API POST] upserted counts:", {
       customers: customersUpsertedCount,
@@ -1054,10 +1003,6 @@ export async function POST(req: NextRequest) {
       message.startsWith("Customer address authority failed:")
     ) {
       publicError = "SYNC_CUSTOMER_ADDRESS_AUTHORITY_FAILED";
-    } else if (message.startsWith("Room upsert failed:")) {
-      publicError = "SYNC_ROOM_UPSERT_FAILED";
-    } else if (message.startsWith("Opening upsert failed:")) {
-      publicError = "SYNC_OPENING_UPSERT_FAILED";
     }
 
     return NextResponse.json(

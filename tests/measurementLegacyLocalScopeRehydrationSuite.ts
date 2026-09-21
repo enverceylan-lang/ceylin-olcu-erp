@@ -1,37 +1,36 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-const source = fs.readFileSync("src/store/useStore.ts", "utf8");
+const store = fs.readFileSync("src/store/useStore.ts", "utf8");
+const scope = fs.readFileSync("src/lib/customerTreeScope.ts", "utf8");
+const localMeasurement = fs.readFileSync(
+  "src/lib/localMeasurementDb.ts",
+  "utf8",
+);
 
-assert.match(
-  source,
-  /import \{ loadVerifiedClientErpScope \} from '@\/lib\/clientErpScope';/,
+assert.match(store, /loadVerifiedClientErpScope/);
+assert.doesNotMatch(store, /activeMeasurementScope/);
+assert.doesNotMatch(store, /requiresLegacyScopeRehydrate/);
+assert.doesNotMatch(
+  store,
+  /saveLocalCustomerWithoutSync\(rehydratedCustomer\)/,
 );
-assert.match(
-  source,
-  /saveLocalCustomerWithoutSync/,
+assert.doesNotMatch(
+  store,
+  /inheritConsistentErpScope\([\s\S]*activeMeasurementScope/,
 );
+assert.match(store, /MEASUREMENT_CUSTOMER_SCOPE_MISSING/);
 assert.match(
-  source,
-  /inheritConsistentErpScope,[\s\S]*readErpScope/,
+  store,
+  /optionalScopeConflicts\(targetRoom, customerScope\)/,
 );
+assert.match(scope, /export function stripErpScope/);
+assert.match(scope, /export function normalizeCustomerOwnershipTree/);
+assert.match(localMeasurement, /resolveMeasurementOwnerScope/);
 assert.match(
-  source,
-  /const activeMeasurementScope = await loadVerifiedClientErpScope\(\s*authState\.sessionToken/,
+  localMeasurement,
+  /MEASUREMENT_CUSTOMER_SCOPE_MISSING/,
 );
-assert.match(
-  source,
-  /inheritConsistentErpScope\([\s\S]*targetCustomer,[\s\S]*targetRoom,[\s\S]*targetOpening,[\s\S]*activeMeasurementScope,/,
-);
-assert.match(source, /requiresLegacyScopeRehydrate/);
-assert.match(source, /!readErpScope\(targetCustomer\)/);
-assert.match(source, /!readErpScope\(targetRoom\)/);
-assert.match(source, /!readErpScope\(targetOpening\)/);
-assert.match(source, /await saveLocalCustomerWithoutSync\(rehydratedCustomer\)/);
-assert.match(
-  source,
-  /customer\.id === customerId \? rehydratedCustomer : customer/,
-);
-assert.match(source, /throw new Error\('MEASUREMENT_SCOPE_MISSING'\)/);
+assert.match(localMeasurement, /stripErpScope/);
 
-console.log("PAK_MEASUREMENT_LEGACY_LOCAL_SCOPE_REHYDRATION_V1_3");
+console.log("PAK_MEASUREMENT_ROOT_OWNERSHIP_NO_SESSION_REHYDRATE_V1");

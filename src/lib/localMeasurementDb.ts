@@ -1,6 +1,12 @@
-import { readErpScope } from './customerTreeScope';
+import {
+  optionalScopeConflicts,
+  readErpScope,
+  stripErpScope,
+} from './customerTreeScope';
+import type { ErpScope } from './erpScope';
 import Dexie, { type Table } from 'dexie';
-import { MeasurementRecord } from '@/store/measurementStore';
+import type { MeasurementRecord } from '@/store/measurementStore';
+import { localCustomerDb } from './localCustomerDb';
 import {
   activateBlockedSyncEvent,
   discardBlockedSyncEvent,
@@ -189,11 +195,57 @@ function normalizeMeasurementLinks(measurement: MeasurementRecord): MeasurementR
     throw new Error("MEASUREMENT_OPENING_ID_MISSING");
   }
 
-  return {
+  return stripErpScope({
     ...measurement,
     openingId: canonicalOpeningId,
     windowId: windowId || canonicalOpeningId
-  };
+  });
+}
+
+export async function resolveMeasurementOwnerScope(
+  measurement: MeasurementRecord,
+): Promise<ErpScope> {
+  const customerId = String(measurement.customerId || "").trim();
+  if (!customerId) {
+    throw new Error("MEASUREMENT_CUSTOMER_ID_MISSING");
+  }
+
+  const customer = await localCustomerDb.customers.get(customerId);
+  if (!customer) {
+    throw new Error("MEASUREMENT_PARENT_CUSTOMER_LOCAL_MISSING");
+  }
+
+  const scope = readErpScope(customer);
+  if (!scope) {
+    throw new Error("MEASUREMENT_CUSTOMER_SCOPE_MISSING");
+  }
+
+  if (optionalScopeConflicts(measurement, scope)) {
+    throw new Error("MEASUREMENT_SCOPE_PARENT_MISMATCH");
+  }
+
+  const room = (customer.rooms || []).find(
+    (item) => item.id === measurement.roomId && !item.isDeleted,
+  );
+  if (!room) {
+    throw new Error("MEASUREMENT_PARENT_ROOM_LOCAL_MISSING");
+  }
+  if (optionalScopeConflicts(room, scope)) {
+    throw new Error("MEASUREMENT_SCOPE_PARENT_MISMATCH");
+  }
+
+  const openingId = measurement.openingId || measurement.windowId;
+  const opening = (room.windows || []).find(
+    (item) => item.id === openingId && !item.isDeleted,
+  );
+  if (!opening) {
+    throw new Error("MEASUREMENT_PARENT_OPENING_LOCAL_MISSING");
+  }
+  if (optionalScopeConflicts(opening, scope)) {
+    throw new Error("MEASUREMENT_SCOPE_PARENT_MISMATCH");
+  }
+
+  return scope;
 }
 export async function loadLocalMeasurements(): Promise<MeasurementRecord[]> {
   try {
@@ -229,9 +281,10 @@ export async function saveLocalMeasurementWithSync(
 ): Promise<void> {
   void username;
 
+  const ownerScope = await resolveMeasurementOwnerScope(measurement);
+  const normalizedMeasurement = normalizeMeasurementLinks(measurement);
   const existingMeasurement =
     await localMeasurementDb.measurements.get(measurement.id);
-  const normalizedMeasurement = normalizeMeasurementLinks(measurement);
 
   const existingVersion = existingMeasurement
     ? Number(existingMeasurement.version)
@@ -249,19 +302,13 @@ export async function saveLocalMeasurementWithSync(
     ? existingVersion
     : 0;
 
-  const measurementScope = readErpScope(normalizedMeasurement);
-
-  if (!measurementScope) {
-    throw new Error("MEASUREMENT_SCOPE_MISSING");
-  }
-
   const sanitizedMeasurement =
     deepSyncSanitize(
       normalizedMeasurement,
     ) as MeasurementRecord;
 
   const payload = {
-    ...measurementScope,
+    ...ownerScope,
     id: normalizedMeasurement.id,
     customerId: normalizedMeasurement.customerId,
     roomId: normalizedMeasurement.roomId,
@@ -418,22 +465,19 @@ export async function deleteLocalMeasurement(
     deletedBy: username
   };
 
-  const deletedScope = readErpScope(deleted);
-
-  if (!deletedScope) {
-    throw new Error("MEASUREMENT_SCOPE_MISSING");
-  }
+  const ownerScope = await resolveMeasurementOwnerScope(deleted);
+  const normalizedDeleted = normalizeMeasurementLinks(deleted);
 
   const payload = {
-    ...deletedScope,
+    ...ownerScope,
     id,
-    customerId: deleted.customerId,
-    roomId: deleted.roomId,
-    openingId: deleted.openingId,
-    windowId: deleted.windowId,
+    customerId: normalizedDeleted.customerId,
+    roomId: normalizedDeleted.roomId,
+    openingId: normalizedDeleted.openingId,
+    windowId: normalizedDeleted.windowId,
     entity: 'measurement',
     isDeleted: true,
-    deletedAt: deleted.deletedAt,
+    deletedAt: normalizedDeleted.deletedAt,
     timestamp: new Date().toISOString()
   };
 
@@ -451,7 +495,7 @@ export async function deleteLocalMeasurement(
   }
 
   try {
-    await localMeasurementDb.measurements.put(deleted);
+    await localMeasurementDb.measurements.put(normalizedDeleted);
   } catch (error: unknown) {
     if (enqueueResult.createdNew) {
       const discarded =
@@ -494,6 +538,19 @@ export async function deleteLocalMeasurement(
     }
   }
 }
+
+export async function requeueLocalMeasurementForSync(
+  id: string,
+  username = 'RECOVERY',
+): Promise<void> {
+  const measurement = await localMeasurementDb.measurements.get(id);
+  if (!measurement) {
+    throw new Error("MEASUREMENT_RECOVERY_LOCAL_MISSING");
+  }
+
+  await saveLocalMeasurementWithSync(measurement, username);
+}
+
 export async function clearLocalMeasurements(): Promise<void> {
   try {
     await localMeasurementDb.measurements.clear();

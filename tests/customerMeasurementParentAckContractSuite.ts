@@ -231,11 +231,11 @@ async function main() {
     customerSyncRouteSource,
     /SYNC_CUSTOMER_ADDRESS_AUTHORITY_FAILED/,
   );
-  assert.match(
+  assert.doesNotMatch(
     customerSyncRouteSource,
     /SYNC_ROOM_UPSERT_FAILED/,
   );
-  assert.match(
+  assert.doesNotMatch(
     customerSyncRouteSource,
     /SYNC_OPENING_UPSERT_FAILED/,
   );

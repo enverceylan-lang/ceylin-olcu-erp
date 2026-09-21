@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { ProductMeasurement } from '@/store/useStore';
 import { loadLocalMeasurements, saveLocalMeasurementWithSync, deleteLocalMeasurement, batchSaveLocalMeasurements } from '@/lib/localMeasurementDb';
+import { stripErpScope } from '@/lib/customerTreeScope';
 import {
   getMeasurementDimensions,
   resolveMeasurementProductType,
@@ -603,11 +604,16 @@ function normalizeMeasurementIdentity(
   m: MeasurementRecord,
   requireOpeningId = true
 ): MeasurementRecord {
-  const openingId = m.openingId || m.windowId || '';
+  const scopeFree = stripErpScope(m);
+  const openingId = scopeFree.openingId || scopeFree.windowId || '';
   if (!openingId && requireOpeningId) {
-    throw new Error(`Ölçü ${m.id || '(kimliksiz)'} için openingId eksik.`);
+    throw new Error(`Ölçü ${scopeFree.id || '(kimliksiz)'} için openingId eksik.`);
   }
-  return { ...m, openingId, windowId: m.windowId || openingId };
+  return {
+    ...scopeFree,
+    openingId,
+    windowId: scopeFree.windowId || openingId,
+  };
 }
 
 export const useMeasurementStore = create<MeasurementState>((set, get) => ({
@@ -627,18 +633,22 @@ export const useMeasurementStore = create<MeasurementState>((set, get) => ({
   },
 
   addMeasurement: async (measurement, username) => {
-    const enriched = enrichMeasurement(measurement);
-    await saveLocalMeasurementWithSync(enriched, username);
+    const normalized = normalizeMeasurementIdentity(
+      enrichMeasurement(measurement),
+    );
+    await saveLocalMeasurementWithSync(normalized, username);
     set(state => ({
-      measurements: [...state.measurements, enriched]
+      measurements: [...state.measurements, normalized]
     }));
   },
 
   updateMeasurement: async (measurement, username) => {
-    const enriched = enrichMeasurement(measurement);
-    await saveLocalMeasurementWithSync(enriched, username);
+    const normalized = normalizeMeasurementIdentity(
+      enrichMeasurement(measurement),
+    );
+    await saveLocalMeasurementWithSync(normalized, username);
     set(state => ({
-      measurements: state.measurements.map(m => m.id === measurement.id ? enriched : m)
+      measurements: state.measurements.map(m => m.id === measurement.id ? normalized : m)
     }));
   },
 
@@ -668,8 +678,11 @@ export const useMeasurementStore = create<MeasurementState>((set, get) => ({
         ),
     );
 
-    const enrichedList =
-      mergedList.map(enrichMeasurement);
+    const enrichedList = mergedList.map((measurement) =>
+      normalizeMeasurementIdentity(
+        enrichMeasurement(measurement),
+      )
+    );
 
     await batchSaveLocalMeasurements(
       enrichedList,

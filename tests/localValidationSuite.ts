@@ -7,6 +7,10 @@ import { useSalesStore } from '../src/store/salesStore';
 import { buildWhatsAppShortReport } from '../src/lib/reportFormatters';
 import { generateMeasurementPdfBlob } from '../src/lib/measurementPdfGenerator';
 import { processAsNewCustomer } from '../src/lib/inboundProcessor';
+import {
+  clearLocalCustomers,
+  saveLocalCustomerWithoutSync,
+} from '../src/lib/localCustomerDb';
 import { runMeasurementMigration } from '../src/lib/measurementMigration';
 import {
   calculateSelectedProduct,
@@ -56,6 +60,54 @@ const testSalesActor = {
 
 
 const testAdminActor = { name: 'Admin' };
+
+function createOwnedFixtureCustomer(
+  id: string,
+  roomId: string,
+  openingId: string,
+): Customer {
+  const now = new Date().toISOString();
+  return {
+    ...testSalesScope,
+    id,
+    name: `FIXTURE ${id}`,
+    phone: '5550000000',
+    address: '',
+    mapLocation: '',
+    notes: '',
+    rooms: [{
+      id: roomId,
+      name: 'Fixture Oda',
+      photos: [],
+      videos: [],
+      windows: [{
+        id: openingId,
+        name: 'Fixture Pencere',
+        products: [],
+        photos: [],
+        videos: [],
+      }],
+    }],
+    createdAt: now,
+    updatedAt: now,
+    createdById: 'admin-1',
+    createdByName: 'Admin',
+    addressPhotos: [],
+  };
+}
+
+async function seedOwnedFixtureCustomer(customer: Customer): Promise<Customer> {
+  const scopedCustomer: Customer = { ...customer, ...testSalesScope };
+  await saveLocalCustomerWithoutSync(scopedCustomer);
+  useStore.setState((state) => ({
+    customers: [
+      ...state.customers.filter((item) => item.id !== scopedCustomer.id),
+      scopedCustomer,
+    ],
+  }));
+  return scopedCustomer;
+}
+
 async function runTests() {
   console.log('==================================================');
   console.log(' FINAL VALIDATION SUITE');
@@ -64,6 +116,7 @@ async function runTests() {
   useStore.setState({ customers: [] });
   useMeasurementStore.setState({ measurements: [] });
   useSalesStore.setState({ sales: [] });
+  await clearLocalCustomers();
   await localSyncQueueDb.pendingSyncEvents.clear();
   let hasFailure = false;
 
@@ -83,6 +136,13 @@ async function runTests() {
   const roomId = generateUUID();
   const windowId = generateUUID();
   const measurementId1 = generateUUID();
+
+  await seedOwnedFixtureCustomer(
+    createOwnedFixtureCustomer('cust-123', 'room-123', 'win-123'),
+  );
+  await seedOwnedFixtureCustomer(
+    createOwnedFixtureCustomer('cust-x', 'rm-x', 'win-x'),
+  );
 
   const testCustomer: Customer = {
     id: customerId,
@@ -123,7 +183,7 @@ async function runTests() {
     createdById: 'admin-1',
   };
 
-  useStore.getState().addCustomer(testCustomer);
+  await seedOwnedFixtureCustomer(testCustomer);
   await useMeasurementStore.getState().batchUpsertMeasurements([testMeasurement]);
 
   await delay(100);
@@ -201,6 +261,7 @@ async function runTests() {
   const inboundId2 = 'meas-inbound-2';
 
   const inboundEvent: Parameters<typeof processAsNewCustomer>[0] = {
+    ...testSalesScope,
     changeId: inboundChangeId,
     revision: 1,
     entityType: 'DRAFT',
@@ -777,7 +838,7 @@ async function runTests() {
       ],
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), createdById: 'admin-1', createdByName: 'Admin', addressPhotos: []
     };
-    useStore.getState().addCustomer(customerObj);
+    await seedOwnedFixtureCustomer(customerObj);
 
     const mId = generateUUID();
     const measObj = {
@@ -827,7 +888,7 @@ async function runTests() {
       ],
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), createdById: 'admin-1', createdByName: 'Admin', addressPhotos: []
     };
-    useStore.getState().addCustomer(customerObj);
+    await seedOwnedFixtureCustomer(customerObj);
 
     const mId = generateUUID();
     const measObj = {
@@ -1219,7 +1280,7 @@ async function runTests() {
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       createdById: 'admin-1', createdByName: 'Admin', addressPhotos: []
     };
-    useStore.getState().addCustomer(customerObj);
+    await seedOwnedFixtureCustomer(customerObj);
     const mId = generateUUID();
     await useMeasurementStore.getState().addMeasurement({
       id: mId, customerId: custId, roomId: 'r1', windowId: 'w1',
@@ -1282,7 +1343,7 @@ async function runTests() {
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       createdById: 'admin-1', createdByName: 'Admin', addressPhotos: []
     };
-    useStore.getState().addCustomer(customerObj);
+    await seedOwnedFixtureCustomer(customerObj);
     const mId = generateUUID();
     await useMeasurementStore.getState().addMeasurement({
       id: mId, customerId: custId, roomId: 'r1', windowId: 'w1',
@@ -1357,7 +1418,7 @@ async function runTests() {
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       createdById: 'admin-1', createdByName: 'Admin', addressPhotos: []
     };
-    useStore.getState().addCustomer(customerObj);
+    await seedOwnedFixtureCustomer(customerObj);
     const mId = generateUUID();
     await useMeasurementStore.getState().addMeasurement({
       id: mId, customerId: custId, roomId: 'r1', windowId: 'w1',
@@ -1398,7 +1459,7 @@ async function runTests() {
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       createdById: 'admin-1', createdByName: 'Admin', addressPhotos: []
     };
-    useStore.getState().addCustomer(customerObj);
+    await seedOwnedFixtureCustomer(customerObj);
     // Create an APPROVED sale directly (not TASLAK)
     const approvedSale = {
       ...testSalesScope,
@@ -1641,7 +1702,7 @@ async function runTests() {
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       createdById: 'admin-1', createdByName: 'Admin', addressPhotos: []
     };
-    useStore.getState().addCustomer(customerObj);
+    await seedOwnedFixtureCustomer(customerObj);
     const mId = generateUUID();
     await useMeasurementStore.getState().addMeasurement({
       id: mId, customerId: custId, roomId: 'r1', windowId: 'w1',
@@ -1683,7 +1744,7 @@ async function runTests() {
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       createdById: 'admin-1', createdByName: 'Admin', addressPhotos: []
     };
-    useStore.getState().addCustomer(customerObj);
+    await seedOwnedFixtureCustomer(customerObj);
     const mId = generateUUID();
     await useMeasurementStore.getState().addMeasurement({
       id: mId, customerId: custId, roomId: 'r1', windowId: 'w1',
@@ -1718,7 +1779,7 @@ async function runTests() {
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       createdById: 'admin-1', createdByName: 'Admin', addressPhotos: []
     };
-    useStore.getState().addCustomer(customerObj);
+    await seedOwnedFixtureCustomer(customerObj);
 
     const approvedSale = {
       ...testSalesScope,

@@ -27,6 +27,7 @@ import {
   loadLocalCustomers,
   saveLocalCustomers,
 } from "@/lib/localCustomerDb";
+import { useErpRuntimeContext } from "@/lib/useErpRuntimeContext";
 
 const measurementOpeningId = (measurement: { openingId?: string; windowId?: string }) =>
   measurement.openingId || measurement.windowId || "";
@@ -102,6 +103,7 @@ const errorMessage = (error: unknown) =>
 // ─── Main component ────────────────────────────────────────────────────────────
 
 export default function OlculerPage() {
+  const { scope } = useErpRuntimeContext();
   const { customers } = useStore();
   const measurementStore = useMeasurementStore();
   const { currentUser } = useAuthStore();
@@ -158,7 +160,14 @@ const [manualRepairingMeasurementId, setManualRepairingMeasurementId] =
 
   const loadInbound = async () => {
     try {
-      const data = await listInboundMeasurements();
+      if (!scope) {
+        setInboundMeasurements([]);
+        setQuarantinedMeasurements([]);
+        setCompletedInboundLinks({});
+        return;
+      }
+
+      const data = await listInboundMeasurements(scope);
       setInboundMeasurements(
         data.filter(
           d =>
@@ -246,14 +255,14 @@ const links: Record<string, string> = {};
     setProcessingInboundId(inbound.changeId);
     try {
       await processAsNewCustomer(inbound, currentUser?.id || 'admin', currentUser?.username || 'Admin');
-      
-      // Update state immediately for instant feedback
-      setInboundMeasurements(prev => prev.filter(x => x.changeId !== inbound.changeId));
-      
-      setTimeout(() => alert("Yeni cari açıldı ve ölçü eklendi."), 50);
-      
-      // Sync with DB just in case
-      loadInbound();
+      await loadInbound();
+      setTimeout(
+        () =>
+          alert(
+            "Cari ve ölçü yerelde kabul edildi; bulut senkronu ayrıca tamamlanacaktır.",
+          ),
+        50,
+      );
       // Notify zustand components to refresh
       window.dispatchEvent(new Event('local-customers-updated'));
     } catch (error: unknown) {
@@ -293,13 +302,14 @@ const links: Record<string, string> = {};
     setProcessingInboundId(inbound.changeId);
     try {
       await processAsMerge(inbound, selectedCustomerId);
-      
-      // Update state immediately
-      setInboundMeasurements(prev => prev.filter(x => x.changeId !== inbound.changeId));
-      
-      setTimeout(() => alert("Ölçü mevcut cariye bağlandı."), 50);
-      
-      loadInbound();
+      await loadInbound();
+      setTimeout(
+        () =>
+          alert(
+            "Ölçü yerelde cariye bağlandı; bulut senkronu ayrıca tamamlanacaktır.",
+          ),
+        50,
+      );
       // Notify zustand components to refresh
       window.dispatchEvent(new Event('local-customers-updated'));
     } catch (error: unknown) {
@@ -330,7 +340,7 @@ const links: Record<string, string> = {};
     }, 0);
 
     return () => window.clearTimeout(initializationTimer);
-  }, []);
+  }, [scope]);
 
   useEffect(() => {
     let cancelled = false;
@@ -512,6 +522,7 @@ const links: Record<string, string> = {};
 
   const handleRepairOrphans = async () => {
     if (orphanMeasurements.length === 0 || isRepairingOrphans) return;
+    if (!scope) return;
 
     const confirmed = window.confirm(
       `${orphanMeasurements.length} yetim ölçü için güvenli onarım çalıştırılacak. Ölçüler silinmeyecek; yalnız kesin cari eşleşmeleri ve eksik oda/açıklık bağlantıları düzeltilecek. Devam edilsin mi?`
@@ -520,7 +531,7 @@ const links: Record<string, string> = {};
 
     setIsRepairingOrphans(true);
     try {
-      const history = await listInboundMeasurements();
+      const history = await listInboundMeasurements(scope);
       const completed = history
         .filter((item) =>
           (item.status === "LINKED_TO_CUSTOMER" || item.status === "CREATED_CUSTOMER") &&

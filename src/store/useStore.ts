@@ -4,9 +4,9 @@ import { create } from 'zustand';
 import { normalizeCariAddress, normalizeCariName, normalizeCariRegion } from '@/lib/stringUtils';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { useAuthStore, normalizeRole } from './useAuthStore';
-import { saveLocalCustomer, saveLocalCustomerWithoutSync, saveLocalCustomers, loadLocalCustomers } from '@/lib/localCustomerDb';
+import { saveLocalCustomer, saveLocalCustomers, loadLocalCustomers } from '@/lib/localCustomerDb';
 import { shouldCreateTailorProductionItem } from '@/lib/productionRouting';
-import { applyErpScope, inheritConsistentErpScope, readErpScope } from '@/lib/customerTreeScope';
+import { applyErpScope, optionalScopeConflicts, readErpScope } from '@/lib/customerTreeScope';
 import { loadVerifiedClientErpScope } from '@/lib/clientErpScope';
 
 
@@ -1374,7 +1374,7 @@ export const useStore = create<AppState>()(
             ...target,
             updatedAt: now,
             rooms: [
-              applyErpScope(newRoom, roomScope),
+              newRoom,
               ...target.rooms
             ]
           };
@@ -1574,67 +1574,25 @@ export const useStore = create<AppState>()(
           );
         }
 
+        const customerScope = readErpScope(targetCustomer);
+        if (!customerScope) {
+          throw new Error('MEASUREMENT_CUSTOMER_SCOPE_MISSING');
+        }
+        if (
+          optionalScopeConflicts(targetRoom, customerScope) ||
+          optionalScopeConflicts(targetOpening, customerScope)
+        ) {
+          throw new Error('ERP_SCOPE_PARENT_MISMATCH');
+        }
+
         const now = new Date().toISOString();
-        const authState = useAuthStore.getState();
-        const activeMeasurementScope = await loadVerifiedClientErpScope(
-          authState.sessionToken,
-        );
-        const inheritedMeasurementScope = inheritConsistentErpScope(
-          targetCustomer,
-          targetRoom,
-          targetOpening,
-          activeMeasurementScope,
-        );
-        if (!inheritedMeasurementScope) {
-          throw new Error('MEASUREMENT_SCOPE_MISSING');
-        }
-
-        const requiresLegacyScopeRehydrate =
-          !readErpScope(targetCustomer) ||
-          !readErpScope(targetRoom) ||
-          !readErpScope(targetOpening);
-
-        if (requiresLegacyScopeRehydrate) {
-          const rehydratedOpening = applyErpScope(
-            targetOpening,
-            inheritedMeasurementScope,
-          );
-          const rehydratedRoom = applyErpScope(
-            {
-              ...targetRoom,
-              windows: targetRoom.windows.map(opening =>
-                opening.id === windowId ? rehydratedOpening : opening
-              ),
-            },
-            inheritedMeasurementScope,
-          );
-          const rehydratedCustomer = applyErpScope(
-            {
-              ...targetCustomer,
-              rooms: targetCustomer.rooms.map(room =>
-                room.id === roomId ? rehydratedRoom : room
-              ),
-            },
-            inheritedMeasurementScope,
-          );
-
-          await saveLocalCustomerWithoutSync(rehydratedCustomer);
-          set(state => ({
-            customers: state.customers.map(customer =>
-              customer.id === customerId ? rehydratedCustomer : customer
-            ),
-          }));
-        }
         const measurementBase: ProductMeasurement = {
           ...measurement,
           id: generateUUID(),
           createdAt: now,
           updatedAt: now
         };
-        const newMeas: ProductMeasurement = applyErpScope(
-          measurementBase,
-          inheritedMeasurementScope,
-        );
+        const newMeas: ProductMeasurement = measurementBase;
 
         // Single-write: bağımsız ölçü deposuna yapısal adlarla yaz.
         const { useMeasurementStore } = await import('@/store/measurementStore');

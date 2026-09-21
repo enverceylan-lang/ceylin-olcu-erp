@@ -717,3 +717,47 @@ SQL, environment configuration or the controlled pilot migration flag.
 This source delta is not runtime closure. Exact owned diff, targeted tests,
 TypeScript, ESLint, diff hygiene, build, release approvals and the same
 preserved runtime event retry remain separate gates.
+
+## 2026-09-19 - Final Customer / Measurement authority patch contract
+
+Current canonical rules:
+
+- Customer/Address automatic sync is separate from Measurement Package
+  Authority.
+- `/api/sync/customers` is not a Room/Opening/Measurement writer.
+- Measurement Package Authority owns Room/Opening parent assurance for
+  measurement persistence.
+- Local/domain ownership is Customer-root-owned. Room, Opening and Measurement
+  child scope is not ownership.
+- Optional legacy child scope may only reject an explicit conflict and is
+  normalized away locally.
+- Queue order is scope validation, active-scope partition, same-scope
+  compaction, limit, then send.
+- CUSTOMER/ROOM/OPENING event-only rows never produce canonical ACK.
+- Recovery uses the canonical MEASUREMENT producer. Enqueue failure is never
+  reported as success.
+- Inbound approval is a Customer-first saga with Measurement verification and
+  compensation.
+- Compensation failure yields QUARANTINE and no completion status.
+
+Historical and superseded behavior:
+
+- Parent projection through `/api/sync/customers` before delta push.
+- Room/Opening writes in `/api/sync/customers`.
+- Session-driven child/root scope rehydration during measurement creation.
+
+Frozen and out of scope:
+
+- `classifyCustomerRootScope` body remains unchanged.
+- `migrateLegacyCustomerRootScope` body remains unchanged.
+- `stampCustomerTreeScope` body remains unchanged. After its production
+  consumer is removed in the later owned phase, deletion or deprecation still
+  requires a separate workstream.
+- `softDeleteLocalCustomer` remains unchanged.
+- `tests/localValidationSuite.ts` is regression-only and must not be mutated.
+
+The controlled pilot legacy Customer migration contract remains server-gated.
+Client session scope must not silently complete a missing Customer root scope
+or stamp Room/Opening/Measurement children. Missing Customer root scope fails
+closed; explicit child conflicts fail closed; unscoped children inherit
+ownership only through their verified Customer root.

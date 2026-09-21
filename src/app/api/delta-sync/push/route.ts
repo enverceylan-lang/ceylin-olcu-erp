@@ -17,9 +17,6 @@ const ALLOWED_PUSH_ROLES = new Set([
 
 const ALLOWED_ENTITY_TYPES = new Set([
   "DRAFT",
-  "CUSTOMER",
-  "ROOM",
-  "OPENING",
   "MEASUREMENT",
 ]);
 
@@ -269,7 +266,7 @@ export async function POST(req: NextRequest) {
         ...payload,
         draft_id: entityId,
       });
-    } else {
+    } else if (entityType === "MEASUREMENT") {
       measurementChanges.push({
         ...payload,
         entity_type: entityType,
@@ -335,14 +332,7 @@ export async function POST(req: NextRequest) {
       Object.assign(change, scopeColumns);
     }
 
-    const canonicalMeasurementChanges = measurementChanges.filter(
-      (change) => String(change.entity_type || "").toUpperCase() === "MEASUREMENT",
-    );
-    const eventOnlyChanges = measurementChanges.filter(
-      (change) => String(change.entity_type || "").toUpperCase() !== "MEASUREMENT",
-    );
-
-    for (const change of canonicalMeasurementChanges) {
+    for (const change of measurementChanges) {
       const changeId = String(change.change_id || "");
       try {
         const result = await persistMeasurementAuthorityCommand({
@@ -373,25 +363,6 @@ export async function POST(req: NextRequest) {
         errors.push(publicError);      }
     }
 
-    if (eventOnlyChanges.length > 0) {
-      const { error } = await supabaseServer
-        .from("measurement_changes")
-        .upsert(eventOnlyChanges, {
-          onConflict: "change_id",
-        });
-
-      if (error) {
-        console.error("[Delta Push] Non-measurement event write failed.");
-        errors.push("Failed to push non-measurement changes");
-        errorIds.push(
-          ...eventOnlyChanges.map((change) => String(change.change_id)),
-        );
-      } else {
-        syncedIds.push(
-          ...eventOnlyChanges.map((change) => String(change.change_id)),
-        );
-      }
-    }
     if (draftChanges.length > 0) {
       const { error } = await supabaseServer
         .from("draft_changes")

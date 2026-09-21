@@ -5,11 +5,32 @@ import path from "node:path";
 
 import {
   localDraftDb,
+  listInboundMeasurements,
   saveInboundMeasurement,
   type InboundMeasurement,
 } from "../src/lib/localDraftDb";
+import { localCustomerDb } from "../src/lib/localCustomerDb";
+import { localMeasurementDb } from "../src/lib/localMeasurementDb";
+import { processAsMerge } from "../src/lib/inboundProcessor";
+import { useMeasurementStore } from "../src/store/measurementStore";
+import { type Customer, useStore } from "../src/store/useStore";
+import type { ErpScope } from "../src/lib/erpScope";
 
 let failed = false;
+
+const SCOPE_A: ErpScope = {
+  tenantId: "tenant-a",
+  companyId: "company-a",
+  branchId: "branch-a",
+  accountingPeriodId: "period-a",
+};
+
+const SCOPE_B: ErpScope = {
+  tenantId: "tenant-b",
+  companyId: "company-b",
+  branchId: "branch-b",
+  accountingPeriodId: "period-b",
+};
 
 function assert(
   condition: unknown,
@@ -24,6 +45,10 @@ async function runTest(
 ): Promise<void> {
   try {
     await localDraftDb.inboundMeasurements.clear();
+    await localCustomerDb.customers.clear();
+    await localMeasurementDb.measurements.clear();
+    useStore.setState({ customers: [] });
+    useMeasurementStore.setState({ measurements: [] });
     await fn();
     console.log(`[PASS] ${name}`);
   } catch (error) {
@@ -40,6 +65,7 @@ function createInbound(
   overrides: Partial<InboundMeasurement> = {},
 ): InboundMeasurement {
   return {
+    ...SCOPE_A,
     changeId: "measurement-group-change-1",
     revision: 1,
     entityType: "MEASUREMENT_GROUP",
@@ -176,6 +202,268 @@ async function main(): Promise<void> {
   );
 
   await runTest(
+    "sameEntityIdentityDoesNotCompactAcrossScopes",
+    async () => {
+      const scopeAFirst = createInbound({
+        changeId: "scope-a-change-1",
+        revision: 1,
+        entityId: "shared-source-customer",
+        patch: {
+          customerId: "shared-source-customer",
+          measurements: [
+            {
+              id: "scope-a-measurement",
+              customerId: "shared-source-customer",
+              roomId: "scope-a-room",
+              openingId: "scope-a-opening",
+              width: 100,
+            },
+          ],
+        },
+      });
+      const scopeBFirst = createInbound({
+        ...SCOPE_B,
+        changeId: "scope-b-change-1",
+        revision: 1,
+        entityId: "shared-source-customer",
+        patch: {
+          customerId: "shared-source-customer",
+          measurements: [
+            {
+              id: "scope-b-measurement",
+              customerId: "shared-source-customer",
+              roomId: "scope-b-room",
+              openingId: "scope-b-opening",
+              width: 200,
+            },
+          ],
+        },
+      });
+      const scopeASecond = createInbound({
+        changeId: "scope-a-change-2",
+        revision: 2,
+        entityId: "shared-source-customer",
+        patch: {
+          customerId: "shared-source-customer",
+          measurements: [
+            {
+              id: "scope-a-measurement",
+              customerId: "shared-source-customer",
+              roomId: "scope-a-room",
+              openingId: "scope-a-opening",
+              width: 125,
+            },
+          ],
+        },
+      });
+
+      assert(
+        (await saveInboundMeasurement(scopeAFirst)) === "INSERTED",
+        "Scope A first event was not inserted",
+      );
+      assert(
+        (await saveInboundMeasurement(scopeBFirst)) === "INSERTED",
+        "Scope B event was compacted into Scope A",
+      );
+      assert(
+        (await saveInboundMeasurement(scopeASecond)) === "UPDATED_OPEN_ITEM",
+        "Scope A newer revision did not compact inside Scope A",
+      );
+
+      const scopeARows = await listInboundMeasurements(SCOPE_A);
+      const scopeBRows = await listInboundMeasurements(SCOPE_B);
+      assert(scopeARows.length === 1, "Scope A row count changed unexpectedly");
+      assert(scopeBRows.length === 1, "Scope B row was lost or merged");
+      assert(
+        scopeARows[0]?.latestChangeId === "scope-a-change-2",
+        "Scope A did not retain its own latest revision",
+      );
+      assert(
+        scopeBRows[0]?.changeId === "scope-b-change-1",
+        "Scope B identity was rewritten by Scope A",
+      );
+      const scopeBMeasurements = scopeBRows[0]?.patch.measurements as
+        | Array<{ width?: number }>
+        | undefined;
+      assert(
+        scopeBMeasurements?.[0]?.width === 200,
+        "Scope B payload was overwritten during Scope A compaction",
+      );
+    },
+  );
+
+  await runTest(
+    "approvalDoesNotReparentOrCompleteForeignScopeMeasurements",
+    async () => {
+      const now = "2026-09-19T10:00:00.000Z";
+      const targetCustomer = {
+        ...SCOPE_A,
+        id: "target-customer-a",
+        name: "TARGET A",
+        phone: "",
+        address: "",
+        mapLocation: "",
+        notes: "",
+        rooms: [],
+        createdAt: now,
+        updatedAt: now,
+        addressPhotos: [],
+        isDeleted: false,
+      } as Customer;
+      const foreignSourceCustomer = {
+        ...SCOPE_B,
+        id: "shared-source-customer",
+        name: "FOREIGN SOURCE B",
+        phone: "",
+        address: "",
+        mapLocation: "",
+        notes: "",
+        rooms: [],
+        createdAt: now,
+        updatedAt: now,
+        addressPhotos: [],
+        isDeleted: false,
+      } as Customer;
+
+      await localCustomerDb.customers.bulkPut([
+        targetCustomer,
+        foreignSourceCustomer,
+      ]);
+      useStore.setState({ customers: [targetCustomer, foreignSourceCustomer] });
+
+      await localMeasurementDb.measurements.put({
+        id: "foreign-local-measurement",
+        customerId: "shared-source-customer",
+        roomId: "foreign-room",
+        openingId: "foreign-opening",
+        windowId: "foreign-opening",
+        templateType: "STOR_PERDE",
+        rawValues: { width: 999, height: 999 },
+        notes: "",
+        status: "DRAFT",
+        measuredBy: "foreign-user",
+        measuredDate: now,
+        notesHistory: [],
+        photos: [],
+        videos: [],
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const approvalInbound = createInbound({
+        changeId: "approval-a",
+        entityType: "CUSTOMER",
+        entityId: "shared-source-customer",
+        patch: {
+          customerId: "shared-source-customer",
+          measurements: [
+            {
+              id: "approved-a-measurement",
+              customerId: "shared-source-customer",
+              roomId: "approved-a-room",
+              openingId: "approved-a-opening",
+              templateType: "STOR_PERDE",
+              rawValues: { width: 120, height: 220 },
+            },
+          ],
+        },
+      });
+      const relatedScopeA = createInbound({
+        changeId: "related-a",
+        entityId: "shared-source-customer",
+        patch: {
+          customerId: "shared-source-customer",
+          measurements: [
+            {
+              id: "related-a-measurement",
+              customerId: "shared-source-customer",
+              roomId: "related-a-room",
+              openingId: "related-a-opening",
+              templateType: "STOR_PERDE",
+              rawValues: { width: 130, height: 230 },
+            },
+          ],
+        },
+      });
+      const relatedScopeB = createInbound({
+        ...SCOPE_B,
+        changeId: "related-b",
+        entityId: "shared-source-customer",
+        patch: {
+          customerId: "shared-source-customer",
+          measurements: [
+            {
+              id: "related-b-measurement",
+              customerId: "shared-source-customer",
+              roomId: "related-b-room",
+              openingId: "related-b-opening",
+              templateType: "STOR_PERDE",
+              rawValues: { width: 777, height: 777 },
+            },
+          ],
+        },
+      });
+
+      await saveInboundMeasurement(approvalInbound);
+      await saveInboundMeasurement(relatedScopeA);
+      await saveInboundMeasurement(relatedScopeB);
+
+      await processAsMerge(approvalInbound, targetCustomer.id);
+
+      const persistedApproval = await localDraftDb.inboundMeasurements.get(
+        approvalInbound.changeId,
+      );
+      const persistedRelatedA = await localDraftDb.inboundMeasurements.get(
+        relatedScopeA.changeId,
+      );
+      const persistedRelatedB = await localDraftDb.inboundMeasurements.get(
+        relatedScopeB.changeId,
+      );
+      assert(
+        persistedApproval?.status === "LINKED_TO_CUSTOMER",
+        "Approved Scope A record was not completed",
+      );
+      assert(
+        persistedRelatedA?.status === "LINKED_TO_CUSTOMER",
+        "Related Scope A group was not completed",
+      );
+      assert(
+        persistedRelatedB?.status === "NEW",
+        "Foreign Scope B group was falsely completed",
+      );
+
+      const approved = await localMeasurementDb.measurements.get(
+        "approved-a-measurement",
+      );
+      const relatedA = await localMeasurementDb.measurements.get(
+        "related-a-measurement",
+      );
+      const relatedB = await localMeasurementDb.measurements.get(
+        "related-b-measurement",
+      );
+      const foreignLocal = await localMeasurementDb.measurements.get(
+        "foreign-local-measurement",
+      );
+      assert(
+        approved?.customerId === targetCustomer.id,
+        "Approved Scope A measurement was not re-parented",
+      );
+      assert(
+        relatedA?.customerId === targetCustomer.id,
+        "Related Scope A measurement was not re-parented",
+      );
+      assert(
+        relatedB === undefined,
+        "Foreign Scope B group measurement was persisted",
+      );
+      assert(
+        foreignLocal?.customerId === foreignSourceCustomer.id,
+        "Foreign local Measurement was re-parented",
+      );
+    },
+  );
+
+  await runTest(
     "deltaSyncClientRejectsEmptyMeasurementGroups",
     async () => {
       const source = await readFile(
@@ -226,7 +514,7 @@ async function main(): Promise<void> {
 
       const relatedLoadCount = (
         source.match(
-          /await loadRelatedMeasurementGroups\(sourceCustomerIds\);/g,
+          /await loadRelatedMeasurementGroups\(sourceCustomerIds, inboundScope\);/g,
         ) || []
       ).length;
 
@@ -250,7 +538,15 @@ async function main(): Promise<void> {
       );
       assert(
         relatedLoadCount === 2,
-        `Expected loader in 2 approval paths, received ${relatedLoadCount}`,
+        `Expected scoped loader in 2 approval paths, received ${relatedLoadCount}`,
+      );
+      assert(
+        source.includes("const rows = await listInboundMeasurements(inboundScope);"),
+        "Related measurement groups are not loaded through the verified scope",
+      );
+      assert(
+        source.includes("verifiedSourceIds.has(measurement.customerId)"),
+        "Local Measurement owner-root scope gate is missing",
       );
       assert(
         source.includes(

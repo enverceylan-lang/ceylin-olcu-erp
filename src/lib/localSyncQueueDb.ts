@@ -1,6 +1,6 @@
 import type { ErpScope } from './erpScope';
 import { readErpScope } from './customerTreeScope';
-import { erpScopeMatches } from './erpScope';
+import { erpScopeKey, erpScopeMatches } from './erpScope';
 import Dexie, { type Table } from 'dexie';
 import { getDeviceId } from './deviceIdentity';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -658,13 +658,59 @@ export async function enqueueSyncEvent(
 
   return result.success;
 }
-export async function getPendingSyncEvents(limit: number = 50): Promise<SyncEvent[]> {
+export function getPendingSyncEvents(limit?: number): Promise<SyncEvent[]>;
+export function getPendingSyncEvents(
+  activeScope: ErpScope,
+  limit?: number,
+): Promise<SyncEvent[]>;
+export async function getPendingSyncEvents(
+  scopeOrLimit: ErpScope | number = 50,
+  scopedLimit: number = 50,
+): Promise<SyncEvent[]> {
   try {
+    const activeScope =
+      typeof scopeOrLimit === 'number'
+        ? undefined
+        : readErpScope(scopeOrLimit);
+    const limit =
+      typeof scopeOrLimit === 'number'
+        ? scopeOrLimit
+        : scopedLimit;
+
+    if (typeof scopeOrLimit !== 'number' && !activeScope) {
+      return [];
+    }
+
     const retryableEvents = await localSyncQueueDb.pendingSyncEvents
       .where('syncStatus')
       .anyOf(['PENDING', 'ERROR'])
       .sortBy('createdAt');
-    const legacyMeasurementEventIds = retryableEvents
+
+    const invalidScopeChangeIds: string[] = [];
+    const scopePartitionedEvents = retryableEvents.filter((event) => {
+      const eventScope = readErpScope(event.scope);
+      if (!eventScope) {
+        invalidScopeChangeIds.push(event.changeId);
+        return false;
+      }
+
+      return !activeScope || erpScopeMatches(eventScope, activeScope);
+    });
+
+    if (invalidScopeChangeIds.length > 0) {
+      const blockedAt = new Date().toISOString();
+      await localSyncQueueDb.pendingSyncEvents.bulkUpdate(
+        invalidScopeChangeIds.map((changeId) => ({
+          key: changeId,
+          changes: {
+            syncStatus: 'BLOCKED',
+            updatedAt: blockedAt,
+          },
+        })),
+      );
+    }
+
+    const legacyMeasurementEventIds = scopePartitionedEvents
       .filter((event) => {
         if (event.entityType !== 'MEASUREMENT') return false;
 
@@ -695,7 +741,7 @@ export async function getPendingSyncEvents(limit: number = 50): Promise<SyncEven
       );
     }
 
-    const eligibleRetryableEvents = retryableEvents.filter(
+    const eligibleRetryableEvents = scopePartitionedEvents.filter(
       (event) => !legacyMeasurementEventIds.includes(event.changeId)
     );
 
@@ -703,7 +749,11 @@ export async function getPendingSyncEvents(limit: number = 50): Promise<SyncEven
     const duplicateChangeIds: string[] = [];
 
     for (const event of eligibleRetryableEvents) {
+      const eventScope = readErpScope(event.scope);
+      if (!eventScope) continue;
+
       const duplicateKey = [
+        erpScopeKey(eventScope),
         event.entityType,
         event.entityId,
         event.operation,
@@ -737,7 +787,7 @@ export async function getPendingSyncEvents(limit: number = 50): Promise<SyncEven
         duplicateChangeIds.map((changeId) => ({
           key: changeId,
           changes: {
-            syncStatus: 'SYNCED',
+            syncStatus: 'BLOCKED',
             updatedAt: now
           }
         }))
@@ -829,17 +879,65 @@ export async function getPendingSyncEvents(limit: number = 50): Promise<SyncEven
   }
 }
 
-export async function markSyncEventsSynced(changeIds: string[]): Promise<void> {
+export async function markSyncEventsSynced(
+  changeIds: string[],
+  activeScope: ErpScope,
+): Promise<void> {
   try {
-    const now = new Date().toISOString();
-    await localSyncQueueDb.pendingSyncEvents.bulkUpdate(
-      changeIds.map(id => ({
-        key: id,
-        changes: { syncStatus: 'SYNCED', updatedAt: now }
-      }))
+    const verifiedScope = readErpScope(activeScope);
+    if (!verifiedScope) {
+      throw new Error('SYNC_ACK_SCOPE_INVALID');
+    }
+
+    const uniqueChangeIds = Array.from(new Set(changeIds));
+    if (uniqueChangeIds.length === 0) return;
+
+    await localSyncQueueDb.transaction(
+      'rw',
+      localSyncQueueDb.pendingSyncEvents,
+      async () => {
+        const events = await localSyncQueueDb.pendingSyncEvents.bulkGet(
+          uniqueChangeIds,
+        );
+        const verifiedIds = events
+          .filter((event): event is SyncEvent => {
+            if (!event) return false;
+            if (
+              event.entityType !== 'DRAFT' &&
+              event.entityType !== 'MEASUREMENT'
+            ) {
+              return false;
+            }
+
+            const eventScope = readErpScope(event.scope);
+            return Boolean(
+              eventScope &&
+              erpScopeMatches(eventScope, verifiedScope),
+            );
+          })
+          .map((event) => event.changeId);
+
+        if (verifiedIds.length !== uniqueChangeIds.length) {
+          throw new Error('SYNC_ACK_SCOPE_OR_AUTHORITY_MISMATCH');
+        }
+
+        const now = new Date().toISOString();
+        const updatedCount =
+          await localSyncQueueDb.pendingSyncEvents.bulkUpdate(
+          verifiedIds.map((id) => ({
+            key: id,
+            changes: { syncStatus: 'SYNCED', updatedAt: now },
+          })),
+        );
+
+        if (updatedCount !== verifiedIds.length) {
+          throw new Error('SYNC_ACK_UPDATE_INCOMPLETE');
+        }
+      },
     );
   } catch (err) {
     console.error('[SyncQueue] Failed to mark events as SYNCED:', err);
+    throw err;
   }
 }
 

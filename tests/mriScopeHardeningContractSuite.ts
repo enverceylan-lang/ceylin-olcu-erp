@@ -51,20 +51,38 @@ assert.match(
 
 assert.match(
   media,
-  /MEDIA_SYNC_NOT_IMPLEMENTED/,
-  "Media skeleton does not fail closed",
+  /requireCompanySession\(req,\s*"WEB"\)/,
+  "Media authority does not require a company session",
 );
 
 assert.match(
   media,
-  /status: 501/,
-  "Media skeleton does not return 501",
+  /loadShadowErpContext[\s\S]*?readRequestedErpScopeId/,
+  "Media authority does not resolve the requested ERP scope",
+);
+
+assert.match(
+  media,
+  /loadMediaEntitlement[\s\S]*?assertTargetAuthority/,
+  "Media entitlement is not checked before target authority",
+);
+
+assert.match(
+  media,
+  /\.from\("measurements"\)[\s\S]*?\.eq\("id", targetId\)[\s\S]*?\.eq\("tenant_id", context\.tenantId\)[\s\S]*?\.eq\("company_id", context\.companyId\)[\s\S]*?\.eq\("branch_id", context\.branchId\)[\s\S]*?\.eq\(\s*"accounting_period_id",\s*context\.accountingPeriodId/,
+  "Measurement media target is not bound to the exact ERP scope",
+);
+
+assert.match(
+  media,
+  /MEDIA_TARGET_FORBIDDEN/,
+  "Media authority does not fail closed for a forbidden target",
 );
 
 assert.doesNotMatch(
   media,
-  /entityId|entityType|media-skeleton-id|via\.placeholder\.com/,
-  "Media skeleton still echoes client ownership or fake persistence data",
+  /media-skeleton-id|via\.placeholder\.com/,
+  "Media authority still contains skeleton persistence data",
 );
 
 console.log(

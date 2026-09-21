@@ -48,14 +48,14 @@ for (const source of [
 }
 
 assert.match(customerSync, /\.match\(scopeColumns\)/);
-for (const table of [
-  "customers",
-  "rooms",
-  "openings",
-]) {
-  assert.match(
+assert.match(
+  customerSync,
+  /from\("customers"\)\.upsert\(\{\s*\.\.\.scopeColumns/,
+);
+for (const table of ["rooms", "openings", "measurements"]) {
+  assert.doesNotMatch(
     customerSync,
-    new RegExp(`from\\("${table}"\\)\\.upsert\\(\\{\\s*\\.\\.\\.scopeColumns`)
+    new RegExp(`from\\("${table}"\\)\\.upsert`),
   );
 }
 
@@ -165,8 +165,30 @@ assert.match(
 );
 
 assert.match(deltaPush, /Object\.assign\(change, scopeColumns\)/);
-assert.match(deltaPush, /from\("measurement_changes"\)/);
+assert.doesNotMatch(deltaPush, /from\("measurement_changes"\)/);
 assert.match(deltaPush, /from\("draft_changes"\)/);
+
+const allowedEntityTypesStart = deltaPush.indexOf(
+  "const ALLOWED_ENTITY_TYPES",
+);
+const allowedOperationsStart = deltaPush.indexOf(
+  "const ALLOWED_OPERATIONS",
+  allowedEntityTypesStart,
+);
+assert.ok(allowedEntityTypesStart >= 0);
+assert.ok(allowedOperationsStart > allowedEntityTypesStart);
+const allowedEntityTypesSource = deltaPush.slice(
+  allowedEntityTypesStart,
+  allowedOperationsStart,
+);
+assert.match(allowedEntityTypesSource, /"DRAFT"/);
+assert.match(allowedEntityTypesSource, /"MEASUREMENT"/);
+for (const legacyType of ["CUSTOMER", "ROOM", "OPENING"]) {
+  assert.doesNotMatch(
+    allowedEntityTypesSource,
+    new RegExp(`"${legacyType}"`),
+  );
+}
 
 assert.equal(
   (deltaPull.match(/\.match\(scopeColumns\)/g) || []).length,

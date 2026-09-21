@@ -1,6 +1,7 @@
 import Dexie, { type Table } from 'dexie';
-import { Customer } from '@/store/useStore';
+import type { Customer } from '@/store/useStore';
 import { normalizeCariName } from './stringUtils';
+import { normalizeCustomerOwnershipTree } from './customerTreeScope';
 import { enqueueSyncEvent } from './localSyncQueueDb';
 
 class LocalCustomerDatabase extends Dexie {
@@ -27,16 +28,14 @@ export async function loadLocalCustomers(): Promise<Customer[]> {
 
 export async function saveLocalCustomer(customer: Customer): Promise<void> {
   try {
-    if (customer && customer.name) {
-      customer.name = normalizeCariName(customer.name);
-    }
-    const existing = await localCustomerDb.customers.get(customer.id);
-    const operation = existing ? 'UPDATE' : 'INSERT';
+    const named =
+      customer && customer.name
+        ? { ...customer, name: normalizeCariName(customer.name) }
+        : customer;
 
-    await localCustomerDb.customers.put(customer);
-    
-    // Fire and forget event queueing at the aggregate root level
-    await enqueueSyncEvent('CUSTOMER', customer.id, operation, customer);
+    await localCustomerDb.customers.put(
+      normalizeCustomerOwnershipTree(named),
+    );
   } catch (err) {
     console.error('[localCustomerDb] Failed to save customer:', err);
     throw err;
@@ -45,12 +44,14 @@ export async function saveLocalCustomer(customer: Customer): Promise<void> {
 
 export async function saveLocalCustomerWithoutSync(customer: Customer): Promise<void> {
   try {
-    const normalizedCustomer =
+    const named =
       customer && customer.name
         ? { ...customer, name: normalizeCariName(customer.name) }
         : customer;
 
-    await localCustomerDb.customers.put(normalizedCustomer);
+    await localCustomerDb.customers.put(
+      normalizeCustomerOwnershipTree(named),
+    );
   } catch (err) {
     console.error('[localCustomerDb] Failed to apply remote customer locally:', err);
     throw err;
@@ -59,7 +60,9 @@ export async function saveLocalCustomerWithoutSync(customer: Customer): Promise<
 
 export async function saveLocalCustomers(customers: Customer[]): Promise<void> {
   try {
-    await localCustomerDb.customers.bulkPut(customers);
+    await localCustomerDb.customers.bulkPut(
+      customers.map(normalizeCustomerOwnershipTree),
+    );
   } catch (err) {
     console.error('[localCustomerDb] Failed to bulk save customers:', err);
     throw err;

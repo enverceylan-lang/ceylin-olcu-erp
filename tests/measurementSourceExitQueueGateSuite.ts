@@ -1,11 +1,60 @@
+import "fake-indexeddb/auto";
 import fs from "node:fs";
 import path from "node:path";
+import {
+  getPendingSyncEvents,
+  localSyncQueueDb,
+  markSyncEventsSynced,
+  type SyncEvent,
+} from "../src/lib/localSyncQueueDb";
+import type { ErpScope } from "../src/lib/erpScope";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
 const root = process.cwd();
+
+const SCOPE_A: ErpScope = {
+  tenantId: "tenant-a",
+  companyId: "company-a",
+  branchId: "branch-a",
+  accountingPeriodId: "period-a",
+};
+
+const SCOPE_B: ErpScope = {
+  tenantId: "tenant-b",
+  companyId: "company-b",
+  branchId: "branch-b",
+  accountingPeriodId: "period-b",
+};
+
+function queueEvent(
+  changeId: string,
+  scope: ErpScope,
+  createdAt: string,
+  entityType: SyncEvent["entityType"] = "MEASUREMENT",
+): SyncEvent {
+  return {
+    scope,
+    changeId,
+    entityType,
+    entityId: "shared-entity",
+    operation: "UPDATE",
+    ...(entityType === "MEASUREMENT" ? { expectedVersion: 1 } : {}),
+    patch: {
+      customerId: "shared-customer",
+      roomId: "shared-room",
+      openingId: "shared-opening",
+    },
+    deviceId: "device-1",
+    userId: "user-1",
+    createdAt,
+    updatedAt: createdAt,
+    syncStatus: "PENDING",
+    retryCount: 0,
+  };
+}
 
 const page = fs.readFileSync(
   path.join(root, "src", "app", "cariler", "[id]", "page.tsx"),
@@ -84,4 +133,147 @@ assert(
   ),
   "Legacy full customer tree auto-sync payloadı yeniden aktif",
 );
-console.log("[PASS] measurementSourceExitQueueGateSuite completed");
+async function verifyScopeAwareQueueContract(): Promise<void> {
+  await localSyncQueueDb.pendingSyncEvents.clear();
+
+  const scopeBFirst = queueEvent(
+    "scope-b-first",
+    SCOPE_B,
+    "2026-09-19T00:00:00.000Z",
+  );
+  const scopeASecond = queueEvent(
+    "scope-a-second",
+    SCOPE_A,
+    "2026-09-19T00:00:01.000Z",
+  );
+  await localSyncQueueDb.pendingSyncEvents.bulkPut([
+    scopeBFirst,
+    scopeASecond,
+  ]);
+
+  const scopeASelected = await getPendingSyncEvents(SCOPE_A, 1);
+  assert(
+    scopeASelected.length === 1 &&
+      scopeASelected[0]?.changeId === scopeASecond.changeId,
+    "Active scope partition limitten önce uygulanmıyor",
+  );
+  assert(
+    (await localSyncQueueDb.pendingSyncEvents.get(scopeBFirst.changeId))
+      ?.syncStatus === "PENDING",
+    "Scope dışı event queue read sırasında değiştirildi",
+  );
+
+  await localSyncQueueDb.pendingSyncEvents.clear();
+  const diagnosticA = queueEvent(
+    "diagnostic-a",
+    SCOPE_A,
+    "2026-09-19T00:01:00.000Z",
+  );
+  const diagnosticB = queueEvent(
+    "diagnostic-b",
+    SCOPE_B,
+    "2026-09-19T00:01:01.000Z",
+  );
+  await localSyncQueueDb.pendingSyncEvents.bulkPut([
+    diagnosticA,
+    diagnosticB,
+  ]);
+  const diagnosticRows = await getPendingSyncEvents(100);
+  assert(
+    diagnosticRows.length === 2,
+    "Diagnostic getPendingSyncEvents(100) cross-scope kayıtları korumuyor",
+  );
+
+  await localSyncQueueDb.pendingSyncEvents.clear();
+  const duplicateOlder = queueEvent(
+    "duplicate-older",
+    SCOPE_A,
+    "2026-09-19T00:02:00.000Z",
+  );
+  const duplicateNewer = queueEvent(
+    "duplicate-newer",
+    SCOPE_A,
+    "2026-09-19T00:02:01.000Z",
+  );
+  await localSyncQueueDb.pendingSyncEvents.bulkPut([
+    duplicateOlder,
+    duplicateNewer,
+  ]);
+  const compacted = await getPendingSyncEvents(SCOPE_A, 50);
+  assert(
+    compacted.length === 1 &&
+      compacted[0]?.changeId === duplicateNewer.changeId,
+    "Same-scope duplicate compaction en yeni eventi seçmiyor",
+  );
+  assert(
+    (await localSyncQueueDb.pendingSyncEvents.get(duplicateOlder.changeId))
+      ?.syncStatus === "BLOCKED",
+    "Compacted duplicate yanlış biçimde canonical ACK alıyor",
+  );
+
+  await localSyncQueueDb.pendingSyncEvents.clear();
+  const canonicalA = queueEvent(
+    "canonical-a",
+    SCOPE_A,
+    "2026-09-19T00:03:00.000Z",
+  );
+  const foreignB = queueEvent(
+    "foreign-b",
+    SCOPE_B,
+    "2026-09-19T00:03:01.000Z",
+  );
+  const legacyCustomerA = queueEvent(
+    "legacy-customer-a",
+    SCOPE_A,
+    "2026-09-19T00:03:02.000Z",
+    "CUSTOMER",
+  );
+  await localSyncQueueDb.pendingSyncEvents.bulkPut([
+    canonicalA,
+    foreignB,
+    legacyCustomerA,
+  ]);
+  let invalidAckRejected = false;
+  try {
+    await markSyncEventsSynced(
+      [canonicalA.changeId, foreignB.changeId, legacyCustomerA.changeId],
+      SCOPE_A,
+    );
+  } catch (error) {
+    invalidAckRejected =
+      error instanceof Error &&
+      error.message === "SYNC_ACK_SCOPE_OR_AUTHORITY_MISMATCH";
+  }
+  assert(invalidAckRejected, "Scope/authority mismatch fail-closed değil");
+  assert(
+    (await localSyncQueueDb.pendingSyncEvents.get(canonicalA.changeId))
+      ?.syncStatus === "PENDING",
+    "Mixed-scope ACK atomik olmadan kısmen uygulandı",
+  );
+  assert(
+    (await localSyncQueueDb.pendingSyncEvents.get(foreignB.changeId))
+      ?.syncStatus === "PENDING",
+    "Scope dışı event SYNCED yapıldı",
+  );
+  assert(
+    (await localSyncQueueDb.pendingSyncEvents.get(legacyCustomerA.changeId))
+      ?.syncStatus === "PENDING",
+    "Legacy CUSTOMER event canonical ACK aldı",
+  );
+
+  await markSyncEventsSynced([canonicalA.changeId], SCOPE_A);
+  assert(
+    (await localSyncQueueDb.pendingSyncEvents.get(canonicalA.changeId))
+      ?.syncStatus === "SYNCED",
+    "Canonical same-scope MEASUREMENT ACK uygulanmadı",
+  );
+}
+
+verifyScopeAwareQueueContract()
+  .then(() => {
+    console.log("[PASS] measurementSourceExitQueueGateSuite completed");
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });

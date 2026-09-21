@@ -12,6 +12,10 @@ function createInbound(
   changeId: string,
 ): InboundMeasurement {
   return {
+    tenantId: "tenant-race-1",
+    companyId: "company-race-1",
+    branchId: "branch-race-1",
+    accountingPeriodId: "period-race-1",
     changeId,
     revision: 1,
     entityType: "DRAFT",

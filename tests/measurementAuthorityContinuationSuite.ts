@@ -16,14 +16,18 @@ const gateway = read("src/lib/serverMeasurementAuthority.ts");
 const media = read("src/app/api/sync/media/route.ts");
 
 assert.match(delta, /const measurementResults: Array/);
-assert.match(delta, /canonicalMeasurementChanges/);
+assert.match(
+  delta,
+  /const ALLOWED_ENTITY_TYPES = new Set\(\[\s*"DRAFT",\s*"MEASUREMENT",\s*\]\)/,
+);
+assert.doesNotMatch(delta, /eventOnlyChanges/);
 assert.match(delta, /measurementResults\.push\(result\)/);
 assert.match(delta, /Physical measurement delete is unsupported/);
 assert.match(delta, /expected_version: expectedVersion/);
 
 assert.doesNotMatch(legacy, /from\("measurements"\)\.upsert/);
 assert.match(legacy, /MEASUREMENT_PHYSICAL_DELETE_UNSUPPORTED/);
-assert.match(legacy, /Canonical measurement writes are owned exclusively/);
+assert.match(legacy, /Measurement Package Authority/);
 assert.match(legacy, /const normalizedEntityVersion = Number\(dm\.entity_version\)/);
 assert.match(legacy, /canonicalVersion/);
 assert.equal(
@@ -67,6 +71,9 @@ assert.match(media, /\.eq\("tenant_id"/);
 assert.match(media, /\.eq\("company_id"/);
 assert.match(media, /\.eq\("branch_id"/);
 assert.match(media, /\.eq\(\s*"accounting_period_id"/);
-assert.match(media, /if \(error \|\| !data\) return false;/);
+assert.match(
+  media,
+  /if \(canonicalMeasurementError\) \{\s*return false;\s*\}/,
+);
 
 console.log("PAK_MEASUREMENT_AUTHORITY_CONTINUATION_SOURCE_SUITE");
