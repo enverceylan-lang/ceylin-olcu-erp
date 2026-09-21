@@ -39,6 +39,24 @@ function assert(
   if (!condition) throw new Error(message);
 }
 
+async function assertRejects(
+  fn: () => Promise<unknown>,
+  expected: RegExp,
+  message: string,
+): Promise<void> {
+  try {
+    await fn();
+  } catch (error) {
+    assert(
+      error instanceof Error && expected.test(error.message),
+      `${message}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return;
+  }
+
+  throw new Error(`${message}: rejection was expected`);
+}
+
 async function runTest(
   name: string,
   fn: () => void | Promise<void>,
@@ -197,6 +215,203 @@ async function main(): Promise<void> {
       assert(
         idless?.width === 90,
         "Id-less measurement was not preserved",
+      );
+    },
+  );
+
+  await runTest(
+    "verifiedReplayRehydratesOnlyExactFullyUnscopedLegacyEvent",
+    async () => {
+      const legacy = createInbound({
+        tenantId: undefined,
+        companyId: undefined,
+        branchId: undefined,
+        accountingPeriodId: undefined,
+        changeId: "legacy-replay-change",
+        revision: 7,
+        entityType: "CUSTOMER",
+        entityId: "legacy-source-customer",
+        sourceTable: "draft_changes",
+        status: "CREATED_CUSTOMER",
+        linkedCustomerId: "canonical-customer-a",
+        patch: {
+          customerId: "legacy-source-customer",
+          customerName: "LEGACY PRESERVED",
+        },
+      });
+      await localDraftDb.inboundMeasurements.put(legacy);
+
+      const replay = createInbound({
+        changeId: legacy.changeId,
+        revision: legacy.revision,
+        entityType: legacy.entityType,
+        entityId: legacy.entityId,
+        sourceTable: legacy.sourceTable,
+        status: "NEW",
+        patch: {
+          customerId: "legacy-source-customer",
+          customerName: "REPLAY MUST NOT OVERWRITE",
+        },
+      });
+
+      assert(
+        (await saveInboundMeasurement(replay, {
+          verifiedReplayScope: SCOPE_A,
+        })) === "ALREADY_RECORDED",
+        "Verified replay did not reuse the exact legacy event",
+      );
+
+      const persisted = await localDraftDb.inboundMeasurements.get(
+        legacy.changeId,
+      );
+      assert(persisted?.tenantId === SCOPE_A.tenantId, "tenantId was not rehydrated");
+      assert(persisted?.companyId === SCOPE_A.companyId, "companyId was not rehydrated");
+      assert(persisted?.branchId === SCOPE_A.branchId, "branchId was not rehydrated");
+      assert(
+        persisted?.accountingPeriodId === SCOPE_A.accountingPeriodId,
+        "accountingPeriodId was not rehydrated",
+      );
+      assert(
+        persisted?.status === "CREATED_CUSTOMER",
+        "Legacy status was overwritten during scope rehydration",
+      );
+      assert(
+        persisted?.linkedCustomerId === "canonical-customer-a",
+        "Legacy linkedCustomerId was overwritten during scope rehydration",
+      );
+      assert(
+        persisted?.patch.customerName === "LEGACY PRESERVED",
+        "Legacy patch was overwritten during scope rehydration",
+      );
+    },
+  );
+
+  await runTest(
+    "legacyReplayRequiresVerifiedScopeAndRejectsAmbiguousOwnership",
+    async () => {
+      const baseLegacy = createInbound({
+        tenantId: undefined,
+        companyId: undefined,
+        branchId: undefined,
+        accountingPeriodId: undefined,
+        changeId: "legacy-guard-change",
+        entityType: "CUSTOMER",
+        entityId: "legacy-guard-customer",
+        sourceTable: "draft_changes",
+      });
+
+      await localDraftDb.inboundMeasurements.put(baseLegacy);
+      const replay = createInbound({
+        changeId: baseLegacy.changeId,
+        entityType: baseLegacy.entityType,
+        entityId: baseLegacy.entityId,
+        sourceTable: baseLegacy.sourceTable,
+      });
+
+      await assertRejects(
+        () => saveInboundMeasurement(replay),
+        /INBOUND_CHANGE_SCOPE_CONFLICT/,
+        "Unverified caller claimed a legacy event",
+      );
+
+      await localDraftDb.inboundMeasurements.put({
+        ...baseLegacy,
+        tenantId: SCOPE_A.tenantId,
+      });
+      await assertRejects(
+        () =>
+          saveInboundMeasurement(replay, {
+            verifiedReplayScope: SCOPE_A,
+          }),
+        /INBOUND_CHANGE_SCOPE_CONFLICT/,
+        "Partially scoped legacy event was rehydrated",
+      );
+
+      await localDraftDb.inboundMeasurements.put({
+        ...baseLegacy,
+        ...SCOPE_B,
+      });
+      await assertRejects(
+        () =>
+          saveInboundMeasurement(replay, {
+            verifiedReplayScope: SCOPE_A,
+          }),
+        /INBOUND_CHANGE_SCOPE_CONFLICT/,
+        "Foreign scoped event was claimed by Scope A",
+      );
+
+      await localDraftDb.inboundMeasurements.put(baseLegacy);
+      await assertRejects(
+        () =>
+          saveInboundMeasurement(
+            { ...replay, entityId: "different-customer" },
+            { verifiedReplayScope: SCOPE_A },
+          ),
+        /INBOUND_CHANGE_SCOPE_CONFLICT/,
+        "Mismatched immutable identity was rehydrated",
+      );
+    },
+  );
+
+  await runTest(
+    "verifiedReplayRehydratesLegacyLatestChangeOwner",
+    async () => {
+      const legacyOwner = createInbound({
+        tenantId: undefined,
+        companyId: undefined,
+        branchId: undefined,
+        accountingPeriodId: undefined,
+        changeId: "legacy-owner-change",
+        latestChangeId: "legacy-latest-change",
+        revision: 9,
+        entityType: "MEASUREMENT_GROUP",
+        entityId: "legacy-owner-customer",
+        status: "SKIPPED",
+      });
+      await localDraftDb.inboundMeasurements.put(legacyOwner);
+
+      const replay = createInbound({
+        changeId: "legacy-latest-change",
+        revision: 9,
+        entityType: legacyOwner.entityType,
+        entityId: legacyOwner.entityId,
+        sourceTable: legacyOwner.sourceTable,
+      });
+
+      assert(
+        (await saveInboundMeasurement(replay, {
+          verifiedReplayScope: SCOPE_A,
+        })) === "ALREADY_RECORDED",
+        "Verified latestChangeId replay was not recognized",
+      );
+
+      const persisted = await localDraftDb.inboundMeasurements.get(
+        legacyOwner.changeId,
+      );
+      assert(
+        persisted?.companyId === SCOPE_A.companyId,
+        "latestChangeId owner scope was not rehydrated",
+      );
+      assert(
+        persisted?.status === "SKIPPED",
+        "latestChangeId owner status was overwritten",
+      );
+    },
+  );
+
+  await runTest(
+    "deltaSyncClientOptsIntoVerifiedReplayScopeForAllInboundWrites",
+    async () => {
+      const source = await readFile(
+        path.join(process.cwd(), "src", "lib", "deltaSyncClient.ts"),
+        "utf8",
+      );
+      const replayScopeCount = (
+        source.match(/verifiedReplayScope: activeScope/g) || []
+      ).length;
+      assert(
+        replayScopeCount === 3,
+        `Expected 3 verified inbound replay call sites, received ${replayScopeCount}`,
       );
     },
   );

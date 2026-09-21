@@ -996,7 +996,9 @@ export async function pullInboundMeasurements(
                   sourceDeviceId: senderDeviceId,
                 };
 
-                const outcome = await saveInboundMeasurement(quarantine);
+                const outcome = await saveInboundMeasurement(quarantine, {
+                  verifiedReplayScope: activeScope,
+                });
 
                 if (outcome === "INSERTED") {
                   newInboundItems += 1;
@@ -1187,7 +1189,9 @@ export async function pullInboundMeasurements(
 
         // Don't import changes produced by this same device back into the pool.
         if (change.device_id !== getDeviceId()) {
-          const outcome = await saveInboundMeasurement(inbound);
+          const outcome = await saveInboundMeasurement(inbound, {
+          verifiedReplayScope: activeScope,
+        });
 
           if (outcome === "INSERTED") newInboundItems += 1;
           else if (outcome === "UPDATED_OPEN_ITEM") updatedInboundItems += 1;
@@ -1241,7 +1245,9 @@ export async function pullInboundMeasurements(
       };
 
       if (change.device_id !== getDeviceId()) {
-        const outcome = await saveInboundMeasurement(inbound);
+        const outcome = await saveInboundMeasurement(inbound, {
+          verifiedReplayScope: activeScope,
+        });
 
         if (outcome === "INSERTED") newInboundItems += 1;
         else if (outcome === "UPDATED_OPEN_ITEM") updatedInboundItems += 1;

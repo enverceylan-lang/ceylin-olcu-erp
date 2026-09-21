@@ -302,8 +302,33 @@ export type SaveInboundMeasurementOutcome =
   | 'UPDATED_OPEN_ITEM'
   | 'ALREADY_RECORDED';
 
+export interface SaveInboundMeasurementOptions {
+  verifiedReplayScope?: ErpScope;
+}
+
+function hasAnyInboundScopeField(inbound: InboundMeasurement): boolean {
+  return [
+    inbound.tenantId,
+    inbound.companyId,
+    inbound.branchId,
+    inbound.accountingPeriodId,
+  ].some((value) => typeof value === 'string' && value.trim().length > 0);
+}
+
+function inboundReplayIdentityMatches(
+  existing: InboundMeasurement,
+  inbound: InboundMeasurement,
+): boolean {
+  return (
+    existing.entityType === inbound.entityType &&
+    existing.entityId === inbound.entityId &&
+    existing.sourceTable === inbound.sourceTable
+  );
+}
+
 export async function saveInboundMeasurement(
-  inbound: InboundMeasurement
+  inbound: InboundMeasurement,
+  options: SaveInboundMeasurementOptions = {},
 ): Promise<SaveInboundMeasurementOutcome> {
   const inboundScope = readErpScope(inbound);
   if (!inboundScope) {
@@ -316,10 +341,47 @@ export async function saveInboundMeasurement(
       localDraftDb.inboundMeasurements,
       async () => {
   // Idempotency is based only on the immutable event identity.
+  const ensureReplayScope = async (
+    existing: InboundMeasurement,
+  ): Promise<boolean> => {
+    const existingScope = readErpScope(existing);
+    if (existingScope) {
+      return erpScopeMatches(existingScope, inboundScope);
+    }
+
+    if (hasAnyInboundScopeField(existing)) {
+      return false;
+    }
+
+    const verifiedReplayScope = options.verifiedReplayScope;
+    if (
+      !verifiedReplayScope ||
+      !erpScopeMatches(verifiedReplayScope, inboundScope) ||
+      !inboundReplayIdentityMatches(existing, inbound)
+    ) {
+      return false;
+    }
+
+    const updated = await localDraftDb.inboundMeasurements.update(
+      existing.changeId,
+      {
+        tenantId: inboundScope.tenantId,
+        companyId: inboundScope.companyId,
+        branchId: inboundScope.branchId,
+        accountingPeriodId: inboundScope.accountingPeriodId,
+      },
+    );
+
+    if (updated !== 1) {
+      throw new Error('INBOUND_LEGACY_SCOPE_REHYDRATE_FAILED');
+    }
+
+    return true;
+  };
+
   const existing = await localDraftDb.inboundMeasurements.get(inbound.changeId);
   if (existing) {
-    const existingScope = readErpScope(existing);
-    if (!existingScope || !erpScopeMatches(existingScope, inboundScope)) {
+    if (!(await ensureReplayScope(existing))) {
       throw new Error('INBOUND_CHANGE_SCOPE_CONFLICT');
     }
     return 'ALREADY_RECORDED';
@@ -330,11 +392,7 @@ export async function saveInboundMeasurement(
     (item) => item.latestChangeId === inbound.changeId,
   );
   if (latestChangeOwner) {
-    const latestChangeScope = readErpScope(latestChangeOwner);
-    if (
-      !latestChangeScope ||
-      !erpScopeMatches(latestChangeScope, inboundScope)
-    ) {
+    if (!(await ensureReplayScope(latestChangeOwner))) {
       throw new Error('INBOUND_CHANGE_SCOPE_CONFLICT');
     }
     return 'ALREADY_RECORDED';
