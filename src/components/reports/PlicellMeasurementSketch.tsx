@@ -191,7 +191,7 @@ export function PlicellMeasurementSketch({
         </div>
       </div>
 
-      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 print:grid-cols-3">
+      <div data-plicell-a5-grid="true" className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 print:grid-cols-3">
         {blocks}
       </div>
     </div>

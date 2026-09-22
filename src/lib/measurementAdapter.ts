@@ -193,7 +193,7 @@ export function resolveMeasurementDisplayDimensions(
     dimensionText,
     heightDetailText,
     hasCompleteDimensions,
-    summaryLabel: dimensionText,
+    summaryLabel: templateType === 'PLICELL' ? base.summaryLabel : dimensionText,
   };
 }
 

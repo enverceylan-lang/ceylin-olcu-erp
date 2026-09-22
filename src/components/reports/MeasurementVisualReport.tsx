@@ -21,6 +21,479 @@ import packageJson from '../../../package.json';
 
 const REPORT_APP_VERSION = packageJson.version;
 
+const ENVERP_A5_PAGE_WIDTH_MM = 148;
+const ENVERP_A5_PAGE_HEIGHT_MM = 210;
+const ENVERP_A5_MARGIN_MM = 5;
+const ENVERP_A5_USABLE_WIDTH_MM =
+  ENVERP_A5_PAGE_WIDTH_MM - ENVERP_A5_MARGIN_MM * 2;
+const ENVERP_A5_USABLE_HEIGHT_MM =
+  ENVERP_A5_PAGE_HEIGHT_MM - ENVERP_A5_MARGIN_MM * 2;
+const ENVERP_A5_MIN_FONT_PX = 7;
+
+function isLegacyA4LiveEnabled(): boolean {
+  // A4 stays in repository for future reuse but is not exposed live.
+  return false;
+}
+
+function buildA5RoomHeader(
+  customer: Customer,
+  roomIndex: number,
+  roomCount: number
+): HTMLElement {
+  const header = document.createElement('div');
+  header.setAttribute('data-a5-room-header', 'true');
+
+  const title = document.createElement('div');
+  title.setAttribute('data-a5-title', 'true');
+  title.textContent =
+    `${customer.name || 'Cari'} • Ölçü Raporu`;
+
+  const meta = document.createElement('div');
+  meta.setAttribute('data-a5-meta', 'true');
+  meta.textContent =
+    `Adres: ${customer.address || customer.mapLocation || '-'} • Oda ${roomIndex + 1}/${roomCount} • ${new Date().toLocaleDateString('tr-TR')}`;
+
+  header.appendChild(title);
+  header.appendChild(meta);
+  return header;
+}
+
+async function generateA5RoomPdfFile(
+  reportElement: HTMLElement,
+  customer: Customer
+): Promise<File> {
+  const roomElements =
+    Array.from(
+      reportElement.querySelectorAll<HTMLElement>(
+        '.room-section'
+      )
+    );
+
+  if (roomElements.length === 0) {
+    throw new Error(
+      'A5_ROOM_SECTION_NOT_FOUND'
+    );
+  }
+
+  const globalTotals =
+    Array.from(
+      reportElement.querySelectorAll<HTMLElement>(
+        '.pdf-keep-together'
+      )
+    ).find(element =>
+      element.textContent?.includes(
+        'Genel Rapor Toplamları'
+      )
+    );
+
+  const pdf =
+    new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a5',
+      compress: true
+    });
+
+  for (
+    let roomIndex = 0;
+    roomIndex < roomElements.length;
+    roomIndex += 1
+  ) {
+    const stage =
+      document.createElement('div');
+
+    stage.setAttribute(
+      'data-enverp-a5-live',
+      'true'
+    );
+
+    Object.assign(
+      stage.style,
+      {
+        position: 'fixed',
+        left: '-100000px',
+        top: '0',
+        width: `${ENVERP_A5_USABLE_WIDTH_MM}mm`,
+        minHeight: '1px',
+        boxSizing: 'border-box',
+        background: '#ffffff',
+        color: '#0f172a',
+        padding: '0',
+        margin: '0',
+        overflow: 'visible',
+        zIndex: '-1'
+      }
+    );
+
+    const style =
+      document.createElement('style');
+
+    style.textContent = `
+      [data-enverp-a5-live],
+      [data-enverp-a5-live] * {
+        box-sizing: border-box !important;
+        font-family: Arial, Helvetica, sans-serif !important;
+        color: #0f172a !important;
+        border-color: #cbd5e1 !important;
+        box-shadow: none !important;
+        text-shadow: none !important;
+      }
+
+      [data-a5-room-header="true"] {
+        border-bottom: 1px solid #94a3b8 !important;
+        margin: 0 0 4px 0 !important;
+        padding: 0 0 3px 0 !important;
+        line-height: 1.1 !important;
+      }
+
+      [data-a5-title="true"] {
+        font-size: 11px !important;
+        font-weight: 800 !important;
+        line-height: 1.1 !important;
+      }
+
+      [data-a5-meta="true"] {
+        margin-top: 1px !important;
+        font-size: 7px !important;
+        line-height: 1.1 !important;
+      }
+
+      [data-enverp-a5-live] .a5-room-live {
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #ffffff !important;
+      }
+
+      [data-enverp-a5-live] .a5-room-live * {
+        min-width: 0 !important;
+      }
+
+      [data-enverp-a5-live] .a5-room-live h3 {
+        margin: 0 0 3px 0 !important;
+        padding: 0 0 2px 3px !important;
+        font-size: 10px !important;
+        line-height: 1.08 !important;
+      }
+
+      [data-enverp-a5-live] .a5-room-live h4 {
+        margin: 0 0 2px 0 !important;
+        padding: 0 !important;
+        font-size: 8px !important;
+        line-height: 1.08 !important;
+      }
+
+      [data-enverp-a5-live] .a5-room-live p,
+      [data-enverp-a5-live] .a5-room-live span,
+      [data-enverp-a5-live] .a5-room-live td,
+      [data-enverp-a5-live] .a5-room-live th {
+        font-size: 7px !important;
+        line-height: 1.08 !important;
+      }
+
+      [data-enverp-a5-live] .a5-room-live .measurement-card {
+        margin: 0 0 3px 0 !important;
+        padding: 3px !important;
+        border-radius: 3px !important;
+        background: #ffffff !important;
+        break-inside: avoid !important;
+      }
+
+      [data-enverp-a5-live] .a5-room-live .pdf-keep-together {
+        margin-top: 0 !important;
+        margin-bottom: 3px !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+      }
+
+      [data-enverp-a5-live] .a5-room-live .print-svg,
+      [data-enverp-a5-live] .a5-room-live svg {
+        width: 100% !important;
+        max-width: 100% !important;
+        max-height: 58px !important;
+        height: auto !important;
+      }
+
+      [data-enverp-a5-live] .a5-room-live img {
+        max-width: 100% !important;
+        max-height: 42px !important;
+        width: auto !important;
+        height: auto !important;
+        object-fit: contain !important;
+      }
+
+      [data-enverp-a5-live] [data-plicell-a5-grid="true"] {
+        display: grid !important;
+        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+        gap: 1.5px !important;
+        margin: 2px 0 !important;
+      }
+
+      [data-enverp-a5-live] [data-plicell-a5-grid="true"] > * {
+        margin: 0 !important;
+        padding: 2px !important;
+        min-width: 0 !important;
+        border-radius: 2px !important;
+        break-inside: avoid !important;
+      }
+
+      [data-enverp-a5-live] [data-plicell-a5-grid="true"] * {
+        font-size: 7px !important;
+        line-height: 1.02 !important;
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
+      }
+
+      [data-enverp-a5-live] [data-plicell-a5-grid="true"] svg {
+        max-height: 16px !important;
+      }
+
+      [data-enverp-a5-live] [data-a5-global-totals="true"] {
+        margin: 3px 0 0 0 !important;
+        padding: 2px !important;
+        font-size: 7px !important;
+        line-height: 1.05 !important;
+      }
+
+      [data-enverp-a5-live][data-a5-density="tight"] .a5-room-live h3 {
+        font-size: 9px !important;
+        margin-bottom: 2px !important;
+      }
+
+      [data-enverp-a5-live][data-a5-density="tight"] .a5-room-live h4 {
+        font-size: 7px !important;
+        margin-bottom: 1px !important;
+      }
+
+      [data-enverp-a5-live][data-a5-density="tight"] .a5-room-live .measurement-card {
+        margin-bottom: 2px !important;
+        padding: 2px !important;
+      }
+
+      [data-enverp-a5-live][data-a5-density="tight"] .a5-room-live .pdf-keep-together {
+        margin-bottom: 2px !important;
+      }
+
+      [data-enverp-a5-live][data-a5-density="tight"] .a5-room-live .print-svg,
+      [data-enverp-a5-live][data-a5-density="tight"] .a5-room-live svg {
+        max-height: 44px !important;
+      }
+
+      [data-enverp-a5-live] button,
+      [data-enverp-a5-live] .no-print {
+        display: none !important;
+      }
+    `;
+
+    stage.appendChild(style);
+    stage.appendChild(
+      buildA5RoomHeader(
+        customer,
+        roomIndex,
+        roomElements.length
+      )
+    );
+
+    const roomClone =
+      roomElements[roomIndex].cloneNode(
+        true
+      ) as HTMLElement;
+
+    roomClone.classList.add(
+      'a5-room-live'
+    );
+
+    stage.appendChild(roomClone);
+
+    if (
+      roomIndex ===
+        roomElements.length - 1 &&
+      globalTotals
+    ) {
+      const totalsClone =
+        globalTotals.cloneNode(
+          true
+        ) as HTMLElement;
+
+      totalsClone.setAttribute(
+        'data-a5-global-totals',
+        'true'
+      );
+
+      stage.appendChild(totalsClone);
+    }
+
+    document.body.appendChild(stage);
+
+    try {
+      if (document.fonts?.ready) {
+        await document.fonts.ready;
+      }
+
+      const capture =
+        async () =>
+          html2canvas(
+            stage,
+            {
+              scale: 2,
+              useCORS: true,
+              backgroundColor: '#ffffff',
+              logging: false,
+              removeContainer: false,
+              imageTimeout: 15_000,
+              windowWidth:
+                Math.ceil(
+                  stage.scrollWidth
+                ),
+              windowHeight:
+                Math.ceil(
+                  stage.scrollHeight
+                )
+            }
+          );
+
+      let canvas =
+        await capture();
+
+      let renderedHeightMm =
+        (
+          canvas.height *
+          ENVERP_A5_USABLE_WIDTH_MM
+        ) /
+        canvas.width;
+
+      if (
+        renderedHeightMm >
+        ENVERP_A5_USABLE_HEIGHT_MM
+      ) {
+        canvas.width = 1;
+        canvas.height = 1;
+
+        stage.setAttribute(
+          'data-a5-density',
+          'tight'
+        );
+
+        canvas =
+          await capture();
+
+        renderedHeightMm =
+          (
+            canvas.height *
+            ENVERP_A5_USABLE_WIDTH_MM
+          ) /
+          canvas.width;
+      }
+
+      const sourceFontCandidates =
+        Array.from(
+          stage.querySelectorAll<HTMLElement>(
+            'p,span,td,th,h3,h4'
+          )
+        )
+          .filter(element =>
+            element.offsetParent !== null
+          )
+          .map(element =>
+            Number.parseFloat(
+              window.getComputedStyle(
+                element
+              ).fontSize
+            )
+          )
+          .filter(Number.isFinite);
+
+      const minFont =
+        sourceFontCandidates.length > 0
+          ? Math.min(
+              ...sourceFontCandidates
+            )
+          : ENVERP_A5_MIN_FONT_PX;
+
+      if (
+        minFont + 0.01 <
+        ENVERP_A5_MIN_FONT_PX
+      ) {
+        canvas.width = 1;
+        canvas.height = 1;
+        throw new Error(
+          `A5_ROOM_LAYOUT_FONT_FLOOR_VIOLATION: oda ${roomIndex + 1}, min ${minFont.toFixed(2)}px`
+        );
+      }
+
+      if (
+        stage.scrollWidth >
+        stage.clientWidth + 2
+      ) {
+        canvas.width = 1;
+        canvas.height = 1;
+        throw new Error(
+          `A5_ROOM_LAYOUT_HORIZONTAL_OVERFLOW: oda ${roomIndex + 1}`
+        );
+      }
+
+      if (
+        renderedHeightMm >
+        ENVERP_A5_USABLE_HEIGHT_MM +
+          0.25
+      ) {
+        canvas.width = 1;
+        canvas.height = 1;
+        throw new Error(
+          `A5_ROOM_LAYOUT_OVERFLOW: oda ${roomIndex + 1}, ${renderedHeightMm.toFixed(1)}mm > ${ENVERP_A5_USABLE_HEIGHT_MM}mm`
+        );
+      }
+
+      if (roomIndex > 0) {
+        pdf.addPage();
+      }
+
+      pdf.addImage(
+        canvas,
+        'PNG',
+        ENVERP_A5_MARGIN_MM,
+        ENVERP_A5_MARGIN_MM,
+        ENVERP_A5_USABLE_WIDTH_MM,
+        renderedHeightMm,
+        undefined,
+        'FAST'
+      );
+
+      canvas.width = 1;
+      canvas.height = 1;
+    } finally {
+      stage.remove();
+    }
+  }
+
+  const safeCustomer =
+    String(
+      customer.name || 'musteri'
+    )
+      .trim()
+      .replace(
+        /[^A-Za-z0-9_-]+/g,
+        '_'
+      )
+      .replace(
+        /^_+|_+$/g,
+        ''
+      ) ||
+    'musteri';
+
+  const fileName =
+    `${safeCustomer}_olcu_raporu_A5.pdf`;
+
+  const pdfBlob =
+    pdf.output('blob');
+
+  return new File(
+    [pdfBlob],
+    fileName,
+    { type: 'application/pdf' }
+  );
+}
+
 const MECHANICAL_VISUAL_PRODUCT_TYPES =
   new Set([
     'STOR',
@@ -1450,6 +1923,25 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
      * Apply the PDF-only sRGB palette to the source report temporarily,
      * then always remove it after rasterization.
      */
+
+    /* ENVERP_A5_ROOM_REPORT_V1
+     * Live export is A5 / one room per page.
+     * The existing A4 renderer remains below this gate as preserved legacy code.
+     */
+    if (!isLegacyA4LiveEnabled()) {
+      const a5ReportElement =
+        document.getElementById('visual-report-print-area');
+
+      if (!a5ReportElement) {
+        throw new Error('A5_REPORT_ELEMENT_NOT_FOUND');
+      }
+
+      return await generateA5RoomPdfFile(
+        a5ReportElement,
+        customer
+      );
+    }
+
     const sourceColorSafetyStyle =
       document.createElement('style');
 
@@ -2091,7 +2583,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
       'break-inside:avoid-page!important;' +
       '}' +
       '@page{' +
-      'size:A4 portrait;' +
+      'size:A5 portrait;' +
       'margin:10mm;' +
       '}' +
       '/* CEYLIN_PRINT_TABLE_COLUMN_WIDTH_V2 */' +
@@ -2420,7 +2912,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
           }
 
           @page {
-            size: A4 portrait;
+            size: A5 portrait;
             margin: 10mm;
           }
           /* Hide everything except the print container */
@@ -2450,9 +2942,11 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
             border: none !important;
           }
           .room-section {
-            page-break-inside: auto !important;
-            break-inside: auto !important;
-            margin-bottom: 30px !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid-page !important;
+            page-break-after: always !important;
+            break-after: page !important;
+            margin-bottom: 0 !important;
           }
           .measurement-card {
             border: 1px solid #cbd5e1 !important;
@@ -2868,6 +3362,9 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
                                         <p className="text-[10px] text-blue-700 print:text-slate-600">
                                           Açıklıktaki tüm aktif ürünler tek
                                           cephe üzerinde gösterilir.
+                                        </p>
+                                        <p className="mt-1 text-[10px] font-semibold text-blue-900 print:text-black">
+                                          Ölçü: {generalDisplayDimensions.dimensionText}
                                         </p>
                                       </div>
 

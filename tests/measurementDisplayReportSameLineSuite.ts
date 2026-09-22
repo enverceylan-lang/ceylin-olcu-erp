@@ -267,3 +267,40 @@ assert.doesNotMatch(
 );
 
 console.log("[PASS] measurementDisplayReportSameLineSuite completed");
+
+
+/* ENVERP_PLICELL_SUMMARY_SEMANTICS_V1 */
+const plicellSummaryProjection =
+  resolveMeasurementDisplayDimensions({
+    ...baseMeasurement,
+    templateType: "PLICELL",
+    productType: "PLICELL",
+    rawValues: {
+      plicellCamListesi: [
+        { widthCm: 44.5, heightCm: 92 },
+        { widthCm: 17, heightCm: 192 },
+        { widthCm: 88, heightCm: 45 },
+      ],
+    },
+  });
+
+assert.equal(
+  plicellSummaryProjection.displayWidth,
+  88,
+);
+assert.equal(
+  plicellSummaryProjection.displayHeight,
+  192,
+);
+assert.equal(
+  plicellSummaryProjection.dimensionText,
+  "88 × 192 cm",
+);
+assert.match(
+  plicellSummaryProjection.summaryLabel,
+  /^3 cam • Toplam [0-9]+[.][0-9]{2} m²$/,
+);
+assert.notEqual(
+  plicellSummaryProjection.summaryLabel,
+  plicellSummaryProjection.dimensionText,
+);
