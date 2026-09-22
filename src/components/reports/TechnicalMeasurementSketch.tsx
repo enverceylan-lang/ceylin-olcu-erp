@@ -1147,7 +1147,7 @@ if (productLegendItems.length > 0) {
 
   return (
     <div className="w-full overflow-x-auto print:overflow-visible my-4">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${svgW} ${svgH}`} width="100%" height="auto" style={{ maxWidth: '800px', backgroundColor: '#fff', fontFamily: 'Arial, Helvetica, sans-serif' }}>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${svgW} ${svgH}`} width="100%" style={{ height: 'auto', maxWidth: '800px', backgroundColor: '#fff', fontFamily: 'Arial, Helvetica, sans-serif' }}>
         {elements}
       </svg>
     </div>

@@ -35,6 +35,24 @@ function isLegacyA4LiveEnabled(): boolean {
   return false;
 }
 
+function normalizeA5SvgAutoHeightAttribute(
+  root: ParentNode
+): void {
+  root.querySelectorAll<SVGSVGElement>(
+    'svg'
+  ).forEach(svg => {
+    const heightAttribute =
+      svg.getAttribute('height');
+
+    if (
+      heightAttribute?.trim().toLowerCase() ===
+      'auto'
+    ) {
+      svg.removeAttribute('height');
+      svg.style.height = 'auto';
+    }
+  });
+}
 function buildA5RoomHeader(
   customer: Customer,
   roomIndex: number,
@@ -303,6 +321,10 @@ async function generateA5RoomPdfFile(
       'a5-room-live'
     );
 
+    normalizeA5SvgAutoHeightAttribute(
+      roomClone
+    );
+
     stage.appendChild(roomClone);
 
     if (
@@ -318,6 +340,10 @@ async function generateA5RoomPdfFile(
       totalsClone.setAttribute(
         'data-a5-global-totals',
         'true'
+      );
+
+      normalizeA5SvgAutoHeightAttribute(
+        totalsClone
       );
 
       stage.appendChild(totalsClone);

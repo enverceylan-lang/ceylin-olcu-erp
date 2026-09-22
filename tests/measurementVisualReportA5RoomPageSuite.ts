@@ -36,6 +36,16 @@ const adapter = fs.readFileSync(
   "utf8",
 );
 
+const technical = fs.readFileSync(
+  path.join(
+    root,
+    "src",
+    "components",
+    "reports",
+    "TechnicalMeasurementSketch.tsx",
+  ),
+  "utf8",
+);
 assert.match(
   visual,
   /ENVERP_A5_ROOM_REPORT_V1/,
@@ -81,6 +91,64 @@ assert.match(
   /generalDisplayDimensions\.dimensionText/,
 );
 
+/* ENVERP_A5_SVG_HEIGHT_AUTO_RUNTIME_CONTRACT_V1 */
+assert.equal(
+  technical.includes('height="auto"'),
+  false,
+);
+
+assert.equal(
+  technical.includes("height: 'auto'"),
+  true,
+);
+
+assert.equal(
+  visual.includes(
+    'function normalizeA5SvgAutoHeightAttribute(',
+  ),
+  true,
+);
+
+assert.equal(
+  visual.includes(
+    "svg.getAttribute('height')",
+  ),
+  true,
+);
+
+assert.equal(
+  visual.includes(
+    "svg.removeAttribute('height')",
+  ),
+  true,
+);
+
+assert.equal(
+  visual.includes(
+    "svg.style.height = 'auto'",
+  ),
+  true,
+);
+
+assert.equal(
+  visual.includes(
+    "normalizeA5SvgAutoHeightAttribute(\n      roomClone",
+  ) ||
+    visual.includes(
+      "normalizeA5SvgAutoHeightAttribute(\r\n      roomClone",
+    ),
+  true,
+);
+
+assert.equal(
+  visual.includes(
+    "normalizeA5SvgAutoHeightAttribute(\n        totalsClone",
+  ) ||
+    visual.includes(
+      "normalizeA5SvgAutoHeightAttribute(\r\n        totalsClone",
+    ),
+  true,
+);
 /*
  * The canonical PDF producer is consumed by both:
  * - Yazdır / PDF Al (object URL download)
