@@ -6,7 +6,13 @@ import {
   getSlopedCeilingReportPresentation
 } from '@/lib/slopedCeilingReport';
 import { Customer, ProductMeasurement, WindowItem, MEASUREMENT_TEMPLATES } from '@/store/useStore';
-import { getTemplateLabel, getMeasurementDimensions, resolveMeasurementProductLabel, resolveMeasurementProductGroup } from '@/lib/measurementAdapter';
+import {
+  getTemplateLabel,
+  resolveMeasurementDisplayDimensions,
+  resolveMeasurementDisplayLabel,
+  resolveMeasurementProductLabel,
+  resolveMeasurementProductGroup,
+} from '@/lib/measurementAdapter';
 import { formatFacadeForReport } from '@/lib/facadeHelper';
 import { getValidNote } from '@/lib/reportFormatters';
 import { useMeasurementStore, MeasurementRecord } from '@/store/measurementStore';
@@ -359,12 +365,18 @@ function drawSimpleTable(
 /**
  * Draws the curtain diagram via jsPDF primitives.
  */
-function drawCurtainDetailDiagram(doc: jsPDF, x: number, y: number, rawValues: UnknownRecord) {
+function drawCurtainDetailDiagram(
+  doc: jsPDF,
+  x: number,
+  y: number,
+  rawValues: UnknownRecord,
+  displayHeight: number,
+) {
   const leftWall = Number(rawValues.leftWall || 0);
   const windowWidth = Number(rawValues.windowWidth || 0);
   const rightWall = Number(rawValues.rightWall || 0);
   const ceilingGap = Number(rawValues.ceilingGap || 0);
-  const windowHeight = Number(rawValues.windowHeight || 0);
+  const windowHeight = displayHeight;
   const floorGap = Number(rawValues.floorGap || 0);
 
   const totalWidth = leftWall + windowWidth + rightWall;
@@ -834,8 +846,28 @@ export async function generateMeasurementPdfBlob(
       const mechanicalProducts: { p: ProductMeasurement; index: number; winName: string }[] = [];
       const standardOpenings: { winName: string; winItem: WindowItem; products: ProductMeasurement[] }[] = [];
 
-      (room.windows || []).forEach(win => {
-        const winMeasurements = resolvedMeasurements.filter(m => m.windowId === win.id && m.customerId === customer.id && !m.isDeleted && !m.isArchived);
+      (room.windows || []).forEach((win, winIndex) => {
+        const winName = resolveMeasurementDisplayLabel(
+          undefined,
+          {
+            verifiedRoom: {
+              id: room.id,
+              name: room.name,
+            },
+            verifiedOpening: {
+              id: win.id,
+              name: win.name,
+              index: winIndex,
+            },
+          },
+        ).openingLabel;
+        const winMeasurements = resolvedMeasurements.filter(
+          m =>
+            (m.openingId || m.windowId) === win.id &&
+            m.customerId === customer.id &&
+            !m.isDeleted &&
+            !m.isArchived,
+        );
         winMeasurements.forEach(m => {
           const activeProducts = m.selectedProducts?.filter(sp => sp.isActive) || [];
 
@@ -843,13 +875,13 @@ export async function generateMeasurementPdfBlob(
             // Fallback
             const fallbackGroup = resolveMeasurementProductGroup(m);
             if (fallbackGroup === 'Plicell') {
-              plicellProducts.push({ p: m, index: plicellProducts.length, winName: win.name });
+              plicellProducts.push({ p: m, index: plicellProducts.length, winName });
             } else if (fallbackGroup === 'Mekanik Perde') {
-              mechanicalProducts.push({ p: m, index: mechanicalProducts.length, winName: win.name });
+              mechanicalProducts.push({ p: m, index: mechanicalProducts.length, winName });
             } else {
-              let entry = standardOpenings.find(so => so.winName === win.name);
+              let entry = standardOpenings.find(so => so.winItem.id === win.id);
               if (!entry) {
-                entry = { winName: win.name, winItem: win, products: [] };
+                entry = { winName, winItem: win, products: [] };
                 standardOpenings.push(entry);
               }
               entry.products.push(m);
@@ -871,7 +903,7 @@ export async function generateMeasurementPdfBlob(
               };
 
               if (pType === 'PLICELL') {
-                plicellProducts.push({ p: pObj, index: plicellProducts.length, winName: win.name });
+                plicellProducts.push({ p: pObj, index: plicellProducts.length, winName });
               } else if (pGroup === 'Mekanik Perde') {
                 if (ap.calculation?.isSegmented && Array.isArray(ap.calculation.groups) && ap.calculation.groups.length > 0) {
                   ap.calculation.groups.forEach((group: unknown, gIdx: number) => {
@@ -897,15 +929,15 @@ export async function generateMeasurementPdfBlob(
                         chainDirection: group.chainDirection
                       }
                     };
-                    mechanicalProducts.push({ p: gObj, index: mechanicalProducts.length, winName: `${win.name} - ParÃ§a ${gIdx + 1}` });
+                    mechanicalProducts.push({ p: gObj, index: mechanicalProducts.length, winName: `${winName} - ParÃ§a ${gIdx + 1}` });
                   });
                 } else {
-                  mechanicalProducts.push({ p: pObj, index: mechanicalProducts.length, winName: win.name });
+                  mechanicalProducts.push({ p: pObj, index: mechanicalProducts.length, winName });
                 }
               } else {
-                let entry = standardOpenings.find(so => so.winName === win.name);
+                let entry = standardOpenings.find(so => so.winItem.id === win.id);
                 if (!entry) {
-                  entry = { winName: win.name, winItem: win, products: [] };
+                  entry = { winName, winItem: win, products: [] };
                   standardOpenings.push(entry);
                 }
                 entry.products.push(pObj);
@@ -995,7 +1027,7 @@ export async function generateMeasurementPdfBlob(
           doc.setFont('helvetica', 'bold');
           doc.text(`Olcu ${pIdx + 1}: ${sanitize(resolveMeasurementProductLabel(p))} (${sanitize(getTemplateLabel(p.templateType))})`, MARGIN + 8, innerY);
 
-          const dims = getMeasurementDimensions(p);
+          const dims = resolveMeasurementDisplayDimensions(p);
           const isCurtain = p.templateType === 'CURTAIN_DETAIL' || p.templateType === 'CURTAIN';
           const isSimple = p.templateType === 'SIMPLE_WIDTH_HEIGHT';
 
@@ -1093,25 +1125,41 @@ export async function generateMeasurementPdfBlob(
               doc.text(`Pencere Eni: ${p.rawValues?.windowWidth || 0} cm`, MARGIN + 8, innerY + 6);
               doc.text(`Sag Duvar: ${p.rawValues?.rightWall || 0} cm`, MARGIN + 8, innerY + 12);
               doc.text(`Tavan Boslugu: ${p.rawValues?.ceilingGap || 0} cm`, MARGIN + 8, innerY + 18);
-              doc.text(`Pencere Boyu: ${p.rawValues?.windowHeight || 0} cm`, MARGIN + 8, innerY + 24);
+              doc.text(`Boy Ozeti: ${sanitize(dims.heightDetailText || 'Belirtilmemis')}`, MARGIN + 8, innerY + 24);
               doc.text(`Zemin Boslugu: ${p.rawValues?.floorGap || 0} cm`, MARGIN + 8, innerY + 30);
 
               doc.setFont('helvetica', 'bold');
               doc.setTextColor(37, 99, 235);
-              doc.text(`Toplam: ${dims.structuralWidth} x ${dims.structuralHeight} cm`, MARGIN + 8, innerY + 38);
+              doc.text(`Olcu: ${sanitize(dims.dimensionText)}`, MARGIN + 8, innerY + 38);
 
               // Draw Diagram
-              drawCurtainDetailDiagram(doc, rightColX, innerY - 4, p.rawValues);
+              if (dims.hasCompleteDimensions && dims.displayHeight !== null) {
+                drawCurtainDetailDiagram(
+                  doc,
+                  rightColX,
+                  innerY - 4,
+                  p.rawValues,
+                  dims.displayHeight,
+                );
+              }
             }
           } else if (isSimple) {
-            doc.text(`Genislik (En): ${p.rawValues?.width || 0} cm`, MARGIN + 8, innerY);
-            doc.text(`Yukseklik (Boy): ${p.rawValues?.height || 0} cm`, MARGIN + 8, innerY + 6);
+            doc.text(`Genislik (En): ${dims.displayWidth ?? '-'} cm`, MARGIN + 8, innerY);
+            doc.text(`Yukseklik (Boy): ${dims.displayHeight ?? '-'} cm`, MARGIN + 8, innerY + 6);
 
             doc.setFont('helvetica', 'bold');
             doc.setTextColor(37, 99, 235);
-            doc.text(`Toplam: ${dims.structuralWidth} x ${dims.structuralHeight} cm`, MARGIN + 8, innerY + 14);
+            doc.text(`Olcu: ${sanitize(dims.dimensionText)}`, MARGIN + 8, innerY + 14);
 
-            drawSimpleDiagram(doc, rightColX, innerY - 4, Number(p.rawValues?.width || 0), Number(p.rawValues?.height || 0));
+            if (dims.hasCompleteDimensions && dims.displayWidth !== null && dims.displayHeight !== null) {
+              drawSimpleDiagram(
+                doc,
+                rightColX,
+                innerY - 4,
+                dims.displayWidth,
+                dims.displayHeight,
+              );
+            }
           } else {
              let customY = innerY;
              Object.entries(p.rawValues || {}).forEach(([k, v]) => {
@@ -1166,12 +1214,12 @@ export async function generateMeasurementPdfBlob(
                ]);
              });
            } else {
-             const dims = getMeasurementDimensions(item.p);
+             const dims = resolveMeasurementDisplayDimensions(item.p);
              tableData.push([
                sanitize(item.winName),
                `${item.index}. Olcu`,
-               `${dims.structuralWidth} cm`,
-               `${dims.structuralHeight} cm`,
+               dims.displayWidth === null ? '-' : `${dims.displayWidth} cm`,
+               dims.displayHeight === null ? '-' : `${dims.displayHeight} cm`,
                sanitize(getValidNote(item.p.notes) || '-')
              ]);
            }

@@ -134,6 +134,7 @@ async function runTests() {
 
   const customerId = generateUUID();
   const roomId = generateUUID();
+  const addressId = generateUUID();
   const windowId = generateUUID();
   const measurementId1 = generateUUID();
 
@@ -151,8 +152,17 @@ async function runTests() {
     address: 'Test Adres',
     mapLocation: '',
     notes: '',
+    addresses: [
+      {
+        id: addressId,
+        customerId,
+        title: 'Ana Adres',
+        legacyPrimary: true,
+        address: 'Test Adres',
+      }
+    ],
     rooms: [
-      { id: roomId, name: 'Salon', photos: [], videos: [], windows: [{ id: windowId, name: 'Pencere 1', products: [], photos: [], videos: [] }] }
+      { id: roomId, customerAddressId: addressId, name: 'Salon', photos: [], videos: [], windows: [{ id: windowId, name: 'Pencere 1', products: [], photos: [], videos: [] }] }
     ],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -164,11 +174,17 @@ async function runTests() {
   const testMeasurement: MeasurementRecord = {
     id: measurementId1,
     customerId,
+    customerAddressId: addressId,
     roomId,
     openingId: windowId,
     windowId,
     templateType: 'Plicell',
-    rawValues: { width: 100 },
+    rawValues: {
+      width: 100,
+      plicellCamListesi: [
+        { widthCm: 100, heightCm: 200 }
+      ]
+    },
     calculatedWidth: 100,
     calculatedHeight: 200,
     status: 'ACTIVE',
@@ -453,7 +469,7 @@ async function runTests() {
     const wpMsg = buildWhatsAppShortReport(testCustomer, [], measurements);
     if (!wpMsg.includes('FINAL TEST CAR')) throw new Error('WhatsApp metni cari adı yanlış');
     if (wpMsg.includes('Telefon:')) throw new Error('WhatsApp kısa raporda telefon olmamalı');
-    if (wpMsg.includes('Adres:')) throw new Error('WhatsApp kısa raporda adres olmamalı');
+    if (!wpMsg.includes('Adres: Test Adres')) throw new Error('WhatsApp kısa raporda bağlı adres gösterilmeli');
     if (wpMsg.includes('Konum:')) throw new Error('WhatsApp kısa raporda konum bağlantısı olmamalı');
     if (wpMsg.includes('GENEL MEKANİK PERDE TOPLAMI')) throw new Error('WhatsApp kısa raporda genel mekanik tekrar toplamı olmamalı');
     if (wpMsg.includes('GENEL PLİCELL TOPLAMI')) throw new Error('WhatsApp kısa raporda genel Plicell tekrar toplamı olmamalı');

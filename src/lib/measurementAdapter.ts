@@ -32,6 +32,14 @@ type MeasurementLike = Partial<ProductMeasurement> & {
   type?: string;
   width?: string | number;
   height?: string | number;
+  roomId?: string;
+  openingId?: string;
+  windowId?: string;
+  roomName?: string;
+  roomLabel?: string;
+  openingName?: string;
+  openingLabel?: string;
+  windowName?: string;
 };
 type FacadeSegmentLike = Partial<FacadeSegment> & Record<string, unknown>;
 type StockCard = Partial<Product>;
@@ -62,6 +70,180 @@ export interface MeasurementDimensions {
   structuralHeight: number;
   templateType: string;
   summaryLabel: string;
+}
+
+export interface MeasurementDisplayDimensions extends MeasurementDimensions {
+  displayWidth: number | null;
+  displayHeight: number | null;
+  dimensionText: string;
+  heightDetailText: string;
+  hasCompleteDimensions: boolean;
+}
+
+export interface MeasurementDisplayParent {
+  id: string;
+  name?: string | null;
+  index?: number;
+}
+
+export interface MeasurementDisplayLabelContext {
+  verifiedRoom?: MeasurementDisplayParent;
+  verifiedOpening?: MeasurementDisplayParent;
+}
+
+export interface MeasurementDisplayLabel {
+  roomLabel: string;
+  openingLabel: string;
+}
+
+function positiveDisplayNumber(value: unknown): number | null {
+  const number = Number(value);
+
+  return Number.isFinite(number) && number > 0
+    ? number
+    : null;
+}
+
+function formatDisplayNumber(value: number): string {
+  return value
+    .toFixed(2)
+    .replace(/\.?0+$/, '');
+}
+
+function cleanDisplayText(value: unknown): string {
+  return typeof value === 'string'
+    ? value.trim()
+    : '';
+}
+
+/**
+ * Read-only presentation projection. It never rewrites measurement payloads or
+ * calculated fields and therefore remains outside save, SOURCE_EXIT and sync.
+ */
+export function resolveMeasurementDisplayDimensions(
+  measurement: MeasurementLike | null | undefined,
+): MeasurementDisplayDimensions {
+  const base = getMeasurementDimensions(measurement);
+  const rawValues = measurement?.rawValues || {};
+  const templateType = base.templateType;
+  let displayWidth = positiveDisplayNumber(base.structuralWidth);
+  let displayHeight = positiveDisplayNumber(base.structuralHeight);
+  let heightDetailText = displayHeight
+    ? formatDisplayNumber(displayHeight)
+    : '';
+
+  if (templateType === 'CURTAIN_DETAIL' || templateType === 'CURTAIN') {
+    const detailHeights = [
+      ['Sol', positiveDisplayNumber(rawValues.solYukseklikCm)],
+      ['Orta', positiveDisplayNumber(rawValues.ortaYukseklikCm)],
+      ['Sağ', positiveDisplayNumber(rawValues.sagYukseklikCm)],
+    ] as const;
+    const enteredFacadeHeights = detailHeights.flatMap(
+      ([label, value]) => value === null ? [] : [{ label, value }],
+    );
+    const radiatorMarbleHeight = positiveDisplayNumber(
+      rawValues.kaloriferMermerBoyuCm,
+    );
+
+    if (enteredFacadeHeights.length > 0) {
+      displayHeight = Math.min(
+        ...enteredFacadeHeights.map(({ value }) => value),
+      );
+      heightDetailText = enteredFacadeHeights
+        .map(({ label, value }) => `${label} ${formatDisplayNumber(value)}`)
+        .join(' / ');
+    } else if (!displayHeight && radiatorMarbleHeight) {
+      displayHeight = radiatorMarbleHeight;
+      heightDetailText = `Kalorifer/Mermer ${formatDisplayNumber(radiatorMarbleHeight)}`;
+    }
+
+    displayWidth = positiveDisplayNumber(base.structuralWidth);
+  }
+
+  const hasCompleteDimensions = Boolean(displayWidth && displayHeight);
+  let dimensionText = '';
+
+  if (
+    (templateType === 'CURTAIN_DETAIL' || templateType === 'CURTAIN') &&
+    heightDetailText.includes(' / ')
+  ) {
+    dimensionText = displayWidth
+      ? `En: ${formatDisplayNumber(displayWidth)} cm • Boy: ${heightDetailText} cm`
+      : `Boy: ${heightDetailText} cm`;
+  } else if (displayWidth && displayHeight) {
+    const formattedHeight = formatDisplayNumber(displayHeight);
+    const heightSource =
+      (templateType === 'CURTAIN_DETAIL' || templateType === 'CURTAIN') &&
+      heightDetailText !== formattedHeight
+        ? ` (${heightDetailText})`
+        : '';
+    dimensionText = `${formatDisplayNumber(displayWidth)} × ${formattedHeight} cm${heightSource}`;
+  } else if (displayWidth) {
+    dimensionText = `En: ${formatDisplayNumber(displayWidth)} cm • Boy belirtilmemiş`;
+  } else if (displayHeight) {
+    dimensionText = `Boy: ${formatDisplayNumber(displayHeight)} cm • En belirtilmemiş`;
+  } else {
+    dimensionText = 'En/Boy belirtilmemiş';
+  }
+
+  return {
+    ...base,
+    displayWidth,
+    displayHeight,
+    dimensionText,
+    heightDetailText,
+    hasCompleteDimensions,
+    summaryLabel: dimensionText,
+  };
+}
+
+/**
+ * Uses a parent name only when the supplied parent id matches the measurement.
+ * Captured labels remain compatibility fallbacks; no parent identity is guessed.
+ */
+export function resolveMeasurementDisplayLabel(
+  measurement: MeasurementLike | null | undefined,
+  context: MeasurementDisplayLabelContext = {},
+): MeasurementDisplayLabel {
+  const measurementRoomId = cleanDisplayText(measurement?.roomId);
+  const measurementOpeningId = cleanDisplayText(
+    measurement?.openingId || measurement?.windowId,
+  );
+  const verifiedRoomMatches = Boolean(
+    context.verifiedRoom &&
+      (!measurement || measurementRoomId === context.verifiedRoom.id),
+  );
+  const verifiedOpeningMatches = Boolean(
+    context.verifiedOpening &&
+      (!measurement || measurementOpeningId === context.verifiedOpening.id),
+  );
+
+  const roomLabel =
+    (verifiedRoomMatches
+      ? cleanDisplayText(context.verifiedRoom?.name)
+      : '') ||
+    (!context.verifiedRoom || verifiedRoomMatches
+      ? cleanDisplayText(measurement?.roomName) ||
+        cleanDisplayText(measurement?.roomLabel)
+      : '') ||
+    (verifiedRoomMatches && context.verifiedRoom?.index !== undefined
+      ? `Oda ${context.verifiedRoom.index + 1}`
+      : 'Oda adı bulunamadı');
+
+  const openingLabel =
+    (verifiedOpeningMatches
+      ? cleanDisplayText(context.verifiedOpening?.name)
+      : '') ||
+    (!context.verifiedOpening || verifiedOpeningMatches
+      ? cleanDisplayText(measurement?.openingName) ||
+        cleanDisplayText(measurement?.windowName) ||
+        cleanDisplayText(measurement?.openingLabel)
+      : '') ||
+    (verifiedOpeningMatches && context.verifiedOpening?.index !== undefined
+      ? `Açıklık ${context.verifiedOpening.index + 1}`
+      : 'Açıklık adı bulunamadı');
+
+  return { roomLabel, openingLabel };
 }
 
 export function getMeasurementDimensions(measurement: MeasurementLike | null | undefined): MeasurementDimensions {

@@ -9,7 +9,7 @@ import Link from "next/link";
 import { Customer, ProductMeasurement, Room, WindowItem, useStore } from "@/store/useStore";
 import { MeasurementRecord, useMeasurementStore } from "@/store/measurementStore";
 import { useEffect, useState, useMemo, useSyncExternalStore } from "react";
-import { getMeasurementDimensions, getTemplateLabel } from "@/lib/measurementAdapter";
+import { getTemplateLabel, resolveMeasurementDisplayDimensions, resolveMeasurementDisplayLabel } from "@/lib/measurementAdapter";
 import { useAuthStore, canViewCustomer } from "@/store/useAuthStore";
 import {
   localDraftDb,
@@ -502,18 +502,30 @@ const links: Record<string, string> = {};
     const opening = room?.windows?.find(
       (item) => item.id === openingId && !item.isDeleted
     );
-    const dimensions = getMeasurementDimensions(measurement);
+    const dimensions = resolveMeasurementDisplayDimensions(measurement);
+    const openingIndex = room?.windows?.findIndex(
+      (item) => item.id === openingId && !item.isDeleted
+    ) ?? -1;
+    const labels = resolveMeasurementDisplayLabel(measurement, {
+      ...(room
+        ? { verifiedRoom: { id: room.id, name: room.name } }
+        : {}),
+      ...(opening
+        ? {
+            verifiedOpening: {
+              id: opening.id,
+              name: opening.name,
+              index: openingIndex >= 0 ? openingIndex : undefined,
+            },
+          }
+        : {}),
+    });
 
     return {
       sourceCustomer,
       targetCustomer,
-      roomName: room?.name || measurement.roomName || measurement.roomLabel || "Oda adı bulunamadı",
-      openingName:
-        opening?.name ||
-        measurement.openingName ||
-        measurement.windowName ||
-        measurement.openingLabel ||
-        "Açıklık adı bulunamadı",
+      roomName: labels.roomLabel,
+      openingName: labels.openingLabel,
       templateLabel: getTemplateLabel(dimensions.templateType),
       summaryLabel: dimensions.summaryLabel || "Ölçü değerleri kayıtlı",
       canAutoRepair: Boolean(targetCustomer || sourceCustomer),
@@ -1868,11 +1880,27 @@ const handleManualOrphanRepair = async (
                                   !measurement.isArchived
                                 )
                               )
-                              .map((window) => (
+                              .map((window, windowIndex) => {
+                                const openingDisplay = resolveMeasurementDisplayLabel(
+                                  undefined,
+                                  {
+                                    verifiedRoom: {
+                                      id: room.id,
+                                      name: room.name,
+                                    },
+                                    verifiedOpening: {
+                                      id: window.id,
+                                      name: window.name,
+                                      index: windowIndex,
+                                    },
+                                  },
+                                );
+
+                                return (
                                 <div key={window.id} className="space-y-2">
                                   <h5 className="font-semibold text-xs text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
                                     <Layers className="w-3.5 h-3.5 text-gray-400" />
-                                    {window.name}
+                                    {openingDisplay.openingLabel}
                                   </h5>
 
                                   <div className="space-y-2 pl-5">
@@ -1889,7 +1917,7 @@ const handleManualOrphanRepair = async (
                                           return b.id.localeCompare(a.id);
                                         })
                                         .map((p) => {
-                                        const dims = getMeasurementDimensions(p);
+                                        const dims = resolveMeasurementDisplayDimensions(p);
                                         const isAssigned = !!(p.productId || p.productType);
 
                                         return (
@@ -1942,7 +1970,8 @@ const handleManualOrphanRepair = async (
                                       })}
                                   </div>
                                 </div>
-                              ))}
+                              );
+                              })}
                           </div>
                         </div>
                       ))}

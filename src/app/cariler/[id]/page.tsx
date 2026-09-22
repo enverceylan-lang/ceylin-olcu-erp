@@ -8,7 +8,7 @@ import Image from "next/image";
 import { useStore, Customer, Room, WindowItem, MEASUREMENT_TEMPLATES, ProductMeasurement } from "@/store/useStore";
 import { useMeasurementStore, type MeasurementRecord } from "@/store/measurementStore";
 import { useAuthStore, ROLE_PERMISSIONS, normalizeRole, canViewCustomer, canViewCustomerWorkflowReport, canViewCustomerContactFields, canViewCariCard, canEditCari, canMergeCari, canArchiveCari, canMoveMeasurementBetweenCustomers, canTransferMeasurementToSale } from "@/store/useAuthStore";
-import { getMeasurementDimensions, getTemplateLabel, getGoogleMapsUrl, getWorkflowStatusLabel, getWorkflowStatusColorClass, WORKFLOW_STATUS_LABELS } from "@/lib/measurementAdapter";
+import { getMeasurementDimensions, getTemplateLabel, getGoogleMapsUrl, getWorkflowStatusLabel, getWorkflowStatusColorClass, resolveMeasurementDisplayDimensions, resolveMeasurementDisplayLabel, WORKFLOW_STATUS_LABELS } from "@/lib/measurementAdapter";
 import { MediaPreviewModal } from "@/components/MediaPreviewModal";
 import { CanonicalMediaPanel } from "@/components/media/CanonicalMediaPanel";
 import { syncNow } from "@/lib/syncService";
@@ -2442,7 +2442,7 @@ showToast("Saha taslağı telefona kaydedildi.");
                 {/* WINDOWS / OPENINGS */}
                 {isExpanded && (
                   <div className="p-4 space-y-6">
-                    {visibleWindows.map(window => {
+                    {visibleWindows.map((window, windowIndex) => {
                       const isPrimaryRoomOpening =
                         window.name ===
                           room.name ||
@@ -2451,15 +2451,29 @@ showToast("Saha taslağı telefona kaydedildi.");
                           window.name ===
                             "Pencere 1"
                         );
+                      const openingDisplay =
+                        resolveMeasurementDisplayLabel(
+                          undefined,
+                          {
+                            verifiedRoom: {
+                              id: room.id,
+                              name: room.name,
+                            },
+                            verifiedOpening: {
+                              id: window.id,
+                              name: window.name,
+                              index: windowIndex,
+                            },
+                          },
+                        );
                       return (
                         <div key={window.id} className={isPrimaryRoomOpening ? "space-y-4" : "border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50/50 dark:bg-gray-900/50 space-y-4 ml-2"}>
 
-                          {!isPrimaryRoomOpening && (
-                            <div className="flex justify-between items-center pb-2 border-b border-gray-200 dark:border-gray-700">
+                          <div className="flex justify-between items-center pb-2 border-b border-gray-200 dark:border-gray-700">
                               <div className="flex items-center gap-4">
                                 <h4 className="font-bold text-gray-900 dark:text-white flex items-center gap-2 text-md">
                                   <WindowIcon className="w-4 h-4 text-blue-500" />
-                                  {window.name}
+                                  {openingDisplay.openingLabel}
                                 </h4>
 
                                 {/* Window Attachments Button */}
@@ -2475,17 +2489,18 @@ showToast("Saha taslağı telefona kaydedildi.");
                                   </div>
                                 )}
                               </div>
-                              <button
-                                onClick={() => setDeleteConfirm({
-                                  type: 'window',
-                                  data: { customerId: customer.id, roomId: room.id, windowId: window.id, windowName: window.name }
-                                })}
-                                className="text-red-400 hover:text-red-600 cursor-pointer"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          )}
+                              {!isPrimaryRoomOpening && (
+                                <button
+                                  onClick={() => setDeleteConfirm({
+                                    type: 'window',
+                                    data: { customerId: customer.id, roomId: room.id, windowId: window.id, windowName: window.name }
+                                  })}
+                                  className="text-red-400 hover:text-red-600 cursor-pointer"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                          </div>
 
                         {/* Display Window Attachments */}
                         {((window.photos && window.photos.length > 0) || (window.videos && window.videos.length > 0)) && (
@@ -2525,15 +2540,17 @@ showToast("Saha taslağı telefona kaydedildi.");
                               .map(p => {
   if (editingMeasurementId === p.id) return renderMeasurementForm(room, window, true);
 
+  const displayDimensions = resolveMeasurementDisplayDimensions(p);
+
 
   if (measurementViewMode === 'GRID') {
     return (
       <div key={p.id} className="relative bg-[#e6f2ff] dark:bg-blue-900/20 border-2 border-blue-400 dark:border-blue-700 rounded-sm p-2 flex flex-col items-center justify-center text-center shadow-inner min-h-[140px] m-2">
         <div className="absolute inset-x-0 top-0 border-b-2 border-blue-300 dark:border-blue-800 bg-white/50 dark:bg-black/20 text-[10px] font-bold py-1 text-blue-800 dark:text-blue-300">
-          EN: {p.rawValues?.width || 0}
+          EN: {displayDimensions.displayWidth ?? "—"}
         </div>
         <div className="absolute inset-y-0 left-0 border-r-2 border-blue-300 dark:border-blue-800 bg-white/50 dark:bg-black/20 text-[10px] font-bold px-1 text-blue-800 dark:text-blue-300 flex items-center justify-center" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
-          BOY: {p.rawValues?.height || 0}
+          BOY: {displayDimensions.displayHeight ?? "—"}
         </div>
         <div className="mt-6 ml-6 flex flex-col items-center justify-center h-full">
            <div className="text-[10px] text-blue-700 dark:text-blue-400 font-bold mb-1 line-clamp-1 bg-white/60 dark:bg-black/40 px-1 rounded">{getTemplateLabel(p.templateType)}</div>
@@ -3003,8 +3020,8 @@ showToast("Saha taslağı telefona kaydedildi.");
                                   <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{p.productGroup} - {p.productType}</div>
                                   <div className="text-xs text-gray-600 dark:text-gray-400">
                                     {p.templateType === 'PLICELL'
-                                      ? `Plicell Özeti: ${getMeasurementDimensions(p).summaryLabel}`
-                                      : `Üretim Ölçüsü: ${p.calculatedWidth}x${p.calculatedHeight}`}
+                                      ? `Plicell Özeti: ${displayDimensions.summaryLabel}`
+                                      : `Üretim Ölçüsü: ${displayDimensions.dimensionText}`}
                                   </div>
                                 </div>
                               ) : null}

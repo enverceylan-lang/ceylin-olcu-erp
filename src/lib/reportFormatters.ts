@@ -1,6 +1,11 @@
 import { MeasurementRecord } from '@/store/measurementStore';
 import { Customer, ProductMeasurement } from '@/store/useStore';
-import { getMeasurementDimensions, resolveMeasurementProductLabel, resolveMeasurementProductGroup } from './measurementAdapter';
+import {
+  resolveMeasurementDisplayDimensions,
+  resolveMeasurementDisplayLabel,
+  resolveMeasurementProductLabel,
+  resolveMeasurementProductGroup,
+} from './measurementAdapter';
 import { formatFacadeForReport } from './facadeHelper';
 import { getStoredProductCalculation } from './calculationEngine';
 
@@ -8,6 +13,31 @@ const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null
     ? value as Record<string, unknown>
     : {};
+
+function resolveBoundRoomAddress(
+  customer: Customer,
+  room: { customerAddressId?: string },
+): string {
+  const addressId = String(
+    room.customerAddressId || '',
+  ).trim();
+
+  if (!addressId) return '';
+
+  const boundAddress = (customer.addresses || []).find(
+    (address) =>
+      !address.isDeleted &&
+      address.id === addressId,
+  );
+
+  if (!boundAddress) return '';
+
+  return String(
+    boundAddress.address ||
+      boundAddress.mapLocation ||
+      '',
+  ).trim();
+}
 
 export function getValidNote(note?: string | null): string {
   if (!note) return "";
@@ -156,19 +186,69 @@ function buildPlicellOnlyWhatsAppReport(
         return;
       }
 
+      const boundAddress =
+        resolveBoundRoomAddress(
+          customer,
+          room,
+        );
+
       const cams:
         Array<{
           widthCm:
             number;
           heightCm:
             number;
+          openingLabel:
+            string;
+          openingCamIndex:
+            number;
         }> = [];
+
+      const openingCamCounts =
+        new Map<string, number>();
 
       const profiles =
         new Set<string>();
 
       roomMeasurements.forEach(
         measurement => {
+          const openingId =
+            String(
+              measurement.openingId ||
+              measurement.windowId ||
+              ''
+            );
+
+          const openingIndex =
+            (room.windows || []).findIndex(
+              opening => opening.id === openingId
+            );
+
+          const opening =
+            openingIndex >= 0
+              ? room.windows[openingIndex]
+              : undefined;
+
+          const labels =
+            resolveMeasurementDisplayLabel(
+              measurement,
+              {
+                verifiedRoom: {
+                  id: room.id,
+                  name: room.name,
+                },
+                ...(opening
+                  ? {
+                      verifiedOpening: {
+                        id: opening.id,
+                        name: opening.name,
+                        index: openingIndex,
+                      },
+                    }
+                  : {}),
+              },
+            );
+
           const raw =
             asRecord(
               measurement.rawValues
@@ -221,9 +301,19 @@ function buildPlicellOnlyWhatsAppReport(
                 widthCm > 0 &&
                 heightCm > 0
               ) {
+                const nextOpeningCamIndex =
+                  (openingCamCounts.get(openingId) || 0) + 1;
+
+                openingCamCounts.set(
+                  openingId,
+                  nextOpeningCamIndex,
+                );
+
                 cams.push({
                   widthCm,
-                  heightCm
+                  heightCm,
+                  openingLabel: labels.openingLabel,
+                  openingCamIndex: nextOpeningCamIndex,
                 });
               }
             }
@@ -268,6 +358,12 @@ function buildPlicellOnlyWhatsAppReport(
           )
       );
 
+      if (boundAddress) {
+        lines.push(
+          `Adres: ${boundAddress}`,
+        );
+      }
+
       lines.push(
         "* Plicell"
       );
@@ -285,9 +381,9 @@ function buildPlicellOnlyWhatsAppReport(
       lines.push("");
 
       cams.forEach(
-        (cam, index) => {
+        cam => {
           lines.push(
-            `  ${index + 1}. Cam: ${formatWhatsAppMeasurementCm(
+            `  ${cam.openingLabel} — ${cam.openingCamIndex}. Cam: ${formatWhatsAppMeasurementCm(
               cam.widthCm
             )} en × ${formatWhatsAppMeasurementCm(
               cam.heightCm
@@ -396,15 +492,17 @@ export function buildWhatsAppShortReport(
 
   rooms.forEach((room) => {
     const roomLines: string[] = [];
+    const boundAddress =
+      resolveBoundRoomAddress(
+        customer,
+        room,
+      );
     const windows = room.windows || [];
-    const showOpening =
-      windows.length > 1;
-
-    windows.forEach((window) => {
+    windows.forEach((window, openingIndex) => {
       const openingMeasurements =
         customerMeasurements.filter(
           (measurement) =>
-            measurement.windowId ===
+            (measurement.openingId || measurement.windowId) ===
             window.id,
         );
 
@@ -447,6 +545,27 @@ export function buildWhatsAppShortReport(
                 : [measurement];
 
           products.forEach((product) => {
+            const display =
+              resolveMeasurementDisplayDimensions(
+                product,
+              );
+
+            const labels =
+              resolveMeasurementDisplayLabel(
+                product,
+                {
+                  verifiedRoom: {
+                    id: room.id,
+                    name: room.name,
+                  },
+                  verifiedOpening: {
+                    id: window.id,
+                    name: window.name,
+                    index: openingIndex,
+                  },
+                },
+              );
+
             const productLabel =
               resolveMeasurementProductLabel(
                 product,
@@ -458,9 +577,7 @@ export function buildWhatsAppShortReport(
               );
 
             const openingPrefix =
-              showOpening
-                ? `${window.name} — `
-                : '';
+              `${labels.openingLabel} — `;
 
             const note = getValidNote(
               product.notes,
@@ -805,14 +922,9 @@ export function buildWhatsAppShortReport(
                 );
 
               if (!hasFacadeSegments) {
-                const dimensions =
-                  getMeasurementDimensions(
-                    product,
-                  );
-
                 if (
-                  dimensions.structuralWidth <= 0 &&
-                  dimensions.structuralHeight <= 0
+                  !display.displayWidth &&
+                  !display.displayHeight
                 ) {
                   return;
                 }
@@ -901,15 +1013,14 @@ export function buildWhatsAppShortReport(
                   roomLines.push(
                     `  Boy: ${heights.join(' / ')} cm`,
                   );
+                } else if (display.heightDetailText) {
+                  roomLines.push(
+                    `  Boy: ${display.heightDetailText} cm`,
+                  );
                 }
               } else {
-                const dimensions =
-                  getMeasurementDimensions(
-                    product,
-                  );
-
                 roomLines.push(
-                  `  Ölçü: ${dimensions.structuralWidth} × ${dimensions.structuralHeight} cm`,
+                  `  Ölçü: ${display.dimensionText}`,
                 );
               }
 
@@ -922,22 +1033,8 @@ export function buildWhatsAppShortReport(
               return;
             }
 
-            const width =
-              product.rawValues?.width ??
-              product.rawValues?.en ??
-              product.rawValues
-                ?.windowWidth ??
-              0;
-
-            const height =
-              product.rawValues?.height ??
-              product.rawValues?.boy ??
-              product.rawValues
-                ?.windowHeight ??
-              0;
-
             roomLines.push(
-              `• ${openingPrefix}${productLabel}: ${numberText(width)} × ${numberText(height)} cm`,
+              `• ${openingPrefix}${productLabel}: ${display.dimensionText}`,
             );
 
             if (note) {
@@ -953,6 +1050,9 @@ export function buildWhatsAppShortReport(
     if (roomLines.length > 0) {
       lines.push(
         `*${room.name.toUpperCase()}*`,
+        ...(boundAddress
+          ? [`Adres: ${boundAddress}`]
+          : []),
         ...roomLines,
         '',
       );

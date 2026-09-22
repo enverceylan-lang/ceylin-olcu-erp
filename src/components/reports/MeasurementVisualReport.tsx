@@ -5,7 +5,7 @@ import { X, Printer, Share2, Loader2, ZoomIn, ZoomOut, RotateCcw, Move } from 'l
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { Customer, MEASUREMENT_TEMPLATES, WindowItem } from '@/store/useStore';
-import { getTemplateLabel, resolveMeasurementProductLabel, resolveMeasurementProductGroup } from '@/lib/measurementAdapter';
+import { getTemplateLabel, resolveMeasurementDisplayDimensions, resolveMeasurementDisplayLabel, resolveMeasurementProductLabel, resolveMeasurementProductGroup } from '@/lib/measurementAdapter';
 import { getValidNote } from '@/lib/reportFormatters';
 import { resolveFacadeHeight } from '@/lib/facadeHeight';
 import {
@@ -2560,7 +2560,21 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
 
                   let plicellCounter = 0;
                   let mechanicalCurtainCounter = 0;
-                  windows.forEach(win => {
+                  windows.forEach((win, winIndex) => {
+                    const winName = resolveMeasurementDisplayLabel(
+                      undefined,
+                      {
+                        verifiedRoom: {
+                          id: room.id,
+                          name: room.name,
+                        },
+                        verifiedOpening: {
+                          id: win.id,
+                          name: win.name,
+                          index: winIndex,
+                        },
+                      },
+                    ).openingLabel;
                     const winMeasurements = activeMeasurements.filter(m => (m.openingId || m.windowId) === win.id);
                     winMeasurements.forEach(m => {
                       const activeProducts = m.selectedProducts?.filter(sp => sp.isActive) || [];
@@ -2569,13 +2583,13 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
                         // Fallback
                         const fallbackGroup = resolveMeasurementProductGroup(m);
                         if (fallbackGroup === 'Plicell') {
-                          plicellProducts.push({ p: m, index: ++plicellCounter, winName: win.name });
+                          plicellProducts.push({ p: m, index: ++plicellCounter, winName });
                         } else if (fallbackGroup === 'Mekanik Perde') {
-                          mechanicalCurtainProducts.push({ p: m, index: ++mechanicalCurtainCounter, winName: win.name });
+                          mechanicalCurtainProducts.push({ p: m, index: ++mechanicalCurtainCounter, winName });
                         } else {
-                          let entry = standardOpenings.find(so => so.winName === win.name);
+                          let entry = standardOpenings.find(so => so.winItem.id === win.id);
                           if (!entry) {
-                            entry = { winName: win.name, winItem: win, products: [] };
+                            entry = { winName, winItem: win, products: [] };
                             standardOpenings.push(entry);
                           }
                           entry.products.push(m);
@@ -2597,7 +2611,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
                           };
 
                           if (pType === 'PLICELL') {
-                            plicellProducts.push({ p: pObj, index: ++plicellCounter, winName: win.name });
+                            plicellProducts.push({ p: pObj, index: ++plicellCounter, winName });
                           } else if (pGroup === 'Mekanik Perde') {
                             if (ap.calculation?.isSegmented && Array.isArray(ap.calculation.groups) && ap.calculation.groups.length > 0) {
                               ap.calculation.groups.forEach((g, gIdx: number) => {
@@ -2642,15 +2656,15 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
                                     chainDirection: g.chainDirection
                                   }
                                 };
-                                mechanicalCurtainProducts.push({ p: gObj, index: ++mechanicalCurtainCounter, winName: `${win.name} - Parça ${gIdx + 1}` });
+                                mechanicalCurtainProducts.push({ p: gObj, index: ++mechanicalCurtainCounter, winName: `${winName} - Parça ${gIdx + 1}` });
                               });
                             } else {
-                              mechanicalCurtainProducts.push({ p: pObj, index: ++mechanicalCurtainCounter, winName: win.name });
+                              mechanicalCurtainProducts.push({ p: pObj, index: ++mechanicalCurtainCounter, winName });
                             }
                           } else {
-                            let entry = standardOpenings.find(so => so.winName === win.name);
+                            let entry = standardOpenings.find(so => so.winItem.id === win.id);
                             if (!entry) {
-                              entry = { winName: win.name, winItem: win, products: [] };
+                              entry = { winName, winItem: win, products: [] };
                               standardOpenings.push(entry);
                             }
                             entry.products.push(pObj);
@@ -2681,7 +2695,6 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
 
                           {/* A. Render Standard Openings */}
                           {standardOpenings.map(({ winName, winItem, products }) => {
-                            const showWinHeader = windows.length > 1;
                             const hasCombinedProductSketch =
                               products.some(
                                 measurement =>
@@ -2702,16 +2715,14 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
 
                             return (
                               <div key={winItem.id} className="pdf-keep-together space-y-4">
-                                {showWinHeader && (
-                                  <h4 className="opening-header text-xs font-bold text-slate-400 print:text-slate-600 border-b border-slate-800 print:border-slate-200 pb-1 flex items-center justify-between">
+                                <h4 className="opening-header text-xs font-bold text-slate-400 print:text-slate-600 border-b border-slate-800 print:border-slate-200 pb-1 flex items-center justify-between">
                                     <span>[Açıklık: {winName}]</span>
                                     {(winItem.photos?.length > 0 || winItem.videos?.length > 0) && (
                                       <span className="text-[9px] font-normal">
                                         ({(winItem.photos||[]).length} Foto, {(winItem.videos||[]).length} Video)
                                       </span>
                                     )}
-                                  </h4>
-                                )}
+                                </h4>
 
                                 {(() => {
                                   const firstMeasurement = products[0];
@@ -2729,6 +2740,10 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
                                       'CURTAIN_DETAIL' ||
                                     firstMeasurement.templateType ===
                                       'CURTAIN';
+                                  const generalDisplayDimensions =
+                                    resolveMeasurementDisplayDimensions(
+                                      firstMeasurement
+                                    );
 
                                   if (
                                     !isGeneralSimple &&
@@ -2748,25 +2763,14 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
 
                                   const generalWidth =
                                     isGeneralSimple
-                                      ? Number(
-                                          firstMeasurement.rawValues
-                                            ?.width || 0
-                                        )
+                                      ? Number(generalDisplayDimensions.displayWidth || 0)
                                       : Number(
                                           firstMeasurement.rawValues
                                             ?.windowWidth || 0
                                         );
 
                                   const generalHeight =
-                                    isGeneralSimple
-                                      ? Number(
-                                          firstMeasurement.rawValues
-                                            ?.height || 0
-                                        )
-                                      : Number(
-                                          firstMeasurement.rawValues
-                                            ?.windowHeight || 0
-                                        );
+                                    Number(generalDisplayDimensions.displayHeight || 0);
 
                                   const generalTotalWidth =
                                     generalSegments.length > 0
@@ -2811,7 +2815,8 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
                                     ).filter(Boolean);
 
                                   if (
-                                    generalProductTypes.length === 0
+                                    generalProductTypes.length === 0 ||
+                                    !generalDisplayDimensions.hasCompleteDimensions
                                   ) {
                                     return null;
                                   }
@@ -2933,6 +2938,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
                                   {products.map((p, pIdx) => {
                                     const isSimple = p.templateType === 'SIMPLE_WIDTH_HEIGHT';
                                     const isCurtain = p.templateType === 'CURTAIN_DETAIL' || p.templateType === 'CURTAIN';
+                                    const displayDimensions = resolveMeasurementDisplayDimensions(p);
 
                                     let segmentsToDraw = [];
                                     let widthToDraw = 0;
@@ -2949,8 +2955,14 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
                                           activeMeasurements
                                             .filter(
                                               measurement =>
-                                                measurement.windowId ===
-                                                p.windowId
+                                                (
+                                                  measurement.openingId ||
+                                                  measurement.windowId
+                                                ) ===
+                                                (
+                                                  p.openingId ||
+                                                  p.windowId
+                                                )
                                             )
                                             .flatMap(
                                               measurement =>
@@ -2977,7 +2989,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
 
                                     if (isSimple) {
                                       widthToDraw = Number(p.rawValues?.width || 0);
-                                      heightToDraw = Number(p.rawValues?.height || 0);
+                                      heightToDraw = Number(displayDimensions.displayHeight || 0);
                                       totalWidth = widthToDraw;
                                     } else if (isCurtain) {
                                       const facadeSegments = p.rawValues?.facadeSegments;
@@ -2986,7 +2998,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
                                         totalWidth = facadeSegments.reduce((sum: number, segment) => sum + (Number(segment.widthCm) > 0 ? Number(segment.widthCm) : 0), 0);
                                       } else {
                                         widthToDraw = Number(p.rawValues?.windowWidth || 0);
-                                        heightToDraw = Number(p.rawValues?.windowHeight || 0);
+                                        heightToDraw = Number(displayDimensions.displayHeight || 0);
                                         totalWidth = widthToDraw;
                                       }
 
@@ -3002,6 +3014,9 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
                                             <h4 className="text-sm font-bold text-slate-800 print:text-black">
                                               {winName} - Ölçü {pIdx + 1}: {resolveMeasurementProductLabel(p)} ({getTemplateLabel(p.templateType)})
                                             </h4>
+                                            <div className="mt-1 text-xs font-semibold text-blue-700 print:text-black">
+                                              Ölçü: {displayDimensions.dimensionText}
+                                            </div>
                                             <div className="text-[10px] text-slate-500 mt-1 flex flex-wrap gap-x-3">
                                               {!sameMeasuredBy && p.measuredBy && <span>Ölçen: {p.measuredBy}</span>}
                                               {showDateOnMeasurements && p.measuredDate && <span>Tarih: {new Date(p.measuredDate).toLocaleDateString('tr-TR')}</span>}
@@ -3025,6 +3040,7 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
 
                                         <div className="w-full flex justify-center mt-2 print:mt-4">
                                           {isSimple || isCurtain ? (
+                                            displayDimensions.hasCompleteDimensions ? (
                                             <div
                                               className="cursor-pointer hover:opacity-90 transition-opacity w-full print-svg"
                                               onClick={() => setPreviewNode(
@@ -3069,8 +3085,13 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
                                                 productHeights={getSketchProductHeights([p], p)}
                                                 suppressFacadeHeight={shouldSuppressSunshadeFacadeHeight(p)}
                                         mechanicalPanels={buildMechanicalVisualPanels([p])}
-                                      />
+                                              />
                                             </div>
+                                            ) : (
+                                              <div className="w-full rounded border border-amber-200 bg-amber-50 p-3 text-center text-xs font-semibold text-amber-900 print:bg-white print:text-black">
+                                                {displayDimensions.dimensionText}
+                                              </div>
+                                            )
                                           ) : (
                                             <div className="w-full grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
                                               {Object.entries(p.rawValues || {}).map(([k, v]) => {
