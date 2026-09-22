@@ -2,10 +2,13 @@ import "fake-indexeddb/auto";
 import fs from "node:fs";
 import path from "node:path";
 import {
+  classifyDeltaQueueEntityType,
   getPendingSyncEvents,
   localSyncQueueDb,
   markSyncEventsBlocked,
   markSyncEventsSynced,
+  syncEventMatchesHistoricalDeltaFingerprint,
+  type HistoricalDeltaEventFingerprint,
   type SyncEvent,
 } from "../src/lib/localSyncQueueDb";
 import type { ErpScope } from "../src/lib/erpScope";
@@ -267,6 +270,188 @@ async function verifyScopeAwareQueueContract(): Promise<void> {
     (await localSyncQueueDb.pendingSyncEvents.get(canonicalA.changeId))
       ?.syncStatus === "SYNCED",
     "Canonical same-scope MEASUREMENT ACK uygulanmadı",
+  );
+
+  assert(
+    classifyDeltaQueueEntityType("DRAFT") === "CANONICAL_SENDABLE",
+    "DRAFT canonical sendable sınıflanmadı",
+  );
+  assert(
+    classifyDeltaQueueEntityType("MEASUREMENT") ===
+      "CANONICAL_SENDABLE",
+    "MEASUREMENT canonical sendable sınıflanmadı",
+  );
+  assert(
+    classifyDeltaQueueEntityType("CUSTOMER") === "KNOWN_NONCANONICAL",
+    "CUSTOMER known noncanonical sınıflanmadı",
+  );
+  assert(
+    classifyDeltaQueueEntityType("FUTURE_ENTITY") === "UNKNOWN",
+    "Unknown delta entity explicit UNKNOWN değil",
+  );
+
+  const historicalFingerprint: HistoricalDeltaEventFingerprint = {
+    entityType: "CUSTOMER",
+    operation: "UPDATE",
+    createdAt: "2026-08-27T08:34:54.139Z",
+    syncIntent: null,
+    expectedVersion: null,
+  };
+  const exactHistorical = queueEvent(
+    "known-historical-customer",
+    SCOPE_A,
+    historicalFingerprint.createdAt,
+    "CUSTOMER",
+  );
+  assert(
+    syncEventMatchesHistoricalDeltaFingerprint(
+      exactHistorical,
+      historicalFingerprint,
+    ),
+    "Exact historical fingerprint eşleşmedi",
+  );
+
+  const recoveryHistorical: SyncEvent = {
+    ...exactHistorical,
+    patch: {
+      ...exactHistorical.patch,
+      syncIntent: "MEASUREMENT_TREE_RECOVERY",
+    },
+  };
+  assert(
+    !syncEventMatchesHistoricalDeltaFingerprint(
+      recoveryHistorical,
+      historicalFingerprint,
+    ),
+    "Recovery CUSTOMER historical fingerprint ile yanlış eşleşti",
+  );
+
+  await localSyncQueueDb.pendingSyncEvents.clear();
+  const historicalPatchBefore = JSON.stringify(exactHistorical.patch);
+  await localSyncQueueDb.pendingSyncEvents.put(exactHistorical);
+  await markSyncEventsBlocked(
+    [
+      {
+        changeId: exactHistorical.changeId,
+        reason: "LEGACY_DELTA_ENTITY_UNSUPPORTED",
+        expected: historicalFingerprint,
+      },
+    ],
+    SCOPE_A,
+  );
+  const blockedHistorical =
+    await localSyncQueueDb.pendingSyncEvents.get(exactHistorical.changeId);
+  assert(
+    blockedHistorical?.syncStatus === "BLOCKED",
+    "Exact historical CUSTOMER BLOCKED olmadı",
+  );
+  assert(
+    blockedHistorical?.blockedReason ===
+      "LEGACY_DELTA_ENTITY_UNSUPPORTED",
+    "Historical block reason korunmadı",
+  );
+  assert(
+    JSON.stringify(blockedHistorical?.patch) === historicalPatchBefore,
+    "Historical block sırasında payload değişti",
+  );
+
+  await localSyncQueueDb.pendingSyncEvents.clear();
+  const wrongCreatedAt = queueEvent(
+    exactHistorical.changeId,
+    SCOPE_A,
+    "2026-08-27T08:34:55.139Z",
+    "CUSTOMER",
+  );
+  await localSyncQueueDb.pendingSyncEvents.put(wrongCreatedAt);
+  let wrongCreatedAtRejected = false;
+  try {
+    await markSyncEventsBlocked(
+      [
+        {
+          changeId: wrongCreatedAt.changeId,
+          reason: "LEGACY_DELTA_ENTITY_UNSUPPORTED",
+          expected: historicalFingerprint,
+        },
+      ],
+      SCOPE_A,
+    );
+  } catch (error) {
+    wrongCreatedAtRejected =
+      error instanceof Error &&
+      error.message === "SYNC_BLOCK_SCOPE_OR_AUTHORITY_MISMATCH";
+  }
+  assert(
+    wrongCreatedAtRejected,
+    "Historical fingerprint createdAt mismatch fail-closed değil",
+  );
+  assert(
+    (await localSyncQueueDb.pendingSyncEvents.get(wrongCreatedAt.changeId))
+      ?.syncStatus === "PENDING",
+    "Fingerprint mismatch event yanlışlıkla BLOCKED oldu",
+  );
+
+  await localSyncQueueDb.pendingSyncEvents.clear();
+  await localSyncQueueDb.pendingSyncEvents.put(recoveryHistorical);
+  let recoveryBlockRejected = false;
+  try {
+    await markSyncEventsBlocked(
+      [
+        {
+          changeId: recoveryHistorical.changeId,
+          reason: "LEGACY_DELTA_ENTITY_UNSUPPORTED",
+          expected: historicalFingerprint,
+        },
+      ],
+      SCOPE_A,
+    );
+  } catch (error) {
+    recoveryBlockRejected =
+      error instanceof Error &&
+      error.message === "SYNC_BLOCK_SCOPE_OR_AUTHORITY_MISMATCH";
+  }
+  assert(
+    recoveryBlockRejected,
+    "MEASUREMENT_TREE_RECOVERY CUSTOMER yanlışlıkla historical BLOCK aldı",
+  );
+  assert(
+    (await localSyncQueueDb.pendingSyncEvents.get(recoveryHistorical.changeId))
+      ?.syncStatus === "PENDING",
+    "Recovery CUSTOMER block rejection sonrası değiştirildi",
+  );
+
+  await localSyncQueueDb.pendingSyncEvents.clear();
+  const foreignHistorical = queueEvent(
+    "foreign-historical-customer",
+    SCOPE_B,
+    historicalFingerprint.createdAt,
+    "CUSTOMER",
+  );
+  await localSyncQueueDb.pendingSyncEvents.put(foreignHistorical);
+  let foreignHistoricalRejected = false;
+  try {
+    await markSyncEventsBlocked(
+      [
+        {
+          changeId: foreignHistorical.changeId,
+          reason: "LEGACY_DELTA_ENTITY_UNSUPPORTED",
+          expected: historicalFingerprint,
+        },
+      ],
+      SCOPE_A,
+    );
+  } catch (error) {
+    foreignHistoricalRejected =
+      error instanceof Error &&
+      error.message === "SYNC_BLOCK_SCOPE_OR_AUTHORITY_MISMATCH";
+  }
+  assert(
+    foreignHistoricalRejected,
+    "Foreign-scope historical event BLOCKED edilebildi",
+  );
+  assert(
+    (await localSyncQueueDb.pendingSyncEvents.get(foreignHistorical.changeId))
+      ?.syncStatus === "PENDING",
+    "Foreign historical event block rejection sonrası değiştirildi",
   );
 
   await localSyncQueueDb.pendingSyncEvents.clear();

@@ -37,12 +37,32 @@ export interface SyncPatch {
 
 export type SyncBlockedReason =
   | 'PARENT_ROOM_MISSING'
-  | 'PARENT_OPENING_MISSING';
+  | 'PARENT_OPENING_MISSING'
+  | 'LEGACY_DELTA_ENTITY_UNSUPPORTED';
 
-export interface SyncEventBlockRequest {
-  changeId: string;
-  reason: SyncBlockedReason;
+export type DeltaQueueEntityClassification =
+  | 'CANONICAL_SENDABLE'
+  | 'KNOWN_NONCANONICAL'
+  | 'UNKNOWN';
+
+export interface HistoricalDeltaEventFingerprint {
+  entityType: 'CUSTOMER' | 'ROOM' | 'OPENING';
+  operation: 'INSERT' | 'UPDATE' | 'SOFT_DELETE';
+  createdAt: string;
+  syncIntent: string | null;
+  expectedVersion: number | null;
 }
+
+export type SyncEventBlockRequest =
+  | {
+      changeId: string;
+      reason: 'PARENT_ROOM_MISSING' | 'PARENT_OPENING_MISSING';
+    }
+  | {
+      changeId: string;
+      reason: 'LEGACY_DELTA_ENTITY_UNSUPPORTED';
+      expected: HistoricalDeltaEventFingerprint;
+    };
 
 export interface SyncEvent {
   scope: ErpScope;
@@ -60,6 +80,37 @@ export interface SyncEvent {
   retryCount: number;
   blockedReason?: SyncBlockedReason;
   blockedAt?: string;
+}
+
+export function classifyDeltaQueueEntityType(
+  entityType: unknown,
+): DeltaQueueEntityClassification {
+  if (entityType === 'DRAFT' || entityType === 'MEASUREMENT') {
+    return 'CANONICAL_SENDABLE';
+  }
+
+  if (
+    entityType === 'CUSTOMER' ||
+    entityType === 'ROOM' ||
+    entityType === 'OPENING'
+  ) {
+    return 'KNOWN_NONCANONICAL';
+  }
+
+  return 'UNKNOWN';
+}
+
+export function syncEventMatchesHistoricalDeltaFingerprint(
+  event: SyncEvent,
+  expected: HistoricalDeltaEventFingerprint,
+): boolean {
+  return (
+    event.entityType === expected.entityType &&
+    event.operation === expected.operation &&
+    event.createdAt === expected.createdAt &&
+    (event.patch.syncIntent ?? null) === expected.syncIntent &&
+    (event.expectedVersion ?? null) === expected.expectedVersion
+  );
 }
 
 class LocalSyncQueueDatabase extends Dexie {
@@ -901,7 +952,9 @@ export async function markSyncEventsBlocked(
     }
 
     const uniqueRequests = Array.from(
-      new Map(requests.map((request) => [request.changeId, request])).values(),
+      new Map<string, SyncEventBlockRequest>(
+        requests.map((request) => [request.changeId, request]),
+      ).values(),
     );
     if (uniqueRequests.length === 0) return;
 
@@ -913,15 +966,34 @@ export async function markSyncEventsBlocked(
           uniqueRequests.map((request) => request.changeId),
         );
 
-        const verified = events.every((event) => {
-          if (!event || event.entityType !== 'MEASUREMENT') return false;
+        const verified = events.every((event, index) => {
+          const request = uniqueRequests[index];
+          if (!event || !request) return false;
           if (event.syncStatus === 'SYNCED') return false;
 
           const eventScope = readErpScope(event.scope);
-          return Boolean(
-            eventScope &&
-            erpScopeMatches(eventScope, verifiedScope),
-          );
+          if (
+            !eventScope ||
+            !erpScopeMatches(eventScope, verifiedScope)
+          ) {
+            return false;
+          }
+
+          if (
+            request.reason === 'PARENT_ROOM_MISSING' ||
+            request.reason === 'PARENT_OPENING_MISSING'
+          ) {
+            return event.entityType === 'MEASUREMENT';
+          }
+
+          if (request.reason === 'LEGACY_DELTA_ENTITY_UNSUPPORTED') {
+            return syncEventMatchesHistoricalDeltaFingerprint(
+              event,
+              request.expected,
+            );
+          }
+
+          return false;
         });
 
         if (!verified) {

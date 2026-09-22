@@ -214,6 +214,46 @@ async function main() {
   );
   assert.match(
     realPushSource,
+    /KNOWN_HISTORICAL_DELTA_EVENTS/,
+  );
+  assert.match(
+    deltaClientSource,
+    /6696e7af-e328-46c9-ac33-77647fcdea5a/,
+  );
+  assert.match(
+    deltaClientSource,
+    /ab843763-4e0a-47a7-bcf5-38b5ff62265e/,
+  );
+  assert.match(
+    realPushSource,
+    /syncEventMatchesHistoricalDeltaFingerprint/,
+  );
+  assert.match(
+    realPushSource,
+    /HISTORICAL_DELTA_EVENT_FINGERPRINT_MISMATCH/,
+  );
+  assert.match(
+    realPushSource,
+    /UNEXPECTED_NONCANONICAL_DELTA_EVENT/,
+  );
+  assert.match(
+    realPushSource,
+    /UNKNOWN_DELTA_ENTITY_TYPE/,
+  );
+  assert.match(
+    realPushSource,
+    /const sendableScopeEvents = remainingScopeEvents;/,
+  );
+  assert.doesNotMatch(
+    realPushSource,
+    /const legacyParentEvents = activeScopeEvents\.filter/,
+  );
+  assert.doesNotMatch(
+    realPushSource,
+    /const sendableScopeEvents = activeScopeEvents\.filter/,
+  );
+  assert.match(
+    realPushSource,
     /PARENT_ROOM_MISSING/,
   );
   assert.match(

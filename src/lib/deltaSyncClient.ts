@@ -12,10 +12,14 @@ import { loadLocalCustomers, saveLocalCustomerWithoutSync } from "./localCustome
 import { resolveMeasurementParentCustomerId } from "./measurementParentAckGate";
 import {
   activateDeferredMeasurementUpdateAfterInsert,
+  classifyDeltaQueueEntityType,
   getPendingSyncEvents,
   markSyncEventsBlocked,
   markSyncEventsSynced,
   markSyncEventsError,
+  syncEventMatchesHistoricalDeltaFingerprint,
+  type HistoricalDeltaEventFingerprint,
+  type SyncEvent,
   type SyncEventBlockRequest,
   type SyncPatchRoom,
   type SyncPatchOpening,
@@ -127,6 +131,25 @@ interface DeltaPushResponse {
     outcome?: string;
   }>;
 }
+
+const KNOWN_HISTORICAL_DELTA_EVENTS: Readonly<
+  Partial<Record<string, HistoricalDeltaEventFingerprint>>
+> = {
+  "6696e7af-e328-46c9-ac33-77647fcdea5a": {
+    entityType: "CUSTOMER",
+    operation: "UPDATE",
+    createdAt: "2026-08-27T08:34:54.139Z",
+    syncIntent: null,
+    expectedVersion: null,
+  },
+  "ab843763-4e0a-47a7-bcf5-38b5ff62265e": {
+    entityType: "CUSTOMER",
+    operation: "UPDATE",
+    createdAt: "2026-09-14T07:46:01.229Z",
+    syncIntent: null,
+    expectedVersion: null,
+  },
+};
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -462,15 +485,97 @@ export async function pushDeltaSyncEvents(): Promise<{
     console.log(
       `[SYNC-DIAGNOSTIC] Push API: eventCount=${activeScopeEvents.length}, roomsCount=${rCount}, productsCount=${pCount}, hasRawValues=${hasRaw}`,
     );
-    const measurementEvents = activeScopeEvents.filter(
+    const historicalBlockRequests: SyncEventBlockRequest[] = [];
+    const remainingScopeEvents: SyncEvent[] = [];
+    let fingerprintMismatchChangeId: string | null = null;
+
+    for (const event of activeScopeEvents) {
+      const expected = KNOWN_HISTORICAL_DELTA_EVENTS[event.changeId];
+      if (!expected) {
+        remainingScopeEvents.push(event);
+        continue;
+      }
+
+      if (!syncEventMatchesHistoricalDeltaFingerprint(event, expected)) {
+        fingerprintMismatchChangeId = event.changeId;
+        break;
+      }
+
+      historicalBlockRequests.push({
+        changeId: event.changeId,
+        reason: "LEGACY_DELTA_ENTITY_UNSUPPORTED",
+        expected,
+      });
+    }
+
+    if (fingerprintMismatchChangeId) {
+      return {
+        success: false,
+        pushedCount: 0,
+        isolatedCount,
+        errors: [
+          `HISTORICAL_DELTA_EVENT_FINGERPRINT_MISMATCH:${fingerprintMismatchChangeId}`,
+        ],
+        debug: {
+          pendingCount: activeScopeEvents.length,
+          apiStatus: "HISTORICAL_FINGERPRINT_MISMATCH",
+          syncedCount: 0,
+          errorCount: 1,
+          firstStatus,
+        },
+      };
+    }
+
+    if (historicalBlockRequests.length > 0) {
+      await markSyncEventsBlocked(
+        historicalBlockRequests,
+        activeScope,
+      );
+      isolatedCount += historicalBlockRequests.length;
+    }
+
+    const unexpectedEvent = remainingScopeEvents.find(
+      (event) =>
+        classifyDeltaQueueEntityType(event.entityType) !==
+        "CANONICAL_SENDABLE",
+    );
+
+    if (unexpectedEvent) {
+      const classification = classifyDeltaQueueEntityType(
+        unexpectedEvent.entityType,
+      );
+      const errorCode =
+        classification === "KNOWN_NONCANONICAL"
+          ? "UNEXPECTED_NONCANONICAL_DELTA_EVENT"
+          : "UNKNOWN_DELTA_ENTITY_TYPE";
+
+      return {
+        success: false,
+        pushedCount: 0,
+        isolatedCount,
+        errors: [
+          `${errorCode}:${String(unexpectedEvent.entityType)}:${unexpectedEvent.changeId}`,
+        ],
+        debug: {
+          pendingCount: activeScopeEvents.length,
+          apiStatus: errorCode,
+          syncedCount: 0,
+          errorCount: 1,
+          firstStatus,
+        },
+      };
+    }
+
+    const sendableScopeEvents = remainingScopeEvents;
+    const measurementEvents = sendableScopeEvents.filter(
       (event) => event.entityType === "MEASUREMENT",
     );
-    let deltaPushEvents = activeScopeEvents;
+    let deltaPushEvents = sendableScopeEvents;
     if (measurementEvents.length > 0) {
       const localCustomers = await loadLocalCustomers();
       const packagedEvents = [];
       const isolatedEvents: SyncEventBlockRequest[] = [];
-      for (const event of activeScopeEvents) {
+      for (const event of sendableScopeEvents) {
         if (event.entityType !== "MEASUREMENT") {
           packagedEvents.push(event);
           continue;
