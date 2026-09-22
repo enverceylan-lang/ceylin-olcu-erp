@@ -6,6 +6,7 @@ import {
 import { X, Save, AlertCircle, Sparkles } from 'lucide-react';
 import { Room, SelectedProductItem } from '@/store/useStore';
 import { MeasurementRecord } from '@/store/measurementStore';
+import type { SaleTransferBundleRefV1 } from '@/lib/salesAdapter';
 import {
   getTemplateLabel,
   resolveMeasurementProductType
@@ -27,7 +28,8 @@ interface RoomPreparationModalProps {
   measurements: MeasurementRecord[];
   onSave: (
     updated: MeasurementRecord[],
-    transferToSale: boolean
+    transferToSale: boolean,
+    transferSelection: SaleTransferBundleRefV1[]
   ) => Promise<void>;
 }
 
@@ -206,6 +208,14 @@ export function RoomPreparationModal({
   const [localSelections, setLocalSelections] =
     useState<Record<string, string[]>>({});
 
+  /*
+   * Satış transfer seçimi ürün niyetinden ayrıdır.
+   * localSelections => measurement.selectedProducts konfigürasyonu
+   * transferSelections => yalnız bu işlemde satışa gidecek bundle seçimi
+   */
+  const [transferSelections, setTransferSelections] =
+    useState<Record<string, string[]>>({});
+
   const [localOptions, setLocalOptions] =
     useState<Record<string, ProductOptions>>({});
 
@@ -279,6 +289,8 @@ export function RoomPreparationModal({
     const frameId = window.requestAnimationFrame(() => {
       setLocalSelections(initialSelections);
       setLocalOptions(initialOptions);
+      // Transfer authority her modal açılışında fail-closed olarak boş başlar.
+      setTransferSelections({});
     });
 
     return () => {
@@ -424,6 +436,60 @@ export function RoomPreparationModal({
       });
     }
   };
+  const toggleTransferSelection = (
+    measurementId: string,
+    productType: string
+  ) => {
+    setTransferSelections(previous => {
+      const current = previous[measurementId] || [];
+      const exists = current.includes(productType);
+
+      return {
+        ...previous,
+        [measurementId]: exists
+          ? current.filter(type => type !== productType)
+          : [...current, productType]
+      };
+    });
+  };
+
+  const currentTransferableBundles =
+    roomMeasurements.flatMap(measurement =>
+      (localSelections[measurement.id] || []).map(productType => ({
+        measurementId: measurement.id,
+        productType
+      }))
+    );
+
+  const selectedTransferCount =
+    Object.values(transferSelections)
+      .reduce((sum, productTypes) => sum + productTypes.length, 0);
+
+  const allCurrentBundlesSelected =
+    currentTransferableBundles.length > 0 &&
+    currentTransferableBundles.every(bundle =>
+      (transferSelections[bundle.measurementId] || [])
+        .includes(bundle.productType)
+    );
+
+  const toggleAllCurrentTransfers = () => {
+    if (allCurrentBundlesSelected) {
+      setTransferSelections({});
+      return;
+    }
+
+    const next: Record<string, string[]> = {};
+
+    currentTransferableBundles.forEach(bundle => {
+      const current = next[bundle.measurementId] || [];
+      if (!current.includes(bundle.productType)) {
+        next[bundle.measurementId] = [...current, bundle.productType];
+      }
+    });
+
+    setTransferSelections(next);
+  };
+
   const getHeightSources = (measurement: MeasurementRecord) => {
     const raw = measurement.rawValues || {};
 
@@ -1251,7 +1317,33 @@ export function RoomPreparationModal({
           };
         });
 
-      await onSave(updatedList, transferToSale);
+      const effectiveTransferSelection: SaleTransferBundleRefV1[] =
+        updatedList.flatMap(measurement =>
+          (measurement.selectedProducts || [])
+            .filter(product =>
+              product.isActive &&
+              (transferSelections[measurement.id] || [])
+                .includes(product.productType)
+            )
+            .map(product => ({
+              measurementId: measurement.id,
+              productType: product.productType
+            }))
+        );
+
+      if (
+        transferToSale &&
+        effectiveTransferSelection.length === 0
+      ) {
+        alert('Satışa aktarılacak en az bir ürün seçin.');
+        return;
+      }
+
+      await onSave(
+        updatedList,
+        transferToSale,
+        effectiveTransferSelection
+      );
       onClose();
     } catch (error) {
       console.error(error);
@@ -1290,6 +1382,33 @@ export function RoomPreparationModal({
         </div>
 
         <div className="flex-1 space-y-6 overflow-y-auto p-6">
+          {canTransferToSale && roomMeasurements.length > 0 && (
+            <div className="flex flex-col gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-emerald-300">
+                  Satış transfer seçimi
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  Ürün seçimi ölçü kaydını belirler; aşağıdaki seçim yalnız bu satış aktarımını belirler.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold text-emerald-200">
+                  {selectedTransferCount} ürün seçildi
+                </span>
+                <button
+                  type="button"
+                  onClick={toggleAllCurrentTransfers}
+                  className="rounded-lg border border-emerald-500/30 bg-emerald-600/10 px-3 py-2 text-xs font-black text-emerald-200 hover:bg-emerald-600/20"
+                >
+                  {allCurrentBundlesSelected
+                    ? 'Satış seçimlerini temizle'
+                    : 'Odadaki aktif ürünleri satışa seç'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {roomMeasurements.length === 0 ? (
             <div className="space-y-2 py-12 text-center">
               <AlertCircle className="mx-auto h-12 w-12 text-slate-500" />
@@ -1404,6 +1523,26 @@ export function RoomPreparationModal({
                             <span>{option.label}</span>
                           </label>
 
+                          {checked && canTransferToSale && (
+                            <label className="mt-3 flex cursor-pointer items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-[11px] font-black text-emerald-200">
+                              <input
+                                type="checkbox"
+                                checked={
+                                  (transferSelections[measurement.id] || [])
+                                    .includes(option.type)
+                                }
+                                onChange={() =>
+                                  toggleTransferSelection(
+                                    measurement.id,
+                                    option.type
+                                  )
+                                }
+                                className="h-4 w-4 cursor-pointer"
+                              />
+                              <span>Satışa aktar</span>
+                            </label>
+                          )}
+
                           {checked &&
                             renderProductOptions(
                               measurement,
@@ -1480,7 +1619,7 @@ export function RoomPreparationModal({
             >
 
 
-              Kaydet ve Satışa Aktar
+              Kaydet ve Seçilenleri Satışa Aktar
 
 
             </button>

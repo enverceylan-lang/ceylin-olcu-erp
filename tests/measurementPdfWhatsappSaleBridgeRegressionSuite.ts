@@ -41,9 +41,24 @@ assert.match(
   /TARGET_SALE_NOT_FOUND_OR_NOT_EDITABLE/,
 );
 
+const returnSaleFlow =
+  cari.match(
+    /if \(returnSaleId\) \{([\s\S]*?)router\.push\(`\/satis\/\$\{returnSaleId\}`\);/
+  )?.[1] ?? "";
+
+assert.match(
+  returnSaleFlow,
+  /syncOrCreateDraftSale\(/,
+);
+
+assert.match(
+  returnSaleFlow,
+  /\breturnSaleId\b/,
+);
+
 assert.match(
   cari,
-  /if \(returnSaleId\)[\s\S]*?scope,\s*returnSaleId\s*\)[\s\S]*?router\.push\(`\/satis\/\$\{returnSaleId\}`\)/,
+  /router\.push\(`\/satis\/\$\{returnSaleId\}`\)/,
 );
 
 console.log(

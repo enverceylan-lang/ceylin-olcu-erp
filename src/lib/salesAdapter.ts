@@ -357,14 +357,102 @@ interface SalesActor {
   name: string;
 }
 
+export interface SaleTransferBundleRefV1 {
+  measurementId: string;
+  productType: string;
+}
+
+export function saleTransferBundleKeyV1(
+  ref: SaleTransferBundleRefV1
+): string {
+  return [
+    String(ref.measurementId || '').trim(),
+    String(ref.productType || '').trim().toLocaleUpperCase('tr-TR')
+  ].join('::');
+}
+
+export function normalizeSaleTransferBundleRefsV1(
+  refs: SaleTransferBundleRefV1[] | undefined
+): SaleTransferBundleRefV1[] {
+  if (!Array.isArray(refs)) {
+    return [];
+  }
+
+  const unique = new Map<string, SaleTransferBundleRefV1>();
+
+  refs.forEach(ref => {
+    const measurementId = String(ref?.measurementId || '').trim();
+    const productType = String(ref?.productType || '').trim();
+
+    if (!measurementId || !productType) {
+      return;
+    }
+
+    const normalized = { measurementId, productType };
+    unique.set(
+      saleTransferBundleKeyV1(normalized),
+      normalized
+    );
+  });
+
+  return Array.from(unique.values());
+}
+
+export function saleItemContainsTransferBundleV1(
+  item: SaleItem,
+  ref: SaleTransferBundleRefV1
+): boolean {
+  const measurementId = String(ref.measurementId || '').trim();
+  const productType = String(ref.productType || '').trim();
+
+  if (!measurementId || !productType) {
+    return false;
+  }
+
+  const measurementIds =
+    String(item.measurementId || '')
+      .split(',')
+      .map(value => value.trim())
+      .filter(Boolean);
+
+  if (!measurementIds.includes(measurementId)) {
+    return false;
+  }
+
+  const prefix = `${measurementId}-${productType}-`;
+
+  if (String(item.id || '').startsWith(prefix)) {
+    return true;
+  }
+
+  const breakdown =
+    Array.isArray(item.productionBreakdown)
+      ? item.productionBreakdown
+      : [];
+
+  return breakdown.some(part =>
+    String(part?.id || '').startsWith(prefix)
+  );
+}
+
 export function createDraftSaleFromCustomer(
   customer: Customer,
   actor: SalesActor,
   scope: ErpScope,
   selectedMeasurementIds?: string[],
-  customerAddressId?: string
+  customerAddressId?: string,
+  selectedTransferBundles?: SaleTransferBundleRefV1[]
 ): Sale {
   const items: SaleItem[] = [];
+
+  const selectedTransferBundleKeys =
+    selectedTransferBundles !== undefined
+      ? new Set(
+          normalizeSaleTransferBundleRefsV1(
+            selectedTransferBundles
+          ).map(saleTransferBundleKeyV1)
+        )
+      : null;
 
   const selectedMeasurementIdSet =
     selectedMeasurementIds
@@ -379,7 +467,24 @@ export function createDraftSaleFromCustomer(
   measurements.forEach(m => {
     const room = customer.rooms?.find(r => r.id === m.roomId);
     const win = room?.windows?.find(w => w.id === (m.openingId || m.windowId));
-    const activeProducts = m.selectedProducts?.filter(sp => sp.isActive) || [];
+    const activeProducts =
+      (m.selectedProducts?.filter(sp => sp.isActive) || [])
+        .filter(product =>
+          !selectedTransferBundleKeys ||
+          selectedTransferBundleKeys.has(
+            saleTransferBundleKeyV1({
+              measurementId: m.id,
+              productType: product.productType
+            })
+          )
+        );
+
+    if (
+      selectedTransferBundleKeys &&
+      activeProducts.length === 0
+    ) {
+      return;
+    }
 
     if (activeProducts.length === 0) {
       const item = createSaleItemFromMeasurement(m, room?.name || 'Oda', win?.name || 'Pencere');
@@ -945,7 +1050,8 @@ export async function syncOrCreateDraftSale(
   actor: SalesActor | null,
   scope: ErpScope | null,
   targetSaleId?: string,
-  customerAddressId?: string
+  customerAddressId?: string,
+  selectedTransferBundles?: SaleTransferBundleRefV1[]
 ): Promise<string> {
   if (
     !actor?.id ||
@@ -960,6 +1066,34 @@ export async function syncOrCreateDraftSale(
   if (!scope) {
     throw new Error('SALE_SCOPE_REQUIRED');
   }
+  const explicitTransferSelection =
+    selectedTransferBundles !== undefined;
+
+  const normalizedTransferSelection =
+    explicitTransferSelection
+      ? normalizeSaleTransferBundleRefsV1(
+          selectedTransferBundles
+        )
+      : null;
+
+  if (
+    explicitTransferSelection &&
+    normalizedTransferSelection?.length === 0
+  ) {
+    throw new Error('SALE_TRANSFER_SELECTION_REQUIRED');
+  }
+
+  const selectedTransferMeasurementIds =
+    normalizedTransferSelection
+      ? Array.from(
+          new Set(
+            normalizedTransferSelection.map(
+              ref => ref.measurementId
+            )
+          )
+        )
+      : undefined;
+
   const cleanTargetSaleId =
     String(targetSaleId || '').trim();
 
@@ -996,8 +1130,9 @@ export async function syncOrCreateDraftSale(
       customer,
       actor,
       scope,
-      undefined,
-      customerAddressId
+      selectedTransferMeasurementIds,
+      customerAddressId,
+      normalizedTransferSelection || undefined
     );
 
   /*
@@ -1019,6 +1154,13 @@ export async function syncOrCreateDraftSale(
     });
 
   if (!existingDraft) {
+    if (
+      explicitTransferSelection &&
+      calculatedItems.length === 0
+    ) {
+      throw new Error('SALE_TRANSFER_SELECTION_NO_ITEMS');
+    }
+
     await salesStore.addSale({
       ...newSaleObj,
       items: calculatedItems
@@ -1031,6 +1173,95 @@ export async function syncOrCreateDraftSale(
     Array.isArray(existingDraft.items)
       ? existingDraft.items
       : [];
+
+  /*
+   * Explicit transfer selection append-only ve non-destructive çalışır.
+   * Bu tur seçilmeyen otomatik satırlar ile manuel satırlar aynen korunur.
+   * Zaten mevcut olan bundle yeniden eklenmez.
+   *
+   * Mevcut bundle'ı kısmi olarak yeniden yazmak, oda bazında gruplanmış
+   * historical satırlarda başka measurement bundle'larını silebileceği için
+   * V1'de bilinçli olarak yapılmaz.
+   */
+  if (normalizedTransferSelection) {
+    const additions: SaleItem[] = [];
+
+    for (const ref of normalizedTransferSelection) {
+      const alreadyExists =
+        existingItems.some(item =>
+          saleItemContainsTransferBundleV1(
+            item,
+            ref
+          )
+        );
+
+      if (alreadyExists) {
+        continue;
+      }
+
+      const bundleDraft =
+        createDraftSaleFromCustomer(
+          customer,
+          actor,
+          scope,
+          [ref.measurementId],
+          customerAddressId,
+          [ref]
+        );
+
+      const bundleItems =
+        bundleDraft.items.filter((item: SaleItem) => {
+          if (!item.measurementId) {
+            return true;
+          }
+
+          return (
+            Number.isFinite(Number(item.metricSize)) &&
+            Number(item.metricSize) > 0 &&
+            Number.isFinite(Number(item.quantity)) &&
+            Number(item.quantity) > 0
+          );
+        });
+
+      if (bundleItems.length === 0) {
+        throw new Error(
+          'SALE_TRANSFER_BUNDLE_NO_ITEMS'
+        );
+      }
+
+      additions.push(...bundleItems);
+    }
+
+    if (additions.length === 0) {
+      return existingDraft.id;
+    }
+
+    const existingIds =
+      new Set(
+        existingItems.map(item => item.id)
+      );
+
+    const uniqueAdditions =
+      additions.filter(item => {
+        if (existingIds.has(item.id)) {
+          return false;
+        }
+
+        existingIds.add(item.id);
+        return true;
+      });
+
+    await salesStore.updateSale({
+      ...existingDraft,
+      items: [
+        ...existingItems,
+        ...uniqueAdditions
+      ],
+      updatedAt: new Date().toISOString()
+    });
+
+    return existingDraft.id;
+  }
 
   /*
    * Kullanıcının elle eklediği, herhangi bir ölçüye

@@ -58,10 +58,27 @@ assert.match(
   "Satışa Hazırlık köprüsü scope hazır değilken satış güncellememelidir."
 );
 
+const returnSaleBridge =
+  cari.match(
+    /if \(returnSaleId\) \{([\s\S]*?)router\.push\(`\/satis\/\$\{returnSaleId\}`\);/
+  )?.[1] ?? "";
+
 assert.match(
-  cari,
-  /syncOrCreateDraftSale\([\s\S]*scope,\s*returnSaleId\s*\)/,
-  "Satış -> Satışa Hazırlık -> aynı satış, exact returnSaleId ile devam etmelidir."
+  returnSaleBridge,
+  /syncOrCreateDraftSale\(/,
+  "Satış -> Satışa Hazırlık dönüşü canonical satış senkron motorunu kullanmalıdır."
+);
+
+assert.match(
+  returnSaleBridge,
+  /\bscope\b[\s\S]*\breturnSaleId\b/,
+  "Satış -> Satışa Hazırlık -> aynı satış, exact returnSaleId hedefiyle devam etmelidir."
+);
+
+assert.match(
+  returnSaleBridge,
+  /transferToSale[\s\S]*\?[\s\S]*transferSelection[\s\S]*:[\s\S]*undefined/,
+  "Mevcut satışa dönüşte explicit transfer seçimi yalnız Satışa Aktar akışında devreye girmelidir."
 );
 
 assert.match(

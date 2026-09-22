@@ -3401,7 +3401,11 @@ showToast("Saha taslağı telefona kaydedildi.");
             room={selectedRoomForPrep}
             customerId={customer.id}
             measurements={measurementStore.measurements}
-            onSave={async (updatedMeas, transferToSale) => {
+            onSave={async (
+              updatedMeas,
+              transferToSale,
+              transferSelection
+            ) => {
               for (const m of updatedMeas) {
                 await measurementStore.updateMeasurement(m, currentUser?.name || 'Sistem');
               }
@@ -3439,7 +3443,11 @@ showToast("Saha taslağı telefona kaydedildi.");
                     useSalesStore.getState(),
                     currentUser,
                     scope,
-                    returnSaleId
+                    returnSaleId,
+                    undefined,
+                    transferToSale
+                      ? transferSelection
+                      : undefined
                   );
                   router.push(`/satis/${returnSaleId}`);
                   return;
@@ -3456,7 +3464,10 @@ showToast("Saha taslağı telefona kaydedildi.");
                     customer,
                     useSalesStore.getState(),
                     currentUser,
-                    scope
+                    scope,
+                    undefined,
+                    undefined,
+                    transferSelection
                   );
                   showToast("Satış taslağı oluşturuldu / güncellendi.");
                   router.push(`/satis/${draftId}`);
