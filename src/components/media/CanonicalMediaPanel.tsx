@@ -1,5 +1,6 @@
 "use client";
 
+import { MediaPreviewModal } from "@/components/MediaPreviewModal";
 import { useAuthStore } from "@/store/useAuthStore";
 
 import Image from "next/image";
@@ -81,6 +82,9 @@ export function CanonicalMediaPanel({
   const [items, setItems] = useState<
     CanonicalMediaItem[]
   >([]);
+  const [previewIndex, setPreviewIndex] = useState<
+    number | null
+  >(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<
     string | null
@@ -228,6 +232,22 @@ export function CanonicalMediaPanel({
     }
   }
 
+  const previewItem =
+    previewIndex === null
+      ? null
+      : items[previewIndex] ?? null;
+
+  function movePreview(offset: number) {
+    if (previewIndex === null || items.length <= 1) {
+      return;
+    }
+
+    setPreviewIndex(
+      (previewIndex + offset + items.length) %
+        items.length,
+    );
+  }
+
   async function archive(linkId: string) {
     if (!canArchive || busy) return;
 
@@ -262,26 +282,36 @@ export function CanonicalMediaPanel({
     >
       {isAdmin && items.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          {items.map(item => (
+          {items.map((item, index) => (
             <div
               key={item.linkId}
               className="relative h-16 w-16 overflow-hidden rounded border border-gray-200 bg-gray-100 dark:border-gray-700 dark:bg-gray-800"
             >
-              <Image
-                src={item.signedUrl}
-                alt="Canonical fotoğraf"
-                fill
-                unoptimized
-                sizes="64px"
-                className="object-cover"
-              />
+              <button
+                type="button"
+                onClick={() =>
+                  setPreviewIndex(index)
+                }
+                className="relative h-full w-full cursor-zoom-in"
+                aria-label="Fotoğrafı büyüt"
+              >
+                <Image
+                  src={item.signedUrl}
+                  alt="Canonical fotoğraf"
+                  fill
+                  unoptimized
+                  sizes="64px"
+                  className="object-cover"
+                />
+              </button>
               <button
                 type="button"
                 disabled={busy}
-                onClick={() =>
-                  void archive(item.linkId)
-                }
-                className="absolute right-0 top-0 rounded-bl bg-red-600 p-1 text-white disabled:opacity-50"
+                onClick={event => {
+                  event.stopPropagation();
+                  void archive(item.linkId);
+                }}
+                className="absolute right-0 top-0 z-10 rounded-bl bg-red-600 p-1 text-white disabled:opacity-50"
                 aria-label="Fotoğrafı görünümden kaldır"
               >
                 <Trash2 className="h-3 w-3" />
@@ -328,6 +358,22 @@ export function CanonicalMediaPanel({
           {message}
         </div>
       )}
+
+      <MediaPreviewModal
+        url={previewItem?.signedUrl ?? null}
+        type={previewItem ? "photo" : null}
+        onClose={() => setPreviewIndex(null)}
+        onPrevious={
+          items.length > 1
+            ? () => movePreview(-1)
+            : undefined
+        }
+        onNext={
+          items.length > 1
+            ? () => movePreview(1)
+            : undefined
+        }
+      />
     </div>
   );
 }

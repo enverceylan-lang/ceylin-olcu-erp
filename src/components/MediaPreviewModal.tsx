@@ -1,6 +1,6 @@
 "use client";
 
-import { X } from "lucide-react";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import Image from "next/image";
 import { useEffect } from "react";
 
@@ -8,9 +8,17 @@ interface MediaPreviewModalProps {
   url: string | null;
   type: 'photo' | 'video' | null;
   onClose: () => void;
+  onPrevious?: () => void;
+  onNext?: () => void;
 }
 
-export function MediaPreviewModal({ url, type, onClose }: MediaPreviewModalProps) {
+export function MediaPreviewModal({
+  url,
+  type,
+  onClose,
+  onPrevious,
+  onNext,
+}: MediaPreviewModalProps) {
   useEffect(() => {
     if (!url) return;
     
@@ -21,6 +29,8 @@ export function MediaPreviewModal({ url, type, onClose }: MediaPreviewModalProps
     // Listen for Escape key
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
+      if (e.key === 'ArrowLeft') onPrevious?.();
+      if (e.key === 'ArrowRight') onNext?.();
     };
     window.addEventListener('keydown', handleKeyDown);
     
@@ -28,7 +38,7 @@ export function MediaPreviewModal({ url, type, onClose }: MediaPreviewModalProps
       document.body.style.overflow = originalStyle;
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [url, onClose]);
+  }, [url, onClose, onNext, onPrevious]);
 
   if (!url || !type) return null;
 
@@ -44,6 +54,34 @@ export function MediaPreviewModal({ url, type, onClose }: MediaPreviewModalProps
       >
         <X className="w-6 h-6" />
       </button>
+
+      {onPrevious && (
+        <button
+          type="button"
+          onClick={event => {
+            event.stopPropagation();
+            onPrevious();
+          }}
+          className="absolute left-3 top-1/2 z-[10000] -translate-y-1/2 rounded-full bg-black/40 p-2 text-white/80 transition-colors hover:bg-black/60 hover:text-white sm:left-6"
+          aria-label="Önceki fotoğraf"
+        >
+          <ChevronLeft className="h-7 w-7" />
+        </button>
+      )}
+
+      {onNext && (
+        <button
+          type="button"
+          onClick={event => {
+            event.stopPropagation();
+            onNext();
+          }}
+          className="absolute right-3 top-1/2 z-[10000] -translate-y-1/2 rounded-full bg-black/40 p-2 text-white/80 transition-colors hover:bg-black/60 hover:text-white sm:right-6"
+          aria-label="Sonraki fotoğraf"
+        >
+          <ChevronRight className="h-7 w-7" />
+        </button>
+      )}
 
       <div 
         onClick={(e) => e.stopPropagation()}
