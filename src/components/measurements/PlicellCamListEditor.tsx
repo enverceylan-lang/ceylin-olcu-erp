@@ -31,6 +31,7 @@ export interface PlicellCamListEditorProps {
     profilRengi: string;
     plicellCamListesi: PlicellCamItem[];
   }) => void;
+  onPendingPieceInputChange?: (value: string) => void;
 }
 
 function createRowId(): string {
@@ -105,6 +106,7 @@ export function PlicellCamListEditor({
   profilRengi = "",
   plicellCamListesi,
   onChange,
+  onPendingPieceInputChange,
 }: PlicellCamListEditorProps) {
   void camAdedi;
 
@@ -299,13 +301,28 @@ export function PlicellCamListEditor({
     );
   }
 
-  function handleGeneratePieces(): void {
+  function handleGeneratePieces(
+    inputValue = fastInput,
+    announceErrors = true,
+  ): void {
     const result =
-      parsePlicellPieceInput(fastInput);
+      parsePlicellPieceInput(inputValue);
 
-    if (result.pieces.length === 0) {
-      setFastInputMessage(
-        result.errors.join(" | "),
+    if (
+      result.pieces.length === 0 ||
+      result.errors.length > 0
+    ) {
+      if (announceErrors) {
+        setFastInputMessage(
+          result.errors.length > 0
+            ? result.errors.join(" | ")
+            : "Geçerli parça bazlı ölçü bulunamadı.",
+        );
+      } else {
+        setFastInputMessage(null);
+      }
+      onPendingPieceInputChange?.(
+        inputValue.trim() ? inputValue : "",
       );
       return;
     }
@@ -336,12 +353,7 @@ export function PlicellCamListEditor({
     setPieceRows(nextPieceRows);
 
     setFastInputMessage(
-      result.errors.length > 0
-        ? [
-            `${nextPieceRows.length} parça bazlı cam aktarıldı.`,
-            result.errors.join(" | "),
-          ].join(" ")
-        : `${nextPieceRows.length} parça bazlı cam aktarıldı.`,
+      `${nextPieceRows.length} parça bazlı cam aktarıldı.`,
     );
 
     /*
@@ -352,6 +364,7 @@ export function PlicellCamListEditor({
       nextPieceRows,
       commonRows,
     );
+    onPendingPieceInputChange?.("");
   }
 
   function handleRenkChange(
@@ -622,11 +635,25 @@ export function PlicellCamListEditor({
 
             <textarea
               value={fastInput}
-              onChange={(event) =>
-                setFastInput(
-                  event.target.value,
-                )
-              }
+              onChange={(event) => {
+                const nextValue =
+                  event.target.value;
+                setFastInput(nextValue);
+
+                if (!nextValue.trim()) {
+                  onPendingPieceInputChange?.("");
+                  setFastInputMessage(null);
+                  return;
+                }
+
+                onPendingPieceInputChange?.(
+                  nextValue,
+                );
+                handleGeneratePieces(
+                  nextValue,
+                  false,
+                );
+              }}
               onKeyDown={(event) => {
                 if (
                   event.key === "Enter" &&
@@ -646,7 +673,7 @@ export function PlicellCamListEditor({
 
             <button
               type="button"
-              onClick={handleGeneratePieces}
+              onClick={() => handleGeneratePieces()}
               className="mt-2 min-h-11 w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 sm:w-auto"
             >
               Parça Bazlı Ölçüleri Aktar

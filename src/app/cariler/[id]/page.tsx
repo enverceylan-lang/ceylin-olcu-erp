@@ -298,8 +298,9 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const [windowName, setWindowName] = useState("");
 
   // Measurement Template Form State
-  const [selectedTemplate, setSelectedTemplate] = useState("CURTAIN_DETAIL");
+  const [selectedTemplate, setSelectedTemplate] = useState("SIMPLE_WIDTH_HEIGHT");
   const [rawValues, setRawValues] = useState<ProductMeasurement["rawValues"]>({});
+  const [pendingPlicellPieceInput, setPendingPlicellPieceInput] = useState("");
   // For ADMIN/SALES entering on behalf of someone else
   const [overrideMeasuredById, setOverrideMeasuredById] = useState(currentUser?.id || "");
   const [measurementNotes, setMeasurementNotes] = useState("");
@@ -815,9 +816,10 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     );
     setEditingMeasurementId(null);
     setSelectedTemplate(
-      "CURTAIN_DETAIL"
+      "SIMPLE_WIDTH_HEIGHT"
     );
     setRawValues({});
+    setPendingPlicellPieceInput("");
     setMeasurementNotes("");
     setOverrideMeasuredById(user.id);
   };
@@ -891,8 +893,9 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const openMeasurementForm = (w: WindowItem) => {
     setActiveWindowIdForProduct(w.id);
     setEditingMeasurementId(null);
-    setSelectedTemplate("CURTAIN_DETAIL");
+    setSelectedTemplate("SIMPLE_WIDTH_HEIGHT");
     setRawValues({});
+    setPendingPlicellPieceInput("");
     setMeasurementNotes("");
     setOverrideMeasuredById(user.id);
   };
@@ -1017,6 +1020,15 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
     const measurementCustomerAddressId =
       customer.rooms.find(room => room.id === roomId)?.customerAddressId;
     if (isSaving) return;
+    if (
+      selectedTemplate === 'PLICELL' &&
+      pendingPlicellPieceInput.trim()
+    ) {
+      showToast(
+        "Parça bazlı Plicell girişinde tamamlanmamış veya geçersiz satır var. Satırları düzeltin ya da hızlı giriş alanını temizleyin."
+      );
+      return;
+    }
     const measurementIssues = validateMeasurementRecord(
       {
         templateType: selectedTemplate,
@@ -1459,7 +1471,7 @@ showToast("Saha taslağı telefona kaydedildi.");
                                     <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Ölçüm Şablonu</label>
                                     <select
                                       value={selectedTemplate}
-                                      onChange={(e) => { setSelectedTemplate(e.target.value); setRawValues({}); }}
+                                      onChange={(e) => { setSelectedTemplate(e.target.value); setRawValues({}); setPendingPlicellPieceInput(""); }}
                                       className="min-h-11 w-full rounded-lg border bg-gray-50 px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                                     >
                                       {Object.values(MEASUREMENT_TEMPLATES).map(t => (
@@ -1508,6 +1520,7 @@ showToast("Saha taslağı telefona kaydedildi.");
                                       profilRengi={rawValues.profilRengi}
                                       plicellCamListesi={rawValues.plicellCamListesi}
                                       onChange={(data) => setRawValues({...rawValues, ...data})}
+                                      onPendingPieceInputChange={setPendingPlicellPieceInput}
                                     />
                                   </div>
                                 )}
@@ -2592,6 +2605,7 @@ showToast("Saha taslağı telefona kaydedildi.");
                                             setActiveWindowIdForProduct(window.id);
                                             setSelectedTemplate(resolvedTemplate);
                                             setRawValues(p.rawValues || {});
+                                            setPendingPlicellPieceInput("");
                                             setMeasurementNotes(p.notes || "");
                                             setOverrideMeasuredById(p.measuredById || currentUser?.id || "");
                                           }}
