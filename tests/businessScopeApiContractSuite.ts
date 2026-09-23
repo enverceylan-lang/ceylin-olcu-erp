@@ -350,7 +350,79 @@ assert.match(
 );
 assert.match(
   identityContract,
-  /not production-closure PAK until the flag-close/,
+  /Production closure has two mutually\s+exclusive evidence paths/,
+);
+assert.match(
+  identityContract,
+  /ZERO_LEGACY_IS_NOT_A_BYPASS = true/,
+);
+assert.match(
+  identityContract,
+  /Path A - Legacy migration lifecycle/,
+);
+assert.match(
+  identityContract,
+  /Path A is not production-closure PAK until all five lifecycle proofs exist/,
+);
+assert.match(
+  identityContract,
+  /Path B - Zero-legacy recovery closure/,
+);
+assert.match(
+  identityContract,
+  /historical migration telemetry is\s+unavailable or incomplete/,
+);
+assert.match(
+  identityContract,
+  /LEGACY_MISSING = 0/,
+);
+assert.match(
+  identityContract,
+  /unmatched_customer_scope_count = 0/,
+);
+assert.match(
+  identityContract,
+  /absent or is not exactly "true"/,
+);
+assert.match(
+  identityContract,
+  /no synthetic invalid production Customer is created solely to manufacture a\s+post-close rejection canary/,
+);
+assert.match(
+  identityContract,
+  /Any LEGACY_MISSING > 0, unmatched_customer_scope_count > 0,[\s\S]*yields\s+DUR/,
+);
+assert.match(
+  identityContract,
+  /does not\s+independently certify the historical business ownership correctness/,
+);
+assert.match(
+  identityContract,
+  /Why two paths exist - Future Me/,
+);
+assert.match(
+  identityContract,
+  /2026-09-23 decision evidence - non-normative history/,
+);
+assert.match(
+  identityContract,
+  /84 Customers with complete\/non-empty root\s+scope and no LEGACY_MISSING classification/,
+);
+assert.match(
+  identityContract,
+  /does not by\s+itself prove authenticated-scope equality/,
+);
+assert.match(
+  identityContract,
+  /MIGRATION_FLAG_STATE=NOT_TRUE/,
+);
+assert.match(
+  identityContract,
+  /Historical accepted \/ migrated \/ rejected runtime counts were not available/,
+);
+assert.match(
+  identityContract,
+  /still requires the separate final-state active-scope integrity proof/,
 );
 
 console.log("[PASS] business scope API write and read contract");

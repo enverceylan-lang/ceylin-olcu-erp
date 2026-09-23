@@ -179,8 +179,20 @@ This window is not general multi-company ownership inference. When disabled or w
 the companyId does not match, incomplete legacy Customer scope remains unproven and must
 be rejected/quarantined without deleting the local record.
 
-The migration window is operationally temporary. Production closure requires all of
-the following evidence:
+The migration window is operationally temporary. Production closure has two mutually
+exclusive evidence paths because a production state with recoverable legacy rows and a
+production state with zero legacy rows do not have the same safe runtime proof.
+
+`ZERO_LEGACY_IS_NOT_A_BYPASS = true`
+
+The two paths exist because the production data state is different, not because Path B
+accepts weaker evidence. A zero-legacy state must never be manufactured by deleting,
+rewriting or hiding legacy Customers.
+
+#### Path A - Legacy migration lifecycle
+
+Path A applies when LEGACY_MISSING Customers exist and are being recovered through the
+controlled pilot migration window. Production closure requires all of the following:
 
 1. the pilot companyId used for the migration window is recorded and verified;
 2. migration is enabled only for the approved pilot runtime window;
@@ -189,8 +201,56 @@ the following evidence:
 5. a subsequent runtime check proves incomplete legacy Customers are again rejected as
    CUSTOMER_SCOPE_LEGACY_UNPROVEN while the migration flag is disabled.
 
-The Customer migration workstream is not production-closure PAK until the flag-close
-proof in steps 4 and 5 exists. Source/test PAK does not substitute for runtime closure.
+Path A is not production-closure PAK until all five lifecycle proofs exist. Source/test
+PAK does not substitute for runtime migration evidence.
+
+#### Path B - Zero-legacy recovery closure
+
+Path B exists for a zero-legacy final state when historical migration telemetry is
+unavailable or incomplete. It does not claim that no migration ever occurred and it
+does not reconstruct missing accepted / migrated / rejected history.
+
+Path B may close only when all of the following are independently proven:
+
+1. a count-only, read-only production inventory proves LEGACY_MISSING = 0;
+2. every current Customer has a complete root-scope tuple;
+3. a count-only final-state integrity query proves unmatched_customer_scope_count = 0
+   against currently active ERP scope tuples;
+4. ENVERP_PILOT_LEGACY_CUSTOMER_SCOPE_MIGRATION is absent or is not exactly "true";
+5. current source still rejects LEGACY_MISSING as CUSTOMER_SCOPE_LEGACY_UNPROVEN while
+   the migration gate is disabled and still rejects explicit scope conflict;
+6. focused regression, TypeScript and diff hygiene remain PAK;
+7. no synthetic invalid production Customer is created solely to manufacture a
+   post-close rejection canary.
+
+Any LEGACY_MISSING > 0, unmatched_customer_scope_count > 0, effectively enabled
+migration flag, or fail-closed source/regression failure invalidates Path B and yields
+DUR.
+
+Path B closes only the legacy Customer scope migration/recovery lifecycle. It does not
+independently certify the historical business ownership correctness of every Customer.
+If historical migration telemetry exists, it remains evidence and must not be discarded.
+
+#### Why two paths exist - Future Me
+
+A post-close rejection canary is meaningful when real legacy data exists or a migration
+run is being verified. When the live legacy count is zero, manufacturing an invalid
+production Customer solely to trigger that rejection would mutate a clean production
+state in order to prove a negative. Path B replaces that synthetic writer risk with
+stronger read-only final-state integrity evidence.
+
+#### 2026-09-23 decision evidence - non-normative history
+
+- Production count-only inventory returned 84 Customers with complete/non-empty root
+  scope and no LEGACY_MISSING classification under the inventory definition.
+- That inventory classification proves non-empty root-scope fields; it does not by
+  itself prove authenticated-scope equality.
+- Production derived flag probe returned MIGRATION_FLAG_STATE=NOT_TRUE and
+  MIGRATION_COMPANY_ID_PRESENT=false without logging raw environment values.
+- Historical accepted / migrated / rejected runtime counts were not available in the
+  evidence set reviewed for this decision.
+- Therefore Path B still requires the separate final-state active-scope integrity proof
+  before this production instance may claim zero-legacy recovery closure.
 
 Partial Customer sync is explicit: valid Customers may succeed while rejected Customer
 ids/reasons are returned to the client. The client must preserve rejected local records
