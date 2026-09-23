@@ -149,6 +149,169 @@ assert.equal(
     ),
   true,
 );
+/* ENVERP_A5_SRGB_COLOR_SAFETY_CONTRACT_V1 */
+const a5SrgbMarker =
+  '/* ENVERP_A5_SRGB_COLOR_SAFETY_V1';
+
+const a5SrgbStart =
+  visual.indexOf(a5SrgbMarker);
+
+assert.ok(
+  a5SrgbStart >= 0,
+  'A5 sRGB safety marker missing',
+);
+
+const a5SrgbEnd =
+  visual.indexOf(
+    '[data-a5-room-header="true"]',
+    a5SrgbStart,
+  );
+
+assert.ok(
+  a5SrgbEnd > a5SrgbStart,
+  'A5 sRGB safety block boundary missing',
+);
+
+const a5SrgbBlock =
+  visual.slice(
+    a5SrgbStart,
+    a5SrgbEnd,
+  );
+
+const a4SrgbStart =
+  visual.indexOf(
+    'sourceColorSafetyStyle.textContent = `',
+  );
+
+assert.ok(
+  a4SrgbStart >= 0,
+  'A4 sRGB source contract missing',
+);
+
+const a4SrgbEnd =
+  visual.indexOf(
+    '`;',
+    a4SrgbStart,
+  );
+
+assert.ok(
+  a4SrgbEnd > a4SrgbStart,
+  'A4 sRGB source contract boundary missing',
+);
+
+const a4SrgbBlock =
+  visual.slice(
+    a4SrgbStart,
+    a4SrgbEnd,
+  );
+
+const sharedSrgbContract = [
+  'font-family: Arial, Helvetica, sans-serif !important;',
+  'color: #0f172a !important;',
+  'background-color: #ffffff !important;',
+  'border-color: #cbd5e1 !important;',
+  'outline-color: #cbd5e1 !important;',
+  'text-decoration-color: #0f172a !important;',
+  'background-image: none !important;',
+  'box-shadow: none !important;',
+  'text-shadow: none !important;',
+];
+
+for (const rule of sharedSrgbContract) {
+  assert.equal(
+    a5SrgbBlock.includes(rule),
+    true,
+    `A5 sRGB contract drift: ${rule}`,
+  );
+  assert.equal(
+    a4SrgbBlock.includes(rule),
+    true,
+    `A4 sRGB reference drift: ${rule}`,
+  );
+}
+
+assert.equal(
+  a5SrgbBlock.includes(
+    '[data-enverp-a5-live] *::before',
+  ),
+  true,
+);
+
+assert.equal(
+  a5SrgbBlock.includes(
+    '[data-enverp-a5-live] *::after',
+  ),
+  true,
+);
+
+const a5SrgbDeclarationLines =
+  a5SrgbBlock
+    .split(/\r?\n/)
+    .filter(line => {
+      const trimmed = line.trim();
+
+      return (
+        trimmed.includes(':') &&
+        !trimmed.startsWith('*') &&
+        !trimmed.startsWith('/*') &&
+        !trimmed.startsWith('//')
+      );
+    })
+    .join('\n');
+
+assert.doesNotMatch(
+  a5SrgbDeclarationLines,
+  /\b(?:oklab|oklch|lab|lch|color-mix)\s*\(/i,
+);
+
+assert.doesNotMatch(
+  a5SrgbBlock,
+  /(?:^|\n)\s*(?:fill|stroke)\s*:/m,
+);
+
+assert.match(
+  a5SrgbBlock,
+  /FUTURE_ME_A5_SRGB_GUARD/,
+);
+
+const firstA5CaptureAfterSafety =
+  visual.indexOf(
+    'html2canvas(',
+    a5SrgbEnd,
+  );
+
+assert.ok(
+  firstA5CaptureAfterSafety > a5SrgbEnd,
+  'A5 sRGB guard must exist before html2canvas capture',
+);
+
+const packageLock =
+  JSON.parse(
+    fs.readFileSync(
+      path.join(root, 'package-lock.json'),
+      'utf8',
+    ),
+  );
+
+const packageJson =
+  JSON.parse(
+    fs.readFileSync(
+      path.join(root, 'package.json'),
+      'utf8',
+    ),
+  );
+
+assert.equal(
+  packageLock.packages?.['node_modules/html2canvas']?.version,
+  '1.4.1',
+  'FUTURE_ME: html2canvas changed; re-evaluate A5 sRGB guard with browser runtime proof',
+);
+
+assert.match(
+  String(packageJson.devDependencies?.tailwindcss || ''),
+  /^\^?4(?:\.|$)/,
+  'FUTURE_ME: Tailwind major changed; re-evaluate A5 sRGB guard with browser runtime proof',
+);
 /*
  * The canonical PDF producer is consumed by both:
  * - Yazdır / PDF Al (object URL download)

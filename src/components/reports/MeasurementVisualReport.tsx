@@ -147,16 +147,36 @@ async function generateA5RoomPdfFile(
       document.createElement('style');
 
     style.textContent = `
+      /* ENVERP_A5_SRGB_COLOR_SAFETY_V1
+       * Runtime RCA: Tailwind/Chrome can expose CSS Color 4 values
+       * from modern CSS Color 4 functions, while html2canvas 1.4.1
+       * cannot parse every such color function.
+       *
+       * Keep this property set in parity with the proven A4 sRGB
+       * color-safety contract below. It intentionally protects only
+       * CSS paint properties consumed by html2canvas.
+       *
+       * FUTURE_ME_A5_SRGB_GUARD:
+       * Re-evaluate this guard when html2canvas or Tailwind changes.
+       * Removal requires browser/runtime proof that CSS Color 4 no
+       * longer breaks A5 capture. Do not broaden this block to SVG
+       * fill/stroke without separate diagram-semantic evidence.
+       */
       [data-enverp-a5-live],
-      [data-enverp-a5-live] * {
+      [data-enverp-a5-live] *,
+      [data-enverp-a5-live] *::before,
+      [data-enverp-a5-live] *::after {
         box-sizing: border-box !important;
         font-family: Arial, Helvetica, sans-serif !important;
         color: #0f172a !important;
+        background-color: #ffffff !important;
         border-color: #cbd5e1 !important;
+        outline-color: #cbd5e1 !important;
+        text-decoration-color: #0f172a !important;
+        background-image: none !important;
         box-shadow: none !important;
         text-shadow: none !important;
       }
-
       [data-a5-room-header="true"] {
         border-bottom: 1px solid #94a3b8 !important;
         margin: 0 0 4px 0 !important;
