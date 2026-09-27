@@ -1291,7 +1291,7 @@ export default function StockPage() {
               }
               className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
             >
-              Excel'den İçeri Aktar
+              Excel&apos;den İçeri Aktar
             </button>
 
             <button
@@ -1302,7 +1302,7 @@ export default function StockPage() {
               }
               className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
             >
-              Excel'e Aktar
+              Excel&apos;e Aktar
             </button>
           </div>
         </div>

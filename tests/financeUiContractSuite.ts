@@ -8,6 +8,7 @@ const read = (path: string) =>
 const sidebar = read("src/components/Sidebar.tsx");
 const page = read("src/app/finans/page.tsx");
 const customerPage = read("src/app/cariler/[id]/page.tsx");
+const customerTabsNav = read("src/components/CariCustomerTabsNav.tsx");
 const customerPanel = read(
   "src/components/finance/CustomerFinancePanel.tsx",
 );
@@ -266,8 +267,18 @@ assert.doesNotMatch(
 );
 
 assert.match(
+  customerTabsNav,
+  /onClick=\{\(\) => onTabChange\("financial"\)\}/,
+);
+
+assert.match(
   customerPage,
-  /onClick=\{\(\) => setActiveTab\("financial"\)\}[\s\S]*<CustomerFinancePanel/,
+  /<CariCustomerTabsNav[\s\S]{0,500}onTabChange=\{tab => setActiveTab\(tab\)\}/,
+);
+
+assert.match(
+  customerPage,
+  /activeTab === "financial"[\s\S]{0,500}<CustomerFinancePanel customerId=\{customer\.id\}/,
 );
 
 console.log(

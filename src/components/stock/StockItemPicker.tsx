@@ -127,9 +127,15 @@ export function StockItemPicker({
   };
 
   useEffect(() => {
-    if (autoOpen) {
-      setOpen(true);
+    if (!autoOpen) {
+      return;
     }
+
+    const autoOpenTimer = window.setTimeout(() => {
+      setOpen(true);
+    }, 0);
+
+    return () => window.clearTimeout(autoOpenTimer);
   }, [autoOpen]);
 
   useEffect(() => {

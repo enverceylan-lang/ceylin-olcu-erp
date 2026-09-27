@@ -95,7 +95,10 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
   const [
     isInstallmentModalOpen,
     setIsInstallmentModalOpen
-  ] = useState(false);
+  ] = useState(
+    () =>
+      searchParams.get("openInstallment") === "1",
+  );
 
   const [
     isPaymentModalOpen,
@@ -103,10 +106,18 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
   ] = useState(false);
   useEffect(() => {
     if (
-      searchParams.get("openInstallment") === "1"
+      searchParams.get("openInstallment") !== "1"
     ) {
-      setIsInstallmentModalOpen(true);
+      return;
     }
+
+    const openInstallmentTimer =
+      window.setTimeout(() => {
+        setIsInstallmentModalOpen(true);
+      }, 0);
+
+    return () =>
+      window.clearTimeout(openInstallmentTimer);
   }, [searchParams]);
 
   useEffect(() => {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { buildShadowErpContextApiResponse } from "../src/lib/serverErpContextApi";
+import { ERP_FEATURES } from "../src/lib/shadowFeatureAccess";
 
 assert.deepEqual(
   buildShadowErpContextApiResponse({
@@ -87,7 +88,7 @@ assert.equal(
   readyWithRole.body.success &&
     readyWithRole.body.configured &&
     readyWithRole.body.accessSummary?.evaluatedFeatureCount,
-  16
+  ERP_FEATURES.length
 );
 assert.equal(
   readyWithRole.body.success &&

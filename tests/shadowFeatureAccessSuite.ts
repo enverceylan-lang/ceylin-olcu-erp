@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { PACKAGE_FEATURES } from "../src/lib/packageFeatures";
 import {
   compareShadowFeatureAccess,
   currentRoleAllowsFeature,
@@ -7,7 +8,10 @@ import {
   parseShadowAccessRole,
 } from "../src/lib/shadowFeatureAccess";
 
-assert.equal(ERP_FEATURES.length, 16);
+assert.deepEqual(
+  [...ERP_FEATURES].sort(),
+  Object.keys(PACKAGE_FEATURES.PLUS).sort()
+);
 assert.equal(normalizeShadowAccessRole("SALES"), "OFFICE");
 assert.equal(normalizeShadowAccessRole("MEASUREMENT"), "FIELD");
 assert.equal(normalizeShadowAccessRole("PRODUCTION"), "TAILOR");

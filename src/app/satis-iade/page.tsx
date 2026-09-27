@@ -40,9 +40,6 @@ export default function SatisIadePage() {
 
   useEffect(() => {
     if (!scope) {
-      if (!scopeLoading) {
-        setLoading(false);
-      }
       return;
     }
 
@@ -120,7 +117,7 @@ export default function SatisIadePage() {
     [returns, sales, customers],
   );
 
-  if (loading || scopeLoading) {
+  if (scopeLoading || (Boolean(scope) && loading)) {
     return (
       <div className="p-8 text-center">
         Yükleniyor...

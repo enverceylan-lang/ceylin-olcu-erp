@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { ERP_FEATURES } from "../src/lib/shadowFeatureAccess";
 import {
   buildShadowRoleInventory,
   PENDING_ACCESS_DECISIONS,
@@ -10,14 +11,19 @@ import {
 const rows = buildShadowRoleInventory();
 const summary = summarizeShadowRoleInventory(rows);
 
+const expectedRowsPerPackage =
+  SHADOW_INVENTORY_ROLES.length * ERP_FEATURES.length;
+const expectedRowCount =
+  SHADOW_INVENTORY_PACKAGES.length * expectedRowsPerPackage;
+
 assert.equal(SHADOW_INVENTORY_ROLES.length, 7);
 assert.equal(SHADOW_INVENTORY_PACKAGES.length, 4);
-assert.equal(rows.length, 7 * 4 * 16);
-assert.equal(summary.rowCount, 448);
-assert.equal(summary.byPackage.ECO.rowCount, 112);
-assert.equal(summary.byPackage.PRO.rowCount, 112);
-assert.equal(summary.byPackage.PLUS.rowCount, 112);
-assert.equal(summary.byPackage.ELITE.rowCount, 112);
+assert.equal(rows.length, expectedRowCount);
+assert.equal(summary.rowCount, rows.length);
+assert.equal(summary.byPackage.ECO.rowCount, expectedRowsPerPackage);
+assert.equal(summary.byPackage.PRO.rowCount, expectedRowsPerPackage);
+assert.equal(summary.byPackage.PLUS.rowCount, expectedRowsPerPackage);
+assert.equal(summary.byPackage.ELITE.rowCount, expectedRowsPerPackage);
 assert.equal(summary.byPackage.PLUS.differenceCount, 0);
 assert.equal(summary.byPackage.ECO.differenceCount > 0, true);
 assert.equal(summary.byPackage.PRO.differenceCount > 0, true);

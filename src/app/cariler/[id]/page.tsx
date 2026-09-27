@@ -15,7 +15,7 @@ import { syncNow } from "@/lib/syncService";
 import { buildWhatsAppShortReport, getValidNote } from "@/lib/reportFormatters";
 import { fetchActiveCompanyDisplayName } from "@/lib/activeCompanyDisplayNameClient";
 import { MeasurementVisualReport } from "@/components/reports/MeasurementVisualReport";
-import { RoomPreparationModal } from "@/components/reports/RoomPreparationModal";
+import dynamic from "next/dynamic";
 import { localDraftDb, FieldMeasurementDraft, forceRequeueCustomerMeasurementTree } from "@/lib/localDraftDb";
 import { useSalesStore } from "@/store/salesStore";
 import { syncOrCreateDraftSale } from "@/lib/salesAdapter";
@@ -31,7 +31,24 @@ import { FieldTaskAssignButton } from "@/components/FieldTaskAssignButton";
 import { hasSlopedFacadeHeight } from "@/lib/facadeHeight";
 import { CustomerFinancePanel } from "@/components/finance/CustomerFinancePanel";
 import { CounterpartyPayablePanel } from "@/components/finance/CounterpartyPayablePanel";
+import { CariTimelineTable } from "@/components/CariTimelineTable";
+import { CariMobileCustomerSummaryHeader } from "@/components/CariMobileCustomerSummaryHeader";
+import { CariCustomerIdentityHeader } from "@/components/CariCustomerIdentityHeader";
+import { CariCustomerTabsNav } from "@/components/CariCustomerTabsNav";
+import { CariCustomerModeToggle } from "@/components/CariCustomerModeToggle";
+import { CariCustomerMobileQuickActions } from "@/components/CariCustomerMobileQuickActions";
+import { CariCustomerWorkAddressCard } from "@/components/CariCustomerWorkAddressCard";
+import { CariCustomerContactLocationActions } from "@/components/CariCustomerContactLocationActions";
+import { CariCustomerExpandedContactDetails } from "@/components/CariCustomerExpandedContactDetails";
+import { CariCustomerWorkflowAnalysisCard } from "@/components/CariCustomerWorkflowAnalysisCard";
+import { CariCustomerDesktopContactSummary } from "@/components/CariCustomerDesktopContactSummary";
 import { validateMeasurementRecord } from "@/lib/measurementValidationEngine";
+
+const RoomPreparationModal = dynamic(() =>
+  import("@/components/reports/RoomPreparationModal").then(
+    (module) => module.RoomPreparationModal
+  )
+);
 
 const measurementOpeningId = (measurement: { openingId?: string; windowId?: string }) =>
   measurement.openingId || measurement.windowId || "";
@@ -1626,142 +1643,63 @@ showToast("Saha taslağı telefona kaydedildi.");
             <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-300" />
           </Link>
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="truncate text-2xl font-extrabold tracking-tight heading-title sm:text-3xl">{customer.name}</h1>
-              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${getCariTypeColor(customer.cariType)}`}>
-                {getCariTypeLabel(customer.cariType)}
-              </span>
-              {customer.customerCode && (
-                <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 font-mono text-[10px] font-semibold text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
-                  {customer.customerCode}
-                </span>
-              )}
-            </div>
+            <CariCustomerIdentityHeader
+              name={customer.name}
+              cariTypeLabel={getCariTypeLabel(customer.cariType)}
+              cariTypeClassName={getCariTypeColor(customer.cariType)}
+              customerCode={customer.customerCode || null}
+            />
 
             {canViewCustomerContactFields(currentUser, customer) && (
-              <div className="mt-2 grid max-w-3xl gap-x-6 gap-y-2 text-sm text-gray-600 dark:text-gray-300 sm:grid-cols-2 xl:grid-cols-[auto_1fr]">
-                <div className="flex min-w-0 items-center gap-2">
-                  <Phone className="h-3.5 w-3.5 shrink-0 text-gray-400" />
-                  {customer.phone ? (
-                    <a href={`tel:${customer.phone}`} className="truncate font-semibold hover:text-blue-600 hover:underline dark:hover:text-blue-300">
-                      {customer.phone}
-                    </a>
-                  ) : (
-                    <span className="text-gray-400">Telefon belirtilmemiş</span>
-                  )}
-                </div>
-
-                <div className="flex min-w-0 items-center gap-2">
-                  <MapPin className="h-3.5 w-3.5 shrink-0 text-gray-400" />
-                  <span className="truncate font-semibold text-blue-600 dark:text-blue-300">
-                    {[customer.province, customer.district].filter(Boolean).join(" / ") || "İl / İlçe belirtilmemiş"}
-                  </span>
-                </div>
-
-                <div className="flex min-w-0 items-start gap-2 sm:col-span-2 xl:col-span-2">
-                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-400" />
-                  <span className="line-clamp-2 font-medium leading-relaxed text-gray-500 dark:text-gray-400">{customer.address || "Adres belirtilmemiş"}</span>
-                </div>
-
-                <div className="mt-1 grid grid-cols-2 gap-x-6 gap-y-2 rounded-xl border border-gray-200/80 bg-gray-50/70 p-3 text-sm dark:border-gray-800 dark:bg-gray-950/30 sm:col-span-2 sm:grid-cols-4 xl:col-span-2">
-                  <div>
-                    <span className="block text-[9px] font-bold uppercase tracking-wider text-gray-400">Müşteri No</span>
-                    <span className="mt-0.5 block truncate font-mono font-semibold text-gray-700 dark:text-gray-200">{customer.customerCode || "-"}</span>
-                  </div>
-                  <div>
-                    <span className="block text-[9px] font-bold uppercase tracking-wider text-gray-400">Vergi No</span>
-                    <span className="mt-0.5 block truncate font-mono font-semibold text-gray-700 dark:text-gray-200">{customer.taxNumber || "-"}</span>
-                  </div>
-                  <div>
-                    <span className="block text-[9px] font-bold uppercase tracking-wider text-gray-400">Grup</span>
-                    <span className="mt-0.5 block truncate font-semibold text-gray-700 dark:text-gray-200">{getCariTypeLabel(customer.cariType)}</span>
-                  </div>
-                  <div>
-                    <span className="block text-[9px] font-bold uppercase tracking-wider text-gray-400">İl / İlçe</span>
-                    <span className="mt-0.5 block truncate font-semibold text-gray-700 dark:text-gray-200">{[customer.province, customer.district].filter(Boolean).join(" / ") || "-"}</span>
-                  </div>
-                </div>
-              </div>
+              <CariCustomerDesktopContactSummary
+                phone={customer.phone || null}
+                locationLabel={
+                  [customer.province, customer.district].filter(Boolean).join(" / ") ||
+                  "İl / İlçe belirtilmemiş"
+                }
+                addressText={customer.address || "Adres belirtilmemiş"}
+                customerCode={customer.customerCode || "-"}
+                taxNumber={customer.taxNumber || "-"}
+                cariTypeLabel={getCariTypeLabel(customer.cariType)}
+                metadataLocationLabel={
+                  [customer.province, customer.district].filter(Boolean).join(" / ") || "-"
+                }
+              />
             )}
 
-            <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50/60 p-3 dark:border-blue-900/40 dark:bg-blue-950/20">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">Ölçü / İş Adresi</span>
-                <span className="truncate text-[10px] font-semibold text-gray-500 dark:text-gray-400">
-                  {[selectedAddressProvince, selectedAddressDistrict].filter(Boolean).join(" / ") || "İl / İlçe belirtilmemiş"}
-                </span>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
-                <select
-                  value={selectedCustomerAddressId || ""}
-                  onChange={(e) => setSelectedCustomerAddressId(e.target.value || null)}
-                  disabled={activeAddresses.length === 0}
-                  className="min-h-9 w-full rounded-lg border border-blue-200 bg-white px-3 text-xs font-semibold text-gray-800 outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 dark:border-blue-900/60 dark:bg-gray-900 dark:text-gray-100 dark:disabled:bg-gray-800"
-                >
-                  {activeAddresses.length === 0 ? (
-                    <option value="">{selectedAddressTitle}</option>
-                  ) : (
-                    activeAddresses.map(address => (
-                      <option key={address.id} value={address.id}>
-                        {customerAddressDisplayTitle(address)}
-                        {[address.province, address.district].filter(Boolean).length
-                          ? ` - ${[address.province, address.district].filter(Boolean).join(" / ")}`
-                          : ""}
-                      </option>
-                    ))
-                  )}
-                </select>
-                {canEdit && (
-                  <button
-                    type="button"
-                    onClick={() => setIsEditModalOpen(true)}
-                    className="min-h-9 rounded-lg border border-blue-200 bg-white px-3 text-xs font-bold text-blue-700 hover:bg-blue-100 dark:border-blue-900/60 dark:bg-gray-900 dark:text-blue-300"
-                  >
-                    Adres Değiştir
-                  </button>
-                )}
-
-              </div>
-              <div className="mt-2 line-clamp-2 text-xs font-medium text-gray-600 dark:text-gray-300">
-                {selectedAddressText || "Adres belirtilmemiş"}
-              </div>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {canViewCustomerContactFields(currentUser, customer) && customer.phone && (
-                <a href={`tel:${customer.phone}`} className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-[11px] font-semibold text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-750">
-                  <Phone className="h-3.5 w-3.5" />
-                  Ara
-                </a>
-              )}
-              {(() => {
-                const mapsUrl = getGoogleMapsUrl(customer);
-                return mapsUrl ? (
-                  <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-[11px] font-semibold text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-750">
-                    <MapPin className="h-3.5 w-3.5" />
-                    Harita
-                  </a>
-                ) : null;
-              })()}
-              <button
-                type="button"
-                onClick={handleUpdateLocation}
-                disabled={updatingLocation}
-                className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-[11px] font-semibold text-gray-700 transition-colors hover:bg-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-750"
-              >
-                {updatingLocation ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MapPin className="h-3.5 w-3.5" />}
-                {customer.mapLocation ? "Konum Güncelle" : "Konum Al"}
-              </button>
-              {canEdit && (
-                <button
-                  type="button"
-                  onClick={() => setIsEditModalOpen(true)}
-                  className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-[11px] font-semibold text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-750"
-                >
-                  <Edit className="h-3.5 w-3.5" />
-                  Cariyi Düzenle
-                </button>
-              )}
-            </div>
+            <CariCustomerWorkAddressCard
+              provinceDistrictLabel={
+                [selectedAddressProvince, selectedAddressDistrict].filter(Boolean).join(" / ") ||
+                "İl / İlçe belirtilmemiş"
+              }
+              selectedAddressId={selectedCustomerAddressId}
+              addressOptions={activeAddresses.map(address => ({
+                id: address.id,
+                label: `${customerAddressDisplayTitle(address)}${
+                  [address.province, address.district].filter(Boolean).length
+                    ? ` - ${[address.province, address.district].filter(Boolean).join(" / ")}`
+                    : ""
+                }`,
+              }))}
+              emptyAddressLabel={selectedAddressTitle}
+              selectedAddressText={selectedAddressText || null}
+              canEdit={canEdit}
+              onAddressChange={(addressId) => setSelectedCustomerAddressId(addressId)}
+              onEditAddress={() => setIsEditModalOpen(true)}
+            />
+            <CariCustomerContactLocationActions
+              phone={
+                canViewCustomerContactFields(currentUser, customer)
+                  ? customer.phone || null
+                  : null
+              }
+              mapsUrl={getGoogleMapsUrl(customer)}
+              hasMapLocation={Boolean(customer.mapLocation)}
+              updatingLocation={updatingLocation}
+              canEdit={canEdit}
+              onUpdateLocation={handleUpdateLocation}
+              onEdit={() => setIsEditModalOpen(true)}
+            />
           </div>
         </div>
 
@@ -1866,30 +1804,14 @@ showToast("Saha taslağı telefona kaydedildi.");
           </button>
 
           {/* MODE TOGGLE */}
-          <div className="flex bg-gray-200 dark:bg-gray-800 rounded-xl p-1 shadow-inner">
-          <button
-            onClick={() => setMode("MEASUREMENT")}
-            className={`px-6 py-2 text-sm font-bold rounded-lg transition-colors ${mode === 'MEASUREMENT' ? 'bg-white dark:bg-[#435269] text-[#527eae] dark:text-[#9fc1e8] shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
-          >
-            Sahadan Ölçü Modu
-          </button>
-          {permissions.canAccessOfficeMode ? (
-            <button
-              onClick={() => setMode("OFFICE")}
-              className={`px-6 py-2 text-sm font-bold rounded-lg transition-colors ${mode === 'OFFICE' ? 'bg-white dark:bg-[#594b47] text-[#ad5f3d] dark:text-[#e1a486] shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
-            >
-              Ofis / Satış Modu
-            </button>
-          ) : (
-            <button
-              disabled
-              className="px-6 py-2 text-sm font-bold rounded-lg text-gray-400 dark:text-gray-600 cursor-not-allowed"
-              title="Bu mod için yetkiniz yok"
-            >
-              Ofis / Satış Modu
-            </button>
-          )}
-          </div>
+          <CariCustomerModeToggle
+            mode={mode}
+            canAccessOfficeMode={permissions.canAccessOfficeMode}
+            onModeChange={(nextMode) => {
+              if (nextMode === "OFFICE" && !permissions.canAccessOfficeMode) return;
+              setMode(nextMode);
+            }}
+          />
         </div>
         </div>
       </div>
@@ -1899,59 +1821,34 @@ showToast("Saha taslağı telefona kaydedildi.");
         <div className="space-y-3">
           <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 lg:hidden">
             <div className="border-b border-gray-200 bg-gray-50/80 px-4 py-3 dark:border-gray-800 dark:bg-gray-800/40">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="truncate text-sm font-bold text-gray-900 dark:text-white lg:text-xs lg:uppercase lg:tracking-wide lg:text-gray-500 lg:dark:text-gray-400">{customer.name}<span className="hidden lg:inline"> · Detaylar</span></h2>
-                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${getCariTypeColor(customer.cariType)}`}>
-                      {getCariTypeLabel(customer.cariType)}
-                    </span>
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-                    {canViewCustomerContactFields(currentUser, customer) && customer.phone && (
-                      <a href={`tel:${customer.phone}`} className="inline-flex items-center gap-1 hover:text-blue-600 dark:hover:text-blue-300">
-                        <Phone className="h-3.5 w-3.5" />
-                        {customer.phone}
-                      </a>
-                    )}
-                    {(customer.province || customer.district) && (
-                      <span className="inline-flex items-center gap-1 font-semibold text-blue-600 dark:text-blue-300">
-                        <MapPin className="h-3.5 w-3.5" />
-                        {[customer.province, customer.district].filter(Boolean).join(" / ")}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsCustomerCardExpanded(value => !value)}
-                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 lg:hidden"
-                  aria-label={isCustomerCardExpanded ? "Müşteri kartını daralt" : "Müşteri kartını genişlet"}
-                >
-                  {isCustomerCardExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                </button>
-              </div>
+              <CariMobileCustomerSummaryHeader
+                name={customer.name}
+                cariTypeLabel={getCariTypeLabel(customer.cariType)}
+                cariTypeClassName={getCariTypeColor(customer.cariType)}
+                phone={
+                  canViewCustomerContactFields(currentUser, customer)
+                    ? customer.phone || null
+                    : null
+                }
+                locationLabel={
+                  customer.province || customer.district
+                    ? [customer.province, customer.district].filter(Boolean).join(" / ")
+                    : null
+                }
+                expanded={isCustomerCardExpanded}
+                onToggle={() => setIsCustomerCardExpanded(value => !value)}
+              />
 
-              <div className="mt-2 flex items-center gap-1.5 lg:hidden">
-                {canViewCustomerContactFields(currentUser, customer) && customer.phone && (
-                  <a href={`tel:${customer.phone}`} title="Ara" className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
-                    <Phone className="h-4 w-4" />
-                  </a>
-                )}
-                {(() => {
-                  const mapsUrl = getGoogleMapsUrl(customer);
-                  return mapsUrl ? (
-                    <a href={mapsUrl} target="_blank" rel="noopener noreferrer" title="Haritada Aç" className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
-                      <MapPin className="h-4 w-4" />
-                    </a>
-                  ) : null;
-                })()}
-                {canEdit && (
-                  <button type="button" onClick={() => setIsEditModalOpen(true)} title="Cariyi Düzenle" className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-purple-50 text-purple-700 dark:bg-purple-950/30 dark:text-purple-300">
-                    <Edit className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
+              <CariCustomerMobileQuickActions
+                phone={
+                  canViewCustomerContactFields(currentUser, customer)
+                    ? customer.phone || null
+                    : null
+                }
+                mapsUrl={getGoogleMapsUrl(customer)}
+                canEdit={canEdit}
+                onEdit={() => setIsEditModalOpen(true)}
+              />
             </div>
 
             <div className={`${isCustomerCardExpanded ? "block" : "hidden"} divide-y divide-gray-100 px-4 text-sm dark:divide-gray-800 sm:px-5 lg:block`}>
@@ -1978,81 +1875,29 @@ showToast("Saha taslağı telefona kaydedildi.");
                 </div>
               )}
 
-              {customer.customerCode && (
-                <div className="py-3">
-                  <span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Cari Kodu</span>
-                  <span className="mt-1 block break-all font-mono text-sm font-semibold text-gray-900 dark:text-white">{customer.customerCode}</span>
-                </div>
-              )}
-              {canViewCustomerContactFields(currentUser, customer) && customer.taxNumber && (
-                <div className="py-3">
-                  <span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">TC / Vergi No</span>
-                  <span className="mt-1 block font-mono text-sm font-semibold text-gray-900 dark:text-white">{customer.taxNumber}</span>
-                </div>
-              )}
-              {canViewCustomerContactFields(currentUser, customer) && (
-                <div className="py-2.5">
-                  <div className="flex items-center gap-2">
-                    <Phone className="h-4 w-4 shrink-0 text-gray-400" />
-                    <div className="min-w-0 flex-1">
-                      <span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Telefon</span>
-                      {customer.phone ? (
-                        <a href={`tel:${customer.phone}`} className="mt-0.5 inline-flex min-h-6 items-center font-semibold text-gray-900 hover:text-blue-700 hover:underline dark:text-gray-100 dark:hover:text-blue-300">
-                          {customer.phone}
-                        </a>
-                      ) : (
-                        <span className="mt-0.5 block text-gray-400">Belirtilmemiş</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-              {canViewCustomerContactFields(currentUser, customer) && customer.phone2 && (
-                <div className="py-3">
-                  <span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Telefon 2</span>
-                  <a href={`tel:${customer.phone2}`} className="mt-1 inline-flex min-h-8 items-center font-bold text-blue-700 hover:underline dark:text-blue-300">
-                    {customer.phone2}
-                  </a>
-                </div>
-              )}
-              {canViewCustomerContactFields(currentUser, customer) && (
-                <div className="py-3">
-                  <div className="mb-1.5 flex items-center justify-between gap-2">
-                    <span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Adres</span>
-                    {(customer.province || customer.district) && (
-                      <span className="text-[10px] font-bold uppercase tracking-wide text-blue-600 dark:text-blue-300">
-                        {[customer.province, customer.district].filter(Boolean).join(" / ")}
-                      </span>
-                    )}
-                  </div>
-                  {(() => {
-                    const mapsUrl = getGoogleMapsUrl(customer);
-                    if (mapsUrl) {
-                      return (
-                        <a
-                          href={mapsUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                           className="group flex min-h-9 items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/70 p-2 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-300 dark:hover:bg-blue-950/40"
-                          title="Haritada Göster"
-                        >
-                          <MapPin className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
-                          <span className="group-hover:underline break-words">{customer.address || customer.mapLocation || '-'}</span>
-                        </a>
-                      );
-                    }
-                    return (
-                      <div
-                        className="flex items-start gap-1.5 text-gray-400 dark:text-gray-600 cursor-not-allowed"
-                        title="Konum eklenmemiş"
-                      >
-                        <MapPin className="w-4 h-4 text-gray-300 dark:text-gray-700 flex-shrink-0 mt-0.5" />
-                        <span className="break-words">{customer.address || '-'}</span>
-                      </div>
-                    );
-                  })()}
-                </div>
-              )}
+              <CariCustomerExpandedContactDetails
+                customerCode={customer.customerCode || null}
+                contactDetails={
+                  canViewCustomerContactFields(currentUser, customer)
+                    ? (() => {
+                        const mapsUrl = getGoogleMapsUrl(customer);
+                        return {
+                          taxNumber: customer.taxNumber || null,
+                          phone: customer.phone || null,
+                          phone2: customer.phone2 || null,
+                          provinceDistrictLabel:
+                            customer.province || customer.district
+                              ? [customer.province, customer.district].filter(Boolean).join(" / ")
+                              : null,
+                          mapsUrl,
+                          addressDisplayText: mapsUrl
+                            ? customer.address || customer.mapLocation || "-"
+                            : customer.address || "-",
+                        };
+                      })()
+                    : null
+                }
+              />
               {canViewCustomerContactFields(currentUser, customer) && (
                 <div className="py-3">
                   <div className="mb-2 flex items-center justify-between gap-2">
@@ -2277,40 +2122,11 @@ showToast("Saha taslağı telefona kaydedildi.");
             )}
 
             {/* Tabs Navigation */}
-          <div className="flex border-b border-gray-200 dark:border-gray-800 mb-4 gap-6">
-            <button
-              onClick={() => setActiveTab("rooms")}
-              className={`pb-3 text-sm font-semibold border-b-2 transition-colors cursor-pointer ${
-                activeTab === "rooms"
-                  ? "border-blue-500 text-blue-600 dark:text-blue-400"
-                  : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400"
-              }`}
-            >
-              Odalar & Ölçüler
-            </button>
-            {canViewCustomerWorkflowReport(currentUser, customer) && (
-              <button
-                onClick={() => setActiveTab("timeline")}
-                className={`pb-3 text-sm font-semibold border-b-2 transition-colors cursor-pointer ${
-                  activeTab === "timeline"
-                    ? "border-blue-500 text-blue-600 dark:text-blue-400"
-                    : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400"
-                }`}
-              >
-                Cari İş Akış Raporu
-              </button>
-            )}
-            <button
-              onClick={() => setActiveTab("financial")}
-              className={`pb-3 text-sm font-semibold border-b-2 transition-colors cursor-pointer ${
-                activeTab === "financial"
-                  ? "border-blue-500 text-blue-600 dark:text-blue-400"
-                  : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400"
-              }`}
-            >
-              Finans
-            </button>
-          </div>
+          <CariCustomerTabsNav
+            activeTab={activeTab}
+            showWorkflowTab={canViewCustomerWorkflowReport(currentUser, customer)}
+            onTabChange={tab => setActiveTab(tab)}
+          />
 
           {activeTab === "rooms" && (
             <>
@@ -3274,57 +3090,14 @@ showToast("Saha taslağı telefona kaydedildi.");
 
           {activeTab === "timeline" && canViewCustomerWorkflowReport(currentUser, customer) && (
             <div className="space-y-6">
-              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 shadow-sm">
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Cari İş Akış Analizi</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                  <div className="p-4 bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/30 rounded-xl">
-                    <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 block mb-1">TOPLAM İŞ SÜRESİ</span>
-                    <span className="text-2xl font-bold text-gray-900 dark:text-white">{getJobDurationDays()} Gün</span>
-                    <span className="text-xs text-gray-500 dark:text-gray-400 block mt-1">Cari oluşturulma tarihi ile bugün arasındaki süre</span>
-                  </div>
-                  <div className="p-4 bg-gray-50 dark:bg-gray-800/40 border border-gray-200/60 dark:border-gray-800 rounded-xl">
-                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 block mb-1">İŞ AKIŞ DURUMU</span>
-                    <span className="text-lg font-bold text-gray-800 dark:text-gray-200">{CUSTOMER_WORKFLOW_LABELS[customer.workflowStatus || 'YENI'] || customer.workflowStatus}</span>
-                    <span className="text-xs text-gray-500 dark:text-gray-400 block mt-1">Müşterinin güncel operasyonel aşaması</span>
-                  </div>
-                </div>
-              </div>
+              <CariCustomerWorkflowAnalysisCard
+                jobDurationDays={getJobDurationDays()}
+                workflowStatusLabel={
+                  CUSTOMER_WORKFLOW_LABELS[customer.workflowStatus || 'YENI'] || customer.workflowStatus
+                }
+              />
 
-              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden shadow-sm">
-                <div className="p-5 border-b border-gray-200 dark:border-gray-800">
-                  <h4 className="font-bold text-gray-900 dark:text-white">Operasyonel Zaman Tüneli</h4>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-sm">
-                    <thead>
-                      <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-800 text-gray-500 dark:text-gray-400 font-bold">
-                        <th className="p-4 font-semibold">Tarih</th>
-                        <th className="p-4 font-semibold">İşlem</th>
-                        <th className="p-4 font-semibold">Açıklama</th>
-                        <th className="p-4 font-semibold">Personel</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-150 dark:divide-gray-800">
-                      {getTimelineEvents().map((e, index) => (
-                        <tr key={index} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
-                          <td className="p-4 whitespace-nowrap text-gray-600 dark:text-gray-400">
-                            {new Date(e.date).toLocaleString('tr-TR')}
-                          </td>
-                          <td className="p-4 font-semibold text-gray-900 dark:text-white">
-                            {e.action}
-                          </td>
-                          <td className="p-4 text-gray-600 dark:text-gray-300">
-                            {e.description}
-                          </td>
-                          <td className="p-4 whitespace-nowrap text-gray-600 dark:text-gray-400">
-                            {e.personnel}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              <CariTimelineTable events={getTimelineEvents()} />
             </div>
           )}
 

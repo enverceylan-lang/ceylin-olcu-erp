@@ -61,11 +61,12 @@ export function CustomerFinancePanel({
   const isLoading = useSalesStore((state) => state.isLoading);
   const [projectionAt] = useState(() => new Date().toISOString());
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
-  const [canonicalSnapshot, setCanonicalSnapshot] =
-    useState<CustomerReceivableSnapshot | null>(null);
-  const [canonicalState, setCanonicalState] =
-    useState<"IDLE" | "LOADING" | "READY" | "ERROR">("IDLE");
-  const [canonicalError, setCanonicalError] = useState<string | null>(null);
+  const [canonicalRead, setCanonicalRead] = useState<{
+    requestKey: string;
+    state: "READY" | "ERROR";
+    snapshot: CustomerReceivableSnapshot | null;
+    error: string | null;
+  } | null>(null);
 
   const saleById = useMemo(
     () => new Map(sales.map((sale) => [sale.id, sale] as const)),
@@ -75,6 +76,33 @@ export function CustomerFinancePanel({
   const selectedSale =
     selectedSaleId === null ? null : saleById.get(selectedSaleId) ?? null;
 
+  const canonicalRequestKey =
+    runtime.state === "ready"
+      ? JSON.stringify([
+          runtime.scope.tenantId,
+          runtime.scope.companyId,
+          runtime.scope.branchId,
+          runtime.scope.accountingPeriodId,
+          customerId,
+          currency,
+        ])
+      : null;
+  const canonicalReadIsCurrent =
+    canonicalRequestKey !== null &&
+    canonicalRead?.requestKey === canonicalRequestKey;
+  const canonicalState =
+    runtime.state !== "ready"
+      ? "IDLE"
+      : canonicalReadIsCurrent
+        ? canonicalRead.state
+        : "LOADING";
+  const canonicalSnapshot = canonicalReadIsCurrent
+    ? canonicalRead.snapshot
+    : null;
+  const canonicalError = canonicalReadIsCurrent
+    ? canonicalRead.error
+    : null;
+
   useEffect(() => {
     if (runtime.state !== "ready") {
       return;
@@ -83,17 +111,18 @@ export function CustomerFinancePanel({
   }, [loadSales, runtime]);
   useEffect(() => {
     if (runtime.state !== "ready") {
-      setCanonicalSnapshot(null);
-      setCanonicalState("IDLE");
-      setCanonicalError(null);
       return;
     }
 
     let cancelled = false;
-
-    setCanonicalSnapshot(null);
-    setCanonicalState("LOADING");
-    setCanonicalError(null);
+    const requestKey = JSON.stringify([
+      runtime.scope.tenantId,
+      runtime.scope.companyId,
+      runtime.scope.branchId,
+      runtime.scope.accountingPeriodId,
+      customerId,
+      currency,
+    ]);
 
     void (async () => {
       try {
@@ -106,20 +135,26 @@ export function CustomerFinancePanel({
           return;
         }
 
-        setCanonicalSnapshot(snapshot);
-        setCanonicalState("READY");
+        setCanonicalRead({
+          requestKey,
+          state: "READY",
+          snapshot,
+          error: null,
+        });
       } catch (error) {
         if (cancelled) {
           return;
         }
 
-        setCanonicalSnapshot(null);
-        setCanonicalState("ERROR");
-        setCanonicalError(
-          error instanceof Error
-            ? error.message
-            : "FINANCE_CUSTOMER_RECEIVABLE_READ_FAILED",
-        );
+        setCanonicalRead({
+          requestKey,
+          state: "ERROR",
+          snapshot: null,
+          error:
+            error instanceof Error
+              ? error.message
+              : "FINANCE_CUSTOMER_RECEIVABLE_READ_FAILED",
+        });
       }
     })();
 
