@@ -12,6 +12,11 @@ async function main(): Promise<void> {
     "utf8",
   );
 
+  const snapshotSql = fs.readFileSync(
+    "docs/sql/20260928_measurement_change_parent_name_snapshot_v1.sql",
+    "utf8",
+  );
+
   assert.match(sql, /persist_measurement_package_authority_v1/);
   assert.match(sql, /persist_measurement_authority_v1/);
   assert.match(sql, /on conflict \(id\) do nothing/gi);
@@ -29,6 +34,42 @@ async function main(): Promise<void> {
     /on conflict\s*\([^)]*\)\s*do update/i,
   );
 
+  assert.match(
+    snapshotSql,
+    /create or replace function public\.persist_measurement_authority_v1\(/i,
+  );
+  assert.match(snapshotSql, /from public\.rooms r/i);
+  assert.match(snapshotSql, /from public\.openings o/i);
+  assert.match(snapshotSql, /r\."customerId" = v_customer_id/);
+  assert.match(snapshotSql, /o\."roomId" = v_room_id/);
+  assert.match(snapshotSql, /r\.tenant_id = v_tenant_id/);
+  assert.match(snapshotSql, /r\.company_id = v_company_id/);
+  assert.match(snapshotSql, /r\.branch_id = v_branch_id/);
+  assert.match(snapshotSql, /r\.accounting_period_id = v_accounting_period_id/);
+  assert.match(snapshotSql, /o\.tenant_id = v_tenant_id/);
+  assert.match(snapshotSql, /o\.company_id = v_company_id/);
+  assert.match(snapshotSql, /o\.branch_id = v_branch_id/);
+  assert.match(snapshotSql, /o\.accounting_period_id = v_accounting_period_id/);
+  assert.match(snapshotSql, /'roomName', v_room_name_snapshot/);
+  assert.match(snapshotSql, /'roomLabel', v_room_name_snapshot/);
+  assert.match(snapshotSql, /'openingName', v_opening_name_snapshot/);
+  assert.match(snapshotSql, /'openingLabel', v_opening_name_snapshot/);
+  assert.match(snapshotSql, /'windowName', v_opening_name_snapshot/);
+  assert.match(
+    snapshotSql,
+    /jsonb_build_object\('data',v_entity_json\)/,
+  );
+  assert.doesNotMatch(snapshotSql, /v_payload->>'room(Name|Label)'/);
+  assert.doesNotMatch(
+    snapshotSql,
+    /v_payload->>'(openingName|openingLabel|windowName)'/,
+  );
+  assert.doesNotMatch(
+    snapshotSql,
+    /\balter\s+table\s+public\.measurements\b/i,
+  );
+  assert.match(snapshotSql, /MEASUREMENT_ROOM_NAME_MISSING/);
+  assert.match(snapshotSql, /MEASUREMENT_OPENING_NAME_MISSING/);
   const calls: Array<{
     name: string;
     args: Record<string, unknown>;
@@ -78,14 +119,14 @@ async function main(): Promise<void> {
       parentPackage: {
         room: {
           id: "room-1",
-          name: "Salon",
+          name: "Salon Test",
           customerAddressId: null,
           createdAt: "2026-09-15T00:00:00.000Z",
           updatedAt: "2026-09-15T00:00:00.000Z",
         },
         opening: {
           id: "opening-1",
-          name: "Pencere 1",
+          name: "Sağ Pencere",
           width: 120,
           height: 220,
           fieldNotes: "",
@@ -110,13 +151,22 @@ async function main(): Promise<void> {
     "persist_measurement_package_authority_v1",
   );
   assert.ok(calls[0]?.args.p_parent_package);
+
+  const packageCommand = calls[0]?.args.p_command as
+    | { payload?: Record<string, unknown> }
+    | undefined;
+  assert.equal(packageCommand?.payload?.roomName, "Salon Test");
+  assert.equal(packageCommand?.payload?.roomLabel, "Salon Test");
+  assert.equal(packageCommand?.payload?.openingName, "Sağ Pencere");
+  assert.equal(packageCommand?.payload?.openingLabel, "Sağ Pencere");
+  assert.equal(packageCommand?.payload?.windowName, "Sağ Pencere");
   // MEASUREMENT_NAME_AUTHORITY_REGRESSION
   const packageCommandJson = JSON.stringify(calls[0]?.args.p_command);
-  assert.match(packageCommandJson, /"roomName":"Salon"/);
-  assert.match(packageCommandJson, /"roomLabel":"Salon"/);
-  assert.match(packageCommandJson, /"openingName":"Pencere 1"/);
-  assert.match(packageCommandJson, /"openingLabel":"Pencere 1"/);
-  assert.match(packageCommandJson, /"windowName":"Pencere 1"/);
+  assert.match(packageCommandJson, /"roomName":"Salon Test"/);
+  assert.match(packageCommandJson, /"roomLabel":"Salon Test"/);
+  assert.match(packageCommandJson, /"openingName":"Sağ Pencere"/);
+  assert.match(packageCommandJson, /"openingLabel":"Sağ Pencere"/);
+  assert.match(packageCommandJson, /"windowName":"Sağ Pencere"/);
 
   calls.length = 0;
 
