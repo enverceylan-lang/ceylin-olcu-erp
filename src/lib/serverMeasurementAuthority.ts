@@ -243,6 +243,17 @@ export async function persistMeasurementAuthorityCommand(args: {
   const payload = normalizeCommandPayload(entityId, args.change.patch);
   const parentPackage = normalizeParentPackage(args.change.patch, payload);
 
+  // PARENT_PACKAGE_NAME_PROJECTION: parentPackage remains the single name authority.
+  if (parentPackage) {
+    Object.assign(payload, {
+      roomName: parentPackage.room.name,
+      roomLabel: parentPackage.room.name,
+      openingName: parentPackage.opening.name,
+      openingLabel: parentPackage.opening.name,
+      windowName: parentPackage.opening.name,
+    });
+  }
+
   const command = {
     changeId,
     entityId,

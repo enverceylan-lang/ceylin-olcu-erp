@@ -70,13 +70,8 @@ async function main(): Promise<void> {
         id: "measurement-1",
         customerId: "customer-1",
         roomId: "room-1",
-        roomName: "9 C SALON NO 3",
-        roomLabel: "9 C SALON NO 3",
         openingId: "opening-1",
         windowId: "opening-1",
-        openingName: "Diğer cam",
-        openingLabel: "Diğer cam",
-        windowName: "Diğer cam",
         templateType: "SIMPLE_WIDTH_HEIGHT",
         rawValues: {},
       },
@@ -117,11 +112,11 @@ async function main(): Promise<void> {
   assert.ok(calls[0]?.args.p_parent_package);
   // MEASUREMENT_NAME_AUTHORITY_REGRESSION
   const packageCommandJson = JSON.stringify(calls[0]?.args.p_command);
-  assert.match(packageCommandJson, /"roomName":"9 C SALON NO 3"/);
-  assert.match(packageCommandJson, /"roomLabel":"9 C SALON NO 3"/);
-  assert.match(packageCommandJson, /"openingName":"Diğer cam"/);
-  assert.match(packageCommandJson, /"openingLabel":"Diğer cam"/);
-  assert.match(packageCommandJson, /"windowName":"Diğer cam"/);
+  assert.match(packageCommandJson, /"roomName":"Salon"/);
+  assert.match(packageCommandJson, /"roomLabel":"Salon"/);
+  assert.match(packageCommandJson, /"openingName":"Pencere 1"/);
+  assert.match(packageCommandJson, /"openingLabel":"Pencere 1"/);
+  assert.match(packageCommandJson, /"windowName":"Pencere 1"/);
 
   calls.length = 0;
 
