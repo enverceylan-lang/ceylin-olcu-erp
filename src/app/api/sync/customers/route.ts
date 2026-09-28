@@ -11,6 +11,7 @@ import { createClient } from "@supabase/supabase-js";
 import { verifyAuth } from "@/lib/authHelper";
 import { loadShadowErpContext } from "@/lib/serverErpContext";
 import { readRequestedErpScopeId } from "@/lib/erpActiveScopeCookie";
+import { shouldPreferRemoteSyncName } from "@/lib/syncFallbackNameRepair";
 type SyncRecord = Record<string, unknown> & {
   id: string;
   customerId?: string;
@@ -620,7 +621,13 @@ export async function POST(req: NextRequest) {
             lr.videos = dr.videos || [];
           }
 
-          if (new Date(dr.updatedAt ?? 0) > new Date(lr.updatedAt || 0)) {
+          if (shouldPreferRemoteSyncName({
+            localName: lr.name,
+            remoteName: dr.name,
+            localUpdatedAt: lr.updatedAt,
+            remoteUpdatedAt: dr.updatedAt,
+            fallbackName: "Gelen Oda",
+          })) {
             mergedRoomsMap.set(dr.id, {
               ...lr,
               name: dr.name,
@@ -664,7 +671,13 @@ export async function POST(req: NextRequest) {
               lo.videos = do_.videos || [];
             }
 
-            if (new Date(do_.updatedAt ?? 0) > new Date(lo.updatedAt || 0)) {
+            if (shouldPreferRemoteSyncName({
+              localName: lo.name,
+              remoteName: do_.name,
+              localUpdatedAt: lo.updatedAt,
+              remoteUpdatedAt: do_.updatedAt,
+              fallbackName: "Gelen Açıklık",
+            })) {
               mergedOpeningsMap.set(do_.id, {
                 ...lo,
                 name: do_.name,
