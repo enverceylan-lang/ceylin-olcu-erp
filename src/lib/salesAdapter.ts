@@ -1097,34 +1097,11 @@ export async function syncOrCreateDraftSale(
   const cleanTargetSaleId =
     String(targetSaleId || '').trim();
 
-  const existingDraft =
-    cleanTargetSaleId
-      ? salesStore.sales.find(
-          sale =>
-            sale.id === cleanTargetSaleId &&
-            sale.customerId === customer.id &&
-            (               !customerAddressId ||               sale.customerAddressId === customerAddressId             ) &&
-            (
-              sale.status === 'TASLAK' ||
-              sale.status === 'TEKLİF'
-            ) &&
-            !sale.isDeleted
-        )
-      : salesStore.sales.find(
-          sale =>
-            sale.customerId === customer.id &&
-            (               !customerAddressId ||               sale.customerAddressId === customerAddressId             ) &&
-            (
-              sale.status === 'TASLAK' ||
-              sale.status === 'TEKLİF'
-            ) &&
-            !sale.isDeleted
-        );
-
-  if (cleanTargetSaleId && !existingDraft) {
-    throw new Error('TARGET_SALE_NOT_FOUND_OR_NOT_EDITABLE');
-  }
-
+  /*
+   * Canonical adres kimliği mevcut draft seçilmeden önce çözülür.
+   * customerAddressId açıkça gelmese bile seçilen ölçüler tek bir
+   * adrese bağlıysa yanlış/adres-bağımsız draft reuse edilmez.
+   */
   const newSaleObj =
     createDraftSaleFromCustomer(
       customer,
@@ -1134,6 +1111,152 @@ export async function syncOrCreateDraftSale(
       customerAddressId,
       normalizedTransferSelection || undefined
     );
+
+  const resolvedCustomerAddressId =
+    String(newSaleObj.customerAddressId || '').trim();
+
+  let existingDraft =
+    cleanTargetSaleId
+      ? salesStore.sales.find(
+          sale =>
+            sale.id === cleanTargetSaleId &&
+            sale.customerId === customer.id &&
+            (
+              sale.status === 'TASLAK' ||
+              sale.status === 'TEKLİF'
+            ) &&
+            !sale.isDeleted
+        )
+      : salesStore.sales.find(
+          sale =>
+            sale.customerId === customer.id &&
+            (
+              resolvedCustomerAddressId
+                ? String(
+                    sale.customerAddressId || ''
+                  ).trim() ===
+                  resolvedCustomerAddressId
+                : !sale.customerAddressId &&
+                  !sale.customerAddressSnapshot
+            ) &&
+            (
+              sale.status === 'TASLAK' ||
+              sale.status === 'TEKLİF'
+            ) &&
+            !sale.isDeleted
+        );
+
+  if (cleanTargetSaleId && !existingDraft) {
+    throw new Error(
+      'TARGET_SALE_NOT_FOUND_OR_NOT_EDITABLE'
+    );
+  }
+
+  if (existingDraft) {
+    const existingAddressId =
+      String(
+        existingDraft.customerAddressId || ''
+      ).trim();
+
+    const existingAddressSnapshot =
+      existingDraft.customerAddressSnapshot;
+
+    if (
+      existingAddressSnapshot &&
+      !existingAddressId
+    ) {
+      throw new Error(
+        'SALE_DRAFT_ADDRESS_SNAPSHOT_WITHOUT_ID'
+      );
+    }
+
+    if (
+      existingAddressSnapshot &&
+      String(
+        existingAddressSnapshot.customerAddressId ||
+        ''
+      ).trim() !== existingAddressId
+    ) {
+      throw new Error(
+        'SALE_DRAFT_ADDRESS_SNAPSHOT_INVALID'
+      );
+    }
+
+    if (
+      resolvedCustomerAddressId &&
+      existingAddressId &&
+      resolvedCustomerAddressId !==
+        existingAddressId
+    ) {
+      throw new Error(
+        'TARGET_SALE_ADDRESS_MISMATCH'
+      );
+    }
+
+    if (
+      cleanTargetSaleId &&
+      resolvedCustomerAddressId &&
+      !existingAddressId
+    ) {
+      throw new Error(
+        'TARGET_SALE_ADDRESS_REBIND_REQUIRED'
+      );
+    }
+
+    /*
+     * Legacy / yarım bağlı TASLAK-TEKLİF:
+     * addressId var fakat snapshot yoksa yalnız exact aynı
+     * customer address kaynağından pair tamamlanır.
+     */
+    if (
+      existingAddressId &&
+      !existingAddressSnapshot
+    ) {
+      const repairCandidate =
+        createDraftSaleFromCustomer(
+          customer,
+          actor,
+          scope,
+          selectedTransferMeasurementIds,
+          existingAddressId,
+          normalizedTransferSelection || undefined
+        );
+
+      if (
+        String(
+          repairCandidate.customerAddressId || ''
+        ).trim() !== existingAddressId ||
+        !repairCandidate.customerAddressSnapshot ||
+        String(
+          repairCandidate.customerAddressSnapshot
+            .customerAddressId || ''
+        ).trim() !== existingAddressId
+      ) {
+        throw new Error(
+          'SALE_DRAFT_ADDRESS_REPAIR_FAILED'
+        );
+      }
+
+      existingDraft = {
+        ...existingDraft,
+        customerAddressId:
+          existingAddressId,
+        customerAddressSnapshot:
+          repairCandidate.customerAddressSnapshot,
+        updatedAt:
+          new Date().toISOString()
+      };
+
+      /*
+       * Repair hemen persist edilir; böylece
+       * additions.length === 0 erken dönüşü pair repair'i
+       * bypass edemez.
+       */
+      await salesStore.updateSale(
+        existingDraft
+      );
+    }
+  }
 
   /*
    * Ölçüden üretilen otomatik satış satırlarında

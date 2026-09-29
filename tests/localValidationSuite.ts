@@ -1503,6 +1503,423 @@ async function runTests() {
     if (draftSale.status !== 'TASLAK') throw new Error(`New sale should be TASLAK, got ${draftSale.status}`);
   });
 
+  await runTest('legacyDraftAddressPairIsRepaired', async () => {
+    const custId = generateUUID();
+    const addressId = generateUUID();
+
+    const customerObj = {
+      id: custId,
+      name: 'ADDRESS REPAIR TEST',
+      phone: '5551000001',
+      address: '',
+      mapLocation: '',
+      notes: '',
+      addresses: [
+        {
+          id: addressId,
+          title: 'Ev',
+          phone: '5551000001',
+          province: 'Konya',
+          district: 'Selçuklu',
+          address: 'Test Mahallesi 1',
+          mapLocation: '',
+          isDeleted: false
+        }
+      ],
+      rooms: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      createdById: 'admin-1',
+      createdByName: 'Admin',
+      addressPhotos: []
+    } as unknown as Customer;
+
+    await seedOwnedFixtureCustomer(
+      customerObj
+    );
+
+    const legacyDraft = {
+      ...testSalesScope,
+      id: generateUUID(),
+      saleNo: 'TEK-ADDRESS-REPAIR',
+      customerId: custId,
+      customerAddressId: addressId,
+      status: 'TASLAK',
+      items: [],
+      priceSource: 'MANUAL',
+      totalAmount: 0,
+      cashPrice: 0,
+      installmentPrice: 0,
+      discount: 0,
+      downPayment: 0,
+      remainingBalance: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    } as unknown as Parameters<
+      ReturnType<
+        typeof useSalesStore.getState
+      >['addSale']
+    >[0];
+
+    await useSalesStore
+      .getState()
+      .addSale(legacyDraft);
+
+    const draftId =
+      await syncOrCreateDraftSale(
+        customerObj,
+        useSalesStore.getState(),
+        testSalesActor,
+        testSalesScope,
+        legacyDraft.id,
+        addressId
+      );
+
+    if (draftId !== legacyDraft.id) {
+      throw new Error(
+        'Legacy draft identity changed during address repair'
+      );
+    }
+
+    const repaired =
+      useSalesStore.getState().sales.find(
+        sale =>
+          sale.id === legacyDraft.id
+      );
+
+    if (
+      !repaired?.customerAddressSnapshot
+    ) {
+      throw new Error(
+        'Legacy draft address snapshot was not repaired'
+      );
+    }
+
+    if (
+      repaired.customerAddressId !==
+        addressId ||
+      repaired
+        .customerAddressSnapshot
+        .customerAddressId !==
+        addressId
+    ) {
+      throw new Error(
+        'Repaired address pair does not preserve exact address identity'
+      );
+    }
+  });
+
+  await runTest('addressFreeSyncDoesNotReuseAddressBoundDraft', async () => {
+    const custId = generateUUID();
+    const addressId = generateUUID();
+    const capturedAt =
+      new Date().toISOString();
+
+    const customerObj = {
+      id: custId,
+      name: 'ADDRESS FREE REUSE TEST',
+      phone: '5551000002',
+      address: '',
+      mapLocation: '',
+      notes: '',
+      addresses: [
+        {
+          id: addressId,
+          title: 'Ofis',
+          phone: '5551000002',
+          province: 'Konya',
+          district: 'Karatay',
+          address: 'Test Mahallesi 2',
+          mapLocation: '',
+          isDeleted: false
+        }
+      ],
+      rooms: [],
+      createdAt: capturedAt,
+      updatedAt: capturedAt,
+      createdById: 'admin-1',
+      createdByName: 'Admin',
+      addressPhotos: []
+    } as unknown as Customer;
+
+    await seedOwnedFixtureCustomer(
+      customerObj
+    );
+
+    const addressBoundDraft = {
+      ...testSalesScope,
+      id: generateUUID(),
+      saleNo: 'TEK-ADDRESS-BOUND',
+      customerId: custId,
+      customerAddressId: addressId,
+      customerAddressSnapshot: {
+        customerAddressId: addressId,
+        title: 'Ofis',
+        phone: '5551000002',
+        province: 'Konya',
+        district: 'Karatay',
+        address: 'Test Mahallesi 2',
+        mapLocation: '',
+        capturedAt
+      },
+      status: 'TASLAK',
+      items: [],
+      priceSource: 'MANUAL',
+      totalAmount: 0,
+      cashPrice: 0,
+      installmentPrice: 0,
+      discount: 0,
+      downPayment: 0,
+      remainingBalance: 0,
+      createdAt: capturedAt,
+      updatedAt: capturedAt
+    } as unknown as Parameters<
+      ReturnType<
+        typeof useSalesStore.getState
+      >['addSale']
+    >[0];
+
+    await useSalesStore
+      .getState()
+      .addSale(addressBoundDraft);
+
+    const draftId =
+      await syncOrCreateDraftSale(
+        customerObj,
+        useSalesStore.getState(),
+        testSalesActor,
+        testSalesScope
+      );
+
+    if (
+      draftId ===
+      addressBoundDraft.id
+    ) {
+      throw new Error(
+        'Address-free sync reused an address-bound draft'
+      );
+    }
+
+    const addressFreeDraft =
+      useSalesStore.getState().sales.find(
+        sale =>
+          sale.id === draftId
+      );
+
+    if (
+      addressFreeDraft
+        ?.customerAddressId ||
+      addressFreeDraft
+        ?.customerAddressSnapshot
+    ) {
+      throw new Error(
+        'Address-free draft unexpectedly became address-bound'
+      );
+    }
+  });
+
+  await runTest('targetSaleDifferentAddressFailsClosed', async () => {
+    const custId = generateUUID();
+    const addressA = generateUUID();
+    const addressB = generateUUID();
+    const capturedAt =
+      new Date().toISOString();
+
+    const customerObj = {
+      id: custId,
+      name: 'TARGET ADDRESS MISMATCH TEST',
+      phone: '5551000003',
+      address: '',
+      mapLocation: '',
+      notes: '',
+      addresses: [
+        {
+          id: addressA,
+          title: 'Ev',
+          phone: '5551000003',
+          province: 'Konya',
+          district: 'Selçuklu',
+          address: 'Adres A',
+          mapLocation: '',
+          isDeleted: false
+        },
+        {
+          id: addressB,
+          title: 'Ofis',
+          phone: '5551000003',
+          province: 'Konya',
+          district: 'Meram',
+          address: 'Adres B',
+          mapLocation: '',
+          isDeleted: false
+        }
+      ],
+      rooms: [],
+      createdAt: capturedAt,
+      updatedAt: capturedAt,
+      createdById: 'admin-1',
+      createdByName: 'Admin',
+      addressPhotos: []
+    } as unknown as Customer;
+
+    await seedOwnedFixtureCustomer(
+      customerObj
+    );
+
+    const targetDraft = {
+      ...testSalesScope,
+      id: generateUUID(),
+      saleNo: 'TEK-ADDRESS-B',
+      customerId: custId,
+      customerAddressId: addressB,
+      customerAddressSnapshot: {
+        customerAddressId: addressB,
+        title: 'Ofis',
+        phone: '5551000003',
+        province: 'Konya',
+        district: 'Meram',
+        address: 'Adres B',
+        mapLocation: '',
+        capturedAt
+      },
+      status: 'TASLAK',
+      items: [],
+      priceSource: 'MANUAL',
+      totalAmount: 0,
+      cashPrice: 0,
+      installmentPrice: 0,
+      discount: 0,
+      downPayment: 0,
+      remainingBalance: 0,
+      createdAt: capturedAt,
+      updatedAt: capturedAt
+    } as unknown as Parameters<
+      ReturnType<
+        typeof useSalesStore.getState
+      >['addSale']
+    >[0];
+
+    await useSalesStore
+      .getState()
+      .addSale(targetDraft);
+
+    let errorCode = '';
+
+    try {
+      await syncOrCreateDraftSale(
+        customerObj,
+        useSalesStore.getState(),
+        testSalesActor,
+        testSalesScope,
+        targetDraft.id,
+        addressA
+      );
+    } catch (error) {
+      errorCode =
+        error instanceof Error
+          ? error.message
+          : String(error);
+    }
+
+    if (
+      errorCode !==
+      'TARGET_SALE_ADDRESS_MISMATCH'
+    ) {
+      throw new Error(
+        `Expected TARGET_SALE_ADDRESS_MISMATCH, got ${errorCode || 'NO_ERROR'}`
+      );
+    }
+  });
+
+  await runTest('snapshotWithoutAddressIdFailsClosed', async () => {
+    const custId = generateUUID();
+    const capturedAt =
+      new Date().toISOString();
+
+    const customerObj = {
+      id: custId,
+      name: 'SNAPSHOT WITHOUT ID TEST',
+      phone: '5551000004',
+      address: '',
+      mapLocation: '',
+      notes: '',
+      addresses: [],
+      rooms: [],
+      createdAt: capturedAt,
+      updatedAt: capturedAt,
+      createdById: 'admin-1',
+      createdByName: 'Admin',
+      addressPhotos: []
+    } as unknown as Customer;
+
+    await seedOwnedFixtureCustomer(
+      customerObj
+    );
+
+    const invalidDraft = {
+      ...testSalesScope,
+      id: generateUUID(),
+      saleNo: 'TEK-SNAPSHOT-NO-ID',
+      customerId: custId,
+      customerAddressSnapshot: {
+        customerAddressId:
+          generateUUID(),
+        title: 'Invalid',
+        phone: '',
+        province: '',
+        district: '',
+        address: '',
+        mapLocation: '',
+        capturedAt
+      },
+      status: 'TASLAK',
+      items: [],
+      priceSource: 'MANUAL',
+      totalAmount: 0,
+      cashPrice: 0,
+      installmentPrice: 0,
+      discount: 0,
+      downPayment: 0,
+      remainingBalance: 0,
+      createdAt: capturedAt,
+      updatedAt: capturedAt
+    } as unknown as Parameters<
+      ReturnType<
+        typeof useSalesStore.getState
+      >['addSale']
+    >[0];
+
+    await useSalesStore
+      .getState()
+      .addSale(invalidDraft);
+
+    let errorCode = '';
+
+    try {
+      await syncOrCreateDraftSale(
+        customerObj,
+        useSalesStore.getState(),
+        testSalesActor,
+        testSalesScope,
+        invalidDraft.id
+      );
+    } catch (error) {
+      errorCode =
+        error instanceof Error
+          ? error.message
+          : String(error);
+    }
+
+    if (
+      errorCode !==
+      'SALE_DRAFT_ADDRESS_SNAPSHOT_WITHOUT_ID'
+    ) {
+      throw new Error(
+        `Expected SALE_DRAFT_ADDRESS_SNAPSHOT_WITHOUT_ID, got ${errorCode || 'NO_ERROR'}`
+      );
+    }
+  });
+
   // ==================================================
   // V2 MEKANİK PERDE & JUMBO HESAP REGRESYON TESTLERİ
   // ==================================================
