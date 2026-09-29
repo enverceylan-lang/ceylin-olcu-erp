@@ -11,6 +11,7 @@ const runtime = read("src/lib/salesAuthorityRuntimeClient.ts");
 const persistRoute = read("src/app/api/sales/authority/persist/route.ts");
 const syncRoute = read("src/app/api/sync/customers/route.ts");
 const saleSql = read("docs/sql/20260822_sales_and_sale_return_authority_v1.sql");
+const normalizationSql = read("docs/sql/20260930_sales_authority_address_json_null_normalization_v1.sql");
 const addressSql = read("docs/sql/20260823_customer_address_authority_v1.sql");
 
 assert.match(contract, /customerAddressId\?: string \| null/);
@@ -28,6 +29,43 @@ assert.match(saleSql, /v_existing\.customer_address_id is distinct from v_custom
 assert.doesNotMatch(
   saleSql,
   /set[\s\S]{0,250}customer_address_snapshot=v_customer_address_snapshot/,
+);
+
+assert.match(
+  normalizationSql,
+  /create or replace function public\.persist_sale_document_authority_v1\(/,
+);
+assert.match(
+  normalizationSql,
+  /p_sale->'customerAddressSnapshot' = 'null'::jsonb/,
+);
+assert.match(
+  normalizationSql,
+  /then null[\s\S]*else p_sale->'customerAddressSnapshot'/,
+);
+assert.match(
+  normalizationSql,
+  /SALE_AUTHORITY_ADDRESS_PAIR_REQUIRED/,
+);
+assert.match(
+  normalizationSql,
+  /SALE_AUTHORITY_CUSTOMER_ADDRESS_PARENT_MISMATCH/,
+);
+assert.match(
+  normalizationSql,
+  /v_existing\.customer_address_id is distinct from v_customer_address_id/,
+);
+assert.doesNotMatch(
+  normalizationSql,
+  /create or replace function public\.approve_sale_document_authority_v1\(/,
+);
+assert.doesNotMatch(
+  normalizationSql,
+  /create or replace function public\.persist_sale_return_authority_v1\(/,
+);
+assert.doesNotMatch(
+  normalizationSql,
+  /drop table|alter table|delete from public\.customer_addresses/i,
 );
 
 assert.match(syncRoute, /CUSTOMER_ADDRESS_EXPECTED_VERSION_MISSING/);
