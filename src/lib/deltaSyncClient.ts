@@ -588,15 +588,26 @@ export async function pushDeltaSyncEvents(): Promise<{
         if (!customerIdentity.ok) {
           return { success: false, pushedCount: 0, isolatedCount, errors: [customerIdentity.error], debug: { pendingCount: pendingEvents.length, apiStatus: "PARENT_IDENTITY_INVALID", syncedCount: 0, errorCount: 1, firstStatus } };
         }
+
         const roomId = String(nested.roomId || patch.roomId || "").trim();
-        const openingId = String(nested.openingId || nested.windowId || patch.openingId || patch.windowId || "").trim();
-        if (!roomId || !openingId) {
+        const openingId = String(nested.openingId || patch.openingId || "").trim();
+        const windowId = String(nested.windowId || patch.windowId || "").trim();
+
+        if (openingId && windowId && openingId !== windowId) {
+          return { success: false, pushedCount: 0, isolatedCount, errors: ["MEASUREMENT_OPENING_WINDOW_MISMATCH"], debug: { pendingCount: pendingEvents.length, apiStatus: "PARENT_IDENTITY_INVALID", syncedCount: 0, errorCount: 1, firstStatus } };
+        }
+
+        const canonicalOpeningId = openingId || windowId;
+
+        if (!roomId) {
           return { success: false, pushedCount: 0, isolatedCount, errors: ["MEASUREMENT_PARENT_ID_MISSING"], debug: { pendingCount: pendingEvents.length, apiStatus: "PARENT_IDENTITY_INVALID", syncedCount: 0, errorCount: 1, firstStatus } };
         }
+
         const customer = localCustomers.find((item) => !item.isDeleted && item.id === customerIdentity.customerId);
         if (!customer) {
           return { success: false, pushedCount: 0, isolatedCount, errors: ["MEASUREMENT_PARENT_CUSTOMER_LOCAL_MISSING"], debug: { pendingCount: pendingEvents.length, apiStatus: "PARENT_LOCAL_MISSING", syncedCount: 0, errorCount: 1, firstStatus } };
         }
+
         const room = (customer.rooms || []).find((item) => !item.isDeleted && item.id === roomId);
         if (!room) {
           isolatedEvents.push({
@@ -605,35 +616,54 @@ export async function pushDeltaSyncEvents(): Promise<{
           });
           continue;
         }
-        const opening = (room.windows || []).find((item) => !item.isDeleted && item.id === openingId);
-        if (!opening) {
-          isolatedEvents.push({
-            changeId: event.changeId,
-            reason: "PARENT_OPENING_MISSING",
+
+        const roomParentPackage = {
+          id: room.id,
+          name: room.name,
+          customerAddressId: room.customerAddressId || null,
+          createdAt: room.createdAt || null,
+          updatedAt: room.updatedAt || null,
+        };
+
+        if (canonicalOpeningId) {
+          const opening = (room.windows || []).find(
+            (item) => !item.isDeleted && item.id === canonicalOpeningId,
+          );
+          if (!opening) {
+            isolatedEvents.push({
+              changeId: event.changeId,
+              reason: "PARENT_OPENING_MISSING",
+            });
+            continue;
+          }
+
+          packagedEvents.push({
+            ...event,
+            patch: {
+              ...event.patch,
+              parentPackage: {
+                room: roomParentPackage,
+                opening: {
+                  id: opening.id,
+                  name: opening.name,
+                  width: opening.width ?? null,
+                  height: opening.height ?? null,
+                  fieldNotes: opening.fieldNotes || "",
+                  createdAt: opening.createdAt || null,
+                  updatedAt: opening.updatedAt || null,
+                },
+              },
+            },
           });
           continue;
         }
+
         packagedEvents.push({
           ...event,
           patch: {
             ...event.patch,
             parentPackage: {
-              room: {
-                id: room.id,
-                name: room.name,
-                customerAddressId: room.customerAddressId || null,
-                createdAt: room.createdAt || null,
-                updatedAt: room.updatedAt || null,
-              },
-              opening: {
-                id: opening.id,
-                name: opening.name,
-                width: opening.width ?? null,
-                height: opening.height ?? null,
-                fieldNotes: opening.fieldNotes || "",
-                createdAt: opening.createdAt || null,
-                updatedAt: opening.updatedAt || null,
-              },
+              room: roomParentPackage,
             },
           },
         });

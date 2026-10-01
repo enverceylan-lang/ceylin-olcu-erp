@@ -191,14 +191,13 @@ function normalizeMeasurementLinks(measurement: MeasurementRecord): MeasurementR
   }
 
   const canonicalOpeningId = openingId || windowId;
-  if (!canonicalOpeningId) {
-    throw new Error("MEASUREMENT_OPENING_ID_MISSING");
-  }
 
   return stripErpScope({
     ...measurement,
-    openingId: canonicalOpeningId,
-    windowId: windowId || canonicalOpeningId
+    openingId: canonicalOpeningId || undefined,
+    windowId: canonicalOpeningId
+      ? (windowId || canonicalOpeningId)
+      : undefined
   });
 }
 
@@ -234,15 +233,20 @@ export async function resolveMeasurementOwnerScope(
     throw new Error("MEASUREMENT_SCOPE_PARENT_MISMATCH");
   }
 
-  const openingId = measurement.openingId || measurement.windowId;
-  const opening = (room.windows || []).find(
-    (item) => item.id === openingId && !item.isDeleted,
-  );
-  if (!opening) {
-    throw new Error("MEASUREMENT_PARENT_OPENING_LOCAL_MISSING");
-  }
-  if (optionalScopeConflicts(opening, scope)) {
-    throw new Error("MEASUREMENT_SCOPE_PARENT_MISMATCH");
+  const openingId = String(
+    measurement.openingId || measurement.windowId || "",
+  ).trim();
+
+  if (openingId) {
+    const opening = (room.windows || []).find(
+      (item) => item.id === openingId && !item.isDeleted,
+    );
+    if (!opening) {
+      throw new Error("MEASUREMENT_PARENT_OPENING_LOCAL_MISSING");
+    }
+    if (optionalScopeConflicts(opening, scope)) {
+      throw new Error("MEASUREMENT_SCOPE_PARENT_MISMATCH");
+    }
   }
 
   return scope;

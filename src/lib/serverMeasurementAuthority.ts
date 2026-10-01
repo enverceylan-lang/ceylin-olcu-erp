@@ -30,7 +30,7 @@ interface MeasurementParentPackage {
     createdAt: string | null;
     updatedAt: string | null;
   };
-  opening: {
+  opening?: {
     id: string;
     name: string;
     width: number | null;
@@ -129,7 +129,7 @@ function normalizeCommandPayload(
   const customerId = cleanId(payload.customerId);
   const roomId = cleanId(payload.roomId);
 
-  if (!customerId || !roomId || !canonicalOpeningId) {
+  if (!customerId || !roomId) {
     throw new Error("MEASUREMENT_PARENT_ID_MISSING");
   }
 
@@ -138,8 +138,10 @@ function normalizeCommandPayload(
     id: entityId,
     customerId,
     roomId,
-    openingId: canonicalOpeningId,
-    windowId: windowId || canonicalOpeningId,
+    openingId: canonicalOpeningId || undefined,
+    windowId: canonicalOpeningId
+      ? (windowId || canonicalOpeningId)
+      : undefined,
   };
 }
 
@@ -147,17 +149,19 @@ function normalizeParentPackage(rawPatch: unknown, payload: Record<string, unkno
   const wrapper = asRecord(rawPatch);
   const parentPackage = asRecord(wrapper?.parentPackage);
   if (!parentPackage) return null;
+
   const room = asRecord(parentPackage.room);
-  const opening = asRecord(parentPackage.opening);
-  if (!room || !opening) throw new Error("MEASUREMENT_PARENT_PACKAGE_INVALID");
+  if (!room) throw new Error("MEASUREMENT_PARENT_PACKAGE_INVALID");
+
   const payloadRoomId = cleanId(payload.roomId);
   const payloadOpeningId = cleanId(payload.openingId) || cleanId(payload.windowId);
   const roomId = cleanId(room.id);
-  const openingId = cleanId(opening.id);
-  if (!roomId || !openingId || roomId !== payloadRoomId || openingId !== payloadOpeningId) {
+
+  if (!roomId || roomId !== payloadRoomId) {
     throw new Error("MEASUREMENT_PARENT_PACKAGE_ID_MISMATCH");
   }
-  return {
+
+  const normalized: MeasurementParentPackage = {
     room: {
       id: roomId,
       name: cleanId(room.name),
@@ -165,7 +169,18 @@ function normalizeParentPackage(rawPatch: unknown, payload: Record<string, unkno
       createdAt: optionalText(room.createdAt),
       updatedAt: optionalText(room.updatedAt),
     },
-    opening: {
+  };
+
+  if (payloadOpeningId) {
+    const opening = asRecord(parentPackage.opening);
+    if (!opening) throw new Error("MEASUREMENT_PARENT_PACKAGE_INVALID");
+
+    const openingId = cleanId(opening.id);
+    if (!openingId || openingId !== payloadOpeningId) {
+      throw new Error("MEASUREMENT_PARENT_PACKAGE_ID_MISMATCH");
+    }
+
+    normalized.opening = {
       id: openingId,
       name: cleanId(opening.name),
       width: optionalFiniteNumber(opening.width, "MEASUREMENT_OPENING_WIDTH_INVALID"),
@@ -173,8 +188,12 @@ function normalizeParentPackage(rawPatch: unknown, payload: Record<string, unkno
       fieldNotes: typeof opening.fieldNotes === "string" ? opening.fieldNotes : "",
       createdAt: optionalText(opening.createdAt),
       updatedAt: optionalText(opening.updatedAt),
-    },
-  };
+    };
+  } else if (parentPackage.opening !== undefined && parentPackage.opening !== null) {
+    throw new Error("MEASUREMENT_PARENT_PACKAGE_ID_MISMATCH");
+  }
+
+  return normalized;
 }
 
 function parseExpectedVersion(
@@ -243,15 +262,24 @@ export async function persistMeasurementAuthorityCommand(args: {
   const payload = normalizeCommandPayload(entityId, args.change.patch);
   const parentPackage = normalizeParentPackage(args.change.patch, payload);
 
-  // PARENT_PACKAGE_NAME_PROJECTION: parentPackage remains the single name authority.
+  // PARENT_PACKAGE_NAME_PROJECTION: canonical parent names remain authoritative.
   if (parentPackage) {
     Object.assign(payload, {
       roomName: parentPackage.room.name,
       roomLabel: parentPackage.room.name,
-      openingName: parentPackage.opening.name,
-      openingLabel: parentPackage.opening.name,
-      windowName: parentPackage.opening.name,
     });
+
+    if (parentPackage.opening) {
+      Object.assign(payload, {
+        openingName: parentPackage.opening.name,
+        openingLabel: parentPackage.opening.name,
+        windowName: parentPackage.opening.name,
+      });
+    } else {
+      delete payload.openingName;
+      delete payload.openingLabel;
+      delete payload.windowName;
+    }
   }
 
   const command = {

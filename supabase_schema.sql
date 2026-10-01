@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS openings (
 -- 5. Create measurements table
 CREATE TABLE IF NOT EXISTS measurements (
     id TEXT PRIMARY KEY,
-    "openingId" TEXT NOT NULL REFERENCES openings(id) ON DELETE CASCADE,
+    "openingId" TEXT REFERENCES openings(id) ON DELETE CASCADE,
     "templateType" TEXT NOT NULL,
     "rawValues" JSONB NOT NULL,
     "productId" TEXT,

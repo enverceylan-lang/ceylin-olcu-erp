@@ -15,7 +15,7 @@ export interface MeasurementRecord extends ProductMeasurement {
   customerAddressId?: string;
   customerId: string;
   roomId: string;
-  openingId: string;
+  openingId?: string;
   /** Legacy compatibility only. New code must use openingId. */
   windowId?: string;
 
@@ -602,17 +602,21 @@ function enrichMeasurement(m: MeasurementRecord): MeasurementRecord {
 
 function normalizeMeasurementIdentity(
   m: MeasurementRecord,
-  requireOpeningId = true
+  requireOpeningId = false
 ): MeasurementRecord {
   const scopeFree = stripErpScope(m);
-  const openingId = scopeFree.openingId || scopeFree.windowId || '';
+  const openingId = String(
+    scopeFree.openingId || scopeFree.windowId || '',
+  ).trim();
   if (!openingId && requireOpeningId) {
     throw new Error(`Ölçü ${scopeFree.id || '(kimliksiz)'} için openingId eksik.`);
   }
   return {
     ...scopeFree,
-    openingId,
-    windowId: scopeFree.windowId || openingId,
+    openingId: openingId || undefined,
+    windowId: openingId
+      ? String(scopeFree.windowId || openingId).trim()
+      : undefined,
   };
 }
 

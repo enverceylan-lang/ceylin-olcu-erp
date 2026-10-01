@@ -236,14 +236,24 @@ function normalizeStandaloneMeasurement(
 ): LocalMeasurement | null {
   const id = measurement?.id;
   const roomId = measurement?.roomId;
-  const openingId = measurement?.openingId || measurement?.windowId;
-  if (!id || !roomId || !openingId) return null;
+  const openingId = String(measurement?.openingId || "").trim();
+  const windowId = String(measurement?.windowId || "").trim();
+
+  if (openingId && windowId && openingId !== windowId) {
+    throw new Error("MEASUREMENT_OPENING_WINDOW_MISMATCH");
+  }
+
+  const canonicalOpeningId = openingId || windowId;
+  if (!id || !roomId) return null;
 
   return {
     ...measurement,
     id,
     roomId,
-    openingId,
+    openingId: canonicalOpeningId || undefined,
+    windowId: canonicalOpeningId
+      ? (windowId || canonicalOpeningId)
+      : undefined,
   } as LocalMeasurement;
 }
 
@@ -460,7 +470,7 @@ function buildStructuralRoomsFromMeasurements(
   measurements.forEach((measurement) => {
     const roomId = measurement.roomId;
     const openingId = measurement.openingId || measurement.windowId;
-    if (!roomId || !openingId) return;
+    if (!roomId) return;
 
     let room = roomsById.get(roomId);
     if (!room) {
@@ -474,7 +484,10 @@ function buildStructuralRoomsFromMeasurements(
       roomsById.set(roomId, room);
     }
 
-    if (!room.windows.some((opening) => opening.id === openingId)) {
+    if (
+      openingId &&
+      !room.windows.some((opening) => opening.id === openingId)
+    ) {
       room.windows.push({
         id: openingId,
         name: openingNameFromMeasurement(measurement, room.windows.length),
@@ -564,8 +577,15 @@ async function persistAndVerifyMeasurements(
 
   const now = new Date().toISOString();
   const normalizedMeasurements = measurements.map((measurement) => {
-    const openingId = measurement.openingId || measurement.windowId;
-    if (!measurement.id || !measurement.customerId || !measurement.roomId || !openingId) {
+    const openingId = String(measurement.openingId || "").trim();
+    const windowId = String(measurement.windowId || "").trim();
+
+    if (openingId && windowId && openingId !== windowId) {
+      throw new Error("MEASUREMENT_OPENING_WINDOW_MISMATCH");
+    }
+
+    const canonicalOpeningId = openingId || windowId;
+    if (!measurement.id || !measurement.customerId || !measurement.roomId) {
       throw new Error(
         `Geçersiz ölçü bağlantısı: ${measurement.id || "kimliksiz ölçü"}`,
       );
@@ -573,8 +593,10 @@ async function persistAndVerifyMeasurements(
 
     return {
       ...measurement,
-      openingId,
-      windowId: openingId,
+      openingId: canonicalOpeningId || undefined,
+      windowId: canonicalOpeningId
+        ? (windowId || canonicalOpeningId)
+        : undefined,
       updatedAt: now,
     };
   });
@@ -696,18 +718,22 @@ function assignMeasurementsToCustomer(
   customerId: string,
 ): LocalMeasurement[] {
   return measurements.map((measurement) => {
-    const openingId = measurement.openingId || measurement.windowId;
+    const openingId = String(measurement.openingId || "").trim();
+    const windowId = String(measurement.windowId || "").trim();
 
-    if (!openingId) {
-      throw new Error(
-        `Geçersiz ölçü açıklık bağlantısı: ${measurement.id}`,
-      );
+    if (openingId && windowId && openingId !== windowId) {
+      throw new Error("MEASUREMENT_OPENING_WINDOW_MISMATCH");
     }
+
+    const canonicalOpeningId = openingId || windowId;
 
     return {
       ...measurement,
       customerId,
-      openingId,
+      openingId: canonicalOpeningId || undefined,
+      windowId: canonicalOpeningId
+        ? (windowId || canonicalOpeningId)
+        : undefined,
     };
   });
 }
