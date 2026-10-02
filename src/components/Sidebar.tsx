@@ -13,8 +13,6 @@ import { LayoutDashboard,
   ShoppingCart,
   Landmark,
   Factory,
-  Wrench,
-  FileText,
   Settings,
   CalendarDays,
   BriefcaseBusiness,
@@ -51,7 +49,6 @@ const menuItems = [
   { name: "Finans", href: "/finans", icon: Landmark },
   { name: "Operasyonlar", href: "/operasyonlar", icon: BriefcaseBusiness },
   { name: "Üretim", href: "/uretim", icon: Factory },
-  { name: "Montaj", href: "/montaj", icon: Wrench },
   { name: "Bekleyen Hakedişler", href: "/bekleyen-hakedisler", icon: ReceiptText },
   { name: "Benim Hakedişlerim", href: "/hakedislerim", icon: ReceiptText },
   { name: "Ajanda", href: "/ajanda", icon: CalendarDays },
@@ -74,6 +71,14 @@ const financeMenuItems = [
   { name: "Hesaplar", hash: "#hesaplar" },
   { name: "Raporlar", hash: "#raporlar" },
   { name: "Devir / Açılış", hash: "#devir-acilis" },
+] as const;
+
+const operationsMenuItems = [
+  { name: "Operasyonlar", href: "/operasyonlar" },
+  { name: "Kesim / Malzeme", href: "/operasyonlar/kesim" },
+  { name: "Atölye", href: "/operasyonlar/atolye" },
+  { name: "Montaj", href: "/montaj" },
+  { name: "Tedarik Siparişleri", href: "/operasyonlar/tedarik" },
 ] as const;
 
 const ROLE_COLORS: Record<string, string> = {
@@ -236,8 +241,17 @@ export function Sidebar({
               appPathname === "/raporlar" ||
               appPathname.startsWith("/raporlar/")
             );
+          const isOperationsRoute =
+            item.href === "/operasyonlar" &&
+            (
+              appPathname === "/operasyonlar" ||
+              appPathname.startsWith("/operasyonlar/") ||
+              appPathname === "/montaj" ||
+              appPathname.startsWith("/montaj/")
+            );
           const isActive =
             isFaturalarRoute ||
+            isOperationsRoute ||
             appPathname === item.href ||
             (
               appPathname.startsWith(item.href) &&
@@ -302,6 +316,56 @@ export function Sidebar({
                   })}
                 </div>
               ) : null}
+              {item.href === "/operasyonlar" && isActive ? (
+                <div className="ml-7 mt-1 space-y-1 border-l border-slate-200 pl-3 dark:border-slate-700" aria-label="Operasyonlar hızlı erişim">
+                  {operationsMenuItems
+                    .filter((operationItem) => {
+                      const role = normalizeRole(currentUser.role);
+
+                      if (!isProviderRole(role)) {
+                        return true;
+                      }
+
+                      if (role === "TAILOR") {
+                        return (
+                          operationItem.href === "/operasyonlar" ||
+                          operationItem.href === "/operasyonlar/atolye"
+                        );
+                      }
+
+                      if (role === "INSTALLER") {
+                        return (
+                          operationItem.href === "/operasyonlar" ||
+                          operationItem.href === "/montaj"
+                        );
+                      }
+
+                      return operationItem.href === "/operasyonlar";
+                    })
+                    .map((operationItem) => {
+                      const operationItemActive =
+                        appPathname === operationItem.href ||
+                        appPathname.startsWith(`${operationItem.href}/`);
+
+                      return (
+                        <Link
+                          key={operationItem.name}
+                          href={withCompanyPrefix(pathname, operationItem.href)}
+                          onClick={() => setMobileMenuOpen(false)}
+                          className={clsx(
+                            "flex min-h-9 items-center rounded-lg px-3 text-xs font-semibold transition-colors",
+                            operationItemActive
+                              ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                              : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white",
+                          )}
+                        >
+                          {operationItem.name}
+                        </Link>
+                      );
+                    })}
+                </div>
+              ) : null}
+
               {item.href === "/finans" && isActive ? (
                 <div className="ml-7 mt-1 space-y-1 border-l border-slate-200 pl-3 dark:border-slate-700" aria-label="Finans hızlı erişim">
                   {financeMenuItems

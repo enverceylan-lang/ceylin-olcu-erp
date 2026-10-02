@@ -39,6 +39,7 @@ import OperationRoutingModal from "@/components/operations/OperationRoutingModal
 import OperationChildSummary from "@/components/operations/OperationChildSummary";
 import MaterialCutDecisionPanel from "@/components/operations/MaterialCutDecisionPanel";
 import ProviderOperationActions from "@/components/operations/ProviderOperationActions";
+import OperationsManagementV2 from "@/components/operations/v2/OperationsManagementV2";
 import {
   useSalesStore
 } from "@/store/salesStore";
@@ -519,6 +520,34 @@ const [showCompleted, setShowCompleted] =
     ]
   );
 
+  const managementVisibleOperations =
+    useMemo(
+      () => {
+        if (!scope) {
+          return [];
+        }
+
+        return operations.filter(
+          operation =>
+            canViewOperation(
+              operation,
+              scope,
+              currentUser
+                ? {
+                    userId: currentUser.id,
+                    role: currentUser.role
+                  }
+                : null
+            )
+        );
+      },
+      [
+        operations,
+        scope,
+        currentUser
+      ]
+    );
+
   const commandCenterSummary =
     useMemo(
       () =>
@@ -802,6 +831,83 @@ const [showCompleted, setShowCompleted] =
       </main>
     );
   }
+  if (String(portalMode.mode) === "MANAGEMENT") {
+    return (
+      <>
+        <OperationsManagementV2
+          operations={managementVisibleOperations}
+          sales={sales}
+          onCut={operation =>
+            setCutOperation(operation)
+          }
+          onRoute={operation =>
+            setRoutingOperation(operation)
+          }
+        />
+
+        {cutOperation && currentUser ? (
+          <MaterialCutDecisionPanel
+            operation={cutOperation}
+            sale={sales.find(
+              sale =>
+                sale.id ===
+                cutOperation.saleId
+            )}
+            currentUserId={currentUser.id}
+            suppliers={customers
+              .filter(
+                customer =>
+                  customer.cariType ===
+                    "SUPPLIER" &&
+                  customer.approvalStatus ===
+                    "APPROVED" &&
+                  !customer.isDeleted &&
+                  !customer.isArchived &&
+                  customer.isActive !==
+                    false &&
+                  !customer.isLockedForAllTransactions
+              )
+              .map(customer => ({
+                id: customer.id,
+                name: customer.name,
+                phone:
+                  customer.phone ||
+                  undefined
+              }))}
+            onClose={() =>
+              setCutOperation(null)
+            }
+          />
+        ) : null}
+
+        {routingOperation &&
+        currentUser ? (
+          <OperationRoutingModal
+            parent={routingOperation}
+            users={users.map(user => ({
+              id: user.id,
+              name: user.name,
+              phone: user.phone,
+              role: user.role,
+              isActive: user.isActive,
+              providerCustomerId:
+                user.providerCustomerId,
+              providerType:
+                user.providerType
+            }))}
+            currentUserId={
+              currentUser.id
+            }
+            onClose={() =>
+              setRoutingOperation(null)
+            }
+            onRoute={routeChild}
+          />
+        ) : null}
+      </>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-100/70 px-3 py-3 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-4 md:px-5"><div className="mx-auto w-full max-w-[1600px]">
       <header className="flex min-h-14 items-center gap-3 rounded-t-lg border border-slate-200 bg-white px-4 py-2.5 shadow-sm dark:border-slate-800 dark:bg-slate-900/90">

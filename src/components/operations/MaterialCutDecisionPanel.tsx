@@ -1,5 +1,7 @@
 "use client";
 import ProcurementDecisionPanel from "@/components/operations/ProcurementDecisionPanel";
+import { fetchActiveCompanyDisplayName } from "@/lib/activeCompanyDisplayNameClient";
+import { openCutSlipPrintWindow } from "@/lib/cutSlipOutput";
 
 import {
   useEffect,
@@ -490,6 +492,99 @@ export default function MaterialCutDecisionPanel({
       sale,
       operation
     ]);
+
+  async function handlePrintCutSlip(): Promise<void> {
+    if (!sale) {
+      window.alert(
+        "Kesim fişi için bağlı satış bulunamadı.",
+      );
+      return;
+    }
+
+    if (pendingStoreCuts.length === 0) {
+      window.alert(
+        "Kesim fişi için önce stok rezervasyonu ve kesim planı oluşturulmalıdır.",
+      );
+      return;
+    }
+
+    try {
+      const companyName =
+        await fetchActiveCompanyDisplayName();
+
+      openCutSlipPrintWindow({
+        companyName,
+        saleNo: sale.saleNo,
+        customerName:
+          operation.customerName,
+        operationId: operation.id,
+        rows: pendingStoreCuts.map(
+          entry => {
+            const source =
+              itemById.get(
+                entry.reservation
+                  .saleItemId,
+              );
+            const item =
+              source?.item;
+            const lot =
+              getStoreCutLots(
+                operation,
+                entry.reservation
+                  .stockItemId,
+              ).find(
+                current =>
+                  current.id ===
+                  entry.reservation
+                    .stockLotId,
+              );
+
+            return {
+              cutOrderId:
+                `cut-order:${entry.reservation.id}`,
+              roomName:
+                item?.roomName ??
+                source?.parent
+                  ?.roomName ??
+                "-",
+              openingName:
+                item?.windowName ??
+                source?.parent
+                  ?.windowName ??
+                "-",
+              productType:
+                item?.productType ??
+                item?.productGroup ??
+                source?.parent
+                  ?.productType ??
+                source?.parent
+                  ?.productGroup ??
+                "-",
+              stockItemId:
+                entry.reservation
+                  .stockItemId,
+              lotLabel:
+                lot?.lotCode ||
+                entry.reservation
+                  .stockLotId,
+              reservedMeters:
+                entry.reservation
+                  .quantityMeters,
+              plannedCutMeters:
+                entry.allocation
+                  .quantity,
+            };
+          },
+        ),
+      });
+    } catch (error) {
+      window.alert(
+        error instanceof Error
+          ? error.message
+          : "Kesim fişi oluşturulamadı.",
+      );
+    }
+  }
 
   const pendingSupplierReceipts =
     useMemo(() => {
@@ -1216,6 +1311,18 @@ export default function MaterialCutDecisionPanel({
         currentUserId={currentUserId}
         suppliers={suppliers}
       />
+
+          {pendingStoreCuts.length > 0 ? (
+            <button
+              type="button"
+              onClick={() =>
+                void handlePrintCutSlip()
+              }
+              className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white hover:bg-indigo-700"
+            >
+              Kesim Fişi Yazdır
+            </button>
+          ) : null}
 
           <button
             type="button"
