@@ -51,6 +51,10 @@ import {
 import {
   approveSaleServerAuthority,
 } from "@/lib/salesAuthorityRuntimeClient";
+import {
+  saleApprovalStockIdentityMessage,
+  validateSaleApprovalStockIdentity,
+} from "@/lib/saleApprovalStockIdentityGate";
 
 export default function SatisPage() {
   const { customers } = useStore();
@@ -139,6 +143,20 @@ export default function SatisPage() {
     if (sale.items.length === 0) {
       alert(
         "Ürün veya hizmet kalemi olmayan satış onaylanamaz."
+      );
+      return;
+    }
+
+    const stockIdentityValidation =
+      validateSaleApprovalStockIdentity(
+        sale.items,
+      );
+
+    if (!stockIdentityValidation.allowed) {
+      alert(
+        saleApprovalStockIdentityMessage(
+          stockIdentityValidation,
+        )
       );
       return;
     }

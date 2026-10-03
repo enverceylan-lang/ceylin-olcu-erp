@@ -22,6 +22,11 @@ import { getSaleRemainingBalance } from "@/lib/salesFinance";
 import { useAuthStore } from "@/store/useAuthStore";
 import { canViewSale } from "@/lib/salesVisibility";
 import {
+  saleApprovalStockIdentityMessage,
+  validateSaleApprovalStockIdentity,
+} from "@/lib/saleApprovalStockIdentityGate";
+
+import {
   approveSaleServerAuthority,
   persistDraftSaleServerAuthority,
 } from "@/lib/salesAuthorityRuntimeClient";
@@ -529,6 +534,29 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
         );
 
         return;
+      }
+
+      const isApprovalTransition =
+        updatedSale.status === "ONAYLANDI" &&
+        (
+          persistedSaleForSave.status === "TASLAK" ||
+          persistedSaleForSave.status === "TEKLİF"
+        );
+
+      if (isApprovalTransition) {
+        const stockIdentityValidation =
+          validateSaleApprovalStockIdentity(
+            updatedSale.items,
+          );
+
+        if (!stockIdentityValidation.allowed) {
+          alert(
+            saleApprovalStockIdentityMessage(
+              stockIdentityValidation,
+            )
+          );
+          return;
+        }
       }
 
       if (
