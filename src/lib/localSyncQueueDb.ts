@@ -687,6 +687,137 @@ export async function activateBlockedSyncEvent(
   }
 }
 
+export async function activateBlockedSyncEventsAtomically(
+  changeIds: string[],
+): Promise<boolean> {
+  const uniqueChangeIds = Array.from(
+    new Set(
+      changeIds
+        .map((changeId) => String(changeId || "").trim())
+        .filter(Boolean),
+    ),
+  );
+
+  if (uniqueChangeIds.length !== changeIds.length) {
+    return false;
+  }
+
+  if (uniqueChangeIds.length === 0) {
+    return true;
+  }
+
+  try {
+    return await localSyncQueueDb.transaction(
+      'rw',
+      localSyncQueueDb.pendingSyncEvents,
+      async () => {
+        const events =
+          await localSyncQueueDb.pendingSyncEvents.bulkGet(
+            uniqueChangeIds,
+          );
+
+        if (
+          events.length !== uniqueChangeIds.length ||
+          events.some(
+            (event) =>
+              !event ||
+              event.syncStatus !== 'BLOCKED',
+          )
+        ) {
+          return false;
+        }
+
+        const now = new Date().toISOString();
+        const updatedCount =
+          await localSyncQueueDb.pendingSyncEvents.bulkUpdate(
+            uniqueChangeIds.map((changeId) => ({
+              key: changeId,
+              changes: {
+                syncStatus: 'PENDING' as const,
+                updatedAt: now,
+              },
+            })),
+          );
+
+        if (updatedCount !== uniqueChangeIds.length) {
+          throw new Error(
+            'SYNC_BATCH_ACTIVATION_INCOMPLETE',
+          );
+        }
+
+        return true;
+      },
+    );
+  } catch (error: unknown) {
+    console.error(
+      '[SyncQueue] Atomic blocked event activation failed.',
+      error,
+    );
+    return false;
+  }
+}
+
+export async function discardBlockedSyncEventsAtomically(
+  changeIds: string[],
+): Promise<boolean> {
+  const uniqueChangeIds = Array.from(
+    new Set(
+      changeIds
+        .map((changeId) => String(changeId || "").trim())
+        .filter(Boolean),
+    ),
+  );
+
+  if (uniqueChangeIds.length !== changeIds.length) {
+    return false;
+  }
+
+  if (uniqueChangeIds.length === 0) {
+    return true;
+  }
+
+  try {
+    return await localSyncQueueDb.transaction(
+      'rw',
+      localSyncQueueDb.pendingSyncEvents,
+      async () => {
+        const events =
+          await localSyncQueueDb.pendingSyncEvents.bulkGet(
+            uniqueChangeIds,
+          );
+
+        if (
+          events.some(
+            (event) =>
+              event &&
+              event.syncStatus !== 'BLOCKED',
+          )
+        ) {
+          return false;
+        }
+
+        const existingIds = events
+          .filter((event): event is SyncEvent => Boolean(event))
+          .map((event) => event.changeId);
+
+        if (existingIds.length > 0) {
+          await localSyncQueueDb.pendingSyncEvents.bulkDelete(
+            existingIds,
+          );
+        }
+
+        return true;
+      },
+    );
+  } catch (error: unknown) {
+    console.error(
+      '[SyncQueue] Atomic blocked event discard failed.',
+      error,
+    );
+    return false;
+  }
+}
+
 export async function discardBlockedSyncEvent(
   changeId: string
 ): Promise<boolean> {

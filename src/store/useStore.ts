@@ -4,6 +4,10 @@ import { create } from 'zustand';
 import { normalizeCariAddress, normalizeCariName, normalizeCariRegion } from '@/lib/stringUtils';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { useAuthStore, normalizeRole } from './useAuthStore';
+import {
+  canMutateSyncedMeasurement,
+  isMeasurementServerSynced,
+} from '@/lib/measurement/measurementPermissionCatalog';
 import { saveLocalCustomer, saveLocalCustomers, loadLocalCustomers } from '@/lib/localCustomerDb';
 import { shouldCreateTailorProductionItem } from '@/lib/productionRouting';
 import { applyErpScope, optionalScopeConflicts, readErpScope } from '@/lib/customerTreeScope';
@@ -637,9 +641,9 @@ interface AppState {
   updateRoomAttachments: (customerId: string, roomId: string, photos: string[], videos: string[]) => Promise<void>;
   updateWindowItem: (customerId: string, roomId: string, windowId: string, data: Partial<WindowItem>) => Promise<void>;
 
-  addProductMeasurement: (customerId: string, roomId: string, windowId: string, measurement: Omit<ProductMeasurement, 'id'>) => Promise<void>;
-  updateProductMeasurement: (customerId: string, roomId: string, windowId: string, measurementId: string, data: Partial<ProductMeasurement>) => Promise<void>;
-  deleteProductMeasurement: (customerId: string, roomId: string, windowId: string, measurementId: string) => Promise<void>;
+  addProductMeasurement: (customerId: string, roomId: string, windowId: string | undefined, measurement: Omit<ProductMeasurement, 'id'>) => Promise<string>;
+  updateProductMeasurement: (customerId: string, roomId: string, windowId: string | undefined, measurementId: string, data: Partial<ProductMeasurement>) => Promise<void>;
+  deleteProductMeasurement: (customerId: string, roomId: string, windowId: string | undefined, measurementId: string) => Promise<void>;
 
   initializeCustomersFromDb: () => Promise<void>;
 
@@ -1555,22 +1559,28 @@ export const useStore = create<AppState>()(
         const targetRoom = targetCustomer?.rooms.find(
           room => room.id === roomId
         );
-        const targetOpening = targetRoom?.windows.find(
-          opening => opening.id === windowId
-        );
+        const targetOpening = windowId
+          ? targetRoom?.windows.find(opening => opening.id === windowId)
+          : undefined;
 
         const roomName = String(targetRoom?.name || '').trim();
         const openingName = String(targetOpening?.name || '').trim();
 
-        if (!targetCustomer || !targetRoom || !targetOpening) {
+        if (!targetCustomer || !targetRoom) {
           throw new Error(
-            'Ölçü oda/açıklık bağlantısı çözülemedi. Kayıt oluşturulmadı.'
+            'Ölçü oda bağlantısı çözülemedi. Kayıt oluşturulmadı.'
           );
         }
 
-        if (!roomName || !openingName) {
+        if (!roomName) {
           throw new Error(
-            'Oda ve açıklık adı zorunludur. Ölçü kaydı oluşturulmadı.'
+            'Oda adı zorunludur. Ölçü kaydı oluşturulmadı.'
+          );
+        }
+
+        if (windowId && (!targetOpening || !openingName)) {
+          throw new Error(
+            'Gönderilen açıklık bulunamadı. Ölçü kaydı oluşturulmadı.'
           );
         }
 
@@ -1580,7 +1590,7 @@ export const useStore = create<AppState>()(
         }
         if (
           optionalScopeConflicts(targetRoom, customerScope) ||
-          optionalScopeConflicts(targetOpening, customerScope)
+          (targetOpening && optionalScopeConflicts(targetOpening, customerScope))
         ) {
           throw new Error('ERP_SCOPE_PARENT_MISMATCH');
         }
@@ -1589,26 +1599,37 @@ export const useStore = create<AppState>()(
         const measurementBase: ProductMeasurement = {
           ...measurement,
           id: generateUUID(),
-          createdAt: now,
+          measuredDate: measurement.measuredDate || now,
+          createdAt: measurement.createdAt || now,
           updatedAt: now
         };
         const newMeas: ProductMeasurement = measurementBase;
 
-        // Single-write: bağımsız ölçü deposuna yapısal adlarla yaz.
         const { useMeasurementStore } = await import('@/store/measurementStore');
         await useMeasurementStore.getState().addMeasurement({
           ...newMeas,
           customerId,
           roomId,
-          openingId: windowId,
-          windowId,
+          ...(windowId
+            ? {
+                openingId: windowId,
+                windowId,
+                openingName,
+                openingLabel: openingName,
+                windowName: openingName,
+              }
+            : {
+                openingId: undefined,
+                windowId: undefined,
+                openingName: undefined,
+                openingLabel: undefined,
+                windowName: undefined,
+              }),
           roomName,
           roomLabel: roomName,
-          openingName,
-          openingLabel: openingName,
-          windowName: openingName
         }, measurement.createdById || 'SYSTEM');
-        // Customer ağacına ikinci kez ölçü yazılmaz.
+
+        return newMeas.id;
       },
 
 
@@ -1621,22 +1642,28 @@ export const useStore = create<AppState>()(
         const targetRoom = targetCustomer?.rooms.find(
           room => room.id === roomId
         );
-        const targetOpening = targetRoom?.windows.find(
-          opening => opening.id === windowId
-        );
+        const targetOpening = windowId
+          ? targetRoom?.windows.find(opening => opening.id === windowId)
+          : undefined;
 
         const roomName = String(targetRoom?.name || '').trim();
         const openingName = String(targetOpening?.name || '').trim();
 
-        if (!targetCustomer || !targetRoom || !targetOpening) {
+        if (!targetCustomer || !targetRoom) {
           throw new Error(
-            'Ölçü oda/açıklık bağlantısı çözülemedi. Güncelleme yapılmadı.'
+            'Ölçü oda bağlantısı çözülemedi. Güncelleme yapılmadı.'
           );
         }
 
-        if (!roomName || !openingName) {
+        if (!roomName) {
           throw new Error(
-            'Oda ve açıklık adı zorunludur. Ölçü güncellenmedi.'
+            'Oda adı zorunludur. Ölçü güncellenmedi.'
+          );
+        }
+
+        if (windowId && (!targetOpening || !openingName)) {
+          throw new Error(
+            'Gönderilen açıklık bulunamadı. Ölçü güncellenmedi.'
           );
         }
 
@@ -1651,35 +1678,83 @@ export const useStore = create<AppState>()(
           throw new Error('Güncellenecek ölçü bulunamadı.');
         }
 
+        const authUser = useAuthStore.getState().currentUser;
+        if (
+          isMeasurementServerSynced(existing) &&
+          !canMutateSyncedMeasurement(authUser)
+        ) {
+          throw new Error('MEASUREMENT_SYNCED_MUTATION_FORBIDDEN');
+        }
+
+        const {
+          measuredDate: _ignoredMeasuredDate,
+          createdAt: _ignoredCreatedAt,
+          ...mutableData
+        } = data;
+        void _ignoredMeasuredDate;
+        void _ignoredCreatedAt;
+
         const updatedMeas = {
           ...existing,
-          ...data,
+          ...mutableData,
           customerId,
           roomId,
-          openingId: windowId,
-          windowId,
+          ...(windowId
+            ? {
+                openingId: windowId,
+                windowId,
+                openingName,
+                openingLabel: openingName,
+                windowName: openingName,
+              }
+            : {
+                openingId: undefined,
+                windowId: undefined,
+                openingName: undefined,
+                openingLabel: undefined,
+                windowName: undefined,
+              }),
           roomName,
           roomLabel: roomName,
-          openingName,
-          openingLabel: openingName,
-          windowName: openingName,
+          measuredDate: existing.measuredDate,
+          createdAt: existing.createdAt,
           updatedAt: now
         };
 
         await useMeasurementStore.getState().updateMeasurement(
           updatedMeas,
-          data.createdById || existing.createdById || 'SYSTEM'
+          mutableData.createdById || existing.createdById || 'SYSTEM'
         );
-        // Customer ağacına ikinci kez ölçü yazılmaz.
       },
 
 
 
       deleteProductMeasurement: async (customerId, roomId, windowId, measurementId) => {
-        // Single-write: delete in independent store only
+        void customerId;
+        void roomId;
+        void windowId;
+
         const { useMeasurementStore } = await import('@/store/measurementStore');
-        await useMeasurementStore.getState().deleteMeasurement(measurementId, 'SYSTEM');
-        // No longer writing to Customer tree
+        const existing = useMeasurementStore
+          .getState()
+          .measurements
+          .find(measurement => measurement.id === measurementId);
+
+        if (!existing) {
+          throw new Error('Silinecek ölçü bulunamadı.');
+        }
+
+        const authUser = useAuthStore.getState().currentUser;
+        if (
+          isMeasurementServerSynced(existing) &&
+          !canMutateSyncedMeasurement(authUser)
+        ) {
+          throw new Error('MEASUREMENT_SYNCED_MUTATION_FORBIDDEN');
+        }
+
+        await useMeasurementStore
+          .getState()
+          .deleteMeasurement(measurementId, authUser?.id || 'SYSTEM');
       },
 
 

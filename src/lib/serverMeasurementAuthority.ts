@@ -260,6 +260,14 @@ export async function persistMeasurementAuthorityCommand(args: {
     args.change.expected_version,
   );
   const payload = normalizeCommandPayload(entityId, args.change.patch);
+
+  // measuredDate is the immutable field measurement timestamp.
+  // UPDATE / SOFT_DELETE may change updatedAt and other mutable data,
+  // but must never rewrite the original measuredDate.
+  if (typedOperation !== "INSERT") {
+    delete payload.measuredDate;
+  }
+
   const parentPackage = normalizeParentPackage(args.change.patch, payload);
 
   // PARENT_PACKAGE_NAME_PROJECTION: canonical parent names remain authoritative.

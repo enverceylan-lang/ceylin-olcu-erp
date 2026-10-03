@@ -403,6 +403,49 @@ export function shouldOverwriteMeasurement(
   return { shouldOverwrite: true };
 }
 
+export async function applyInboundMeasurementSoftDelete(
+  incoming: LocalMeasurement,
+): Promise<"APPLIED" | "SKIPPED"> {
+  const incomingId = String(incoming?.id || "").trim();
+  const incomingVersion = Number(incoming?.version);
+
+  if (
+    !incomingId ||
+    !String(incoming.customerId || "").trim() ||
+    !String(incoming.roomId || "").trim() ||
+    incoming.isDeleted !== true ||
+    !Number.isInteger(incomingVersion) ||
+    incomingVersion < 1
+  ) {
+    throw new Error(
+      "MEASUREMENT_SOFT_DELETE_CANONICAL_PAYLOAD_INVALID",
+    );
+  }
+
+  const existing =
+    useMeasurementStore
+      .getState()
+      .measurements.find(
+        (measurement) => measurement.id === incomingId,
+      ) ??
+    await getLocalMeasurementById(incomingId);
+
+  const check = shouldOverwriteMeasurement(
+    existing,
+    incoming,
+  );
+
+  if (!check.shouldOverwrite) {
+    return "SKIPPED";
+  }
+
+  await useMeasurementStore
+    .getState()
+    .batchUpsertMeasurements([incoming]);
+
+  return "APPLIED";
+}
+
 export async function pushDeltaSyncEvents(): Promise<{
   success: boolean;
   pushedCount: number;
@@ -580,6 +623,12 @@ export async function pushDeltaSyncEvents(): Promise<{
           packagedEvents.push(event);
           continue;
         }
+
+        if (event.operation === "SOFT_DELETE") {
+          packagedEvents.push(event);
+          continue;
+        }
+
         const patch = event.patch as Record<string, unknown>;
         const nested = patch.data && typeof patch.data === "object"
           ? (patch.data as Record<string, unknown>)
@@ -1068,6 +1117,89 @@ export async function pullInboundMeasurements(
       const isMeasurementEvent =
         ["CUSTOMER", "ROOM", "OPENING"].includes(change.entity_type) &&
         (change.operation === "INSERT" || change.operation === "UPDATE");
+
+      if (
+        change.entity_type === "MEASUREMENT" &&
+        change.operation === "SOFT_DELETE"
+      ) {
+        const now = new Date().toISOString();
+        const receiverDeviceId = getDeviceId();
+        const receiverUserId = currentUser.id;
+        const senderUserId = change.user_id || "unknown";
+        const senderDeviceId = change.device_id || "unknown";
+
+        try {
+          const canonical = extractMeasurementFromChange(change);
+
+          if (
+            !canonical ||
+            canonical.id !== change.entity_id ||
+            canonical.isDeleted !== true
+          ) {
+            throw new Error(
+              "MEASUREMENT_SOFT_DELETE_CANONICAL_PAYLOAD_INVALID",
+            );
+          }
+
+          const outcome =
+            await applyInboundMeasurementSoftDelete(
+              canonical,
+            );
+
+          if (outcome === "APPLIED") {
+            appliedMeasurements += 1;
+          } else {
+            alreadyRecorded += 1;
+          }
+
+          const receipt: TransferReceipt = {
+            transferId: change.change_id,
+            entityType: "MEASUREMENT",
+            entityId: canonical.id,
+            senderUserId,
+            receiverUserId,
+            senderDeviceId,
+            receiverDeviceId,
+            status: "DELIVERED",
+            deliveredAt: now,
+            entityVersion: Number(canonical.version),
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          await saveTransferReceipt(receipt);
+        } catch (err: unknown) {
+          const failedReceipt: TransferReceipt = {
+            transferId: change.change_id,
+            entityType: "MEASUREMENT",
+            entityId: change.entity_id || "unknown",
+            senderUserId,
+            receiverUserId,
+            senderDeviceId,
+            receiverDeviceId,
+            status: "FAILED",
+            failedAt: now,
+            failureReason: "LOCAL_WRITE_FAILED",
+            entityVersion: Number(
+              change.patch?.data?.version ||
+              change.patch?.version ||
+              1,
+            ),
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          await saveTransferReceipt(failedReceipt);
+          console.error(
+            "[DeltaSyncClient] Failed to apply MEASUREMENT SOFT_DELETE event",
+            err,
+          );
+          failed += 1;
+          measurementCursorAdvanceBlocked = true;
+        }
+
+        continue;
+      }
 
       if (
         change.entity_type === "MEASUREMENT" &&

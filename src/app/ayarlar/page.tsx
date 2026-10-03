@@ -21,6 +21,11 @@ import type { FinancePermission } from "@/lib/finance/financeAccessPolicy";
 import { isFinancePermission } from "@/lib/finance/financeRoleDefaults";
 import StockPermissionEditor from "@/components/admin/StockPermissionEditor";
 import { isStockPermission, type StockPermission } from "@/lib/stock/stockPermissionCatalog";
+import MeasurementPermissionEditor from "@/components/admin/MeasurementPermissionEditor";
+import {
+  isMeasurementPermission,
+  type MeasurementPermission,
+} from "@/lib/measurement/measurementPermissionCatalog";
 
 type BackupPayload =
   FullSystemBackupPayload;
@@ -75,6 +80,7 @@ export default function AyarlarPage() {
   const [editProviderCustomerId, setEditProviderCustomerId] = useState("");
   const [editFinancePermissions, setEditFinancePermissions] = useState<FinancePermission[]>([]);
   const [editStockPermissions, setEditStockPermissions] = useState<StockPermission[]>([]);
+  const [editMeasurementPermissions, setEditMeasurementPermissions] = useState<MeasurementPermission[]>([]);
   const [userLoading, setUserLoading] = useState(false);
   const [userFilter, setUserFilter] = useState<'ACTIVE' | 'PASSIVE' | 'ALL'>('ACTIVE');
 
@@ -138,6 +144,7 @@ export default function AyarlarPage() {
     providerCustomerId: "Hizmet sağlayıcı carisi",
     providerType: "Hizmet sağlayıcı türü",
     passwordChanged: "Şifre",
+    permissions: "Özel yetkiler",
   };
 
   const formatAuditValue = (field: string, value: unknown) => {
@@ -418,6 +425,9 @@ export default function AyarlarPage() {
     setEditStockPermissions(
       (u.permissions || []).filter(isStockPermission),
     );
+    setEditMeasurementPermissions(
+      (u.permissions || []).filter(isMeasurementPermission),
+    );
   };
 
   const handleSaveEdit = async (id: string) => {
@@ -446,6 +456,7 @@ export default function AyarlarPage() {
       address: editAddress.trim(),
       financePermissions: editFinancePermissions,
       stockPermissions: editStockPermissions,
+      measurementPermissions: editMeasurementPermissions,
       providerCustomerId: isProviderRole(editRole)
         ? editProviderCustomerId
         : undefined
@@ -1176,6 +1187,11 @@ export default function AyarlarPage() {
                               role={editRole}
                               selectedPermissions={editStockPermissions}
                               onChange={setEditStockPermissions}
+                              isSelf={u.id === currentUser?.id}
+                            />
+                            <MeasurementPermissionEditor
+                              selectedPermissions={editMeasurementPermissions}
+                              onChange={setEditMeasurementPermissions}
                               isSelf={u.id === currentUser?.id}
                             />
                           </td>

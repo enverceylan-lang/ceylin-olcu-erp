@@ -9,7 +9,9 @@ import type { MeasurementRecord } from '@/store/measurementStore';
 import { localCustomerDb } from './localCustomerDb';
 import {
   activateBlockedSyncEvent,
+  activateBlockedSyncEventsAtomically,
   discardBlockedSyncEvent,
+  discardBlockedSyncEventsAtomically,
   enqueueDeferredMeasurementUpdateAfterInsert,
   enqueueSyncEventDetailed,
   rollbackDeferredMeasurementUpdate
@@ -541,6 +543,192 @@ export async function deleteLocalMeasurement(
       throw new Error("MEASUREMENT_SYNC_QUEUE_ACTIVATION_FAILED");
     }
   }
+}
+
+export type MeasurementCascadeDeleteSource =
+  | 'OPENING_CASCADE'
+  | 'ROOM_CASCADE';
+
+export async function deleteLocalMeasurementsWithSync(
+  ids: string[],
+  username: string,
+  deleteSource: MeasurementCascadeDeleteSource,
+): Promise<MeasurementRecord[]> {
+  const uniqueIds = Array.from(
+    new Set(
+      ids
+        .map((id) => String(id || "").trim())
+        .filter(Boolean),
+    ),
+  );
+
+  if (uniqueIds.length !== ids.length) {
+    throw new Error("MEASUREMENT_CASCADE_TARGET_ID_INVALID");
+  }
+
+  if (uniqueIds.length === 0) {
+    return [];
+  }
+
+  const originals =
+    await localMeasurementDb.measurements.bulkGet(uniqueIds);
+
+  if (
+    originals.length !== uniqueIds.length ||
+    originals.some(
+      (measurement) =>
+        !measurement ||
+        measurement.isDeleted,
+    )
+  ) {
+    throw new Error("MEASUREMENT_CASCADE_TARGET_CHANGED");
+  }
+
+  const activeOriginals =
+    originals as MeasurementRecord[];
+  const deletedAt = new Date().toISOString();
+  const prepared: Array<{
+    original: MeasurementRecord;
+    deleted: MeasurementRecord;
+    expectedVersion: number;
+    ownerScope: ErpScope;
+  }> = [];
+
+  for (const original of activeOriginals) {
+    const expectedVersion = Number(original.version);
+
+    if (
+      !Number.isInteger(expectedVersion) ||
+      expectedVersion < 1
+    ) {
+      throw new Error("MEASUREMENT_EXPECTED_VERSION_MISSING");
+    }
+
+    const ownerScope =
+      await resolveMeasurementOwnerScope(original);
+    const deleted = normalizeMeasurementLinks({
+      ...original,
+      isDeleted: true,
+      deletedAt,
+      deletedBy: username,
+      deleteSource,
+    } as MeasurementRecord);
+
+    prepared.push({
+      original,
+      deleted,
+      expectedVersion,
+      ownerScope,
+    });
+  }
+
+  const createdChangeIds: string[] = [];
+
+  try {
+    for (const item of prepared) {
+      const payload = {
+        ...item.ownerScope,
+        id: item.deleted.id,
+        customerId: item.deleted.customerId,
+        roomId: item.deleted.roomId,
+        openingId: item.deleted.openingId,
+        windowId: item.deleted.windowId,
+        entity: 'measurement',
+        isDeleted: true,
+        deletedAt: item.deleted.deletedAt,
+        timestamp: new Date().toISOString(),
+      };
+
+      const enqueueResult =
+        await enqueueSyncEventDetailed(
+          'MEASUREMENT',
+          item.deleted.id,
+          'SOFT_DELETE',
+          payload,
+          item.expectedVersion,
+          'BLOCKED',
+        );
+
+      if (
+        !enqueueResult.success ||
+        !enqueueResult.changeId ||
+        enqueueResult.createdNew !== true
+      ) {
+        throw new Error(
+          "MEASUREMENT_CASCADE_SYNC_QUEUE_CREATE_FAILED",
+        );
+      }
+
+      createdChangeIds.push(enqueueResult.changeId);
+    }
+  } catch (error: unknown) {
+    const discarded =
+      await discardBlockedSyncEventsAtomically(
+        createdChangeIds,
+      );
+
+    if (!discarded) {
+      throw new Error(
+        "MEASUREMENT_SYNC_COMPENSATION_FAILED",
+      );
+    }
+
+    throw error;
+  }
+
+  try {
+    await localMeasurementDb.measurements.bulkPut(
+      prepared.map((item) => item.deleted),
+    );
+  } catch (error: unknown) {
+    const discarded =
+      await discardBlockedSyncEventsAtomically(
+        createdChangeIds,
+      );
+
+    if (!discarded) {
+      throw new Error(
+        "MEASUREMENT_SYNC_COMPENSATION_FAILED",
+      );
+    }
+
+    throw error;
+  }
+
+  const activated =
+    await activateBlockedSyncEventsAtomically(
+      createdChangeIds,
+    );
+
+  if (!activated) {
+    let rollbackSucceeded = false;
+
+    try {
+      await localMeasurementDb.measurements.bulkPut(
+        prepared.map((item) => item.original),
+      );
+      rollbackSucceeded = true;
+    } catch {
+      rollbackSucceeded = false;
+    }
+
+    const discarded =
+      await discardBlockedSyncEventsAtomically(
+        createdChangeIds,
+      );
+
+    if (!rollbackSucceeded || !discarded) {
+      throw new Error(
+        "MEASUREMENT_SYNC_COMPENSATION_FAILED",
+      );
+    }
+
+    throw new Error(
+      "MEASUREMENT_SYNC_QUEUE_ACTIVATION_FAILED",
+    );
+  }
+
+  return prepared.map((item) => item.deleted);
 }
 
 export async function requeueLocalMeasurementForSync(

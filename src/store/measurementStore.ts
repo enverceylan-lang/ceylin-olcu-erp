@@ -1,6 +1,12 @@
 import { create } from 'zustand';
 import { ProductMeasurement } from '@/store/useStore';
-import { loadLocalMeasurements, saveLocalMeasurementWithSync, deleteLocalMeasurement, batchSaveLocalMeasurements } from '@/lib/localMeasurementDb';
+import {
+  batchSaveLocalMeasurements,
+  deleteLocalMeasurement,
+  deleteLocalMeasurementsWithSync,
+  loadLocalMeasurements,
+  saveLocalMeasurementWithSync,
+} from '@/lib/localMeasurementDb';
 import { stripErpScope } from '@/lib/customerTreeScope';
 import {
   getMeasurementDimensions,
@@ -722,25 +728,58 @@ export const useMeasurementStore = create<MeasurementState>((set, get) => ({
     const now = new Date().toISOString();
     const { measurements } = get();
 
-    const changed = measurements
-      .filter((measurement) =>
-        measurement.customerId === customerId &&
-        measurement.roomId === roomId &&
-        (measurement.openingId || measurement.windowId) === openingId &&
-        !measurement.isDeleted
-      )
-      .map((measurement) => ({
-        ...measurement,
-        isDeleted: true,
-        deletedAt: now,
-        deletedBy: username,
-        deleteSource: 'OPENING_CASCADE'
-      }));
+    const targets = measurements.filter((measurement) =>
+      measurement.customerId === customerId &&
+      measurement.roomId === roomId &&
+      (measurement.openingId || measurement.windowId) === openingId &&
+      !measurement.isDeleted
+    );
 
-    if (changed.length === 0) return 0;
+    if (targets.length === 0) return 0;
 
-    await batchSaveLocalMeasurements(changed);
+    const syncedTargets = targets.filter((measurement) => {
+      const version = Number(measurement.version);
+      return Number.isInteger(version) && version >= 1;
+    });
+    const syncedIds = new Set(
+      syncedTargets.map((measurement) => measurement.id),
+    );
+    const unsyncedTargets = targets.filter(
+      (measurement) => !syncedIds.has(measurement.id),
+    );
+    const unsyncedDeleted = unsyncedTargets.map((measurement) => ({
+      ...measurement,
+      isDeleted: true,
+      deletedAt: now,
+      deletedBy: username,
+      deleteSource: 'OPENING_CASCADE'
+    }));
 
+    if (unsyncedDeleted.length > 0) {
+      await batchSaveLocalMeasurements(unsyncedDeleted);
+    }
+
+    let syncedDeleted: MeasurementRecord[] = [];
+
+    try {
+      syncedDeleted = await deleteLocalMeasurementsWithSync(
+        syncedTargets.map((measurement) => measurement.id),
+        username,
+        'OPENING_CASCADE',
+      );
+    } catch (error: unknown) {
+      if (unsyncedTargets.length > 0) {
+        try {
+          await batchSaveLocalMeasurements(unsyncedTargets);
+        } catch {
+          throw new Error("MEASUREMENT_SYNC_COMPENSATION_FAILED");
+        }
+      }
+
+      throw error;
+    }
+
+    const changed = [...unsyncedDeleted, ...syncedDeleted];
     const changedById = new Map(
       changed.map((measurement) => [measurement.id, measurement])
     );
@@ -758,24 +797,57 @@ export const useMeasurementStore = create<MeasurementState>((set, get) => ({
     const now = new Date().toISOString();
     const { measurements } = get();
 
-    const changed = measurements
-      .filter((measurement) =>
-        measurement.customerId === customerId &&
-        measurement.roomId === roomId &&
-        !measurement.isDeleted
-      )
-      .map((measurement) => ({
-        ...measurement,
-        isDeleted: true,
-        deletedAt: now,
-        deletedBy: username,
-        deleteSource: 'ROOM_CASCADE'
-      }));
+    const targets = measurements.filter((measurement) =>
+      measurement.customerId === customerId &&
+      measurement.roomId === roomId &&
+      !measurement.isDeleted
+    );
 
-    if (changed.length === 0) return 0;
+    if (targets.length === 0) return 0;
 
-    await batchSaveLocalMeasurements(changed);
+    const syncedTargets = targets.filter((measurement) => {
+      const version = Number(measurement.version);
+      return Number.isInteger(version) && version >= 1;
+    });
+    const syncedIds = new Set(
+      syncedTargets.map((measurement) => measurement.id),
+    );
+    const unsyncedTargets = targets.filter(
+      (measurement) => !syncedIds.has(measurement.id),
+    );
+    const unsyncedDeleted = unsyncedTargets.map((measurement) => ({
+      ...measurement,
+      isDeleted: true,
+      deletedAt: now,
+      deletedBy: username,
+      deleteSource: 'ROOM_CASCADE'
+    }));
 
+    if (unsyncedDeleted.length > 0) {
+      await batchSaveLocalMeasurements(unsyncedDeleted);
+    }
+
+    let syncedDeleted: MeasurementRecord[] = [];
+
+    try {
+      syncedDeleted = await deleteLocalMeasurementsWithSync(
+        syncedTargets.map((measurement) => measurement.id),
+        username,
+        'ROOM_CASCADE',
+      );
+    } catch (error: unknown) {
+      if (unsyncedTargets.length > 0) {
+        try {
+          await batchSaveLocalMeasurements(unsyncedTargets);
+        } catch {
+          throw new Error("MEASUREMENT_SYNC_COMPENSATION_FAILED");
+        }
+      }
+
+      throw error;
+    }
+
+    const changed = [...unsyncedDeleted, ...syncedDeleted];
     const changedById = new Map(
       changed.map((measurement) => [measurement.id, measurement])
     );

@@ -18,6 +18,9 @@ import {
   mergeSelectedFinancePermissions,
 } from "@/lib/finance/userFinancePermissions";
 import { isKnownStockLikePermission, mergeSelectedStockPermissions } from "@/lib/stock/stockPermissionCatalog";
+import {
+  mergeSelectedMeasurementPermissions,
+} from "@/lib/measurement/measurementPermissionCatalog";
 
 const supabaseUrl =
   process.env.SUPABASE_URL ||
@@ -240,6 +243,8 @@ export async function POST(req: NextRequest) {
       Object.prototype.hasOwnProperty.call(body, "financePermissions");
     const hasStockPermissionUpdate =
       Object.prototype.hasOwnProperty.call(body, "stockPermissions");
+    const hasMeasurementPermissionUpdate =
+      Object.prototype.hasOwnProperty.call(body, "measurementPermissions");
 
     // Admin herkes üzerinde işlem yapabilir.
     // Personel yalnız kendi eksik profilini tamamlayabilir.
@@ -280,6 +285,17 @@ export async function POST(req: NextRequest) {
           success: false,
           code: "STOCK_PERMISSION_UPDATE_FORBIDDEN",
           error: "Stok yetkilerini yalnız yönetici güncelleyebilir.",
+        },
+        { status: 403 }
+      );
+    }
+
+    if (hasMeasurementPermissionUpdate && !isAdmin) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: "MEASUREMENT_PERMISSION_UPDATE_FORBIDDEN",
+          error: "Ölçü yetkilerini yalnız yönetici güncelleyebilir.",
         },
         { status: 403 }
       );
@@ -421,6 +437,28 @@ export async function POST(req: NextRequest) {
       }
 
       nextPermissions = stockPermissionUpdate.permissions;
+    }
+
+    if (hasMeasurementPermissionUpdate) {
+      const measurementPermissionUpdate =
+        mergeSelectedMeasurementPermissions({
+          existingPermissions:
+            nextPermissions ?? (isCreate ? [] : existingUser?.permissions),
+          selectedMeasurementPermissions: body.measurementPermissions,
+        });
+
+      if (!measurementPermissionUpdate.ok) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: measurementPermissionUpdate.code,
+            error: "Ölçü yetkisi isteği geçersiz.",
+          },
+          { status: 400 },
+        );
+      }
+
+      nextPermissions = measurementPermissionUpdate.permissions;
     }
     // Kullanıcı adı yalnız admin tarafından belirlenebilir.
     if (

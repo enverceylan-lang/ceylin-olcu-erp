@@ -5,6 +5,7 @@ import { verifyAuth } from "@/lib/authHelper";
 import { loadShadowErpContext } from "@/lib/serverErpContext";
 import { readRequestedErpScopeId } from "@/lib/erpActiveScopeCookie";
 import { persistMeasurementAuthorityCommand } from "@/lib/serverMeasurementAuthority";
+import { canMutateSyncedMeasurement } from "@/lib/measurement/measurementPermissionCatalog";
 
 const ALLOWED_PUSH_ROLES = new Set([
   "ADMIN",
@@ -246,6 +247,15 @@ export async function POST(req: NextRequest) {
       ) {
         rejectedIds.push(changeId);
         errors.push(`Invalid expectedVersion for measurement operation ${changeId}`);
+        continue;
+      }
+
+      if (
+        (operation === "UPDATE" || operation === "SOFT_DELETE") &&
+        !canMutateSyncedMeasurement(user)
+      ) {
+        rejectedIds.push(changeId);
+        errors.push("MEASUREMENT_SYNCED_MUTATION_FORBIDDEN");
         continue;
       }
     }

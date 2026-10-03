@@ -482,8 +482,11 @@ const links: Record<string, string> = {};
     if (measurement.isDeleted || measurement.isArchived) return false;
     const customer = customers.find(c => c.id === measurement.customerId && !c.isDeleted);
     const room = customer?.rooms?.find(r => r.id === measurement.roomId && !r.isDeleted);
-    const opening = room?.windows?.find(w => w.id === measurementOpeningId(measurement) && !w.isDeleted);
-    return !customer || !room || !opening;
+    const openingId = measurementOpeningId(measurement);
+    const opening = openingId
+      ? room?.windows?.find(w => w.id === openingId && !w.isDeleted)
+      : undefined;
+    return !customer || !room || (Boolean(openingId) && !opening);
   });
 
   const getOrphanDisplay = (measurement: MeasurementRecord) => {
