@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const route = fs.readFileSync(
@@ -30,6 +30,6 @@ assert.equal(
   parsed.crons?.[0]?.path,
   "/api/finance/pos-auto-settlement"
 );
-assert.equal(parsed.crons?.[0]?.schedule, "5 * * * *");
+assert.equal(parsed.crons?.[0]?.schedule, "5 0 * * *");
 
 console.log("FINANCE_POS_AUTO_SETTLEMENT_ROUTE_CONTRACT: PAK");
