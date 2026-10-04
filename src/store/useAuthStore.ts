@@ -2,6 +2,7 @@ import { getProviderRole } from "@/lib/providerRolePolicy";
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { normalizeUsername } from '@/lib/usernameHelper';
+import { getFinanceRoleDefaults } from '@/lib/finance/financeRoleDefaults';
 import type {
   Customer,
   MontageTask,
@@ -167,9 +168,23 @@ export function normalizeUser(user: UserInput | null | undefined): MockUser {
   const username = (user.username || legacyName || user.id || '').trim().toLowerCase().replace(/\s+/g, '');
   const password = typeof user.password === 'string' ? user.password.trim() : user.password;
   
-  const permissions = Array.isArray(user.permissions) && user.permissions.length > 0
-    ? user.permissions 
-    : getRoleDefaultPermissions(role);
+  const basePermissions =
+    Array.isArray(user.permissions) && user.permissions.length > 0
+      ? user.permissions
+      : getRoleDefaultPermissions(role);
+
+  const normalizedRole = normalizeRole(role);
+  const adminFinancePermissions =
+    normalizedRole === 'ADMIN'
+      ? getFinanceRoleDefaults(role)
+      : [];
+
+  const permissions = [
+    ...new Set([
+      ...basePermissions,
+      ...adminFinancePermissions,
+    ]),
+  ];
 
     const profileCompletedAt =
     typeof user.profileCompletedAt === 'string' &&
