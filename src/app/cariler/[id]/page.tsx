@@ -294,6 +294,10 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const [captureOpeningId, setCaptureOpeningId] = useState("");
   const [lastSavedMeasurementId, setLastSavedMeasurementId] =
     useState<string | null>(null);
+  const [
+    selectedExplorerMeasurementId,
+    setSelectedExplorerMeasurementId,
+  ] = useState<string | null>(null);
   const [requestedTab, setActiveTab] = useState<"rooms" | "timeline" | "financial">("rooms");
 
   const CUSTOMER_WORKFLOW_LABELS: Record<string, string> = {
@@ -758,53 +762,99 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   };
 
   const openRoomPreparation = (room: Customer["rooms"][number]) => {
+    if (!customer) return;
+
+    const directRoomMeasurements =
+      measurementStore.measurements.filter(
+        measurement =>
+          measurement.customerId === customer.id &&
+          measurement.roomId === room.id &&
+          !measurementOpeningId(measurement) &&
+          !measurement.isDeleted,
+      );
+
     const activeOpenings = (room.windows || []).filter(
       opening => !opening.isDeleted,
     );
 
-    if (activeOpenings.length === 0) {
+    const openingMeasurementGroups = activeOpenings.map(
+      opening => {
+        const nestedOpeningMeasurements = (
+          opening.products || []
+        ).filter(
+          measurement => !measurement.isDeleted,
+        );
+
+        const canonicalOpeningMeasurements =
+          measurementStore.measurements.filter(
+            measurement =>
+              measurement.customerId === customer.id &&
+              measurement.roomId === room.id &&
+              measurementOpeningId(measurement) ===
+                opening.id &&
+              !measurement.isDeleted,
+          );
+
+        const measurements = Array.from(
+          new Map(
+            [
+              ...nestedOpeningMeasurements,
+              ...canonicalOpeningMeasurements,
+            ].map(measurement => [
+              measurement.id,
+              measurement,
+            ]),
+          ).values(),
+        );
+
+        return {
+          opening,
+          measurements,
+        };
+      },
+    );
+
+    const hasAnyMeasurement =
+      directRoomMeasurements.length > 0 ||
+      openingMeasurementGroups.some(
+        group => group.measurements.length > 0,
+      );
+
+    if (!hasAnyMeasurement) {
       showToast(
-        `${room.name} odasında ölçü açıklığı bulunmuyor. Satışa Hazırlık açılamaz.`,
+        `${room.name} odasında kayıtlı ölçü bulunmuyor. Satışa Hazırlık açılamaz.`,
       );
       return;
     }
 
-    for (const opening of activeOpenings) {
-      const nestedOpeningMeasurements = (opening.products || []).filter(
-        measurement => !measurement.isDeleted,
+    for (const measurement of directRoomMeasurements) {
+      const issues = validateMeasurementRecord(
+        measurement,
+        {
+          roomId: room.id,
+          roomName: room.name,
+        },
       );
 
-      const canonicalOpeningMeasurements = measurementStore.measurements.filter(
-        measurement =>
-          measurement.customerId === customer.id &&
-          measurementOpeningId(measurement) === opening.id &&
-          !measurement.isDeleted,
-      );
-
-      const openingMeasurements = Array.from(
-        new Map(
-          [
-            ...nestedOpeningMeasurements,
-            ...canonicalOpeningMeasurements,
-          ].map(measurement => [measurement.id, measurement]),
-        ).values(),
-      );
-
-      if (openingMeasurements.length === 0) {
-        showToast(
-          `${room.name} > ${opening.name || "Açıklık"} için ölçü kaydedilmeden Satışa Hazırlık açılamaz.`,
+      if (issues.length > 0) {
+        console.warn(
+          "[MeasurementValidation] Satışa Hazırlık kapısı",
+          issues,
         );
+        showToast(issues[0].message);
         return;
       }
+    }
 
-      for (const measurement of openingMeasurements) {
+    for (const group of openingMeasurementGroups) {
+      for (const measurement of group.measurements) {
         const issues = validateMeasurementRecord(
           measurement,
           {
             roomId: room.id,
             roomName: room.name,
-            openingId: opening.id,
-            openingName: opening.name,
+            openingId: group.opening.id,
+            openingName: group.opening.name,
           },
         );
 
@@ -1230,6 +1280,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
       setPendingNewWindow(null);
       setMeasurementWorkspaceTab("EXPLORER");
       setLastSavedMeasurementId(savedId);
+      setSelectedExplorerMeasurementId(savedId);
 
       void syncNow().catch((error) => {
         console.warn(
@@ -1782,7 +1833,7 @@ showToast("Saha taslağı telefona kaydedildi.");
         </div>
 
         <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-2 [&_button]:h-9 [&_button]:min-h-9 [&_button]:rounded-lg [&_button]:px-3 [&_button]:py-1.5 [&_button]:text-xs [&_button]:font-semibold [&_a]:h-9 [&_a]:min-h-9 [&_a]:rounded-lg [&_a]:px-3 [&_a]:text-xs [&_a]:font-semibold">
-          {currentUser?.role === 'ADMIN' && (
+          {Boolean(mode !== "MEASUREMENT") && currentUser?.role === 'ADMIN' && (
             <button
               onClick={handleTargetRecover}
               disabled={isRecovering}
@@ -2218,90 +2269,456 @@ showToast("Saha taslağı telefona kaydedildi.");
                       visibleCustomerRooms[0]?.id ||
                       "";
                     setCaptureRoomId(roomId);
+                    setCaptureOpeningId("");
+                    setActiveWindowIdForProduct(
+                      roomId
+                        ? DIRECT_ROOM_WINDOW_ID
+                        : null,
+                    );
+                    setEditingMeasurementId(null);
+                    setSelectedTemplate(
+                      "SIMPLE_WIDTH_HEIGHT",
+                    );
+                    setRawValues({});
+                    setPendingPlicellPieceInput("");
+                    setMeasurementNotes("");
+                    setOverrideMeasuredById(user.id);
                   }}
                   onExplorer={() =>
                     setMeasurementWorkspaceTab("EXPLORER")
                   }
-                />
-              )}
+                  capture={
+                    <MeasurementCapturePanel
+                      rooms={visibleCustomerRooms.map(room => ({
+                        id: room.id,
+                        name: room.name,
+                        openings: room.windows
+                          .filter(opening => !opening.isDeleted)
+                          .map(opening => ({
+                            id: opening.id,
+                            name: opening.name,
+                          })),
+                      }))}
+                      selectedRoomId={captureRoomId}
+                      selectedOpeningId={captureOpeningId}
+                      activeParentId={activeWindowIdForProduct}
+                      directParentId={DIRECT_ROOM_WINDOW_ID}
+                      isEditing={Boolean(editingMeasurementId)}
+                      onRoomChange={roomId => {
+                        setCaptureRoomId(roomId);
+                        setCaptureOpeningId("");
+                        setActiveWindowIdForProduct(
+                          DIRECT_ROOM_WINDOW_ID,
+                        );
+                        setEditingMeasurementId(null);
+                        setSelectedTemplate(
+                          "SIMPLE_WIDTH_HEIGHT",
+                        );
+                        setRawValues({});
+                        setPendingPlicellPieceInput("");
+                        setMeasurementNotes("");
+                        setOverrideMeasuredById(user.id);
+                      }}
+                      onOpeningChange={openingId => {
+                        setCaptureOpeningId(openingId);
+                        setActiveWindowIdForProduct(
+                          openingId ||
+                            DIRECT_ROOM_WINDOW_ID,
+                        );
+                        setEditingMeasurementId(null);
+                        setSelectedTemplate(
+                          "SIMPLE_WIDTH_HEIGHT",
+                        );
+                        setRawValues({});
+                        setPendingPlicellPieceInput("");
+                        setMeasurementNotes("");
+                        setOverrideMeasuredById(user.id);
+                      }}
+                      onCreateOpening={async (
+                        roomId,
+                        openingName,
+                      ) => {
+                        const normalizedOpeningName =
+                          openingName.trim();
+                        if (!normalizedOpeningName) {
+                          return null;
+                        }
 
-              {mode === "MEASUREMENT" &&
-                measurementWorkspaceTab === "CAPTURE" && (
-                  <MeasurementCapturePanel
-                    rooms={visibleCustomerRooms.map(room => ({
-                      id: room.id,
-                      name: room.name,
-                      openings: room.windows
-                        .filter(opening => !opening.isDeleted)
-                        .map(opening => ({
-                          id: opening.id,
-                          name: opening.name,
-                        })),
-                    }))}
-                    selectedRoomId={captureRoomId}
-                    selectedOpeningId={captureOpeningId}
-                    activeParentId={activeWindowIdForProduct}
-                    directParentId={DIRECT_ROOM_WINDOW_ID}
-                    isEditing={Boolean(editingMeasurementId)}
-                    onRoomChange={roomId => {
-                      setCaptureRoomId(roomId);
-                      setCaptureOpeningId("");
-                      setActiveWindowIdForProduct(null);
-                      setEditingMeasurementId(null);
-                    }}
-                    onOpeningChange={openingId => {
-                      setCaptureOpeningId(openingId);
-                      setActiveWindowIdForProduct(null);
-                      setEditingMeasurementId(null);
-                    }}
-                    onStart={({ parentId }) => {
-                      setActiveWindowIdForProduct(parentId);
-                      setEditingMeasurementId(null);
-                      setSelectedTemplate("SIMPLE_WIDTH_HEIGHT");
-                      setRawValues({});
-                      setPendingPlicellPieceInput("");
-                      setMeasurementNotes("");
-                      setOverrideMeasuredById(user.id);
-                    }}
-                    renderForm={({
-                      roomId,
-                      openingId,
-                    }) => {
-                      const room =
-                        visibleCustomerRooms.find(
-                          candidate =>
-                            candidate.id === roomId,
-                        ) ||
-                        visibleCustomerRooms[0];
-                      if (!room) return null;
+                        try {
+                          const openingId =
+                            await addWindow(
+                              customer.id,
+                              roomId,
+                              normalizedOpeningName,
+                            );
 
-                      const opening = openingId
-                        ? room.windows.find(
+                          if (!openingId) {
+                            showToast(
+                              "Açıklık / grup oluşturulamadı.",
+                            );
+                            return null;
+                          }
+
+                          setCaptureRoomId(roomId);
+                          setCaptureOpeningId(openingId);
+
+                          void syncNow().catch(error => {
+                            console.warn(
+                              "[OpeningSync] Açıklık local kaydedildi, senkron bekliyor.",
+                              error,
+                            );
+                            showToast(
+                              "Açıklık kaydedildi. Senkronizasyon bekliyor.",
+                            );
+                          });
+
+                          return openingId;
+                        } catch (error) {
+                          console.error(error);
+                          showToast(
+                            "Açıklık / grup oluşturulamadı.",
+                          );
+                          return null;
+                        }
+                      }}
+                      onStart={({ parentId }) => {
+                        setActiveWindowIdForProduct(parentId);
+                        setEditingMeasurementId(null);
+                        setSelectedTemplate(
+                          "SIMPLE_WIDTH_HEIGHT",
+                        );
+                        setRawValues({});
+                        setPendingPlicellPieceInput("");
+                        setMeasurementNotes("");
+                        setOverrideMeasuredById(user.id);
+                      }}
+                      renderForm={({
+                        roomId,
+                        openingId,
+                      }) => {
+                        const room =
+                          visibleCustomerRooms.find(
                             candidate =>
-                              candidate.id === openingId &&
-                              !candidate.isDeleted,
-                          )
-                        : undefined;
+                              candidate.id === roomId,
+                          ) ||
+                          visibleCustomerRooms[0];
+                        if (!room) return null;
 
-                      const captureWindow: WindowItem =
-                        opening || {
-                          id: DIRECT_ROOM_WINDOW_ID,
-                          name: room.name,
-                          photos: [],
-                          videos: [],
-                          products: [],
+                        const opening = openingId
+                          ? room.windows.find(
+                              candidate =>
+                                candidate.id === openingId &&
+                                !candidate.isDeleted,
+                            )
+                          : undefined;
+
+                        const captureWindow: WindowItem =
+                          opening || {
+                            id: DIRECT_ROOM_WINDOW_ID,
+                            name: room.name,
+                            photos: [],
+                            videos: [],
+                            products: [],
+                          };
+
+                        return renderMeasurementForm(
+                          room,
+                          captureWindow,
+                          Boolean(editingMeasurementId),
+                        );
+                      }}
+                    />
+                  }
+                  explorer={
+                    <MeasurementsExplorerPanel
+                      selectedMeasurementId={
+                        selectedExplorerMeasurementId
+                      }
+                      onSelectMeasurement={
+                        setSelectedExplorerMeasurementId
+                      }
+                      rooms={visibleCustomerRooms.map(room => {
+                        const roomMeasurements =
+                          measurementStore.measurements
+                            .filter(
+                              measurement =>
+                                measurement.customerId ===
+                                  customer.id &&
+                                measurement.roomId ===
+                                  room.id &&
+                                !measurement.isDeleted,
+                            )
+                            .sort(
+                              (left, right) =>
+                                new Date(
+                                  right.measuredDate ||
+                                    right.createdAt ||
+                                    0,
+                                ).getTime() -
+                                new Date(
+                                  left.measuredDate ||
+                                    left.createdAt ||
+                                    0,
+                                ).getTime(),
+                            );
+
+                        const toExplorerItem = (
+                          measurement:
+                            (typeof roomMeasurements)[number],
+                          fallbackIndex: number,
+                        ) => {
+                          const dimensions =
+                            resolveMeasurementDisplayDimensions(
+                              measurement,
+                            );
+                          const measurementLabelValue =
+                            (
+                              measurement as typeof measurement & {
+                                measurementLabel?: unknown;
+                              }
+                            ).measurementLabel;
+                          const measurementLabel =
+                            typeof measurementLabelValue ===
+                            "string"
+                              ? measurementLabelValue.trim()
+                              : "";
+
+                          return {
+                            id: measurement.id,
+                            measurementLabel:
+                              measurementLabel || undefined,
+                            fallbackIndex,
+                            templateLabel:
+                              getTemplateLabel(
+                                measurement.templateType,
+                              ),
+                            summary:
+                              dimensions.summaryLabel ||
+                              dimensions.dimensionText ||
+                              "Ölçü değerleri kayıtlı",
+                            measuredAt:
+                              measurement.measuredDate
+                                ? new Date(
+                                    measurement.measuredDate,
+                                  ).toLocaleString("tr-TR")
+                                : undefined,
+                            measuredBy:
+                              measurement.measuredBy,
+                            statusLabel:
+                              typeof (
+                                measurement as typeof measurement & {
+                                  status?: unknown;
+                                }
+                              ).status === "string"
+                                ? String(
+                                    (
+                                      measurement as typeof measurement & {
+                                        status?: unknown;
+                                      }
+                                    ).status,
+                                  )
+                                : "MEASURED",
+                            canMutate:
+                              canMutateMeasurementRecord(
+                                measurement,
+                              ),
+                            highlighted:
+                              lastSavedMeasurementId ===
+                              measurement.id,
+                          };
                         };
 
-                      return renderMeasurementForm(
-                        room,
-                        captureWindow,
-                        Boolean(editingMeasurementId),
-                      );
-                    }}
-                  />
-                )}
+                        const directMeasurements =
+                          roomMeasurements.filter(
+                            measurement =>
+                              !measurementOpeningId(
+                                measurement,
+                              ),
+                          );
 
-              {(mode !== "MEASUREMENT" || measurementWorkspaceTab === "EXPLORER") && (
+                        const activeOpenings =
+                          room.windows.filter(
+                            opening =>
+                              !opening.isDeleted,
+                          );
+
+                        return {
+                          id: room.id,
+                          name: room.name,
+                          directMeasurements:
+                            directMeasurements.map(
+                              (measurement, index) =>
+                                toExplorerItem(
+                                  measurement,
+                                  index + 1,
+                                ),
+                            ),
+                          openings: activeOpenings.map(
+                            opening => {
+                              const openingMeasurements =
+                                roomMeasurements.filter(
+                                  measurement =>
+                                    measurementOpeningId(
+                                      measurement,
+                                    ) === opening.id,
+                                );
+
+                              return {
+                                id: opening.id,
+                                name: opening.name,
+                                measurements:
+                                  openingMeasurements.map(
+                                    (
+                                      measurement,
+                                      index,
+                                    ) =>
+                                      toExplorerItem(
+                                        measurement,
+                                        index + 1,
+                                      ),
+                                  ),
+                              };
+                            },
+                          ),
+                        };
+                      })}
+                      onAddMeasurement={(
+                        roomId,
+                        openingId,
+                      ) => {
+                        setCaptureRoomId(roomId);
+                        setCaptureOpeningId(
+                          openingId || "",
+                        );
+                        setMeasurementWorkspaceTab(
+                          "CAPTURE",
+                        );
+                        setEditingMeasurementId(null);
+                        setActiveWindowIdForProduct(
+                          openingId ||
+                            DIRECT_ROOM_WINDOW_ID,
+                        );
+                        setSelectedTemplate(
+                          "SIMPLE_WIDTH_HEIGHT",
+                        );
+                        setRawValues({});
+                        setPendingPlicellPieceInput("");
+                        setMeasurementNotes("");
+                        setOverrideMeasuredById(user.id);
+                      }}
+                      onEditMeasurement={measurementId => {
+                        const measurement =
+                          measurementStore.measurements.find(
+                            candidate =>
+                              candidate.id ===
+                                measurementId &&
+                              candidate.customerId ===
+                                customer.id &&
+                              !candidate.isDeleted,
+                          );
+                        if (!measurement) return;
+
+                        const openingId =
+                          measurementOpeningId(
+                            measurement,
+                          );
+
+                        setCaptureRoomId(
+                          measurement.roomId,
+                        );
+                        setCaptureOpeningId(openingId);
+                        setMeasurementWorkspaceTab(
+                          "CAPTURE",
+                        );
+                        setEditingMeasurementId(
+                          measurement.id,
+                        );
+                        setActiveWindowIdForProduct(
+                          openingId ||
+                            DIRECT_ROOM_WINDOW_ID,
+                        );
+                        setSelectedTemplate(
+                          measurement.templateType ===
+                            "CURTAIN"
+                            ? "CURTAIN_DETAIL"
+                            : measurement.templateType,
+                        );
+                        setRawValues(
+                          measurement.rawValues || {},
+                        );
+                        setMeasurementNotes(
+                          measurement.notes || "",
+                        );
+                        setOverrideMeasuredById(
+                          measurement.measuredById ||
+                            currentUser?.id ||
+                            "",
+                        );
+                      }}
+                      onDeleteMeasurement={measurementId => {
+                        const measurement =
+                          measurementStore.measurements.find(
+                            candidate =>
+                              candidate.id ===
+                                measurementId &&
+                              candidate.customerId ===
+                                customer.id &&
+                              !candidate.isDeleted,
+                          );
+                        if (!measurement) return;
+
+                        const openingId =
+                          measurementOpeningId(
+                            measurement,
+                          );
+
+                        setDeleteConfirm({
+                          type: "measurement",
+                          data: {
+                            customerId: customer.id,
+                            roomId: measurement.roomId,
+                            ...(openingId
+                              ? {
+                                  windowId: openingId,
+                                }
+                              : {}),
+                            measurementId,
+                          },
+                        });
+                      }}
+                      onOpenSalesPreparation={roomId => {
+                        const room =
+                          visibleCustomerRooms.find(
+                            candidate =>
+                              candidate.id === roomId,
+                          );
+                        if (room) {
+                          openRoomPreparation(room);
+                        }
+                      }}
+                      onOpenVisualReport={() =>
+                        setIsVisualReportOpen(true)
+                      }
+                      onShareWhatsApp={() =>
+                        void handleShareWhatsAppReport()
+                      }
+                      onTransferToSale={
+                        canTransferToSale
+                          ? () =>
+                              void handleTransferToSales()
+                          : undefined
+                      }
+                      onRecoverMeasurements={
+                        currentUser?.role === "ADMIN"
+                          ? () =>
+                              void handleTargetRecover()
+                          : undefined
+                      }
+                      isRecovering={isRecovering}
+                    />
+                  }
+                />
+              )}              {Boolean(mode !== "MEASUREMENT") && (
               <>
               {visibleCustomerRooms.length === 0 ? (
                 <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-12 text-center text-gray-500">
