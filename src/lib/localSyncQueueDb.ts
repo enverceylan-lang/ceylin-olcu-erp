@@ -76,8 +76,9 @@ export interface SyncEvent {
   userId: string;
   createdAt: string;
   updatedAt: string;
-  syncStatus: 'PENDING' | 'SYNCED' | 'ERROR' | 'BLOCKED';
+  syncStatus: 'PENDING' | 'SYNCED' | 'ERROR' | 'BLOCKED' | 'CONFLICT';
   retryCount: number;
+  lastErrorCode?: string;
   blockedReason?: SyncBlockedReason;
   blockedAt?: string;
 }
@@ -1238,5 +1239,50 @@ export async function markSyncEventsError(changeIds: string[], errorMessage?: st
     }
   } catch (err) {
     console.error('[SyncQueue] Failed to mark events as ERROR:', err);
+  }
+}
+export async function markSyncEventsConflict(
+  changeIds: string[],
+  errorCode: string,
+): Promise<void> {
+  const normalizedErrorCode = String(errorCode || "").trim();
+
+  if (
+    normalizedErrorCode !==
+    "MEASUREMENT_STALE_VERSION"
+  ) {
+    throw new Error(
+      "SYNC_CONFLICT_ERROR_CODE_UNSUPPORTED",
+    );
+  }
+
+  try {
+    const now = new Date().toISOString();
+
+    for (const id of changeIds) {
+      const event =
+        await localSyncQueueDb.pendingSyncEvents.get(id);
+
+      if (!event) {
+        continue;
+      }
+
+      await localSyncQueueDb.pendingSyncEvents.update(
+        id,
+        {
+          syncStatus: 'CONFLICT',
+          updatedAt: now,
+          retryCount: (event.retryCount || 0) + 1,
+          lastErrorCode: normalizedErrorCode,
+        },
+      );
+    }
+  }
+  catch (err) {
+    console.error(
+      '[SyncQueue] Failed to mark events as CONFLICT:',
+      err,
+    );
+    throw err;
   }
 }

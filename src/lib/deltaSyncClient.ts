@@ -17,6 +17,7 @@ import {
   markSyncEventsBlocked,
   markSyncEventsSynced,
   markSyncEventsError,
+  markSyncEventsConflict,
   syncEventMatchesHistoricalDeltaFingerprint,
   type HistoricalDeltaEventFingerprint,
   type SyncEvent,
@@ -129,6 +130,10 @@ interface DeltaPushResponse {
     entityId?: string;
     entityVersion?: number;
     outcome?: string;
+  }>;
+  measurementErrors?: Array<{
+    changeId?: string;
+    errorCode?: string;
   }>;
 }
 
@@ -446,7 +451,7 @@ export async function applyInboundMeasurementSoftDelete(
   return "APPLIED";
 }
 
-export async function pushDeltaSyncEvents(): Promise<{
+async function pushDeltaSyncEventsBatch(eventLimit: number): Promise<{
   success: boolean;
   pushedCount: number;
   isolatedCount: number;
@@ -481,7 +486,7 @@ export async function pushDeltaSyncEvents(): Promise<{
 
     const token = sessionToken;
     const activeScope = await loadVerifiedClientErpScope(sessionToken);
-    const pendingEvents = await getPendingSyncEvents(activeScope, 50);
+    const pendingEvents = await getPendingSyncEvents(activeScope, eventLimit);
     const activeScopeEvents = pendingEvents.filter((event) =>
       erpScopeMatches(event.scope, activeScope),
     );
@@ -784,6 +789,7 @@ export async function pushDeltaSyncEvents(): Promise<{
       errorIds,
       errors,
       measurementResults,
+      measurementErrors,
     } = data;
 
     const resultByChangeId = new Map(
@@ -874,11 +880,36 @@ export async function pushDeltaSyncEvents(): Promise<{
       new Set([...(errorIds || []), ...clientRejectedIds]),
     );
 
-    if (combinedErrorIds.length > 0) {
+    const terminalConflictIds = new Set(
+      (measurementErrors || [])
+        .filter(
+          (item) =>
+            String(item?.errorCode || "").trim() ===
+            "MEASUREMENT_STALE_VERSION",
+        )
+        .map((item) => String(item?.changeId || "").trim())
+        .filter(Boolean),
+    );
+
+    const terminalConflictChangeIds = combinedErrorIds.filter(
+      (changeId) => terminalConflictIds.has(changeId),
+    );
+    const retryableErrorIds = combinedErrorIds.filter(
+      (changeId) => !terminalConflictIds.has(changeId),
+    );
+
+    if (terminalConflictChangeIds.length > 0) {
+      await markSyncEventsConflict(
+        terminalConflictChangeIds,
+        "MEASUREMENT_STALE_VERSION",
+      );
+    }
+
+    if (retryableErrorIds.length > 0) {
       const errMsgs = Array.isArray(errors)
         ? errors.join(", ")
         : errors || "Measurement canonical ACK validation failed";
-      await markSyncEventsError(combinedErrorIds, errMsgs);
+      await markSyncEventsError(retryableErrorIds, errMsgs);
     }
 
     return {
@@ -917,6 +948,96 @@ export async function pushDeltaSyncEvents(): Promise<{
   }
 }
 
+const DELTA_SYNC_SERVER_REQUEST_EVENT_LIMIT = 1;
+const DELTA_SYNC_MAX_EVENTS_PER_MANUAL_RUN = 50;
+const TERMINAL_MEASUREMENT_CONFLICT = "MEASUREMENT_STALE_VERSION";
+
+function isTerminalMeasurementConflictOnly(errors: string[]): boolean {
+  return (
+    errors.length > 0 &&
+    errors.every((error) => error === TERMINAL_MEASUREMENT_CONFLICT)
+  );
+}
+
+export async function pushDeltaSyncEvents(): Promise<
+  Awaited<ReturnType<typeof pushDeltaSyncEventsBatch>>
+> {
+  let totalPushedCount = 0;
+  let totalIsolatedCount = 0;
+  const terminalErrors: string[] = [];
+  let lastResult: Awaited<ReturnType<typeof pushDeltaSyncEventsBatch>> | null =
+    null;
+
+  for (
+    let eventIndex = 0;
+    eventIndex < DELTA_SYNC_MAX_EVENTS_PER_MANUAL_RUN;
+    eventIndex += 1
+  ) {
+    const result = await pushDeltaSyncEventsBatch(
+      DELTA_SYNC_SERVER_REQUEST_EVENT_LIMIT,
+    );
+
+    lastResult = result;
+    totalPushedCount += result.pushedCount;
+    totalIsolatedCount += result.isolatedCount;
+
+    if (!result.success) {
+      if (isTerminalMeasurementConflictOnly(result.errors)) {
+        terminalErrors.push(...result.errors);
+        continue;
+      }
+
+      return {
+        ...result,
+        pushedCount: totalPushedCount,
+        isolatedCount: totalIsolatedCount,
+        errors: [...terminalErrors, ...result.errors],
+        debug: {
+          ...result.debug,
+          syncedCount: totalPushedCount,
+          errorCount: result.debug.errorCount + terminalErrors.length,
+        },
+      };
+    }
+
+    if (
+      result.debug.pendingCount === 0 &&
+      result.pushedCount === 0 &&
+      result.isolatedCount === 0
+    ) {
+      return {
+        ...result,
+        success: terminalErrors.length === 0,
+        pushedCount: totalPushedCount,
+        isolatedCount: totalIsolatedCount,
+        errors: terminalErrors,
+        debug: {
+          ...result.debug,
+          syncedCount: totalPushedCount,
+          errorCount: terminalErrors.length,
+        },
+      };
+    }
+  }
+
+  if (!lastResult) {
+    throw new Error("DELTA_SYNC_DRAIN_RESULT_MISSING");
+  }
+
+  return {
+    ...lastResult,
+    success: terminalErrors.length === 0,
+    pushedCount: totalPushedCount,
+    isolatedCount: totalIsolatedCount,
+    errors: terminalErrors,
+    debug: {
+      ...lastResult.debug,
+      apiStatus: "BATCH_WINDOW_COMPLETE",
+      syncedCount: totalPushedCount,
+      errorCount: terminalErrors.length,
+    },
+  };
+}
 export async function pullInboundMeasurements(
   allLocalCustomers: LocalCustomer[],
 ): Promise<{

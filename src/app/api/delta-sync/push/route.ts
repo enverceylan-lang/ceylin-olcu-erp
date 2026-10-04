@@ -300,6 +300,10 @@ export async function POST(req: NextRequest) {
     entityVersion: number;
     outcome: string;
   }> = [];
+  const measurementErrors: Array<{
+    changeId: string;
+    errorCode: string;
+  }> = [];
 
   try {
     const erpContext = await loadShadowErpContext(
@@ -370,6 +374,10 @@ export async function POST(req: NextRequest) {
             ? error.message
             : `Failed to commit measurement ${changeId}`;
 
+        measurementErrors.push({
+          changeId,
+          errorCode: publicError,
+        });
         errors.push(publicError);      }
     }
 
@@ -395,6 +403,7 @@ export async function POST(req: NextRequest) {
       errorIds: Array.from(new Set(errorIds)),
       errors,
       measurementResults,
+      measurementErrors,
     });
   } catch {
     console.error("[Delta Push] Internal error.");
