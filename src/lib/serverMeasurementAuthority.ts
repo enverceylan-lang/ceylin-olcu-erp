@@ -49,6 +49,30 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function cleanId(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
+const ALLOWED_MEASUREMENT_DOMAIN_CODES = new Set([
+  'MEASUREMENT_STALE_VERSION',
+]);
+
+function extractMeasurementDomainCode(
+  error: unknown,
+): string | null {
+  const record = asRecord(error);
+  if (!record) return null;
+
+  for (const field of ['message', 'details', 'hint']) {
+    const value = record[field];
+    if (typeof value !== 'string') continue;
+
+    const matches = value.match(/\bMEASUREMENT_[A-Z0-9_]+\b/g) || [];
+    for (const code of matches) {
+      if (ALLOWED_MEASUREMENT_DOMAIN_CODES.has(code)) {
+        return code;
+      }
+    }
+  }
+
+  return null;
+}
 
 function optionalText(value: unknown): string | null {
   const text = cleanId(value);
@@ -326,10 +350,9 @@ export async function persistMeasurementAuthorityCommand(args: {
 
   if (error) {
     const publicCode =
-      typeof error.message === "string" &&
-      /^MEASUREMENT_[A-Z0-9_]+$/.test(error.message)
-        ? error.message
-        : "MEASUREMENT_AUTHORITY_RPC_FAILED";
+      extractMeasurementDomainCode(error) ??
+      "MEASUREMENT_AUTHORITY_RPC_FAILED";
+
     console.error("[MeasurementAuthority] Canonical RPC failed.");
     throw new Error(publicCode);
   }

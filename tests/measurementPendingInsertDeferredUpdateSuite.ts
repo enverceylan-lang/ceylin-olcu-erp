@@ -84,6 +84,29 @@ requireText(
   "ACK_ACTIVATES_DEFERRED",
 );
 
+requireText(
+  queue,
+  "enqueueDeferredMeasurementMutationAfterInsert",
+  "GENERIC_DEFERRED_MUTATION",
+);
+
+requireText(
+  queue,
+  "activateDeferredMeasurementMutationAfterInsert",
+  "GENERIC_DEFERRED_ACTIVATION",
+);
+
+requireText(
+  queue,
+  "['UPDATE', 'SOFT_DELETE']",
+  "UPDATE_DELETE_CHAIN",
+);
+
+requireText(
+  queue,
+  "previousOperation",
+  "ROLLBACK_RESTORES_OPERATION",
+);
 console.log(
   "PAK_MEASUREMENT_PENDING_INSERT_DEFERRED_UPDATE_CONTRACT",
 );

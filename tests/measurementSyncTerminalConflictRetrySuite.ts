@@ -173,3 +173,27 @@ main().catch(async (error) => {
   console.error(error);
   process.exitCode = 1;
 });
+const __serverAuthoritySource = readFileSync(
+  "src/lib/serverMeasurementAuthority.ts",
+  "utf8",
+);
+assert.match(
+  __serverAuthoritySource,
+  /extractMeasurementDomainCode/,
+  "server authority must normalize safe MEASUREMENT_* tokens",
+);
+assert.match(
+  __serverAuthoritySource,
+  /\['message', 'details', 'hint'\]/,
+  "server authority must inspect only the safe PostgREST error text fields",
+);
+assert.match(
+  __serverAuthoritySource,
+  /ALLOWED_MEASUREMENT_DOMAIN_CODES[\s\S]*?MEASUREMENT_STALE_VERSION/,
+  "only explicitly allowlisted measurement domain codes may escape normalization",
+);
+assert.match(
+  __serverAuthoritySource,
+  /MEASUREMENT_AUTHORITY_RPC_FAILED/,
+  "generic public fallback must remain fail-closed",
+);

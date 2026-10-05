@@ -359,24 +359,37 @@ export async function enqueueSyncEventDetailed(
   }
 }
 
-export interface DeferredMeasurementUpdateResult
+export interface DeferredMeasurementMutationResult
   extends EnqueueSyncResult {
   previousPatch?: SyncPatch;
   previousUpdatedAt?: string;
+  previousOperation?: SyncEvent['operation'];
   appliedUpdatedAt?: string;
 }
 
-export async function enqueueDeferredMeasurementUpdateAfterInsert(
+export type DeferredMeasurementUpdateResult =
+  DeferredMeasurementMutationResult;
+
+export async function enqueueDeferredMeasurementMutationAfterInsert(
   entityId: string,
+  operation: 'UPDATE' | 'SOFT_DELETE',
   patch: SyncPatch,
-): Promise<DeferredMeasurementUpdateResult> {
+  ownerScope: ErpScope,
+): Promise<DeferredMeasurementMutationResult> {
   try {
     const now = new Date().toISOString();
     const deviceId = getDeviceId();
     const sanitizedPatch = sanitizePatch(patch);
     const patchScope = readErpScope(sanitizedPatch);
+    const verifiedOwnerScope = readErpScope(ownerScope);
 
-    if (!patchScope) {
+    if (
+      !verifiedOwnerScope ||
+      (
+        patchScope &&
+        !erpScopeMatches(patchScope, verifiedOwnerScope)
+      )
+    ) {
       return { success: false };
     }
 
@@ -407,7 +420,7 @@ export async function enqueueDeferredMeasurementUpdateAfterInsert(
           const eventScope = readErpScope(event.scope);
           return Boolean(
             eventScope &&
-            erpScopeMatches(eventScope, patchScope)
+            erpScopeMatches(eventScope, verifiedOwnerScope)
           );
         });
 
@@ -419,7 +432,7 @@ export async function enqueueDeferredMeasurementUpdateAfterInsert(
           .filter((event) => {
             if (
               event.entityType !== 'MEASUREMENT' ||
-              event.operation !== 'UPDATE' ||
+              !['UPDATE', 'SOFT_DELETE'].includes(event.operation) ||
               event.expectedVersion !== 0 ||
               event.deviceId !== deviceId ||
               event.syncStatus !== 'BLOCKED'
@@ -430,7 +443,7 @@ export async function enqueueDeferredMeasurementUpdateAfterInsert(
             const eventScope = readErpScope(event.scope);
             return Boolean(
               eventScope &&
-              erpScopeMatches(eventScope, patchScope)
+              erpScopeMatches(eventScope, verifiedOwnerScope)
             );
           })
           .sort((a, b) =>
@@ -446,15 +459,24 @@ export async function enqueueDeferredMeasurementUpdateAfterInsert(
         const existingDeferred = deferredCandidates[0];
 
         if (existingDeferred) {
+          if (
+            existingDeferred.operation === 'SOFT_DELETE' &&
+            operation === 'UPDATE'
+          ) {
+            return { success: false };
+          }
+
           const previousPatch = existingDeferred.patch;
           const previousUpdatedAt = existingDeferred.updatedAt;
+          const previousOperation = existingDeferred.operation;
 
           const updated =
             await localSyncQueueDb.pendingSyncEvents.update(
               existingDeferred.changeId,
               {
+                operation,
                 patch: sanitizedPatch,
-                scope: patchScope,
+                scope: verifiedOwnerScope,
                 userId,
                 updatedAt: now,
               },
@@ -473,6 +495,7 @@ export async function enqueueDeferredMeasurementUpdateAfterInsert(
             createdNew: false,
             previousPatch,
             previousUpdatedAt,
+            previousOperation,
             appliedUpdatedAt: now,
           };
         }
@@ -488,10 +511,10 @@ export async function enqueueDeferredMeasurementUpdateAfterInsert(
           changeId,
           entityType: 'MEASUREMENT',
           entityId,
-          operation: 'UPDATE',
+          operation,
           expectedVersion: 0,
           patch: sanitizedPatch,
-          scope: patchScope,
+          scope: verifiedOwnerScope,
           deviceId,
           userId,
           createdAt: now,
@@ -515,16 +538,28 @@ export async function enqueueDeferredMeasurementUpdateAfterInsert(
     );
   } catch (error: unknown) {
     console.error(
-      '[SyncQueue] Deferred measurement update enqueue failed.',
+      '[SyncQueue] Deferred measurement mutation enqueue failed.',
       error,
     );
-
     return { success: false };
   }
 }
 
+export async function enqueueDeferredMeasurementUpdateAfterInsert(
+  entityId: string,
+  patch: SyncPatch,
+  ownerScope: ErpScope,
+): Promise<DeferredMeasurementUpdateResult> {
+  return enqueueDeferredMeasurementMutationAfterInsert(
+    entityId,
+    'UPDATE',
+    patch,
+    ownerScope,
+  );
+}
+
 export async function rollbackDeferredMeasurementUpdate(
-  result: DeferredMeasurementUpdateResult,
+  result: DeferredMeasurementMutationResult,
 ): Promise<boolean> {
   try {
     if (!result.changeId || !result.appliedUpdatedAt) {
@@ -557,7 +592,8 @@ export async function rollbackDeferredMeasurementUpdate(
 
         if (
           !result.previousPatch ||
-          !result.previousUpdatedAt
+          !result.previousUpdatedAt ||
+          !result.previousOperation
         ) {
           return false;
         }
@@ -566,6 +602,7 @@ export async function rollbackDeferredMeasurementUpdate(
           await localSyncQueueDb.pendingSyncEvents.update(
             result.changeId!,
             {
+              operation: result.previousOperation,
               patch: result.previousPatch,
               updatedAt: result.previousUpdatedAt,
             },
@@ -576,15 +613,14 @@ export async function rollbackDeferredMeasurementUpdate(
     );
   } catch (error: unknown) {
     console.error(
-      '[SyncQueue] Deferred measurement update rollback failed.',
+      '[SyncQueue] Deferred measurement mutation rollback failed.',
       error,
     );
-
     return false;
   }
 }
 
-export async function activateDeferredMeasurementUpdateAfterInsert(
+export async function activateDeferredMeasurementMutationAfterInsert(
   entityId: string,
   deviceId: string,
   canonicalVersion: number,
@@ -599,7 +635,6 @@ export async function activateDeferredMeasurementUpdateAfterInsert(
     }
 
     const canonicalScope = readErpScope(scopeSource);
-
     if (!canonicalScope) {
       return false;
     }
@@ -617,7 +652,7 @@ export async function activateDeferredMeasurementUpdateAfterInsert(
         const deferred = entityEvents.filter((event) => {
           if (
             event.entityType !== 'MEASUREMENT' ||
-            event.operation !== 'UPDATE' ||
+            !['UPDATE', 'SOFT_DELETE'].includes(event.operation) ||
             event.expectedVersion !== 0 ||
             event.deviceId !== deviceId ||
             event.syncStatus !== 'BLOCKED'
@@ -626,7 +661,6 @@ export async function activateDeferredMeasurementUpdateAfterInsert(
           }
 
           const eventScope = readErpScope(event.scope);
-
           return Boolean(
             eventScope &&
             erpScopeMatches(eventScope, canonicalScope)
@@ -656,13 +690,27 @@ export async function activateDeferredMeasurementUpdateAfterInsert(
     );
   } catch (error: unknown) {
     console.error(
-      '[SyncQueue] Deferred measurement update activation failed.',
+      '[SyncQueue] Deferred measurement mutation activation failed.',
       error,
     );
-
     return false;
   }
 }
+
+export async function activateDeferredMeasurementUpdateAfterInsert(
+  entityId: string,
+  deviceId: string,
+  canonicalVersion: number,
+  scopeSource: unknown,
+): Promise<boolean> {
+  return activateDeferredMeasurementMutationAfterInsert(
+    entityId,
+    deviceId,
+    canonicalVersion,
+    scopeSource,
+  );
+}
+
 export async function activateBlockedSyncEvent(
   changeId: string
 ): Promise<boolean> {

@@ -12,6 +12,7 @@ import {
   activateBlockedSyncEventsAtomically,
   discardBlockedSyncEvent,
   discardBlockedSyncEventsAtomically,
+  enqueueDeferredMeasurementMutationAfterInsert,
   enqueueDeferredMeasurementUpdateAfterInsert,
   enqueueSyncEventDetailed,
   rollbackDeferredMeasurementUpdate
@@ -336,6 +337,7 @@ export async function saveLocalMeasurementWithSync(
       await enqueueDeferredMeasurementUpdateAfterInsert(
         measurement.id,
         payload,
+        ownerScope,
       );
 
     if (
@@ -459,10 +461,9 @@ export async function deleteLocalMeasurement(
   if (!existing) return;
 
   const expectedVersion = Number(existing.version);
-
-  if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
-    throw new Error("MEASUREMENT_EXPECTED_VERSION_MISSING");
-  }
+  const hasCanonicalVersion =
+    Number.isInteger(expectedVersion) &&
+    expectedVersion >= 1;
 
   const deleted = {
     ...existing,
@@ -487,6 +488,43 @@ export async function deleteLocalMeasurement(
     timestamp: new Date().toISOString()
   };
 
+  if (!hasCanonicalVersion) {
+    const deferredResult =
+      await enqueueDeferredMeasurementMutationAfterInsert(
+        deleted.id,
+        'SOFT_DELETE',
+        payload,
+        ownerScope,
+      );
+
+    if (
+      !deferredResult.success ||
+      !deferredResult.changeId
+    ) {
+      throw new Error("MEASUREMENT_EXPECTED_VERSION_MISSING");
+    }
+
+    try {
+      await localMeasurementDb.measurements.put(
+        normalizeMeasurementLinks(deleted),
+      );
+    } catch (error: unknown) {
+      const rolledBack =
+        await rollbackDeferredMeasurementUpdate(
+          deferredResult,
+        );
+
+      if (!rolledBack) {
+        throw new Error(
+          "MEASUREMENT_SYNC_COMPENSATION_FAILED",
+        );
+      }
+
+      throw error;
+    }
+
+    return;
+  }
   const enqueueResult = await enqueueSyncEventDetailed(
     'MEASUREMENT',
     deleted.id,

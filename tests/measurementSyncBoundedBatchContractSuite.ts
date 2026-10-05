@@ -41,8 +41,20 @@ assert.match(
 
 assert.match(
   client,
-  /export async function pushDeltaSyncEvents\(\): Promise<[\s\S]*pushDeltaSyncEventsBatch/,
-  "Public push must drain via the bounded internal batch function",
+  /export async function pushDeltaSyncEvents\(\):[\s\S]{0,800}runDeltaPushWithCrossTabLock\(\)/,
+  "Public push must enter the cross-tab single-flight gate",
+);
+
+assert.match(
+  client,
+  /async function runDeltaPushWithCrossTabLock\(\)[\s\S]{0,1200}pushDeltaSyncEventsUnlocked\(\)/,
+  "Cross-tab gate must delegate to the unlocked drain",
+);
+
+assert.match(
+  client,
+  /async function pushDeltaSyncEventsUnlocked\(\): Promise<[\s\S]{0,5000}pushDeltaSyncEventsBatch\(/,
+  "Unlocked drain must preserve bounded sequential batch delivery",
 );
 
 assert.match(

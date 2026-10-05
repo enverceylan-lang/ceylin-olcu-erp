@@ -959,7 +959,7 @@ function isTerminalMeasurementConflictOnly(errors: string[]): boolean {
   );
 }
 
-export async function pushDeltaSyncEvents(): Promise<
+async function pushDeltaSyncEventsUnlocked(): Promise<
   Awaited<ReturnType<typeof pushDeltaSyncEventsBatch>>
 > {
   let totalPushedCount = 0;
@@ -1037,6 +1037,45 @@ export async function pushDeltaSyncEvents(): Promise<
       errorCount: terminalErrors.length,
     },
   };
+}
+const DELTA_SYNC_CROSS_TAB_LOCK_UNAVAILABLE =
+  'DELTA_SYNC_CROSS_TAB_LOCK_UNAVAILABLE';
+
+let deltaPushInFlight:
+  ReturnType<typeof pushDeltaSyncEventsUnlocked> | null = null;
+
+async function runDeltaPushWithCrossTabLock() {
+  if (typeof navigator === 'undefined') {
+    return pushDeltaSyncEventsUnlocked();
+  }
+
+  if (!('locks' in navigator)) {
+    throw new Error(DELTA_SYNC_CROSS_TAB_LOCK_UNAVAILABLE);
+  }
+
+  return navigator.locks.request(
+    'enverp-delta-sync-push',
+    { mode: 'exclusive' },
+    () => pushDeltaSyncEventsUnlocked(),
+  );
+}
+
+export async function pushDeltaSyncEvents():
+  ReturnType<typeof pushDeltaSyncEventsUnlocked> {
+  if (deltaPushInFlight) {
+    return deltaPushInFlight;
+  }
+
+  const run = runDeltaPushWithCrossTabLock();
+  deltaPushInFlight = run;
+
+  try {
+    return await run;
+  } finally {
+    if (deltaPushInFlight === run) {
+      deltaPushInFlight = null;
+    }
+  }
 }
 export async function pullInboundMeasurements(
   allLocalCustomers: LocalCustomer[],
