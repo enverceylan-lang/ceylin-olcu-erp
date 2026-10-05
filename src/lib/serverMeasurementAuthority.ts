@@ -352,8 +352,27 @@ export async function persistMeasurementAuthorityCommand(args: {
     const publicCode =
       extractMeasurementDomainCode(error) ??
       "MEASUREMENT_AUTHORITY_RPC_FAILED";
+    const errorRecord = asRecord(error);
+    const diagnosticCode =
+      typeof errorRecord?.code === "string" &&
+      /^[A-Z0-9]{5}$/.test(errorRecord.code)
+        ? errorRecord.code
+        : null;
+    const staleTokenFields = ["message", "details", "hint"].filter(
+      (field) => {
+        const value = errorRecord?.[field];
+        return (
+          typeof value === "string" &&
+          /\bMEASUREMENT_STALE_VERSION\b/.test(value)
+        );
+      },
+    );
 
-    console.error("[MeasurementAuthority] Canonical RPC failed.");
+    console.error("[MeasurementAuthority] Canonical RPC failed.", {
+      code: diagnosticCode,
+      staleTokenFields,
+      publicCode,
+    });
     throw new Error(publicCode);
   }
   return parseResult(data);
