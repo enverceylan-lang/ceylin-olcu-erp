@@ -29,6 +29,58 @@ function unauthorized(): Response {
   );
 }
 
+
+type SupabaseRpcErrorPayload = {
+  code?: unknown;
+  message?: unknown;
+  details?: unknown;
+  hint?: unknown;
+};
+
+const SAFE_RPC_ERROR_TOKEN_CLASSES = [
+  "FINANCE_POS_AUTO_SETTLEMENT_SERVICE_ROLE_REQUIRED",
+  "FINANCE_POS_AUTO_SETTLEMENT_EFFECTIVE_DATE_REQUIRED",
+  "FINANCE_POS_AUTO_SETTLEMENT_LIMIT_INVALID",
+  "FINANCE_POS_AUTO_SETTLEMENT_UNKNOWN_OUTCOME",
+] as const;
+
+function asRpcErrorPayload(payload: unknown): SupabaseRpcErrorPayload | null {
+  return payload !== null && typeof payload === "object"
+    ? (payload as SupabaseRpcErrorPayload)
+    : null;
+}
+
+function safeSupabaseErrorCode(payload: SupabaseRpcErrorPayload | null): string | null {
+  if (!payload || typeof payload.code !== "string") return null;
+
+  const code = payload.code.trim().toUpperCase();
+  return /^(?:[0-9A-Z]{5}|PGRST[0-9]{3})$/.test(code) ? code : null;
+}
+
+function hasNonEmptyString(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function rpcErrorTokenClass(
+  payload: SupabaseRpcErrorPayload | null
+): string {
+  if (!payload) return "NO_JSON_ERROR_PAYLOAD";
+
+  const fields = [payload.message, payload.details, payload.hint].filter(
+    (value): value is string => typeof value === "string"
+  );
+
+  for (const token of SAFE_RPC_ERROR_TOKEN_CLASSES) {
+    if (fields.some((value) => value.includes(token))) return token;
+  }
+
+  if (fields.some((value) => value.includes("FINANCE_"))) {
+    return "FINANCE_DOMAIN_ERROR_OTHER";
+  }
+
+  return "UNCLASSIFIED";
+}
+
 export async function GET(request: Request): Promise<Response> {
   const cronSecret = process.env.CRON_SECRET;
   const supabaseUrl =
@@ -75,8 +127,15 @@ export async function GET(request: Request): Promise<Response> {
   const payload = await response.json().catch(() => null);
 
   if (!response.ok) {
+    const errorPayload = asRpcErrorPayload(payload);
+
     console.error("[POS Auto Settlement] RPC failed", {
-      status: response.status,
+      supabaseStatus: response.status,
+      supabaseCode: safeSupabaseErrorCode(errorPayload),
+      hasMessage: hasNonEmptyString(errorPayload?.message),
+      hasDetails: hasNonEmptyString(errorPayload?.details),
+      hasHint: hasNonEmptyString(errorPayload?.hint),
+      errorTokenClass: rpcErrorTokenClass(errorPayload),
       effectiveDate,
       dayPolicy: DAY_POLICY,
     });

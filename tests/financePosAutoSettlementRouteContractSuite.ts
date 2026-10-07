@@ -19,6 +19,36 @@ assert.match(route, /cache:\s*"no-store"/);
 
 assert.doesNotMatch(route, /NEXT_PUBLIC_SUPABASE_ANON_KEY/);
 assert.doesNotMatch(route, /sessionToken/);
+assert.match(route, /supabaseStatus:\s*response\.status/);
+assert.match(route, /supabaseCode:\s*safeSupabaseErrorCode\(errorPayload\)/);
+assert.match(route, /hasMessage:\s*hasNonEmptyString\(errorPayload\?\.message\)/);
+assert.match(route, /hasDetails:\s*hasNonEmptyString\(errorPayload\?\.details\)/);
+assert.match(route, /hasHint:\s*hasNonEmptyString\(errorPayload\?\.hint\)/);
+assert.match(route, /errorTokenClass:\s*rpcErrorTokenClass\(errorPayload\)/);
+assert.match(route, /code:\s*"POS_AUTO_SETTLEMENT_RPC_FAILED"/);
+assert.match(route, /\{\s*status:\s*502\s*\}/);
+assert.match(route, /POS_AUTO_SETTLEMENT_CRON_UNAUTHORIZED/);
+assert.match(route, /POS_AUTO_SETTLEMENT_CRON_SECRET_MISSING/);
+assert.match(route, /POS_AUTO_SETTLEMENT_SERVER_CONFIG_MISSING/);
+assert.match(route, /SAFE_RPC_ERROR_TOKEN_CLASSES/);
+const rpcFailureLogMatch = route.match(
+  /console\.error\("\[POS Auto Settlement\] RPC failed",\s*\{([\s\S]*?)\}\s*\);/
+);
+assert.ok(rpcFailureLogMatch);
+
+const rpcFailureLogBody = rpcFailureLogMatch[1];
+assert.doesNotMatch(rpcFailureLogBody, /\bmessage\s*:/);
+assert.doesNotMatch(rpcFailureLogBody, /\bdetails\s*:/);
+assert.doesNotMatch(rpcFailureLogBody, /\bhint\s*:/);
+assert.doesNotMatch(rpcFailureLogBody, /\bpayload\b/);
+assert.doesNotMatch(
+  rpcFailureLogBody,
+  /\b(?:serviceRoleKey|cronSecret|Authorization|apikey)\b/
+);
+assert.equal(
+  (route.match(/run_finance_pos_auto_settlement_v1/g) ?? []).length,
+  1
+);
 
 const parsed = JSON.parse(vercel) as {
   crons?: Array<{ path?: string; schedule?: string }>;
