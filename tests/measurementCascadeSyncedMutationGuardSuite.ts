@@ -543,7 +543,8 @@ function permissionAndSourceContracts(): void {
       role: "FIELD",
       permissions: ["measurement.synced.mutate"],
     }),
-    true,
+    false,
+    "legacy synced-mutate permission must not bypass ADMIN-only authority",
   );
 
   const page = fs.readFileSync(
@@ -592,7 +593,7 @@ function permissionAndSourceContracts(): void {
   );
   assert.match(
     local,
-    /activateBlockedSyncEventsAtomically/,
+    /finalizeMeasurementMutationQueueAtomically/,
   );
   assert.match(
     delta,

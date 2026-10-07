@@ -2,11 +2,11 @@
 
 import { useTheme } from "next-themes";
 import { Moon, Sun, Menu, Bell, Cloud, CloudOff, RefreshCw, AlertCircle } from "lucide-react";
-import { useState, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { useAuthStore, ROLE_PERMISSIONS, normalizeUser } from "@/store/useAuthStore";
 import { useUiStore } from "@/store/useUiStore";
 import { useStore } from "@/store/useStore";
-import { pushDeltaSyncEvents } from "@/lib/deltaSyncClient";
+
 import { CLOUD_SYNC_DISABLED } from "@/lib/syncService";
 import { ErpScopeSelector } from "@/components/ErpScopeSelector";
 const subscribeToHydration = () => () => {};
@@ -35,61 +35,8 @@ export function Topbar() {
     getClientSnapshot,
     getServerSnapshot,
   );
-  const [isPushing, setIsPushing] = useState(false);
-
 
   if (!rawCurrentUser) return null;
-
-  const handleManualPush = async () => {
-    setIsPushing(true);
-    try {
-      const result = await pushDeltaSyncEvents();
-      
-      const debugText = `
-pendingCount: ${result.debug.pendingCount}
-apiStatus: ${result.debug.apiStatus}
-syncedCount: ${result.debug.syncedCount}
-errorCount: ${result.debug.errorCount}
-isolatedCount: ${result.isolatedCount}
-firstStatus: ${result.debug.firstStatus}
-      `.trim();
-
-      const isDev = process.env.NODE_ENV === 'development';
-
-      if (result.success) {
-        const isolatedText = result.isolatedCount > 0
-          ? ` ${result.isolatedCount} tarihsel kayıt incelemeye alındı.`
-          : '';
-
-        if (result.pushedCount > 0) {
-          alert(`Ölçüler gönderildi. ${result.pushedCount} kayıt aktarıldı.${isolatedText}` + (isDev ? `\n\nDEBUG:\n${debugText}` : ''));
-        } else if (result.isolatedCount > 0) {
-          alert(`${result.isolatedCount} tarihsel kayıt incelemeye alındı. Gönderilecek geçerli yeni ölçü yok.` + (isDev ? `\n\nDEBUG:\n${debugText}` : ''));
-        } else {
-          alert(`Gönderilecek yeni ölçü yok.` + (isDev ? `\n\nDEBUG:\n${debugText}` : ''));
-        }
-      } else {
-        const errorText = result.errors.length
-          ? result.errors.join(', ')
-          : 'SUNUCU_GONDERIM_BASARISIZ';
-        const isolatedText = result.isolatedCount > 0
-          ? ` ${result.isolatedCount} tarihsel kayıt incelemeye alındı.`
-          : '';
-        alert(`Ölçüler gönderilemedi. Hata: ${errorText}.${isolatedText}` +
-          (isDev ? `
-
-DEBUG:
-${debugText}` : ''));
-      }
-    } catch (error: unknown) {
-      alert(`Beklenmeyen hata oluştu. Lütfen tekrar deneyin.`);
-      if (process.env.NODE_ENV === 'development') {
-        console.error("Manual push failed:", error);
-      }
-    } finally {
-      setIsPushing(false);
-    }
-  };
 
 
   const currentUser = normalizeUser(rawCurrentUser);
@@ -126,41 +73,28 @@ ${debugText}` : ''));
               {!CLOUD_SYNC_DISABLED && syncStatus === 'synced' && (
                 <span className="flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400" title="Senkronize edildi">
                   <Cloud className="w-3.5 h-3.5" />
-                  <span className="hidden md:inline">Senkronize edildi</span>
+                  <span className="hidden md:inline">✓ Güncel</span>
                 </span>
               )}
               {!CLOUD_SYNC_DISABLED && syncStatus === 'pending' && (
                 <span className="flex items-center gap-1 text-xs font-medium text-amber-650 dark:text-amber-400" title="Senkron bekliyor">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span className="hidden md:inline">Senkron bekliyor</span>
+                  <span className="hidden md:inline">↻ Senkronlanıyor…</span>
                 </span>
               )}
               {!CLOUD_SYNC_DISABLED && syncStatus === 'offline' && (
                 <span className="flex items-center gap-1 text-xs font-medium text-gray-500 dark:text-gray-400" title="Çevrimdışı">
                   <CloudOff className="w-3.5 h-3.5" />
-                  <span className="hidden md:inline">Çevrimdışı</span>
+                  <span className="hidden md:inline">☁ Çevrimdışı</span>
                 </span>
               )}
               {!CLOUD_SYNC_DISABLED && syncStatus === 'error' && (
-                <span className="flex items-center gap-1 text-xs font-medium text-red-500 dark:text-red-400" title="Senkron hatası">
+                <span className="flex items-center gap-1 text-xs font-medium text-red-500 dark:text-red-400" title="Senkron hatası veya çakışma var; durum çözülünce sistem devam eder">
                   <AlertCircle className="w-3.5 h-3.5" />
-                  <span className="hidden md:inline">Senkron hatası</span>
+                  <span className="hidden md:inline">⚠ Senkron bekliyor</span>
                 </span>
               )}
 
-              <button
-                onClick={handleManualPush}
-                disabled={isPushing}
-                className={`ml-1 flex min-h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-lg border px-2 text-xs font-semibold transition-colors sm:ml-2 ${
-                  isPushing 
-                    ? 'bg-gray-200 text-gray-500 border-gray-300 cursor-wait'
-                    : 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50'
-                }`}
-                title="Bekleyen yerel ölçüleri merkeze gönder"
-              >
-                <RefreshCw className={`w-3 h-3 ${isPushing ? 'animate-spin text-gray-500' : 'text-indigo-600 dark:text-indigo-400'}`} />
-                <span className="hidden sm:inline">{isPushing ? 'Gönderiliyor...' : 'Ölçüleri Gönder'}</span>
-              </button>
             </div>
           </div>
         )}

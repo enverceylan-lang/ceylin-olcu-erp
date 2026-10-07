@@ -162,7 +162,7 @@ async function main() {
   );
 
   const pushStart = deltaClientSource.indexOf(
-    "export async function pushDeltaSyncEvents",
+    "async function pushDeltaSyncEventsBatch",
   );
   const pullStart = deltaClientSource.indexOf(
     "export async function pullInboundMeasurements",
@@ -289,17 +289,25 @@ async function main() {
     topbarSource,
     /İnternet bağlantısını kontrol edip tekrar deneyin/,
   );
-  assert.match(
+  assert.doesNotMatch(
     topbarSource,
     /result\.errors\.length/,
   );
-  assert.match(
+  assert.doesNotMatch(
     topbarSource,
     /result\.isolatedCount/,
   );
+  assert.doesNotMatch(
+    topbarSource,
+    /handleManualPush/,
+  );
+  assert.doesNotMatch(
+    topbarSource,
+    /pushDeltaSyncEvents/,
+  );
   assert.match(
     topbarSource,
-    /tarihsel kayıt incelemeye alındı/,
+    /syncStatus === 'error'/,
   );
   assert.match(
     fieldTasksSource,

@@ -25,7 +25,7 @@ export function CariCustomerTabsNav({
         onClick={() => onTabChange("rooms")}
         className={tabClassName(activeTab === "rooms")}
       >
-        Odalar & Ölçüler
+        Odalar ve Ölçüler
       </button>
 
       {showWorkflowTab && (
@@ -33,7 +33,7 @@ export function CariCustomerTabsNav({
           onClick={() => onTabChange("timeline")}
           className={tabClassName(activeTab === "timeline")}
         >
-          Cari İş Akış Raporu
+          Cari İş Akışı
         </button>
       )}
 

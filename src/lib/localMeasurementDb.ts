@@ -9,13 +9,14 @@ import type { MeasurementRecord } from '@/store/measurementStore';
 import { localCustomerDb } from './localCustomerDb';
 import {
   activateBlockedSyncEvent,
-  activateBlockedSyncEventsAtomically,
   discardBlockedSyncEvent,
   discardBlockedSyncEventsAtomically,
-  enqueueDeferredMeasurementMutationAfterInsert,
-  enqueueDeferredMeasurementUpdateAfterInsert,
+  enqueueDeferredMeasurementMutationAfterPredecessor,
   enqueueSyncEventDetailed,
-  rollbackDeferredMeasurementUpdate
+  finalizeMeasurementMutationQueueAtomically,
+  markDeferredMeasurementMutationsReadyAtomically,
+  rollbackDeferredMeasurementUpdate,
+  type DeferredMeasurementMutationResult
 } from './localSyncQueueDb';
 import {
   saveTransferReceipt,
@@ -273,6 +274,206 @@ export async function getLocalMeasurementById(
     return undefined;
   }
 }
+function readCanonicalMeasurementVersion(
+  measurement: MeasurementRecord | undefined,
+): number | null {
+  if (!measurement) return null;
+
+  const version =
+    Number(measurement.version);
+
+  return (
+    Number.isInteger(version) &&
+    version >= 1
+  )
+    ? version
+    : null;
+}
+
+async function putLocalMeasurementPreservingCanonicalVersion(
+  measurement: MeasurementRecord,
+): Promise<MeasurementRecord> {
+  const normalized =
+    normalizeMeasurementLinks(measurement);
+
+  return localMeasurementDb.transaction(
+    'rw',
+    localMeasurementDb.measurements,
+    async () => {
+      const current =
+        await localMeasurementDb.measurements.get(
+          normalized.id,
+        );
+
+      const currentVersion =
+        readCanonicalMeasurementVersion(
+          current,
+        );
+      const incomingVersion =
+        readCanonicalMeasurementVersion(
+          normalized,
+        );
+
+      const canonicalVersion =
+        currentVersion === null
+          ? incomingVersion
+          : incomingVersion === null
+            ? currentVersion
+            : Math.max(
+                currentVersion,
+                incomingVersion,
+              );
+
+      const persisted =
+        canonicalVersion === null
+          ? normalized
+          : {
+              ...normalized,
+              version: canonicalVersion,
+            };
+
+      await localMeasurementDb.measurements.put(
+        persisted,
+      );
+
+      return persisted;
+    },
+  );
+}
+
+export async function advanceLocalMeasurementCanonicalVersion(
+  id: string,
+  canonicalVersion: number,
+): Promise<MeasurementRecord | undefined> {
+  if (
+    !Number.isInteger(canonicalVersion) ||
+    canonicalVersion < 1
+  ) {
+    throw new Error(
+      "MEASUREMENT_CANONICAL_VERSION_INVALID",
+    );
+  }
+
+  return localMeasurementDb.transaction(
+    'rw',
+    localMeasurementDb.measurements,
+    async () => {
+      const current =
+        await localMeasurementDb.measurements.get(
+          id,
+        );
+
+      if (!current) {
+        return undefined;
+      }
+
+      const currentVersion =
+        readCanonicalMeasurementVersion(
+          current,
+        );
+
+      const nextVersion =
+        currentVersion === null
+          ? canonicalVersion
+          : Math.max(
+              currentVersion,
+              canonicalVersion,
+            );
+
+      const updated =
+        normalizeMeasurementLinks({
+          ...current,
+          version: nextVersion,
+        });
+
+      await localMeasurementDb.measurements.put(
+        updated,
+      );
+
+      return updated;
+    },
+  );
+}
+
+async function restoreLocalMeasurementsPreservingCanonicalVersion(
+  measurements: MeasurementRecord[],
+): Promise<boolean> {
+  try {
+    await localMeasurementDb.transaction(
+      'rw',
+      localMeasurementDb.measurements,
+      async () => {
+        for (const measurement of measurements) {
+          const normalized =
+            normalizeMeasurementLinks(
+              measurement,
+            );
+
+          const current =
+            await localMeasurementDb.measurements.get(
+              normalized.id,
+            );
+
+          const currentVersion =
+            readCanonicalMeasurementVersion(
+              current,
+            );
+          const originalVersion =
+            readCanonicalMeasurementVersion(
+              normalized,
+            );
+
+          const canonicalVersion =
+            currentVersion === null
+              ? originalVersion
+              : originalVersion === null
+                ? currentVersion
+                : Math.max(
+                    currentVersion,
+                    originalVersion,
+                  );
+
+          await localMeasurementDb.measurements.put(
+            canonicalVersion === null
+              ? normalized
+              : {
+                  ...normalized,
+                  version:
+                    canonicalVersion,
+                },
+          );
+        }
+      },
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function rollbackDeferredMeasurementResults(
+  results: DeferredMeasurementMutationResult[],
+): Promise<boolean> {
+  let success = true;
+
+  for (
+    let index = results.length - 1;
+    index >= 0;
+    index--
+  ) {
+    const rolledBack =
+      await rollbackDeferredMeasurementUpdate(
+        results[index],
+      );
+
+    if (!rolledBack) {
+      success = false;
+    }
+  }
+
+  return success;
+}
 export async function saveLocalMeasurement(measurement: MeasurementRecord): Promise<void> {
   try {
     await localMeasurementDb.measurements.put(normalizeMeasurementLinks(measurement));
@@ -288,26 +489,23 @@ export async function saveLocalMeasurementWithSync(
 ): Promise<void> {
   void username;
 
-  const ownerScope = await resolveMeasurementOwnerScope(measurement);
-  const normalizedMeasurement = normalizeMeasurementLinks(measurement);
+  const ownerScope =
+    await resolveMeasurementOwnerScope(
+      measurement,
+    );
+  const normalizedMeasurement =
+    normalizeMeasurementLinks(
+      measurement,
+    );
   const existingMeasurement =
-    await localMeasurementDb.measurements.get(measurement.id);
-
-  const existingVersion = existingMeasurement
-    ? Number(existingMeasurement.version)
-    : 0;
-
-  const hasCanonicalVersion =
-    !existingMeasurement ||
-    (
-      Number.isInteger(existingVersion) &&
-      existingVersion >= 1
+    await localMeasurementDb.measurements.get(
+      measurement.id,
     );
 
-  const operation = existingMeasurement ? 'UPDATE' : 'INSERT';
-  const expectedVersion = existingMeasurement
-    ? existingVersion
-    : 0;
+  const operation =
+    existingMeasurement
+      ? 'UPDATE'
+      : 'INSERT';
 
   const sanitizedMeasurement =
     deepSyncSanitize(
@@ -317,10 +515,14 @@ export async function saveLocalMeasurementWithSync(
   const payload = {
     ...ownerScope,
     id: normalizedMeasurement.id,
-    customerId: normalizedMeasurement.customerId,
-    roomId: normalizedMeasurement.roomId,
-    openingId: normalizedMeasurement.openingId,
-    windowId: normalizedMeasurement.windowId,
+    customerId:
+      normalizedMeasurement.customerId,
+    roomId:
+      normalizedMeasurement.roomId,
+    openingId:
+      normalizedMeasurement.openingId,
+    windowId:
+      normalizedMeasurement.windowId,
     entity: 'measurement',
     data: {
       ...sanitizedMeasurement,
@@ -329,55 +531,126 @@ export async function saveLocalMeasurementWithSync(
           normalizedMeasurement,
         ),
     },
-    timestamp: new Date().toISOString()
+    timestamp:
+      new Date().toISOString()
   };
 
-  if (existingMeasurement && !hasCanonicalVersion) {
+  if (existingMeasurement) {
     const deferredResult =
-      await enqueueDeferredMeasurementUpdateAfterInsert(
+      await enqueueDeferredMeasurementMutationAfterPredecessor(
         measurement.id,
+        'UPDATE',
         payload,
         ownerScope,
       );
 
-    if (
-      !deferredResult.success ||
-      !deferredResult.changeId
-    ) {
+    if (!deferredResult.success) {
       throw new Error(
-        "MEASUREMENT_EXPECTED_VERSION_MISSING",
+        "MEASUREMENT_SYNC_QUEUE_CREATE_FAILED",
       );
     }
 
-    try {
-      await localMeasurementDb.measurements.put(
-        normalizedMeasurement,
-      );
-    } catch (error: unknown) {
-      const rolledBack =
-        await rollbackDeferredMeasurementUpdate(
-          deferredResult,
-        );
-
-      if (!rolledBack) {
+    if (deferredResult.deferred) {
+      if (!deferredResult.changeId) {
         throw new Error(
-          "MEASUREMENT_SYNC_COMPENSATION_FAILED",
+          "MEASUREMENT_SYNC_QUEUE_CREATE_FAILED",
         );
       }
 
-      throw error;
-    }
+      let persisted:
+        MeasurementRecord | undefined;
 
-    return;
+      try {
+        persisted =
+          await putLocalMeasurementPreservingCanonicalVersion(
+            normalizedMeasurement,
+          );
+      } catch (error: unknown) {
+        const rolledBack =
+          await rollbackDeferredMeasurementUpdate(
+            deferredResult,
+          );
+
+        if (!rolledBack) {
+          throw new Error(
+            "MEASUREMENT_SYNC_COMPENSATION_FAILED",
+          );
+        }
+
+        throw error;
+      }
+
+      const ready =
+        await markDeferredMeasurementMutationsReadyAtomically([
+          {
+            result: deferredResult,
+            canonicalVersion:
+              readCanonicalMeasurementVersion(
+                persisted,
+              ),
+          },
+        ]);
+
+      if (!ready) {
+        const localRollback =
+          await restoreLocalMeasurementsPreservingCanonicalVersion([
+            existingMeasurement,
+          ]);
+        const queueRollback =
+          await rollbackDeferredMeasurementUpdate(
+            deferredResult,
+          );
+
+        if (
+          !localRollback ||
+          !queueRollback
+        ) {
+          throw new Error(
+            "MEASUREMENT_SYNC_COMPENSATION_FAILED",
+          );
+        }
+
+        throw new Error(
+          "MEASUREMENT_SYNC_QUEUE_ACTIVATION_FAILED",
+        );
+      }
+
+      return;
+    }
   }
-  const enqueueResult = await enqueueSyncEventDetailed(
-    'MEASUREMENT',
-    measurement.id,
-    operation,
-    payload,
-    expectedVersion,
-    'BLOCKED'
-  );
+
+  const latestMeasurement =
+    existingMeasurement
+      ? await localMeasurementDb.measurements.get(
+          measurement.id,
+        )
+      : undefined;
+
+  const expectedVersion =
+    existingMeasurement
+      ? readCanonicalMeasurementVersion(
+          latestMeasurement,
+        )
+      : 0;
+
+  if (
+    existingMeasurement &&
+    expectedVersion === null
+  ) {
+    throw new Error(
+      "MEASUREMENT_EXPECTED_VERSION_MISSING",
+    );
+  }
+
+  const enqueueResult =
+    await enqueueSyncEventDetailed(
+      'MEASUREMENT',
+      measurement.id,
+      operation,
+      payload,
+      expectedVersion ?? 0,
+      'BLOCKED',
+    );
 
   if (
     !enqueueResult.success ||
@@ -386,18 +659,26 @@ export async function saveLocalMeasurementWithSync(
     !enqueueResult.userId ||
     !enqueueResult.createdAt
   ) {
-    throw new Error("MEASUREMENT_SYNC_QUEUE_CREATE_FAILED");
+    throw new Error(
+      "MEASUREMENT_SYNC_QUEUE_CREATE_FAILED",
+    );
   }
 
   try {
-    await localMeasurementDb.measurements.put(normalizedMeasurement);
+    await putLocalMeasurementPreservingCanonicalVersion(
+      normalizedMeasurement,
+    );
   } catch (error: unknown) {
     if (enqueueResult.createdNew) {
       const discarded =
-        await discardBlockedSyncEvent(enqueueResult.changeId);
+        await discardBlockedSyncEvent(
+          enqueueResult.changeId,
+        );
 
       if (!discarded) {
-        throw new Error("MEASUREMENT_SYNC_COMPENSATION_FAILED");
+        throw new Error(
+          "MEASUREMENT_SYNC_COMPENSATION_FAILED",
+        );
       }
     }
 
@@ -406,16 +687,22 @@ export async function saveLocalMeasurementWithSync(
 
   if (enqueueResult.createdNew) {
     const activated =
-      await activateBlockedSyncEvent(enqueueResult.changeId);
+      await activateBlockedSyncEvent(
+        enqueueResult.changeId,
+      );
 
     if (!activated) {
       let rollbackSucceeded = false;
 
       try {
         if (existingMeasurement) {
-          await localMeasurementDb.measurements.put(existingMeasurement);
+          await putLocalMeasurementPreservingCanonicalVersion(
+            existingMeasurement,
+          );
         } else {
-          await localMeasurementDb.measurements.delete(measurement.id);
+          await localMeasurementDb.measurements.delete(
+            measurement.id,
+          );
         }
 
         rollbackSucceeded = true;
@@ -424,90 +711,127 @@ export async function saveLocalMeasurementWithSync(
       }
 
       if (!rollbackSucceeded) {
-        throw new Error("MEASUREMENT_SYNC_COMPENSATION_FAILED");
+        throw new Error(
+          "MEASUREMENT_SYNC_COMPENSATION_FAILED",
+        );
       }
 
       const discarded =
-        await discardBlockedSyncEvent(enqueueResult.changeId);
+        await discardBlockedSyncEvent(
+          enqueueResult.changeId,
+        );
 
       if (!discarded) {
-        throw new Error("MEASUREMENT_SYNC_COMPENSATION_FAILED");
+        throw new Error(
+          "MEASUREMENT_SYNC_COMPENSATION_FAILED",
+        );
       }
 
-      throw new Error("MEASUREMENT_SYNC_QUEUE_ACTIVATION_FAILED");
+      throw new Error(
+        "MEASUREMENT_SYNC_QUEUE_ACTIVATION_FAILED",
+      );
     }
   }
 
   const receipt: TransferReceipt = {
-    transferId: enqueueResult.changeId,
+    transferId:
+      enqueueResult.changeId,
     entityType: 'MEASUREMENT',
     entityId: measurement.id,
-    senderUserId: enqueueResult.userId,
-    senderDeviceId: enqueueResult.deviceId,
+    senderUserId:
+      enqueueResult.userId,
+    senderDeviceId:
+      enqueueResult.deviceId,
     status: 'SENT',
-    sentAt: enqueueResult.createdAt,
-    entityVersion: expectedVersion,
-    createdAt: enqueueResult.createdAt,
-    updatedAt: enqueueResult.createdAt
+    sentAt:
+      enqueueResult.createdAt,
+    entityVersion:
+      expectedVersion ?? 0,
+    createdAt:
+      enqueueResult.createdAt,
+    updatedAt:
+      enqueueResult.createdAt
   };
 
   await saveTransferReceipt(receipt);
 }
+
 export async function deleteLocalMeasurement(
   id: string,
   username: string
 ): Promise<void> {
-  const existing = await localMeasurementDb.measurements.get(id);
-  if (!existing) return;
+  const existing =
+    await localMeasurementDb.measurements.get(
+      id,
+    );
 
-  const expectedVersion = Number(existing.version);
-  const hasCanonicalVersion =
-    Number.isInteger(expectedVersion) &&
-    expectedVersion >= 1;
+  if (!existing) return;
 
   const deleted = {
     ...existing,
     isDeleted: true,
-    deletedAt: new Date().toISOString(),
+    deletedAt:
+      new Date().toISOString(),
     deletedBy: username
   };
 
-  const ownerScope = await resolveMeasurementOwnerScope(deleted);
-  const normalizedDeleted = normalizeMeasurementLinks(deleted);
+  const ownerScope =
+    await resolveMeasurementOwnerScope(
+      deleted,
+    );
+  const normalizedDeleted =
+    normalizeMeasurementLinks(
+      deleted,
+    );
 
   const payload = {
     ...ownerScope,
     id,
-    customerId: normalizedDeleted.customerId,
-    roomId: normalizedDeleted.roomId,
-    openingId: normalizedDeleted.openingId,
-    windowId: normalizedDeleted.windowId,
+    customerId:
+      normalizedDeleted.customerId,
+    roomId:
+      normalizedDeleted.roomId,
+    openingId:
+      normalizedDeleted.openingId,
+    windowId:
+      normalizedDeleted.windowId,
     entity: 'measurement',
     isDeleted: true,
-    deletedAt: normalizedDeleted.deletedAt,
-    timestamp: new Date().toISOString()
+    deletedAt:
+      normalizedDeleted.deletedAt,
+    timestamp:
+      new Date().toISOString()
   };
 
-  if (!hasCanonicalVersion) {
-    const deferredResult =
-      await enqueueDeferredMeasurementMutationAfterInsert(
-        deleted.id,
-        'SOFT_DELETE',
-        payload,
-        ownerScope,
-      );
+  const deferredResult =
+    await enqueueDeferredMeasurementMutationAfterPredecessor(
+      deleted.id,
+      'SOFT_DELETE',
+      payload,
+      ownerScope,
+    );
 
-    if (
-      !deferredResult.success ||
-      !deferredResult.changeId
-    ) {
-      throw new Error("MEASUREMENT_EXPECTED_VERSION_MISSING");
+  if (!deferredResult.success) {
+    throw new Error(
+      "MEASUREMENT_SYNC_QUEUE_CREATE_FAILED",
+    );
+  }
+
+  if (deferredResult.deferred) {
+    if (!deferredResult.changeId) {
+      throw new Error(
+        "MEASUREMENT_SYNC_QUEUE_CREATE_FAILED",
+      );
     }
 
+    let persisted:
+      MeasurementRecord | undefined;
+
     try {
-      await localMeasurementDb.measurements.put(
-        normalizeMeasurementLinks(deleted),
-      );
+      persisted =
+        await putLocalMeasurementPreservingCanonicalVersion(
+          normalizedDeleted,
+        );
     } catch (error: unknown) {
       const rolledBack =
         await rollbackDeferredMeasurementUpdate(
@@ -523,30 +847,93 @@ export async function deleteLocalMeasurement(
       throw error;
     }
 
+    const ready =
+      await markDeferredMeasurementMutationsReadyAtomically([
+        {
+          result: deferredResult,
+          canonicalVersion:
+            readCanonicalMeasurementVersion(
+              persisted,
+            ),
+        },
+      ]);
+
+    if (!ready) {
+      const localRollback =
+        await restoreLocalMeasurementsPreservingCanonicalVersion([
+          existing,
+        ]);
+      const queueRollback =
+        await rollbackDeferredMeasurementUpdate(
+          deferredResult,
+        );
+
+      if (
+        !localRollback ||
+        !queueRollback
+      ) {
+        throw new Error(
+          "MEASUREMENT_SYNC_COMPENSATION_FAILED",
+        );
+      }
+
+      throw new Error(
+        "MEASUREMENT_SYNC_QUEUE_ACTIVATION_FAILED",
+      );
+    }
+
     return;
   }
-  const enqueueResult = await enqueueSyncEventDetailed(
-    'MEASUREMENT',
-    deleted.id,
-    'SOFT_DELETE',
-    payload,
-    expectedVersion,
-    'BLOCKED'
-  );
 
-  if (!enqueueResult.success || !enqueueResult.changeId) {
-    throw new Error("MEASUREMENT_SYNC_QUEUE_CREATE_FAILED");
+  const latest =
+    await localMeasurementDb.measurements.get(
+      id,
+    );
+  const expectedVersion =
+    readCanonicalMeasurementVersion(
+      latest,
+    );
+
+  if (expectedVersion === null) {
+    throw new Error(
+      "MEASUREMENT_EXPECTED_VERSION_MISSING",
+    );
+  }
+
+  const enqueueResult =
+    await enqueueSyncEventDetailed(
+      'MEASUREMENT',
+      deleted.id,
+      'SOFT_DELETE',
+      payload,
+      expectedVersion,
+      'BLOCKED',
+    );
+
+  if (
+    !enqueueResult.success ||
+    !enqueueResult.changeId
+  ) {
+    throw new Error(
+      "MEASUREMENT_SYNC_QUEUE_CREATE_FAILED",
+    );
   }
 
   try {
-    await localMeasurementDb.measurements.put(normalizedDeleted);
+    await putLocalMeasurementPreservingCanonicalVersion(
+      normalizedDeleted,
+    );
   } catch (error: unknown) {
     if (enqueueResult.createdNew) {
       const discarded =
-        await discardBlockedSyncEvent(enqueueResult.changeId);
+        await discardBlockedSyncEvent(
+          enqueueResult.changeId,
+        );
 
       if (!discarded) {
-        throw new Error("MEASUREMENT_SYNC_COMPENSATION_FAILED");
+        throw new Error(
+          "MEASUREMENT_SYNC_COMPENSATION_FAILED",
+        );
       }
     }
 
@@ -555,30 +942,33 @@ export async function deleteLocalMeasurement(
 
   if (enqueueResult.createdNew) {
     const activated =
-      await activateBlockedSyncEvent(enqueueResult.changeId);
+      await activateBlockedSyncEvent(
+        enqueueResult.changeId,
+      );
 
     if (!activated) {
-      let rollbackSucceeded = false;
-
-      try {
-        await localMeasurementDb.measurements.put(existing);
-        rollbackSucceeded = true;
-      } catch {
-        rollbackSucceeded = false;
-      }
-
-      if (!rollbackSucceeded) {
-        throw new Error("MEASUREMENT_SYNC_COMPENSATION_FAILED");
-      }
+      const localRollback =
+        await restoreLocalMeasurementsPreservingCanonicalVersion([
+          existing,
+        ]);
 
       const discarded =
-        await discardBlockedSyncEvent(enqueueResult.changeId);
+        await discardBlockedSyncEvent(
+          enqueueResult.changeId,
+        );
 
-      if (!discarded) {
-        throw new Error("MEASUREMENT_SYNC_COMPENSATION_FAILED");
+      if (
+        !localRollback ||
+        !discarded
+      ) {
+        throw new Error(
+          "MEASUREMENT_SYNC_COMPENSATION_FAILED",
+        );
       }
 
-      throw new Error("MEASUREMENT_SYNC_QUEUE_ACTIVATION_FAILED");
+      throw new Error(
+        "MEASUREMENT_SYNC_QUEUE_ACTIVATION_FAILED",
+      );
     }
   }
 }
@@ -595,13 +985,17 @@ export async function deleteLocalMeasurementsWithSync(
   const uniqueIds = Array.from(
     new Set(
       ids
-        .map((id) => String(id || "").trim())
+        .map((id) =>
+          String(id || "").trim()
+        )
         .filter(Boolean),
     ),
   );
 
   if (uniqueIds.length !== ids.length) {
-    throw new Error("MEASUREMENT_CASCADE_TARGET_ID_INVALID");
+    throw new Error(
+      "MEASUREMENT_CASCADE_TARGET_ID_INVALID",
+    );
   }
 
   if (uniqueIds.length === 0) {
@@ -609,7 +1003,9 @@ export async function deleteLocalMeasurementsWithSync(
   }
 
   const originals =
-    await localMeasurementDb.measurements.bulkGet(uniqueIds);
+    await localMeasurementDb.measurements.bulkGet(
+      uniqueIds,
+    );
 
   if (
     originals.length !== uniqueIds.length ||
@@ -619,12 +1015,16 @@ export async function deleteLocalMeasurementsWithSync(
         measurement.isDeleted,
     )
   ) {
-    throw new Error("MEASUREMENT_CASCADE_TARGET_CHANGED");
+    throw new Error(
+      "MEASUREMENT_CASCADE_TARGET_CHANGED",
+    );
   }
 
   const activeOriginals =
     originals as MeasurementRecord[];
-  const deletedAt = new Date().toISOString();
+  const deletedAt =
+    new Date().toISOString();
+
   const prepared: Array<{
     original: MeasurementRecord;
     deleted: MeasurementRecord;
@@ -633,24 +1033,30 @@ export async function deleteLocalMeasurementsWithSync(
   }> = [];
 
   for (const original of activeOriginals) {
-    const expectedVersion = Number(original.version);
+    const expectedVersion =
+      readCanonicalMeasurementVersion(
+        original,
+      );
 
-    if (
-      !Number.isInteger(expectedVersion) ||
-      expectedVersion < 1
-    ) {
-      throw new Error("MEASUREMENT_EXPECTED_VERSION_MISSING");
+    if (expectedVersion === null) {
+      throw new Error(
+        "MEASUREMENT_EXPECTED_VERSION_MISSING",
+      );
     }
 
     const ownerScope =
-      await resolveMeasurementOwnerScope(original);
-    const deleted = normalizeMeasurementLinks({
-      ...original,
-      isDeleted: true,
-      deletedAt,
-      deletedBy: username,
-      deleteSource,
-    } as MeasurementRecord);
+      await resolveMeasurementOwnerScope(
+        original,
+      );
+
+    const deleted =
+      normalizeMeasurementLinks({
+        ...original,
+        isDeleted: true,
+        deletedAt,
+        deletedBy: username,
+        deleteSource,
+      } as MeasurementRecord);
 
     prepared.push({
       original,
@@ -661,21 +1067,74 @@ export async function deleteLocalMeasurementsWithSync(
   }
 
   const createdChangeIds: string[] = [];
+  const deferredResults:
+    DeferredMeasurementMutationResult[] = [];
 
   try {
     for (const item of prepared) {
       const payload = {
         ...item.ownerScope,
         id: item.deleted.id,
-        customerId: item.deleted.customerId,
-        roomId: item.deleted.roomId,
-        openingId: item.deleted.openingId,
-        windowId: item.deleted.windowId,
+        customerId:
+          item.deleted.customerId,
+        roomId:
+          item.deleted.roomId,
+        openingId:
+          item.deleted.openingId,
+        windowId:
+          item.deleted.windowId,
         entity: 'measurement',
         isDeleted: true,
-        deletedAt: item.deleted.deletedAt,
-        timestamp: new Date().toISOString(),
+        deletedAt:
+          item.deleted.deletedAt,
+        timestamp:
+          new Date().toISOString(),
       };
+
+      const deferredResult =
+        await enqueueDeferredMeasurementMutationAfterPredecessor(
+          item.deleted.id,
+          'SOFT_DELETE',
+          payload,
+          item.ownerScope,
+        );
+
+      if (!deferredResult.success) {
+        throw new Error(
+          "MEASUREMENT_CASCADE_SYNC_QUEUE_CREATE_FAILED",
+        );
+      }
+
+      if (deferredResult.deferred) {
+        if (!deferredResult.changeId) {
+          throw new Error(
+            "MEASUREMENT_CASCADE_SYNC_QUEUE_CREATE_FAILED",
+          );
+        }
+
+        deferredResults.push(
+          deferredResult,
+        );
+        continue;
+      }
+
+      const latest =
+        await localMeasurementDb.measurements.get(
+          item.deleted.id,
+        );
+      const latestVersion =
+        readCanonicalMeasurementVersion(
+          latest,
+        );
+
+      if (latestVersion === null) {
+        throw new Error(
+          "MEASUREMENT_EXPECTED_VERSION_MISSING",
+        );
+      }
+
+      item.expectedVersion =
+        latestVersion;
 
       const enqueueResult =
         await enqueueSyncEventDetailed(
@@ -697,15 +1156,27 @@ export async function deleteLocalMeasurementsWithSync(
         );
       }
 
-      createdChangeIds.push(enqueueResult.changeId);
+      createdChangeIds.push(
+        enqueueResult.changeId,
+      );
     }
   } catch (error: unknown) {
     const discarded =
-      await discardBlockedSyncEventsAtomically(
-        createdChangeIds,
+      createdChangeIds.length === 0
+        ? true
+        : await discardBlockedSyncEventsAtomically(
+            createdChangeIds,
+          );
+
+    const deferredRolledBack =
+      await rollbackDeferredMeasurementResults(
+        deferredResults,
       );
 
-    if (!discarded) {
+    if (
+      !discarded ||
+      !deferredRolledBack
+    ) {
       throw new Error(
         "MEASUREMENT_SYNC_COMPENSATION_FAILED",
       );
@@ -713,18 +1184,91 @@ export async function deleteLocalMeasurementsWithSync(
 
     throw error;
   }
+
+  let persistedDeleted:
+    MeasurementRecord[] = [];
 
   try {
-    await localMeasurementDb.measurements.bulkPut(
-      prepared.map((item) => item.deleted),
-    );
+    persistedDeleted =
+      await localMeasurementDb.transaction(
+        'rw',
+        localMeasurementDb.measurements,
+        async () => {
+          const next:
+            MeasurementRecord[] = [];
+
+          for (const item of prepared) {
+            const current =
+              await localMeasurementDb.measurements.get(
+                item.deleted.id,
+              );
+
+            if (
+              !current ||
+              current.isDeleted
+            ) {
+              throw new Error(
+                "MEASUREMENT_CASCADE_TARGET_CHANGED",
+              );
+            }
+
+            const currentVersion =
+              readCanonicalMeasurementVersion(
+                current,
+              );
+            const deletedVersion =
+              readCanonicalMeasurementVersion(
+                item.deleted,
+              );
+
+            const canonicalVersion =
+              currentVersion === null
+                ? deletedVersion
+                : deletedVersion === null
+                  ? currentVersion
+                  : Math.max(
+                      currentVersion,
+                      deletedVersion,
+                    );
+
+            const candidate =
+              normalizeMeasurementLinks({
+                ...item.deleted,
+                ...(canonicalVersion === null
+                  ? {}
+                  : {
+                      version:
+                        canonicalVersion,
+                    }),
+              });
+
+            next.push(candidate);
+          }
+
+          await localMeasurementDb.measurements.bulkPut(
+            next,
+          );
+
+          return next;
+        },
+      );
   } catch (error: unknown) {
     const discarded =
-      await discardBlockedSyncEventsAtomically(
-        createdChangeIds,
+      createdChangeIds.length === 0
+        ? true
+        : await discardBlockedSyncEventsAtomically(
+            createdChangeIds,
+          );
+
+    const deferredRolledBack =
+      await rollbackDeferredMeasurementResults(
+        deferredResults,
       );
 
-    if (!discarded) {
+    if (
+      !discarded ||
+      !deferredRolledBack
+    ) {
       throw new Error(
         "MEASUREMENT_SYNC_COMPENSATION_FAILED",
       );
@@ -733,29 +1277,55 @@ export async function deleteLocalMeasurementsWithSync(
     throw error;
   }
 
-  const activated =
-    await activateBlockedSyncEventsAtomically(
-      createdChangeIds,
+  const persistedById =
+    new Map(
+      persistedDeleted.map(
+        (measurement) => [
+          measurement.id,
+          measurement,
+        ],
+      ),
     );
 
-  if (!activated) {
-    let rollbackSucceeded = false;
+  const finalized =
+    await finalizeMeasurementMutationQueueAtomically(
+      createdChangeIds,
+      deferredResults.map((result) => ({
+        result,
+        canonicalVersion:
+          readCanonicalMeasurementVersion(
+            result.entityId
+              ? persistedById.get(
+                  result.entityId,
+                )
+              : undefined,
+          ),
+      })),
+    );
 
-    try {
-      await localMeasurementDb.measurements.bulkPut(
-        prepared.map((item) => item.original),
+  if (!finalized) {
+    const localRollback =
+      await restoreLocalMeasurementsPreservingCanonicalVersion(
+        activeOriginals,
       );
-      rollbackSucceeded = true;
-    } catch {
-      rollbackSucceeded = false;
-    }
 
     const discarded =
-      await discardBlockedSyncEventsAtomically(
-        createdChangeIds,
+      createdChangeIds.length === 0
+        ? true
+        : await discardBlockedSyncEventsAtomically(
+            createdChangeIds,
+          );
+
+    const deferredRolledBack =
+      await rollbackDeferredMeasurementResults(
+        deferredResults,
       );
 
-    if (!rollbackSucceeded || !discarded) {
+    if (
+      !localRollback ||
+      !discarded ||
+      !deferredRolledBack
+    ) {
       throw new Error(
         "MEASUREMENT_SYNC_COMPENSATION_FAILED",
       );
@@ -766,7 +1336,7 @@ export async function deleteLocalMeasurementsWithSync(
     );
   }
 
-  return prepared.map((item) => item.deleted);
+  return persistedDeleted;
 }
 
 export async function requeueLocalMeasurementForSync(

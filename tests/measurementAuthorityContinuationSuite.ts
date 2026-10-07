@@ -41,7 +41,10 @@ assert.match(queue, /event\.expectedVersion === expectedVersion/);
 assert.match(queue, /String\(event\.expectedVersion \?\? ""\)/);
 assert.match(queue, /enqueueSyncEventDetailed\([\s\S]*expectedVersion[\s\S]*\)/);
 
-assert.match(localDb, /operation = existingMeasurement \? 'UPDATE' : 'INSERT'/);
+assert.match(
+  localDb,
+  /const operation =\s*existingMeasurement\s*\?\s*'UPDATE'\s*:\s*'INSERT';/,
+);
 assert.match(localDb, /MEASUREMENT_EXPECTED_VERSION_MISSING/);
 assert.match(localDb, /MEASUREMENT_OPENING_WINDOW_MISMATCH/);
 assert.match(localDb, /'SOFT_DELETE'/);
@@ -49,7 +52,10 @@ assert.doesNotMatch(localDb, /version \|\| 1/);
 
 assert.match(client, /measurementResults\?: Array/);
 assert.match(client, /const safeSyncedIds: string\[\] = \[\]/);
-assert.match(client, /version: entityVersion/);
+assert.match(
+  client,
+  /advanceMeasurementCanonicalVersion\(\s*entityId,\s*entityVersion,\s*\)/,
+);
 assert.match(client, /Measurement canonical ACK validation failed/);
 
 assert.match(sql, /security definer/i);

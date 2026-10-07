@@ -81,6 +81,10 @@ export interface SyncEvent {
   lastErrorCode?: string;
   blockedReason?: SyncBlockedReason;
   blockedAt?: string;
+  blockedByChangeId?: string;
+  canonicalAckVersion?: number;
+  successorReady?: boolean;
+  successorAckVersion?: number;
 }
 
 export function classifyDeltaQueueEntityType(
@@ -361,16 +365,70 @@ export async function enqueueSyncEventDetailed(
 
 export interface DeferredMeasurementMutationResult
   extends EnqueueSyncResult {
+  deferred?: boolean;
+  blockedByChangeId?: string;
+  entityId?: string;
   previousPatch?: SyncPatch;
   previousUpdatedAt?: string;
   previousOperation?: SyncEvent['operation'];
+  previousExpectedVersion?: number;
+  previousBlockedByChangeId?: string;
+  previousSuccessorReady?: boolean;
+  previousSuccessorAckVersion?: number;
   appliedUpdatedAt?: string;
 }
 
 export type DeferredMeasurementUpdateResult =
   DeferredMeasurementMutationResult;
 
-export async function enqueueDeferredMeasurementMutationAfterInsert(
+export interface DeferredMeasurementReadyRequest {
+  result: DeferredMeasurementMutationResult;
+  canonicalVersion: number | null;
+}
+
+function isDeferredMeasurementMutation(
+  event: SyncEvent,
+): boolean {
+  return (
+    event.entityType === 'MEASUREMENT' &&
+    ['UPDATE', 'SOFT_DELETE'].includes(event.operation) &&
+    event.syncStatus === 'BLOCKED' &&
+    !event.blockedReason
+  );
+}
+
+function isMeasurementPredecessor(
+  event: SyncEvent,
+): boolean {
+  return (
+    event.entityType === 'MEASUREMENT' &&
+    ['INSERT', 'UPDATE'].includes(event.operation)
+  );
+}
+
+function eventMatchesMeasurementLineage(
+  event: SyncEvent,
+  entityId: string,
+  deviceId: string,
+  scope: ErpScope,
+): boolean {
+  if (
+    event.entityType !== 'MEASUREMENT' ||
+    event.entityId !== entityId ||
+    event.deviceId !== deviceId
+  ) {
+    return false;
+  }
+
+  const eventScope = readErpScope(event.scope);
+
+  return Boolean(
+    eventScope &&
+    erpScopeMatches(eventScope, scope)
+  );
+}
+
+export async function enqueueDeferredMeasurementMutationAfterPredecessor(
   entityId: string,
   operation: 'UPDATE' | 'SOFT_DELETE',
   patch: SyncPatch,
@@ -387,13 +445,17 @@ export async function enqueueDeferredMeasurementMutationAfterInsert(
       !verifiedOwnerScope ||
       (
         patchScope &&
-        !erpScopeMatches(patchScope, verifiedOwnerScope)
+        !erpScopeMatches(
+          patchScope,
+          verifiedOwnerScope,
+        )
       )
     ) {
       return { success: false };
     }
 
-    const currentUser = useAuthStore.getState().currentUser;
+    const currentUser =
+      useAuthStore.getState().currentUser;
     const userId = currentUser?.id || 'unknown';
 
     return await localSyncQueueDb.transaction(
@@ -406,69 +468,123 @@ export async function enqueueDeferredMeasurementMutationAfterInsert(
             .equals(entityId)
             .toArray();
 
-        const unresolvedInsert = entityEvents.some((event) => {
-          if (
-            event.entityType !== 'MEASUREMENT' ||
-            event.operation !== 'INSERT' ||
-            event.expectedVersion !== 0 ||
-            event.deviceId !== deviceId ||
-            !['PENDING', 'ERROR'].includes(event.syncStatus)
-          ) {
-            return false;
-          }
-
-          const eventScope = readErpScope(event.scope);
-          return Boolean(
-            eventScope &&
-            erpScopeMatches(eventScope, verifiedOwnerScope)
-          );
-        });
-
-        if (!unresolvedInsert) {
-          return { success: false };
-        }
-
-        const deferredCandidates = entityEvents
-          .filter((event) => {
-            if (
-              event.entityType !== 'MEASUREMENT' ||
-              !['UPDATE', 'SOFT_DELETE'].includes(event.operation) ||
-              event.expectedVersion !== 0 ||
-              event.deviceId !== deviceId ||
-              event.syncStatus !== 'BLOCKED'
-            ) {
-              return false;
-            }
-
-            const eventScope = readErpScope(event.scope);
-            return Boolean(
-              eventScope &&
-              erpScopeMatches(eventScope, verifiedOwnerScope)
-            );
-          })
-          .sort((a, b) =>
-            String(b.updatedAt || b.createdAt).localeCompare(
-              String(a.updatedAt || a.createdAt),
+        const lineageEvents = entityEvents.filter(
+          (event) =>
+            eventMatchesMeasurementLineage(
+              event,
+              entityId,
+              deviceId,
+              verifiedOwnerScope,
             ),
+        );
+
+        const deferredCandidates =
+          lineageEvents.filter(
+            isDeferredMeasurementMutation,
           );
 
         if (deferredCandidates.length > 1) {
           return { success: false };
         }
 
-        const existingDeferred = deferredCandidates[0];
+        const existingDeferred =
+          deferredCandidates[0];
 
-        if (existingDeferred) {
-          if (
-            existingDeferred.operation === 'SOFT_DELETE' &&
-            operation === 'UPDATE'
-          ) {
+        const terminalConflictPredecessors =
+          lineageEvents.filter(
+            (event) =>
+              isMeasurementPredecessor(event) &&
+              event.syncStatus === 'CONFLICT',
+          );
+
+        if (terminalConflictPredecessors.length > 0) {
+          return { success: false };
+        }
+
+        let predecessor: SyncEvent | undefined;
+
+        if (
+          existingDeferred?.blockedByChangeId
+        ) {
+          predecessor = lineageEvents.find(
+            (event) =>
+              event.changeId ===
+                existingDeferred.blockedByChangeId &&
+              isMeasurementPredecessor(event),
+          );
+
+          if (!predecessor) {
+            return { success: false };
+          }
+        } else {
+          const unresolvedPredecessors =
+            lineageEvents.filter(
+              (event) =>
+                isMeasurementPredecessor(event) &&
+                ['PENDING', 'ERROR'].includes(
+                  event.syncStatus,
+                ),
+            );
+
+          if (unresolvedPredecessors.length === 0) {
+            if (existingDeferred) {
+              return { success: false };
+            }
+
+            return {
+              success: true,
+              deferred: false,
+            };
+          }
+
+          if (unresolvedPredecessors.length !== 1) {
             return { success: false };
           }
 
-          const previousPatch = existingDeferred.patch;
-          const previousUpdatedAt = existingDeferred.updatedAt;
-          const previousOperation = existingDeferred.operation;
+          predecessor = unresolvedPredecessors[0];
+
+          if (
+            existingDeferred &&
+            !(
+              predecessor.operation === 'INSERT' &&
+              existingDeferred.expectedVersion === 0
+            )
+          ) {
+            return { success: false };
+          }
+        }
+
+        if (!predecessor) {
+          return { success: false };
+        }
+
+        if (predecessor.syncStatus === 'CONFLICT') {
+          return { success: false };
+        }
+
+        if (
+          existingDeferred &&
+          existingDeferred.operation === 'SOFT_DELETE' &&
+          operation === 'UPDATE'
+        ) {
+          return { success: false };
+        }
+
+        if (existingDeferred) {
+          const previousPatch =
+            existingDeferred.patch;
+          const previousUpdatedAt =
+            existingDeferred.updatedAt;
+          const previousOperation =
+            existingDeferred.operation;
+          const previousExpectedVersion =
+            existingDeferred.expectedVersion;
+          const previousBlockedByChangeId =
+            existingDeferred.blockedByChangeId;
+          const previousSuccessorReady =
+            existingDeferred.successorReady;
+          const previousSuccessorAckVersion =
+            existingDeferred.successorAckVersion;
 
           const updated =
             await localSyncQueueDb.pendingSyncEvents.update(
@@ -476,8 +592,12 @@ export async function enqueueDeferredMeasurementMutationAfterInsert(
               {
                 operation,
                 patch: sanitizedPatch,
+                expectedVersion: 0,
                 scope: verifiedOwnerScope,
                 userId,
+                blockedByChangeId:
+                  predecessor.changeId,
+                successorReady: false,
                 updatedAt: now,
               },
             );
@@ -488,20 +608,31 @@ export async function enqueueDeferredMeasurementMutationAfterInsert(
 
           return {
             success: true,
-            changeId: existingDeferred.changeId,
+            deferred: true,
+            changeId:
+              existingDeferred.changeId,
+            blockedByChangeId:
+              predecessor.changeId,
+            entityId,
             deviceId,
             userId,
-            createdAt: existingDeferred.createdAt,
+            createdAt:
+              existingDeferred.createdAt,
             createdNew: false,
             previousPatch,
             previousUpdatedAt,
             previousOperation,
+            previousExpectedVersion,
+            previousBlockedByChangeId,
+            previousSuccessorReady,
+            previousSuccessorAckVersion,
             appliedUpdatedAt: now,
           };
         }
 
         const changeId =
-          typeof crypto !== 'undefined' && crypto.randomUUID
+          typeof crypto !== 'undefined' &&
+          crypto.randomUUID
             ? crypto.randomUUID()
             : `chg-${Date.now()}-${Math.random()
                 .toString(36)
@@ -521,13 +652,22 @@ export async function enqueueDeferredMeasurementMutationAfterInsert(
           updatedAt: now,
           syncStatus: 'BLOCKED',
           retryCount: 0,
+          blockedByChangeId:
+            predecessor.changeId,
+          successorReady: false,
         };
 
-        await localSyncQueueDb.pendingSyncEvents.put(fullEvent);
+        await localSyncQueueDb.pendingSyncEvents.put(
+          fullEvent,
+        );
 
         return {
           success: true,
+          deferred: true,
           changeId,
+          blockedByChangeId:
+            predecessor.changeId,
+          entityId,
           deviceId,
           userId,
           createdAt: now,
@@ -541,8 +681,30 @@ export async function enqueueDeferredMeasurementMutationAfterInsert(
       '[SyncQueue] Deferred measurement mutation enqueue failed.',
       error,
     );
+
     return { success: false };
   }
+}
+
+export async function enqueueDeferredMeasurementMutationAfterInsert(
+  entityId: string,
+  operation: 'UPDATE' | 'SOFT_DELETE',
+  patch: SyncPatch,
+  ownerScope: ErpScope,
+): Promise<DeferredMeasurementMutationResult> {
+  const result =
+    await enqueueDeferredMeasurementMutationAfterPredecessor(
+      entityId,
+      operation,
+      patch,
+      ownerScope,
+    );
+
+  if (!result.success || !result.deferred) {
+    return { success: false };
+  }
+
+  return result;
 }
 
 export async function enqueueDeferredMeasurementUpdateAfterInsert(
@@ -562,7 +724,10 @@ export async function rollbackDeferredMeasurementUpdate(
   result: DeferredMeasurementMutationResult,
 ): Promise<boolean> {
   try {
-    if (!result.changeId || !result.appliedUpdatedAt) {
+    if (
+      !result.changeId ||
+      !result.appliedUpdatedAt
+    ) {
       return false;
     }
 
@@ -575,11 +740,17 @@ export async function rollbackDeferredMeasurementUpdate(
             result.changeId!,
           );
 
-        if (!event || event.syncStatus !== 'BLOCKED') {
+        if (
+          !event ||
+          event.syncStatus !== 'BLOCKED'
+        ) {
           return false;
         }
 
-        if (event.updatedAt !== result.appliedUpdatedAt) {
+        if (
+          event.updatedAt !==
+          result.appliedUpdatedAt
+        ) {
           return false;
         }
 
@@ -602,9 +773,20 @@ export async function rollbackDeferredMeasurementUpdate(
           await localSyncQueueDb.pendingSyncEvents.update(
             result.changeId!,
             {
-              operation: result.previousOperation,
-              patch: result.previousPatch,
-              updatedAt: result.previousUpdatedAt,
+              operation:
+                result.previousOperation,
+              patch:
+                result.previousPatch,
+              expectedVersion:
+                result.previousExpectedVersion,
+              blockedByChangeId:
+                result.previousBlockedByChangeId,
+              successorReady:
+                result.previousSuccessorReady,
+              successorAckVersion:
+                result.previousSuccessorAckVersion,
+              updatedAt:
+                result.previousUpdatedAt,
             },
           );
 
@@ -616,11 +798,286 @@ export async function rollbackDeferredMeasurementUpdate(
       '[SyncQueue] Deferred measurement mutation rollback failed.',
       error,
     );
+
     return false;
   }
 }
 
-export async function activateDeferredMeasurementMutationAfterInsert(
+function validCanonicalSuccessorVersion(
+  predecessor: SyncEvent,
+  value: number | null,
+): value is number {
+  if (
+    value === null ||
+    !Number.isInteger(value) ||
+    value < 1
+  ) {
+    return false;
+  }
+
+  const predecessorVersion =
+    Number(predecessor.expectedVersion);
+
+  if (predecessor.operation === 'INSERT') {
+    return (
+      predecessorVersion === 0 &&
+      value === 1
+    );
+  }
+
+  return (
+    Number.isInteger(predecessorVersion) &&
+    predecessorVersion >= 1 &&
+    value === predecessorVersion + 1
+  );
+}
+
+export async function finalizeMeasurementMutationQueueAtomically(
+  immediateChangeIds: string[],
+  deferredRequests: DeferredMeasurementReadyRequest[],
+): Promise<boolean> {
+  try {
+    const uniqueImmediateIds =
+      Array.from(new Set(immediateChangeIds));
+
+    const deferredIds =
+      deferredRequests
+        .map((request) =>
+          request.result.changeId,
+        )
+        .filter(
+          (value): value is string =>
+            Boolean(value),
+        );
+
+    if (
+      new Set(deferredIds).size !==
+      deferredIds.length
+    ) {
+      return false;
+    }
+
+    if (
+      uniqueImmediateIds.some(
+        (id) => deferredIds.includes(id),
+      )
+    ) {
+      return false;
+    }
+
+    return await localSyncQueueDb.transaction(
+      'rw',
+      localSyncQueueDb.pendingSyncEvents,
+      async () => {
+        const now =
+          new Date().toISOString();
+
+        const immediateEvents =
+          await localSyncQueueDb.pendingSyncEvents.bulkGet(
+            uniqueImmediateIds,
+          );
+
+        if (
+          immediateEvents.some(
+            (event) =>
+              !event ||
+              event.syncStatus !== 'BLOCKED' ||
+              Boolean(event.blockedByChangeId),
+          )
+        ) {
+          return false;
+        }
+
+        const updates: Array<{
+          key: string;
+          changes: Partial<SyncEvent>;
+        }> = uniqueImmediateIds.map(
+          (changeId) => ({
+            key: changeId,
+            changes: {
+              syncStatus: 'PENDING',
+              updatedAt: now,
+            },
+          }),
+        );
+
+        for (const request of deferredRequests) {
+          const result = request.result;
+
+          if (
+            !result.changeId ||
+            !result.appliedUpdatedAt ||
+            !result.blockedByChangeId
+          ) {
+            return false;
+          }
+
+          const event =
+            await localSyncQueueDb.pendingSyncEvents.get(
+              result.changeId,
+            );
+
+          if (
+            !event ||
+            event.syncStatus !== 'BLOCKED' ||
+            event.updatedAt !==
+              result.appliedUpdatedAt ||
+            event.blockedByChangeId !==
+              result.blockedByChangeId
+          ) {
+            return false;
+          }
+
+          const predecessor =
+            await localSyncQueueDb.pendingSyncEvents.get(
+              result.blockedByChangeId,
+            );
+
+          if (
+            !predecessor ||
+            !isMeasurementPredecessor(
+              predecessor,
+            )
+          ) {
+            return false;
+          }
+
+          const eventScope =
+            readErpScope(event.scope);
+          const predecessorScope =
+            readErpScope(predecessor.scope);
+
+          if (
+            !eventScope ||
+            !predecessorScope ||
+            !erpScopeMatches(
+              eventScope,
+              predecessorScope,
+            ) ||
+            event.entityId !==
+              predecessor.entityId ||
+            event.deviceId !==
+              predecessor.deviceId
+          ) {
+            return false;
+          }
+
+          const successorAckVersion =
+            typeof event.successorAckVersion ===
+              'number'
+              ? event.successorAckVersion
+              : null;
+
+          const predecessorAckVersion =
+            typeof predecessor.canonicalAckVersion ===
+              'number'
+              ? predecessor.canonicalAckVersion
+              : null;
+
+          const ackVersion =
+            successorAckVersion ??
+            predecessorAckVersion;
+
+          const canonicalVersion =
+            ackVersion ??
+            request.canonicalVersion;
+
+          const canActivateFromAck =
+            ackVersion !== null &&
+            validCanonicalSuccessorVersion(
+              predecessor,
+              ackVersion,
+            );
+
+          const canActivateFromSyncedPredecessor =
+            predecessor.syncStatus ===
+              'SYNCED' &&
+            validCanonicalSuccessorVersion(
+              predecessor,
+              canonicalVersion,
+            );
+
+          if (
+            predecessor.syncStatus ===
+              'CONFLICT'
+          ) {
+            updates.push({
+              key: event.changeId,
+              changes: {
+                successorReady: true,
+              },
+            });
+            continue;
+          }
+
+          if (
+            canActivateFromAck ||
+            canActivateFromSyncedPredecessor
+          ) {
+            updates.push({
+              key: event.changeId,
+              changes: {
+                successorReady: true,
+                expectedVersion:
+                  canonicalVersion!,
+                syncStatus: 'PENDING',
+                successorAckVersion:
+                  undefined,
+                updatedAt: now,
+              },
+            });
+            continue;
+          }
+
+          if (
+            !['PENDING', 'ERROR'].includes(
+              predecessor.syncStatus,
+            )
+          ) {
+            return false;
+          }
+
+          updates.push({
+            key: event.changeId,
+            changes: {
+              successorReady: true,
+            },
+          });
+        }
+
+        if (updates.length === 0) {
+          return true;
+        }
+
+        const updatedCount =
+          await localSyncQueueDb.pendingSyncEvents.bulkUpdate(
+            updates,
+          );
+
+        return updatedCount === updates.length;
+      },
+    );
+  } catch (error: unknown) {
+    console.error(
+      '[SyncQueue] Measurement mutation queue finalization failed.',
+      error,
+    );
+
+    return false;
+  }
+}
+
+export async function markDeferredMeasurementMutationsReadyAtomically(
+  requests: DeferredMeasurementReadyRequest[],
+): Promise<boolean> {
+  return finalizeMeasurementMutationQueueAtomically(
+    [],
+    requests,
+  );
+}
+
+export async function activateDeferredMeasurementMutationAfterPredecessor(
+  predecessorChangeId: string,
   entityId: string,
   deviceId: string,
   canonicalVersion: number,
@@ -634,7 +1091,9 @@ export async function activateDeferredMeasurementMutationAfterInsert(
       return false;
     }
 
-    const canonicalScope = readErpScope(scopeSource);
+    const canonicalScope =
+      readErpScope(scopeSource);
+
     if (!canonicalScope) {
       return false;
     }
@@ -643,29 +1102,97 @@ export async function activateDeferredMeasurementMutationAfterInsert(
       'rw',
       localSyncQueueDb.pendingSyncEvents,
       async () => {
+        const predecessor =
+          await localSyncQueueDb.pendingSyncEvents.get(
+            predecessorChangeId,
+          );
+
+        if (
+          !predecessor ||
+          !isMeasurementPredecessor(
+            predecessor,
+          ) ||
+          predecessor.entityId !== entityId ||
+          predecessor.deviceId !== deviceId ||
+          !['PENDING', 'ERROR'].includes(
+            predecessor.syncStatus,
+          )
+        ) {
+          return false;
+        }
+
+        const predecessorScope =
+          readErpScope(predecessor.scope);
+
+        if (
+          !predecessorScope ||
+          !erpScopeMatches(
+            predecessorScope,
+            canonicalScope,
+          ) ||
+          !validCanonicalSuccessorVersion(
+            predecessor,
+            canonicalVersion,
+          )
+        ) {
+          return false;
+        }
+
+        const predecessorAckRecorded =
+          await localSyncQueueDb.pendingSyncEvents.update(
+            predecessorChangeId,
+            {
+              canonicalAckVersion:
+                canonicalVersion,
+            },
+          );
+
+        if (predecessorAckRecorded !== 1) {
+          return false;
+        }
+
         const entityEvents =
           await localSyncQueueDb.pendingSyncEvents
             .where('entityId')
             .equals(entityId)
             .toArray();
 
-        const deferred = entityEvents.filter((event) => {
-          if (
-            event.entityType !== 'MEASUREMENT' ||
-            !['UPDATE', 'SOFT_DELETE'].includes(event.operation) ||
-            event.expectedVersion !== 0 ||
-            event.deviceId !== deviceId ||
-            event.syncStatus !== 'BLOCKED'
-          ) {
-            return false;
-          }
+        const deferred =
+          entityEvents.filter((event) => {
+            if (
+              !isDeferredMeasurementMutation(
+                event,
+              ) ||
+              event.deviceId !== deviceId
+            ) {
+              return false;
+            }
 
-          const eventScope = readErpScope(event.scope);
-          return Boolean(
-            eventScope &&
-            erpScopeMatches(eventScope, canonicalScope)
-          );
-        });
+            const eventScope =
+              readErpScope(event.scope);
+
+            const exactLineage =
+              event.blockedByChangeId ===
+                predecessorChangeId;
+
+            const legacyInsertLineage =
+              !event.blockedByChangeId &&
+              predecessor.operation ===
+                'INSERT' &&
+              event.expectedVersion === 0;
+
+            return Boolean(
+              eventScope &&
+              erpScopeMatches(
+                eventScope,
+                canonicalScope,
+              ) &&
+              (
+                exactLineage ||
+                legacyInsertLineage
+              )
+            );
+          });
 
         if (deferred.length === 0) {
           return true;
@@ -675,13 +1202,37 @@ export async function activateDeferredMeasurementMutationAfterInsert(
           return false;
         }
 
+        const successor = deferred[0];
+
+        if (successor.successorReady === false) {
+          const captured =
+            await localSyncQueueDb.pendingSyncEvents.update(
+              successor.changeId,
+              {
+                blockedByChangeId:
+                  predecessorChangeId,
+                successorAckVersion:
+                  canonicalVersion,
+              },
+            );
+
+          return captured === 1;
+        }
+
         const activated =
           await localSyncQueueDb.pendingSyncEvents.update(
-            deferred[0].changeId,
+            successor.changeId,
             {
-              expectedVersion: canonicalVersion,
+              blockedByChangeId:
+                predecessorChangeId,
+              successorReady: true,
+              successorAckVersion:
+                undefined,
+              expectedVersion:
+                canonicalVersion,
               syncStatus: 'PENDING',
-              updatedAt: new Date().toISOString(),
+              updatedAt:
+                new Date().toISOString(),
             },
           );
 
@@ -693,8 +1244,64 @@ export async function activateDeferredMeasurementMutationAfterInsert(
       '[SyncQueue] Deferred measurement mutation activation failed.',
       error,
     );
+
     return false;
   }
+}
+
+export async function activateDeferredMeasurementMutationAfterInsert(
+  entityId: string,
+  deviceId: string,
+  canonicalVersion: number,
+  scopeSource: unknown,
+): Promise<boolean> {
+  const canonicalScope =
+    readErpScope(scopeSource);
+
+  if (!canonicalScope) {
+    return false;
+  }
+
+  const candidates =
+    await localSyncQueueDb.pendingSyncEvents
+      .where('entityId')
+      .equals(entityId)
+      .filter((event) => {
+        if (
+          event.entityType !== 'MEASUREMENT' ||
+          event.operation !== 'INSERT' ||
+          event.deviceId !== deviceId ||
+          !['PENDING', 'ERROR'].includes(
+            event.syncStatus,
+          )
+        ) {
+          return false;
+        }
+
+        const eventScope =
+          readErpScope(event.scope);
+
+        return Boolean(
+          eventScope &&
+          erpScopeMatches(
+            eventScope,
+            canonicalScope,
+          )
+        );
+      })
+      .toArray();
+
+  if (candidates.length !== 1) {
+    return false;
+  }
+
+  return activateDeferredMeasurementMutationAfterPredecessor(
+    candidates[0].changeId,
+    entityId,
+    deviceId,
+    canonicalVersion,
+    canonicalScope,
+  );
 }
 
 export async function activateDeferredMeasurementUpdateAfterInsert(
@@ -952,7 +1559,48 @@ export async function getPendingSyncEvents(
       );
     }
 
-    const legacyMeasurementEventIds = scopePartitionedEvents
+    const legacyInsertNormalizationIds = scopePartitionedEvents
+      .filter(
+        (event) =>
+          event.entityType === 'MEASUREMENT' &&
+          event.operation === 'INSERT' &&
+          (
+            event.expectedVersion === undefined ||
+            event.expectedVersion === null
+          ),
+      )
+      .map((event) => event.changeId);
+
+    let normalizedScopePartitionedEvents = scopePartitionedEvents;
+
+    if (legacyInsertNormalizationIds.length > 0) {
+      const normalizedAt = new Date().toISOString();
+      const normalizationIdSet = new Set(
+        legacyInsertNormalizationIds,
+      );
+
+      await localSyncQueueDb.pendingSyncEvents.bulkUpdate(
+        legacyInsertNormalizationIds.map((changeId) => ({
+          key: changeId,
+          changes: {
+            expectedVersion: 0,
+            updatedAt: normalizedAt,
+          },
+        })),
+      );
+
+      normalizedScopePartitionedEvents =
+        scopePartitionedEvents.map((event) =>
+          normalizationIdSet.has(event.changeId)
+            ? {
+                ...event,
+                expectedVersion: 0,
+                updatedAt: normalizedAt,
+              }
+            : event,
+        );
+    }
+    const legacyMeasurementEventIds = normalizedScopePartitionedEvents
       .filter((event) => {
         if (event.entityType !== 'MEASUREMENT') return false;
 
@@ -983,7 +1631,7 @@ export async function getPendingSyncEvents(
       );
     }
 
-    const eligibleRetryableEvents = scopePartitionedEvents.filter(
+    const eligibleRetryableEvents = normalizedScopePartitionedEvents.filter(
       (event) => !legacyMeasurementEventIds.includes(event.changeId)
     );
 

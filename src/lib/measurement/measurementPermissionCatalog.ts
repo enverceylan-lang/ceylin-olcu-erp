@@ -56,13 +56,7 @@ export function canMutateSyncedMeasurement(user: {
 } | null | undefined): boolean {
   if (!user) return false;
 
-  if (String(user.role || "").trim().toUpperCase() === "ADMIN") {
-    return true;
-  }
-
-  return (user.permissions || []).includes(
-    MEASUREMENT_SYNCED_MUTATE_PERMISSION,
-  );
+  return String(user.role || "").trim().toUpperCase() === "ADMIN";
 }
 
 export function isMeasurementServerSynced(

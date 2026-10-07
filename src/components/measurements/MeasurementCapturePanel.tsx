@@ -95,7 +95,7 @@ export function MeasurementCapturePanel({
     return (
       <section className="rounded-2xl border border-blue-200 bg-white p-5 shadow-sm dark:border-blue-900/50 dark:bg-gray-900">
         <h3 className="text-base font-black text-gray-900 dark:text-white">
-          Ölçü Al
+          Yeni Ölçü
         </h3>
         <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
           Ölçü almadan önce sayfanın üstündeki Yeni Oda Ekle aksiyonuyla bir oda oluşturun.

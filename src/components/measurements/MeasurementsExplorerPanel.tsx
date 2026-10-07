@@ -216,7 +216,7 @@ function LegacyMeasurementList({
             onClick={onAdd}
             className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-700"
           >
-            + Ölçü Al
+            + Yeni Ölçü
           </button>
         )}
       </div>
@@ -306,7 +306,7 @@ export function MeasurementsExplorerPanel({
     >
       <div className="mb-3 border-b border-gray-100 pb-3 dark:border-gray-800">
         <h3 className="text-base font-black text-gray-900 dark:text-white">
-          Odalar / Ölçüler
+          Odalar ve Ölçüler
         </h3>
         <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
           Kaydedilen ölçü aynı oda altında görünür. Opening / grup yalnız gerçekten varsa listelenir.

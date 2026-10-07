@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { ProductMeasurement } from '@/store/useStore';
 import {
+  advanceLocalMeasurementCanonicalVersion,
   batchSaveLocalMeasurements,
   deleteLocalMeasurement,
   deleteLocalMeasurementsWithSync,
@@ -67,6 +68,7 @@ interface MeasurementState {
   updateMeasurement: (measurement: MeasurementRecord, username: string) => Promise<void>;
   deleteMeasurement: (id: string, username: string) => Promise<void>;
   batchUpsertMeasurements: (measurements: MeasurementRecord[]) => Promise<void>;
+  advanceMeasurementCanonicalVersion: (id: string, canonicalVersion: number) => Promise<boolean>;
   cascadeDeleteOpening: (
     customerId: string,
     roomId: string,
@@ -626,6 +628,46 @@ function normalizeMeasurementIdentity(
   };
 }
 
+function canonicalVersionOrZero(
+  measurement:
+    MeasurementRecord | undefined,
+): number {
+  const version =
+    Number(measurement?.version);
+
+  return (
+    Number.isInteger(version) &&
+    version >= 1
+  )
+    ? version
+    : 0;
+}
+
+function mergeLocalEditPreservingCanonicalVersion(
+  current: MeasurementRecord | undefined,
+  edited: MeasurementRecord,
+): MeasurementRecord {
+  const canonicalVersion =
+    Math.max(
+      canonicalVersionOrZero(current),
+      canonicalVersionOrZero(edited),
+    );
+
+  return canonicalVersion >= 1
+    ? {
+        ...edited,
+        version: canonicalVersion,
+      }
+    : edited;
+}
+function requestMeasurementTransportSync(): void {
+  if (typeof window === 'undefined') return;
+
+  window.dispatchEvent(
+    new Event('enverp:measurement-sync-request'),
+  );
+}
+
 export const useMeasurementStore = create<MeasurementState>((set, get) => ({
   measurements: [],
   isLoading: false,
@@ -643,27 +685,77 @@ export const useMeasurementStore = create<MeasurementState>((set, get) => ({
   },
 
   addMeasurement: async (measurement, username) => {
-    const normalized = normalizeMeasurementIdentity(
-      enrichMeasurement(measurement),
+    const normalized =
+      normalizeMeasurementIdentity(
+        enrichMeasurement(measurement),
+      );
+
+    await saveLocalMeasurementWithSync(
+      normalized,
+      username,
     );
-    await saveLocalMeasurementWithSync(normalized, username);
-    set(state => ({
-      measurements: [...state.measurements, normalized]
-    }));
+    requestMeasurementTransportSync();
+
+    set((state) => {
+      const existingMap =
+        new Map(
+          state.measurements.map(
+            (item) => [
+              item.id,
+              item,
+            ],
+          ),
+        );
+
+      existingMap.set(
+        normalized.id,
+        mergeLocalEditPreservingCanonicalVersion(
+          existingMap.get(
+            normalized.id,
+          ),
+          normalized,
+        ),
+      );
+
+      return {
+        measurements:
+          Array.from(
+            existingMap.values(),
+          ),
+      };
+    });
   },
 
   updateMeasurement: async (measurement, username) => {
-    const normalized = normalizeMeasurementIdentity(
-      enrichMeasurement(measurement),
+    const normalized =
+      normalizeMeasurementIdentity(
+        enrichMeasurement(measurement),
+      );
+
+    await saveLocalMeasurementWithSync(
+      normalized,
+      username,
     );
-    await saveLocalMeasurementWithSync(normalized, username);
-    set(state => ({
-      measurements: state.measurements.map(m => m.id === measurement.id ? normalized : m)
+    requestMeasurementTransportSync();
+
+    set((state) => ({
+      measurements:
+        state.measurements.map(
+          (current) =>
+            current.id ===
+              measurement.id
+              ? mergeLocalEditPreservingCanonicalVersion(
+                  current,
+                  normalized,
+                )
+              : current,
+        ),
     }));
   },
 
   deleteMeasurement: async (id, username) => {
     await deleteLocalMeasurement(id, username);
+    requestMeasurementTransportSync();
     set(state => ({
       measurements: state.measurements.map(m => m.id === id ? { ...m, isDeleted: true, deletedAt: new Date().toISOString(), deletedBy: username } : m)
     }));
@@ -723,6 +815,63 @@ export const useMeasurementStore = create<MeasurementState>((set, get) => ({
     });
   },
 
+
+  advanceMeasurementCanonicalVersion: async (
+    id,
+    canonicalVersion,
+  ) => {
+    const persisted =
+      await advanceLocalMeasurementCanonicalVersion(
+        id,
+        canonicalVersion,
+      );
+
+    if (!persisted) {
+      return false;
+    }
+
+    set((state) => {
+      const existingMap =
+        new Map(
+          state.measurements.map(
+            (measurement) => [
+              measurement.id,
+              measurement,
+            ],
+          ),
+        );
+
+      const existing =
+        existingMap.get(id);
+
+      if (existing) {
+        existingMap.set(
+          id,
+          {
+            ...existing,
+            version:
+              canonicalVersionOrZero(
+                persisted,
+              ),
+          },
+        );
+      } else {
+        existingMap.set(
+          id,
+          persisted,
+        );
+      }
+
+      return {
+        measurements:
+          Array.from(
+            existingMap.values(),
+          ),
+      };
+    });
+
+    return true;
+  },
 
   cascadeDeleteOpening: async (customerId, roomId, openingId, username) => {
     const now = new Date().toISOString();
@@ -789,6 +938,7 @@ export const useMeasurementStore = create<MeasurementState>((set, get) => ({
         (measurement) => changedById.get(measurement.id) || measurement
       )
     }));
+    requestMeasurementTransportSync();
 
     return changed.length;
   },
@@ -857,6 +1007,7 @@ export const useMeasurementStore = create<MeasurementState>((set, get) => ({
         (measurement) => changedById.get(measurement.id) || measurement
       )
     }));
+    requestMeasurementTransportSync();
 
     return changed.length;
   },

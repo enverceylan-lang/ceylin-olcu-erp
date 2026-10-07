@@ -50,14 +50,14 @@ requireText(
 
 requireText(
   queue,
-  "expectedVersion: canonicalVersion",
+  "validCanonicalSuccessorVersion",
   "CANONICAL_VERSION_ACTIVATION",
 );
 
 requireText(
   local,
-  "existingMeasurement && !hasCanonicalVersion",
-  "LOCAL_PENDING_INSERT_BRANCH",
+  "enqueueDeferredMeasurementMutationAfterPredecessor",
+  "LOCAL_GENERIC_PREDECESSOR_BRANCH",
 );
 
 requireText(
@@ -74,14 +74,56 @@ requireText(
 
 requireText(
   delta,
-  'pendingEvent.operation === "INSERT"',
-  "ACK_INSERT_ONLY",
+  'pendingEvent.operation === "INSERT" ||',
+  "ACK_INSERT_CHAIN",
 );
 
 requireText(
   delta,
-  "activateDeferredMeasurementUpdateAfterInsert",
-  "ACK_ACTIVATES_DEFERRED",
+  'pendingEvent.operation === "UPDATE"',
+  "ACK_UPDATE_CHAIN",
+);
+
+requireText(
+  delta,
+  "activateDeferredMeasurementMutationAfterPredecessor",
+  "ACK_ACTIVATES_EXACT_SUCCESSOR",
+);
+
+requireText(
+  queue,
+  "blockedByChangeId",
+  "SUCCESSOR_LINEAGE",
+);
+
+requireText(
+  queue,
+  "successorReady",
+  "SUCCESSOR_LOCAL_WRITE_GATE",
+);
+
+requireText(
+  queue,
+  "successorAckVersion",
+  "ACK_BEFORE_LOCAL_WRITE_CAPTURE",
+);
+
+requireText(
+  queue,
+  "canonicalAckVersion",
+  "ACK_BEFORE_SUCCESSOR_CAPTURE",
+);
+
+requireText(
+  queue,
+  "terminalConflictPredecessors",
+  "TERMINAL_CONFLICT_BLOCKS_NEW_SUCCESSOR",
+);
+
+requireText(
+  queue,
+  "value === predecessorVersion + 1",
+  "EXACT_PLUS_ONE_SUCCESSOR_VERSION",
 );
 
 requireText(

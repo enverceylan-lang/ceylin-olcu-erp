@@ -11,7 +11,7 @@ import { useStore } from "@/store/useStore";
 import { loadLocalCustomers, saveLocalCustomerWithoutSync } from "./localCustomerDb";
 import { resolveMeasurementParentCustomerId } from "./measurementParentAckGate";
 import {
-  activateDeferredMeasurementUpdateAfterInsert,
+  activateDeferredMeasurementMutationAfterPredecessor,
   classifyDeltaQueueEntityType,
   getPendingSyncEvents,
   markSyncEventsBlocked,
@@ -833,30 +833,28 @@ async function pushDeltaSyncEventsBatch(eventLimit: number): Promise<{
         continue;
       }
 
-      const localMeasurement =
-        useMeasurementStore
+      const canonicalAdvanced =
+        await useMeasurementStore
           .getState()
-          .measurements.find(
-            (measurement) => measurement.id === entityId,
-          ) ??
-        await getLocalMeasurementById(entityId);
-      if (!localMeasurement) {
-        clientRejectedIds.push(changeId);
+          .advanceMeasurementCanonicalVersion(
+            entityId,
+            entityVersion,
+          );
+
+      if (!canonicalAdvanced) {
+        clientRejectedIds.push(
+          changeId,
+        );
         continue;
       }
 
-      await useMeasurementStore
-        .getState()
-        .batchUpsertMeasurements([
-          {
-            ...localMeasurement,
-            version: entityVersion,
-          },
-        ]);
-
-      if (pendingEvent.operation === "INSERT") {
+      if (
+        pendingEvent.operation === "INSERT" ||
+        pendingEvent.operation === "UPDATE"
+      ) {
         const deferredActivated =
-          await activateDeferredMeasurementUpdateAfterInsert(
+          await activateDeferredMeasurementMutationAfterPredecessor(
+            changeId,
             entityId,
             pendingEvent.deviceId,
             entityVersion,
@@ -864,7 +862,9 @@ async function pushDeltaSyncEventsBatch(eventLimit: number): Promise<{
           );
 
         if (!deferredActivated) {
-          clientRejectedIds.push(changeId);
+          clientRejectedIds.push(
+            changeId,
+          );
           continue;
         }
       }

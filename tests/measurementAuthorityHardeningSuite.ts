@@ -30,7 +30,21 @@ assert.ok(sql.includes("v_current_is_deleted boolean;"));
 assert.ok(sql.includes('m."isDeleted",'));
 assert.ok(sql.includes("MEASUREMENT_ALREADY_SOFT_DELETED"));
 
-assert.ok(gateway.includes("/^MEASUREMENT_[A-Z0-9_]+$/"));
+assert.ok(
+  gateway.includes(
+    "ALLOWED_MEASUREMENT_DOMAIN_CODES",
+  ),
+);
+assert.ok(
+  gateway.includes(
+    "ALLOWED_MEASUREMENT_DOMAIN_CODES.has(code)",
+  ),
+);
+assert.ok(
+  gateway.includes(
+    "extractMeasurementDomainCode(error)",
+  ),
+);
 assert.ok(gateway.includes("MEASUREMENT_AUTHORITY_RPC_FAILED"));
 assert.ok(delta.includes("const publicError ="));
 assert.ok(delta.includes("/^MEASUREMENT_[A-Z0-9_]+$/"));
@@ -48,8 +62,9 @@ assert.ok(localMeasurement.includes("MEASUREMENT_SYNC_COMPENSATION_FAILED"));
 assert.ok(localMeasurement.includes("getLocalMeasurementById"));
 
 assert.ok(deltaClient.includes("getLocalMeasurementById"));
-assert.ok(
-  deltaClient.includes("await getLocalMeasurementById(entityId)"),
+assert.match(
+  deltaClient,
+  /await\s+getLocalMeasurementById\(/,
 );
 
 console.log("PAK_MEASUREMENT_AUTHORITY_FOUR_RISK_HARDENING_SOURCE_SUITE");

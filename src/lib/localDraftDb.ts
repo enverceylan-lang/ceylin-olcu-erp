@@ -995,5 +995,5 @@ export async function forceRequeueCustomerMeasurementTree(customerId: string): P
     await requeueLocalMeasurementForSync(measurement.id);
   }
 
-  return { success: true, message: "Bu carinin bağımsız ölçü kayıtları gönderim kuyruğuna alındı. Şimdi Ölçüleri Gönder butonuna basabilirsiniz.", counts, alreadyQueued: false, queued: true };
+  return { success: true, message: "Bu carinin bağımsız ölçü kayıtları senkron kuyruğuna alındı. Sistem bağlantı olduğunda otomatik olarak gönderecek.", counts, alreadyQueued: false, queued: true };
 }

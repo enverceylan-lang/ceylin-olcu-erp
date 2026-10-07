@@ -37,8 +37,8 @@ function workspaceKeepsCaptureExplorerTabsOnAllLayouts(): void {
     captureHtml,
     /data-enverp-measurement-workspace="stitch-v2"/,
   );
-  assert.match(captureHtml, />Ölçü Al</);
-  assert.match(captureHtml, />Odalar \/ Ölçüler</);
+  assert.match(captureHtml, />Yeni Ölçü</);
+  assert.match(captureHtml, />Odalar ve Ölçüler</);
   assert.match(
     captureHtml,
     /data-workspace-pane="capture"/,

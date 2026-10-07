@@ -1725,7 +1725,7 @@ showToast("Saha taslağı telefona kaydedildi.");
                                 </div>
 
                                 <div className="sticky bottom-2 z-10 rounded-xl border border-blue-100 bg-white/95 p-1.5 shadow-lg backdrop-blur dark:border-gray-700 dark:bg-gray-900/95 sm:static sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none"><button onClick={() => handleSaveMeasurement(room.id, window.id)} className="min-h-12 w-full rounded-xl bg-blue-600 px-4 py-3 text-base font-bold text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
-                                  {editingMeasurementId ? "Değişiklikleri Kaydet" : "Ölçüyü Kaydet"}
+                                  Ölçüleri Kaydet
                                 </button></div>
                               </div>
                             </div>

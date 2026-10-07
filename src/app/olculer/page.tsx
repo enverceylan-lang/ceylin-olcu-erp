@@ -3,12 +3,12 @@
 import {
   Search, Ruler, ArrowRight, ChevronDown, ChevronUp, User, Calendar, Layers,
   Image as ImageIcon, Video as VideoIcon, CheckCircle2, AlertCircle, ClipboardList,
-  Trash2, Edit3, X, Save, BadgeCheck, Filter, CloudDownload, RefreshCw, MapPin, Wrench
+  Trash2, Edit3, X, Save, BadgeCheck, Filter, CloudDownload, MapPin, Wrench
 } from "lucide-react";
 import Link from "next/link";
 import { Customer, ProductMeasurement, Room, WindowItem, useStore } from "@/store/useStore";
 import { MeasurementRecord, useMeasurementStore } from "@/store/measurementStore";
-import { useEffect, useState, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useMemo, useSyncExternalStore } from "react";
 import { getTemplateLabel, resolveMeasurementDisplayDimensions, resolveMeasurementDisplayLabel } from "@/lib/measurementAdapter";
 import { useAuthStore, canViewCustomer } from "@/store/useAuthStore";
 import {
@@ -21,7 +21,7 @@ import {
   type InboundMeasurement,
   updateInboundStatus
 } from "@/lib/localDraftDb";
-import { pullInboundMeasurements } from "@/lib/deltaSyncClient";
+
 import { processAsNewCustomer, processAsMerge } from "@/lib/inboundProcessor";
 import {
   loadLocalCustomers,
@@ -120,7 +120,7 @@ export default function OlculerPage() {
   const [inboundMeasurements, setInboundMeasurements] = useState<InboundMeasurement[]>([]);
   const [quarantinedMeasurements, setQuarantinedMeasurements] =
     useState<InboundMeasurement[]>([]);
-  const [isPulling, setIsPulling] = useState(false);
+
   const [inboundSelections, setInboundSelections] = useState<Record<string, string>>({});
   const [processingInboundId, setProcessingInboundId] = useState<string | null>(null);
   const [isRepairingOrphans, setIsRepairingOrphans] = useState(false);
@@ -158,7 +158,7 @@ const [manualRepairingMeasurementId, setManualRepairingMeasurementId] =
     }
   };
 
-  const loadInbound = async () => {
+  const loadInbound = useCallback(async () => {
     try {
       if (!scope) {
         setInboundMeasurements([]);
@@ -198,53 +198,7 @@ const links: Record<string, string> = {};
     } catch (err) {
       console.error("Gelen ölçü geçmişi yüklenemedi:", err);
     }
-  };
-
-  const handlePullInbound = async () => {
-    setIsPulling(true);
-    try {
-      const res = await pullInboundMeasurements(customers);
-      if (res.success) {
-        const applied = res.appliedMeasurements || 0;
-        const newInbound = res.newInboundItems || 0;
-        const updatedInbound = res.updatedInboundItems || 0;
-        const alreadyRecorded = res.alreadyRecorded || 0;
-        const ignoredOwnDevice = res.ignoredOwnDevice || 0;
-        const failed = res.failed || 0;
-
-        if (applied > 0 || newInbound > 0 || updatedInbound > 0) {
-          const parts: string[] = [];
-
-          if (applied > 0) {
-            parts.push("Doğrudan uygulanan ölçü: " + applied);
-          }
-          if (newInbound > 0) {
-            parts.push("Yeni istisna kaydı: " + newInbound);
-          }
-          if (updatedInbound > 0) {
-            parts.push("Güncellenen istisna: " + updatedInbound);
-          }
-
-          alert("Senkron tamamlandı. " + parts.join(". ") + ".");
-        } else if (failed > 0) {
-          alert("Senkron tamamlanamadı. " + failed + " kayıt yerel olarak uygulanamadı.");
-        } else if (alreadyRecorded > 0) {
-          alert("Yeni kayıt yok. " + alreadyRecorded + " değişiklik daha önce uygulanmış.");
-        } else if (ignoredOwnDevice > 0) {
-          alert("Yeni kayıt yok. " + ignoredOwnDevice + " değişiklik bu cihaz tarafından oluşturulmuş.");
-        } else {
-          alert('Yeni veya güncellenmiş kayıt yok.');
-        }
-      } else {
-        alert('Çekerken hata: ' + res.errors.join(', '));
-      }
-      await loadInbound();
-    } catch(e) {
-       console.error(e);
-    } finally {
-      setIsPulling(false);
-    }
-  };
+  }, [scope]);
 
   const handleInboundCreateNew = async (inbound: InboundMeasurement) => {
     if (inbound.suggestedCustomerIds && inbound.suggestedCustomerIds.length > 0) {
@@ -340,68 +294,26 @@ const links: Record<string, string> = {};
     }, 0);
 
     return () => window.clearTimeout(initializationTimer);
-  }, [scope]);
+  }, [scope, loadInbound]);
 
   useEffect(() => {
-    let cancelled = false;
-    let pullRunning = false;
-
-    const runAutomaticPull = async () => {
-      if (cancelled || pullRunning || !navigator.onLine) return;
-
-      pullRunning = true;
-
-      try {
-        const result = await pullInboundMeasurements(customers);
-
-        if (!cancelled && result.success) {
-          await loadInbound();
-
-          if ((result.appliedMeasurements || 0) > 0) {
-            await useMeasurementStore.getState().loadMeasurements();
-          }
-        }
-      } catch (error) {
-        console.error(
-          "[AutomaticDeltaSync] Gelen ölçü senkronu başarısız:",
-          error,
-        );
-      } finally {
-        pullRunning = false;
-      }
+    const refreshFromAutomaticSync = () => {
+      void loadInbound();
+      void useMeasurementStore.getState().loadMeasurements();
     };
 
-    const handleOnline = () => {
-      void runAutomaticPull();
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        void runAutomaticPull();
-      }
-    };
-
-    const initialTimer = window.setTimeout(() => {
-      void runAutomaticPull();
-    }, 1500);
-
-    const intervalId = window.setInterval(() => {
-      if (document.visibilityState === "visible") {
-        void runAutomaticPull();
-      }
-    }, 30000);
-
-    window.addEventListener("online", handleOnline);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener(
+      "enverp:measurement-sync-complete",
+      refreshFromAutomaticSync,
+    );
 
     return () => {
-      cancelled = true;
-      window.clearTimeout(initialTimer);
-      window.clearInterval(intervalId);
-      window.removeEventListener("online", handleOnline);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener(
+        "enverp:measurement-sync-complete",
+        refreshFromAutomaticSync,
+      );
     };
-  }, [customers]);
+  }, [loadInbound]);
 
   if (!mounted) return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
 
@@ -1076,14 +988,9 @@ const handleManualOrphanRepair = async (
                 {inboundMeasurements.length} bekleyen
               </span>
             </h2>
-            <button
-              onClick={handlePullInbound}
-              disabled={isPulling}
-              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-            >
-              <RefreshCw className={`w-4 h-4 ${isPulling ? 'animate-spin' : ''}`} />
-              {isPulling ? 'Alınıyor...' : 'Gelen Ölçüleri Al'}
-            </button>
+            <span className="inline-flex min-h-10 items-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300">
+              Otomatik senkron açık
+            </span>
           </div>          {quarantinedMeasurements.length > 0 && (
             <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
               <div className="mb-3">

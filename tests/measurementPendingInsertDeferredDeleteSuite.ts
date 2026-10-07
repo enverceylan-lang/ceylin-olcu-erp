@@ -12,14 +12,14 @@ const queue = fs.readFileSync(
 
 assert.match(
   local,
-  /const hasCanonicalVersion[\s\S]*?enqueueDeferredMeasurementMutationAfterInsert\([\s\S]*?'SOFT_DELETE'/,
-  "missing-version delete must defer behind unresolved INSERT",
+  /enqueueDeferredMeasurementMutationAfterPredecessor\([\s\S]*?'SOFT_DELETE'/,
+  "delete must defer behind an unresolved canonical predecessor",
 );
 
 assert.match(
   local,
-  /throw new Error\("MEASUREMENT_EXPECTED_VERSION_MISSING"\)/,
-  "missing version must still fail closed when no unresolved INSERT exists",
+  /MEASUREMENT_EXPECTED_VERSION_MISSING/,
+  "missing version must still fail closed when no unresolved predecessor exists",
 );
 
 assert.match(
@@ -36,8 +36,8 @@ assert.match(
 
 assert.match(
   queue,
-  /expectedVersion:\s*canonicalVersion[\s\S]*?syncStatus:\s*'PENDING'/,
-  "deferred delete/update must activate only after INSERT ACK supplies canonical version",
+  /validCanonicalSuccessorVersion[\s\S]*?syncStatus:\s*'PENDING'/,
+  "deferred delete/update must activate only after predecessor ACK supplies canonical version",
 );
 
 console.log(

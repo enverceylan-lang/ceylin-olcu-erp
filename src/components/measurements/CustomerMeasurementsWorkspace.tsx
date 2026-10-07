@@ -29,14 +29,14 @@ export function CustomerMeasurementsWorkspace({
       <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-sm font-black tracking-wide text-gray-900 dark:text-white">
-            Ölçüler Workspace
+            Ölçüler
           </h2>
           <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
-            Ölçüyü al, kaydet; ardından yeni kayıt Odalar / Ölçüler içinde aynı oda altında görünür.
+            Ölçüleri kaydedin; cihaz çevrimdışıyken yerelde korunur ve bağlantı gelince otomatik eşitlenir.
           </p>
         </div>
         <div className="rounded-full bg-blue-50 px-3 py-1 text-[10px] font-bold text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
-          ROOM → MEASUREMENT · OPENING OPSİYONEL
+          Oda · Ölçü · Açıklık isteğe bağlı
         </div>
       </div>
 
@@ -54,7 +54,7 @@ export function CustomerMeasurementsWorkspace({
               : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
           }`}
         >
-          Ölçü Al
+          Yeni Ölçü
         </button>
         <button
           type="button"
@@ -66,7 +66,7 @@ export function CustomerMeasurementsWorkspace({
               : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
           }`}
         >
-          Odalar / Ölçüler
+          Odalar ve Ölçüler
         </button>
       </div>
 
