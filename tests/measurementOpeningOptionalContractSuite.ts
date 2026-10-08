@@ -266,6 +266,15 @@ function migrationContract(): void {
   assert.match(migration, /'roomLabel', v_room_name_snapshot/);
   assert.match(migration, /'openingName', v_opening_name_snapshot/);
   assert.match(migration, /MEASUREMENT_OPENING_NAME_MISSING/);
+  const packageAuthorityStart = migration.indexOf(
+    "create or replace function public.persist_measurement_package_authority_v1(",
+  );
+  assert.notEqual(packageAuthorityStart, -1);
+  const packageAuthority = migration.slice(packageAuthorityStart);
+  assert.match(
+    packageAuthority,
+    /insert into public\.openings \(\s*id,name,"roomId","customerId",width,height,"fieldNotes",photos,videos,"createdAt","updatedAt",\s*tenant_id,company_id,branch_id,accounting_period_id\s*\) values \(\s*v_opening_id,v_opening_name,v_room_id,v_customer_id,/,
+  );
 
   console.log("[PASS] openingOptionalMigrationContract");
 }

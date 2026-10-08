@@ -632,10 +632,10 @@ begin
         raise exception using errcode = '22023', message = 'MEASUREMENT_OPENING_NAME_MISSING';
       end if;
       insert into public.openings (
-        id,name,"roomId",width,height,"fieldNotes",photos,videos,"createdAt","updatedAt",
+        id,name,"roomId","customerId",width,height,"fieldNotes",photos,videos,"createdAt","updatedAt",
         tenant_id,company_id,branch_id,accounting_period_id
       ) values (
-        v_opening_id,v_opening_name,v_room_id,
+        v_opening_id,v_opening_name,v_room_id,v_customer_id,
         nullif(pg_catalog.btrim(coalesce(v_opening_json->>'width','')),'')::double precision,
         nullif(pg_catalog.btrim(coalesce(v_opening_json->>'height','')),'')::double precision,
         coalesce(v_opening_json->>'fieldNotes',''),'{}'::text[],'{}'::text[],
