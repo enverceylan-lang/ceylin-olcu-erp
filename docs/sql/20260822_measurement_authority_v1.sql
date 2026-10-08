@@ -239,7 +239,7 @@ begin
       return v_existing_receipt.result_json || pg_catalog.jsonb_build_object('outcome','REPLAY');
     end if;
 
-    raise exception using errcode = '40001', message = 'MEASUREMENT_COMMAND_IN_PROGRESS';
+    raise sqlstate 'PT409' using message = 'MEASUREMENT_COMMAND_IN_PROGRESS';
   end if;
 
   if v_operation = 'INSERT' then
@@ -346,7 +346,7 @@ begin
       raise exception using errcode = '22023', message = 'MEASUREMENT_UPDATE_EXPECTED_VERSION_INVALID';
     end if;
     if v_current_version <> v_expected_version then
-      raise exception using errcode = '40001', message = 'MEASUREMENT_STALE_VERSION';
+      raise sqlstate 'PT409' using message = 'MEASUREMENT_STALE_VERSION';
     end if;
 
     v_resulting_version := v_current_version + 1;
