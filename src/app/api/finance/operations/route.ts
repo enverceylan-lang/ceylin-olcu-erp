@@ -72,6 +72,7 @@ function hasCommand(body: unknown, key: string): boolean {
 }
 
 type PaymentCounterpartyType =
+  | "CUSTOMER"
   | "SUPPLIER"
   | "TAILOR"
   | "INSTALLER";
@@ -85,7 +86,8 @@ function readPaymentCounterpartyType(
 
   const value = (body as { counterpartyType?: unknown }).counterpartyType;
 
-  return value === "SUPPLIER" ||
+  return value === "CUSTOMER" ||
+    value === "SUPPLIER" ||
     value === "TAILOR" ||
     value === "INSTALLER"
     ? value

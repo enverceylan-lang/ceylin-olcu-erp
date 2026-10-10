@@ -1,3 +1,5 @@
+export type CustomerReceivableSourceType = "SALE" | "OPENING_BALANCE";
+
 export type CustomerReceivableOpenItemStatus =
   | "OPEN"
   | "PARTIAL"
@@ -6,7 +8,9 @@ export type CustomerReceivableOpenItemStatus =
 
 export interface CustomerReceivableOpenItem {
   id: string;
-  saleId: string;
+  saleId: string | null;
+  sourceType: CustomerReceivableSourceType;
+  sourceDocumentId: string;
   installmentId: string | null;
   documentNumber: string;
   sequenceNo: number;
@@ -25,7 +29,7 @@ export interface CustomerReceivableAllocation {
   operationId: string;
   transactionId: string;
   openItemId: string;
-  saleId: string;
+  saleId: string | null;
   installmentId: string | null;
   amount: number;
   reversedAt: string | null;
@@ -134,12 +138,21 @@ export function parseCustomerReceivableSnapshot(
     (raw): CustomerReceivableOpenItem => {
       const item = record(raw, "FINANCE_CUSTOMER_RECEIVABLE_OPEN_ITEM_INVALID");
       const status = text(item.status, "FINANCE_CUSTOMER_RECEIVABLE_OPEN_ITEM_STATUS_INVALID");
+      const sourceType = text(item.sourceType, "FINANCE_CUSTOMER_RECEIVABLE_OPEN_ITEM_SOURCE_TYPE_INVALID");
+      if (!["SALE", "OPENING_BALANCE"].includes(sourceType)) {
+        throw new Error("FINANCE_CUSTOMER_RECEIVABLE_OPEN_ITEM_SOURCE_TYPE_INVALID");
+      }
       if (!["OPEN", "PARTIAL", "CLOSED", "REVERSED"].includes(status)) {
         throw new Error("FINANCE_CUSTOMER_RECEIVABLE_OPEN_ITEM_STATUS_INVALID");
       }
       return {
         id: text(item.id, "FINANCE_CUSTOMER_RECEIVABLE_OPEN_ITEM_ID_INVALID"),
-        saleId: text(item.saleId, "FINANCE_CUSTOMER_RECEIVABLE_OPEN_ITEM_SALE_INVALID"),
+        saleId: nullableText(item.saleId, "FINANCE_CUSTOMER_RECEIVABLE_OPEN_ITEM_SALE_INVALID"),
+        sourceType: sourceType as CustomerReceivableSourceType,
+        sourceDocumentId: text(
+          item.sourceDocumentId,
+          "FINANCE_CUSTOMER_RECEIVABLE_OPEN_ITEM_SOURCE_DOCUMENT_INVALID",
+        ),
         installmentId: nullableText(
           item.installmentId,
           "FINANCE_CUSTOMER_RECEIVABLE_OPEN_ITEM_INSTALLMENT_INVALID",
@@ -195,7 +208,7 @@ export function parseCustomerReceivableSnapshot(
         item.openItemId,
         "FINANCE_CUSTOMER_RECEIVABLE_ALLOCATION_OPEN_ITEM_INVALID",
       ),
-      saleId: text(item.saleId, "FINANCE_CUSTOMER_RECEIVABLE_ALLOCATION_SALE_INVALID"),
+      saleId: nullableText(item.saleId, "FINANCE_CUSTOMER_RECEIVABLE_ALLOCATION_SALE_INVALID"),
       installmentId: nullableText(
         item.installmentId,
         "FINANCE_CUSTOMER_RECEIVABLE_ALLOCATION_INSTALLMENT_INVALID",
