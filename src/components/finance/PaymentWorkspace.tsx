@@ -16,7 +16,7 @@ interface CounterpartyRow {
   id: string;
   name: string;
   customerCode?: string | null;
-  cariType: "SUPPLIER" | "TAILOR" | "INSTALLER";
+  cariType: "CUSTOMER" | "SUPPLIER" | "TAILOR" | "INSTALLER";
 }
 
 interface CashRow {
@@ -196,7 +196,10 @@ export function PaymentWorkspace({
     void readSources()
       .then((data) => {
         if (cancelled) return;
-        setCounterparties((data.counterparties || []) as CounterpartyRow[]);
+        setCounterparties([
+          ...((data.counterparties || []) as CounterpartyRow[]),
+          ...((data.customers || []) as CounterpartyRow[]),
+        ]);
         setCashAccounts(
           ((data.cashAccounts || []) as CashRow[]).filter((item) => item.is_active),
         );

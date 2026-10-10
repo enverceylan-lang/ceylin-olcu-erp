@@ -3,6 +3,7 @@ import type {
 } from "@/lib/erpScope";
 
 export type CounterpartyType =
+  | "CUSTOMER"
   | "SUPPLIER"
   | "TAILOR"
   | "INSTALLER";

@@ -14,6 +14,7 @@ import type { ErpScope } from "@/lib/erpScope";
 import type { FinancePermission } from "@/lib/finance/financeAccessPolicy";
 import { CollectionWorkspace } from "@/components/finance/CollectionWorkspace";
 import { PaymentWorkspace } from "@/components/finance/PaymentWorkspace";
+import { OpeningBalanceWorkspace } from "@/components/finance/OpeningBalanceWorkspace";
 import { PayableInstrumentWorkspace } from "@/components/finance/PayableInstrumentWorkspace";
 import { PosAdminOperationsWorkspace } from "@/components/finance/PosAdminOperationsWorkspace";
 import {
@@ -303,6 +304,8 @@ export default function FinanceOperationsPanel({
               scope={scope}
               permissions={permissions}
             />
+          ) : activeItem && section === "Devir / A\u00e7\u0131l\u0131\u015f" ? (
+            <OpeningBalanceWorkspace scope={scope} permissions={permissions} />
           ) : activeItem === "POS Cihazlar\u0131 ve S\u00f6zle\u015fmeleri" && section === "Hesaplar" ? (
             <PosAdminOperationsWorkspace scope={scope} />
           ) : activeItem && section === "Hesaplar" ? (
