@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { WifiOff, Download, RefreshCw, X, HelpCircle } from "lucide-react";
+import { compareClientBuild, fetchServerBuild } from "@/lib/clientVersionPolicy";
 import { initSync } from "@/lib/syncService";
+import { localSyncQueueDb, ensureMeasurementCutover, isLegacyMeasurementEvent } from "@/lib/localSyncQueueDb";
 import { useStore } from "@/store/useStore";
 import { useMeasurementStore } from "@/store/measurementStore";
 import { runMeasurementMigration } from "@/lib/measurementMigration";
@@ -129,6 +131,21 @@ export function PWAController() {
             console.warn("Service Worker update check failed:", updateError);
           }
 
+          // Server revision is verified rather than inferred from a cached SW response.
+          // If the client revision is not injected, classify as unverified.
+          try {
+            const serverBuild = await fetchServerBuild();
+            const clientBuild = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA;
+            const versionState = compareClientBuild(clientBuild, serverBuild);
+            if (versionState === 'outdated') {
+              await registration.update();
+            } else if (versionState === 'unverified') {
+              console.warn('[PWA] Client build identity cannot be verified.');
+            }
+          } catch (error) {
+            console.warn('[PWA] Server version verification failed.', error);
+          }
+
           // Check if there's already a waiting worker on page load
           if (registration.waiting) {
             setWaitingWorker(registration.waiting);
@@ -152,10 +169,11 @@ export function PWAController() {
         });
 
         // Handle page refresh when the new service worker takes control
-        let refreshing = false;
+        // A worker may change due to a different tab. Never reload a tab
+        // unless THIS tab explicitly approved a guarded activation.
         navigator.serviceWorker.addEventListener("controllerchange", () => {
-          if (!refreshing) {
-            refreshing = true;
+          if (sessionStorage.getItem('enverp-safe-update-approved') === '1') {
+            sessionStorage.removeItem('enverp-safe-update-approved');
             window.location.reload();
           }
         });
@@ -186,11 +204,27 @@ export function PWAController() {
     setShowInstallPrompt(false);
   };
 
-  const handleUpdateClick = () => {
-    if (waitingWorker) {
+  const handleUpdateClick = async () => {
+    if (!waitingWorker) return;
+    try {
+      await ensureMeasurementCutover();
+      // Fail closed: a local pending/error/blocked/conflicted NEW mutation must
+      // survive the update, and we must not force-refresh while it exists.
+      const events = await localSyncQueueDb.pendingSyncEvents.toArray();
+      for (const event of events) {
+        if (event.syncStatus === 'SYNCED') continue;
+        if (event.entityType === 'MEASUREMENT' &&
+            await isLegacyMeasurementEvent(event.changeId)) continue;
+        window.alert('Gönderilmemiş işlemler var. Güncelleme ertelendi; yerel kayıtlar korundu.');
+        return;
+      }
+      sessionStorage.setItem('enverp-safe-update-approved', '1');
       waitingWorker.postMessage({ type: "SKIP_WAITING" });
+      setShowUpdateBanner(false);
+    } catch (error) {
+      console.error('[PWA] Update safety check failed.', error);
+      window.alert('Güncelleme güvenli biçimde doğrulanamadı. Kayıtlar korunuyor.');
     }
-    setShowUpdateBanner(false);
   };
 
   const dismissIosPrompt = () => {

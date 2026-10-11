@@ -120,18 +120,59 @@ export function syncEventMatchesHistoricalDeltaFingerprint(
   );
 }
 
+interface MeasurementCutoverMeta { key: string; initializedAt: string; }
+interface LegacyMeasurementId { changeId: string; }
 class LocalSyncQueueDatabase extends Dexie {
   pendingSyncEvents!: Table<SyncEvent, string>;
+  measurementCutoverMeta!: Table<MeasurementCutoverMeta, string>;
+  legacyMeasurementIds!: Table<LegacyMeasurementId, string>;
 
   constructor() {
     super('CeylinLocalSyncQueueDb');
     this.version(1).stores({
       pendingSyncEvents: 'changeId, entityType, entityId, syncStatus'
     });
+    this.version(2).stores({
+      pendingSyncEvents: 'changeId, entityType, entityId, syncStatus',
+      measurementCutoverMeta: 'key',
+      legacyMeasurementIds: 'changeId',
+    });
   }
 }
 
+
 export const localSyncQueueDb = new LocalSyncQueueDatabase();
+
+/** The original events remain untouched. All pre-existing MEASUREMENT event IDs
+ * are snapshotted once, atomically with a durable marker. Never use device time
+ * as a surrogate event boundary. Initialization failure aborts the sync. */
+export async function ensureMeasurementCutover(): Promise<void> {
+  await localSyncQueueDb.transaction(
+    'rw',
+    localSyncQueueDb.pendingSyncEvents,
+    localSyncQueueDb.measurementCutoverMeta,
+    localSyncQueueDb.legacyMeasurementIds,
+    async () => {
+      if (await localSyncQueueDb.measurementCutoverMeta.get('v1')) return;
+      const preExisting = await localSyncQueueDb.pendingSyncEvents
+        .where('entityType').equals('MEASUREMENT').primaryKeys();
+      if (preExisting.length) {
+        await localSyncQueueDb.legacyMeasurementIds.bulkPut(
+          preExisting.map(changeId => ({ changeId: String(changeId) })),
+        );
+      }
+      await localSyncQueueDb.measurementCutoverMeta.put({
+        key: 'v1', initializedAt: new Date().toISOString(),
+      });
+    },
+  );
+}
+
+export async function isLegacyMeasurementEvent(changeId: string): Promise<boolean> {
+  await ensureMeasurementCutover();
+  return Boolean(await localSyncQueueDb.legacyMeasurementIds.get(changeId));
+}
+
 
 /**
  * Safely strips out photos, videos, and large base64 data to ensure
@@ -236,6 +277,7 @@ export async function enqueueSyncEventDetailed(
       }
     }
 
+    if (entityType === 'MEASUREMENT') await ensureMeasurementCutover();
     const now = new Date().toISOString();
     const deviceId = getDeviceId();
     const sanitizedPatch = sanitizePatch(patch);
@@ -270,31 +312,37 @@ export async function enqueueSyncEventDetailed(
       )
     )[0];
 
+    // Legacy queue records are immutable: a NEW mutation must never reuse
+    // their changeId, but it must still be allowed to create a fresh event.
+    const candidateForDedup =
+      entityType === 'MEASUREMENT' && latestEvent &&
+      await isLegacyMeasurementEvent(latestEvent.changeId)
+        ? undefined : latestEvent;
     if (
-      latestEvent &&
-      getComparablePatchSignature(latestEvent.patch) === comparableSignature
+      candidateForDedup &&
+      getComparablePatchSignature(candidateForDedup.patch) === comparableSignature
     ) {
       if (initialSyncStatus === 'BLOCKED') {
         if (
-          latestEvent.syncStatus === 'BLOCKED' ||
-          latestEvent.syncStatus === 'SYNCED'
+          candidateForDedup.syncStatus === 'BLOCKED' ||
+          candidateForDedup.syncStatus === 'SYNCED'
         ) {
           return { success: false };
         }
 
         return {
           success: true,
-          changeId: latestEvent.changeId,
-          deviceId: latestEvent.deviceId,
-          userId: latestEvent.userId,
-          createdAt: latestEvent.createdAt,
+          changeId: candidateForDedup.changeId,
+          deviceId: candidateForDedup.deviceId,
+          userId: candidateForDedup.userId,
+          createdAt: candidateForDedup.createdAt,
           createdNew: false
         };
       }
 
-      if (latestEvent.syncStatus === 'ERROR') {
+      if (candidateForDedup.syncStatus === 'ERROR') {
         await localSyncQueueDb.pendingSyncEvents.update(
-          latestEvent.changeId,
+          candidateForDedup.changeId,
           {
             syncStatus: 'PENDING',
             updatedAt: now
@@ -304,10 +352,10 @@ export async function enqueueSyncEventDetailed(
 
       return {
         success: true,
-        changeId: latestEvent.changeId,
-        deviceId: latestEvent.deviceId,
-        userId: latestEvent.userId,
-        createdAt: latestEvent.createdAt,
+        changeId: candidateForDedup.changeId,
+        deviceId: candidateForDedup.deviceId,
+        userId: candidateForDedup.userId,
+        createdAt: candidateForDedup.createdAt,
         createdNew: false
       };
     }
@@ -1393,6 +1441,8 @@ export async function activateBlockedSyncEvent(
     const event = await localSyncQueueDb.pendingSyncEvents.get(changeId);
 
     if (!event) return false;
+    if (event.entityType === 'MEASUREMENT' &&
+        await isLegacyMeasurementEvent(changeId)) return false;
     if (event.syncStatus === 'PENDING') return true;
     if (event.syncStatus !== 'BLOCKED') return false;
 
@@ -1431,14 +1481,20 @@ export async function activateBlockedSyncEventsAtomically(
   }
 
   try {
+    await ensureMeasurementCutover();
     return await localSyncQueueDb.transaction(
       'rw',
       localSyncQueueDb.pendingSyncEvents,
+      localSyncQueueDb.legacyMeasurementIds,
       async () => {
         const events =
           await localSyncQueueDb.pendingSyncEvents.bulkGet(
             uniqueChangeIds,
           );
+        const legacy = await localSyncQueueDb.legacyMeasurementIds.bulkGet(uniqueChangeIds);
+        if (events.some((event, index) =>
+          event?.entityType === 'MEASUREMENT' && Boolean(legacy[index])
+        )) return false;
 
         if (
           events.length !== uniqueChangeIds.length ||
@@ -1598,6 +1654,9 @@ export async function getPendingSyncEvents(
       return [];
     }
 
+    await ensureMeasurementCutover();
+    const legacyIds = new Set((await localSyncQueueDb.legacyMeasurementIds.toArray()).map(x => x.changeId));
+
     const retryableEvents = await localSyncQueueDb.pendingSyncEvents
       .where('syncStatus')
       .anyOf(['PENDING', 'ERROR'])
@@ -1605,6 +1664,7 @@ export async function getPendingSyncEvents(
 
     const invalidScopeChangeIds: string[] = [];
     const scopePartitionedEvents = retryableEvents.filter((event) => {
+      if (event.entityType === 'MEASUREMENT' && legacyIds.has(event.changeId)) return false;
       const eventScope = readErpScope(event.scope);
       if (!eventScope) {
         invalidScopeChangeIds.push(event.changeId);

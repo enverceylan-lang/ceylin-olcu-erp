@@ -2,7 +2,7 @@ import { loadVerifiedClientErpScope } from '@/lib/clientErpScope';
 import { executePendingSalesFinanceOutbox } from '@/lib/finance/salesFinanceOutboxExecutor';
 import { createSalesFinanceOutboxRetryCoordinator } from '@/lib/finance/salesFinanceOutboxRetryCoordinator';
 import { pushDeltaSyncEvents, pullInboundMeasurements } from '@/lib/deltaSyncClient';
-import { getPendingSyncEvents, localSyncQueueDb } from '@/lib/localSyncQueueDb';
+import { ensureMeasurementCutover, isLegacyMeasurementEvent, getPendingSyncEvents, localSyncQueueDb } from '@/lib/localSyncQueueDb';
 import { erpScopeMatches } from '@/lib/erpScope';
 import { readErpScope } from '@/lib/customerTreeScope';
 import { useStore, Customer, Room, WindowItem, ProductMeasurement } from '@/store/useStore';
@@ -11,6 +11,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 // Track if a sync is currently in progress
 let isSyncing = false;
 let hasPendingSync = false;
+let customerTransportState: 'idle'|'pending'|'synced'|'offline'|'error' = 'idle';
 
 // Finance outbox retry is independent from CLOUD_SYNC_DISABLED.
 // The coordinator keeps exact-scope retry single-flight and directly testable.
@@ -90,23 +91,19 @@ let measurementSyncQueued = false;
 
 function applyMeasurementAwareSyncedStatus(): void {
   const store = useStore.getState();
-
-  if (measurementTransportState === 'error') {
+  if (customerTransportState === 'error' || measurementTransportState === 'error') {
     store.setSyncStatus('error');
-    return;
-  }
-
-  if (measurementTransportState === 'pending') {
-    store.setSyncStatus('pending');
-    return;
-  }
-
-  if (measurementTransportState === 'offline') {
+  } else if (customerTransportState === 'offline' || measurementTransportState === 'offline') {
     store.setSyncStatus('offline');
-    return;
+  } else if (isSyncing || customerTransportState === 'pending' ||
+             measurementTransportState === 'pending') {
+    store.setSyncStatus('pending');
+  } else if (customerTransportState === 'synced' && measurementTransportState === 'synced') {
+    store.setSyncStatus('synced');
+  } else {
+    // No verified end-to-end acknowledgement for both transports yet.
+    store.setSyncStatus('error');
   }
-
-  store.setSyncStatus('synced');
 }
 
 async function hasMeasurementSyncBlockerForActiveScope(
@@ -128,10 +125,12 @@ async function hasMeasurementSyncBlockerForActiveScope(
         erpScopeMatches(eventScope, activeScope)
       );
     })
-    .limit(1)
     .toArray();
 
-  return blockers.length > 0;
+  for (const event of blockers) {
+    if (!await isLegacyMeasurementEvent(event.changeId)) return true;
+  }
+  return false;
 }
 
 async function runMeasurementAutoSync(
@@ -143,7 +142,7 @@ async function runMeasurementAutoSync(
 
   if (!window.navigator.onLine) {
     measurementTransportState = 'offline';
-    store.setSyncStatus('offline');
+    applyMeasurementAwareSyncedStatus();
     return;
   }
 
@@ -159,9 +158,10 @@ async function runMeasurementAutoSync(
   }
 
   measurementTransportState = 'pending';
-  store.setSyncStatus('pending');
+  applyMeasurementAwareSyncedStatus();
 
   try {
+    await ensureMeasurementCutover();
     const activeScope =
       await loadVerifiedClientErpScope(auth.sessionToken);
 
@@ -192,18 +192,18 @@ async function runMeasurementAutoSync(
       hasBlocker
     ) {
       measurementTransportState = 'error';
-      store.setSyncStatus('error');
+      applyMeasurementAwareSyncedStatus();
       return;
     }
 
     if (remaining.length > 0) {
-      measurementTransportState = 'pending';
-      store.setSyncStatus('pending');
+      measurementTransportState = 'error';
+      applyMeasurementAwareSyncedStatus();
       return;
     }
 
     measurementTransportState = 'synced';
-    store.setSyncStatus('synced');
+    applyMeasurementAwareSyncedStatus();
 
     if (process.env.NODE_ENV === 'development') {
       console.log(
@@ -212,7 +212,7 @@ async function runMeasurementAutoSync(
     }
   } catch (error: unknown) {
     measurementTransportState = 'error';
-    store.setSyncStatus('error');
+    applyMeasurementAwareSyncedStatus();
     console.error(
       '[Measurement Auto Sync] Automatic delta sync failed.',
       error,
@@ -546,8 +546,10 @@ function mergeProducts(local: ProductMeasurement[], remote: ProductMeasurement[]
 
 export async function syncNow(isManual: boolean = false) {
   if (CLOUD_SYNC_DISABLED) {
-    // Cloud sync is disabled — clear any lingering pending/spinner state immediately
-    useStore.getState().setSyncStatus('synced');
+    // Disabled transports are NOT evidence of a server acknowledgement.
+    customerTransportState = 'error';
+    measurementTransportState = 'error';
+    applyMeasurementAwareSyncedStatus();
     console.log('[Client Sync] Cloud sync is temporarily disabled. Local PC data is protected.');
     return;
   }
@@ -583,12 +585,14 @@ export async function syncNow(isManual: boolean = false) {
 
   // Check network connection — set offline status and abort early if no connection
   if (typeof window !== 'undefined' && !window.navigator.onLine) {
-    store.setSyncStatus('offline');
+    customerTransportState = 'offline';
+    applyMeasurementAwareSyncedStatus();
     isSyncing = false;
     return;
   }
 
-  store.setSyncStatus('pending');
+  customerTransportState = 'pending';
+  applyMeasurementAwareSyncedStatus();
 
   try {
     const localCustomers = store.customers || [];
@@ -610,7 +614,8 @@ export async function syncNow(isManual: boolean = false) {
     // Use 'offline' as a neutral non-error state while unauthenticated.
     if (!currentUser) {
       console.log('[Client Sync] No user logged in — sync skipped.');
-      store.setSyncStatus('offline');
+      customerTransportState = 'offline';
+    applyMeasurementAwareSyncedStatus();
       isSyncing = false;
       return;
     }
@@ -618,7 +623,8 @@ export async function syncNow(isManual: boolean = false) {
     // ── Guard: authenticated user has no active session token ──
     if (!sessionToken) {
       console.warn('[Client Sync] Active session token is missing. Sync aborted.');
-      store.setSyncStatus('error');
+      customerTransportState = 'error';
+      applyMeasurementAwareSyncedStatus();
       isSyncing = false;
       return;
     }
@@ -781,7 +787,8 @@ export async function syncNow(isManual: boolean = false) {
     if (response.status === 413) {
       last413Time = Date.now();
       console.error('[Client Sync] response error 413: Request Entity Too Large. Senkronizasyon paketi çok büyük. Fotoğraf/video verileri ayrı aktarılmalı.');
-      store.setSyncStatus('error');
+      customerTransportState = 'error';
+      applyMeasurementAwareSyncedStatus();
       isSyncing = false;
       return;
     }
@@ -790,7 +797,8 @@ export async function syncNow(isManual: boolean = false) {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('[Client Sync] response error:', errorText);
-      store.setSyncStatus('error');
+      customerTransportState = 'error';
+      applyMeasurementAwareSyncedStatus();
       isSyncing = false;
       return;
     }
@@ -816,8 +824,31 @@ export async function syncNow(isManual: boolean = false) {
     if (!result.success) {
       console.error('[Client Sync] Sync API returned success: false —', result.error || 'unknown error');
       console.log('[Client Sync Target Diagnostic] Server error details:', { error: result.error, reason: result.reason });
-      store.setSyncStatus('error');
+      customerTransportState = 'error';
+      applyMeasurementAwareSyncedStatus();
       isSyncing = false;
+      return;
+    }
+
+    // Fail-closed: an HTTP 200 or success:true is insufficient evidence that
+    // this entire outgoing customer batch was accepted. The server reports
+    // received/accepted/rejected based on the request it actually parsed.
+    const ack = result.customerScopeMigration;
+    if (!ack ||
+        !Number.isInteger(ack.received) ||
+        !Number.isInteger(ack.accepted) ||
+        !Number.isInteger(ack.rejected) ||
+        ack.received !== sanitizedCustomers.length ||
+        (ack.accepted ?? Number.NaN) + (ack.rejected ?? Number.NaN) !== ack.received ||
+        ack.rejected !== 0) {
+      console.error('[Client Sync] Customer acceptance is incomplete or unverified.', {
+        outgoing: sanitizedCustomers.length,
+        received: ack?.received,
+        accepted: ack?.accepted,
+        rejected: ack?.rejected,
+      });
+      customerTransportState = 'error';
+      applyMeasurementAwareSyncedStatus();
       return;
     }
 
@@ -981,17 +1012,20 @@ export async function syncNow(isManual: boolean = false) {
         rejected: rejectedScopeCustomerCount,
         rejectedCustomers: rejectedScopeCustomers,
       });
-      store.setSyncStatus('pending');
+      customerTransportState = 'error';
+      applyMeasurementAwareSyncedStatus();
     } else {
-      // ── Preserve measurement transport truth before showing "synced" ──
+      customerTransportState = 'synced';
       applyMeasurementAwareSyncedStatus();
     }
 
   } catch (error) {
     console.error('[Client Sync] Unexpected error during sync:', error);
-    store.setSyncStatus('error');
+    customerTransportState = 'error';
+      applyMeasurementAwareSyncedStatus();
   } finally {
     isSyncing = false;
+    applyMeasurementAwareSyncedStatus();
     if (hasPendingSync) {
       hasPendingSync = false;
       console.log('[Client Sync Queue] Triggering queued follow-up sync.');
@@ -1028,20 +1062,24 @@ export function initSync() {
 
     void retryPendingFinanceOutboxForActiveScope();
     if (CLOUD_SYNC_DISABLED) {
-      // Sync is disabled — just ensure status shows synced, no spinner
-      store.setSyncStatus('synced');
+      // Disabled sync must never be advertised as an acknowledged success.
+      customerTransportState = 'error';
+      measurementTransportState = 'error';
+      applyMeasurementAwareSyncedStatus();
       return;
     }
-    store.setSyncStatus('pending');
-    syncNow();
+    customerTransportState = 'pending';
+    measurementTransportState = 'pending';
+    applyMeasurementAwareSyncedStatus();
+    void syncNow();
     requestMeasurementAutoSync('online');
   };
 
   // Mark as offline immediately when network drops
   const handleOffline = () => {
-    const store = useStore.getState();
+    customerTransportState = 'offline';
     measurementTransportState = 'offline';
-    store.setSyncStatus('offline');
+    applyMeasurementAwareSyncedStatus();
   };
 
   const handleMeasurementSyncRequest = () => {

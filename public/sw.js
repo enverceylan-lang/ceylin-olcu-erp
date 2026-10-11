@@ -26,7 +26,7 @@ self.addEventListener('install', (event) => {
   // Skip the waiting phase immediately so the new SW takes over without
   // requiring the user to close all tabs. This ensures phones always run
   // the latest code after a deployment.
-  self.skipWaiting();
+  // Wait until the app verifies pending local writes and user approves update.
 });
 
 // Activate Event — purge all caches from previous versions and claim all clients
