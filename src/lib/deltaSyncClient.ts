@@ -38,6 +38,7 @@ import {
 import { validateMeasurementRecord } from "@/lib/measurementValidationEngine";
 import { useAuthStore } from "@/store/useAuthStore";
 import { getDeviceId } from "./deviceIdentity";
+import { getCanonicalParentPackageFromSnapshot } from "./measurementCanonicalParentSnapshot";
 
 type LocalCustomer = Awaited<
   ReturnType<typeof loadLocalCustomers>
@@ -160,7 +161,7 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-// btoa() fails on non-Latin1 characters (e.g. Å, Ä, Ä°, Ãœ, Ã–, Ã‡).
+// btoa() fails on non-Latin1 characters (e.g. Ş, Ğ, İ, Ü, Ö, Ç).
 function getOpeningId(measurement: OpeningReference): string {
   return measurement?.openingId || measurement?.windowId || "";
 }
@@ -486,6 +487,8 @@ async function pushDeltaSyncEventsBatch(eventLimit: number): Promise<{
 
     const token = sessionToken;
     const activeScope = await loadVerifiedClientErpScope(sessionToken);
+    // RELEASE SAFETY GATE: historical BLOCKED auto recovery is not wired into push.
+    // It stays disabled until IndexedDB deletion-race and SQL concurrency tests pass.
     const pendingEvents = await getPendingSyncEvents(activeScope, eventLimit);
     const activeScopeEvents = pendingEvents.filter((event) =>
       erpScopeMatches(event.scope, activeScope),
@@ -618,6 +621,20 @@ async function pushDeltaSyncEventsBatch(eventLimit: number): Promise<{
     const measurementEvents = sendableScopeEvents.filter(
       (event) => event.entityType === "MEASUREMENT",
     );
+    // Snapshot is used only to construct THIS push payload. No queue unblocking.
+    async function findExistingCanonicalParent(customerId: string, roomId: string, openingId: string) {
+      try {
+        const response = await fetch('/api/measurement-parent-authority/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ customerId, roomId, ...(openingId ? { openingId } : {}) }),
+        });
+        if (!response.ok) return null;
+        const snapshot: unknown = await response.json();
+        return getCanonicalParentPackageFromSnapshot(snapshot, activeScope,
+          { customerId, roomId, ...(openingId ? { openingId } : {}) });
+      } catch { return null; }
+    }
     let deltaPushEvents = sendableScopeEvents;
     if (measurementEvents.length > 0) {
       const localCustomers = await loadLocalCustomers();
@@ -662,12 +679,24 @@ async function pushDeltaSyncEventsBatch(eventLimit: number): Promise<{
           return { success: false, pushedCount: 0, isolatedCount, errors: ["MEASUREMENT_PARENT_CUSTOMER_LOCAL_MISSING"], debug: { pendingCount: pendingEvents.length, apiStatus: "PARENT_LOCAL_MISSING", syncedCount: 0, errorCount: 1, firstStatus } };
         }
 
-        const room = (customer.rooms || []).find((item) => !item.isDeleted && item.id === roomId);
+        // A locally deleted parent is not an absent parent. Never use a
+        // server snapshot to bypass an unsynced local tombstone.
+        const roomRecord = (customer.rooms || []).find((item) => item.id === roomId);
+        if (roomRecord?.isDeleted) {
+          isolatedEvents.push({ changeId: event.changeId, reason: "PARENT_ROOM_MISSING" });
+          continue;
+        }
+        const room = roomRecord;
         if (!room) {
-          isolatedEvents.push({
-            changeId: event.changeId,
-            reason: "PARENT_ROOM_MISSING",
-          });
+          // Server read is NOT authorization. Canonical push RPC re-verifies parents.
+          const existingParent = await findExistingCanonicalParent(
+            customerIdentity.customerId, roomId, canonicalOpeningId);
+          if (existingParent) {
+            packagedEvents.push({ ...event, patch: { ...event.patch,
+              parentPackage: existingParent } });
+            continue;
+          }
+          isolatedEvents.push({ changeId: event.changeId, reason: "PARENT_ROOM_MISSING" });
           continue;
         }
 
@@ -680,14 +709,23 @@ async function pushDeltaSyncEventsBatch(eventLimit: number): Promise<{
         };
 
         if (canonicalOpeningId) {
-          const opening = (room.windows || []).find(
-            (item) => !item.isDeleted && item.id === canonicalOpeningId,
+          const openingRecord = (room.windows || []).find(
+            (item) => item.id === canonicalOpeningId,
           );
+          if (openingRecord?.isDeleted) {
+            isolatedEvents.push({ changeId: event.changeId, reason: "PARENT_OPENING_MISSING" });
+            continue;
+          }
+          const opening = openingRecord;
           if (!opening) {
-            isolatedEvents.push({
-              changeId: event.changeId,
-              reason: "PARENT_OPENING_MISSING",
-            });
+            const existingParent = await findExistingCanonicalParent(
+              customerIdentity.customerId, roomId, canonicalOpeningId);
+            if (existingParent) {
+              packagedEvents.push({ ...event, patch: { ...event.patch,
+                parentPackage: existingParent } });
+              continue;
+            }
+            isolatedEvents.push({ changeId: event.changeId, reason: "PARENT_OPENING_MISSING" });
             continue;
           }
 
@@ -1096,7 +1134,7 @@ export async function pullInboundMeasurements(
       return {
         success: false,
         fetchedCount: 0,
-        errors: ["Oturum anahtarÄ± bulunamadı. Ã‡Ä±kÄ±ÅŸ yapÄ±p yeniden giriÅŸ yapÄ±n."],
+        errors: ["Oturum anahtarı bulunamadı. Çıkış yapıp yeniden giriş yapın."],
       };
     }
 
@@ -1168,7 +1206,7 @@ export async function pullInboundMeasurements(
     }
 
     // Permanent source->target reconciliation created by the admin's earlier
-    // "Mevcut Cariye BaÄŸla" or "Yeni Cari AÃ§" decision.
+    // "Mevcut Cariye Bağla" or "Yeni Cari Aç" decision.
     const completedInboundCustomerMap =
       await buildCompletedInboundCustomerMap(activeScope);
 
@@ -1245,7 +1283,7 @@ export async function pullInboundMeasurements(
       }
     });
     console.log(
-      `[SYNC-DIAGNOSTIC] PC pull sonrasÄ±: pulledRawEventCount=${rawChanges.length}, uniqueMergedCount=${changes.length}, mergedRoomsCount=${rCount}, mergedProductsCount=${pCount}, hasRawValues=${hasRaw}`,
+      `[SYNC-DIAGNOSTIC] PC pull sonrası: pulledRawEventCount=${rawChanges.length}, uniqueMergedCount=${changes.length}, mergedRoomsCount=${rCount}, mergedProductsCount=${pCount}, hasRawValues=${hasRaw}`,
     );
 
     const unmatchedMeasurementGroups = new Map<

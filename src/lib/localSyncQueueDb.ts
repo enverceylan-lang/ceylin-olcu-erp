@@ -1,3 +1,5 @@
+import { canRecoverBlockedMeasurement, type ConfirmedParent, type RecoveryScope } from './measurementBlockedRecoveryGate';
+import { hasExclusiveBlockedInsertLineage } from './measurementRecoveryQueuePolicy';
 import type { ErpScope } from './erpScope';
 import { readErpScope } from './customerTreeScope';
 import { erpScopeKey, erpScopeMatches } from './erpScope';
@@ -1316,6 +1318,72 @@ export async function activateDeferredMeasurementUpdateAfterInsert(
     canonicalVersion,
     scopeSource,
   );
+}
+
+/**
+ * Explicit, fail-closed recovery entry point. No automatic caller is installed.
+ * Caller must independently obtain fresh server authority evidence and active
+ * actor authorization; this function re-checks local queue state atomically.
+ * A server-side deletion after proof issuance cannot be excluded here: callers
+ * MUST NOT use this as a standalone automated recovery policy.
+ */
+/** Enumerate only; never change blocked statuses during discovery. */
+export async function listBlockedParentMeasurementInsertsForScope(
+  activeScope: ErpScope,
+  limit = 10,
+): Promise<SyncEvent[]> {
+  const verified = readErpScope(activeScope);
+  if (!verified || !Number.isInteger(limit) || limit < 1 || limit > 50) return [];
+  const blocked = await localSyncQueueDb.pendingSyncEvents
+    .where('syncStatus').equals('BLOCKED').toArray();
+  return blocked.filter(event =>
+    event.entityType === 'MEASUREMENT' &&
+    event.operation === 'INSERT' &&
+    event.expectedVersion === 0 &&
+    (event.blockedReason === 'PARENT_ROOM_MISSING' ||
+     event.blockedReason === 'PARENT_OPENING_MISSING') &&
+    Boolean(readErpScope(event.scope) && erpScopeMatches(readErpScope(event.scope)!, verified))
+  ).slice(0, limit);
+}
+
+export async function activateVerifiedBlockedMeasurementInsert(args: {
+  changeId: string;
+  activeScope: RecoveryScope;
+  parent: ConfirmedParent | null;
+  authorizedForScope: boolean;
+}): Promise<boolean> {
+  if (!args.parent || !args.authorizedForScope || !args.changeId.trim()) return false;
+  try {
+    return await localSyncQueueDb.transaction(
+      'rw',
+      localSyncQueueDb.pendingSyncEvents,
+      async () => {
+        const event = await localSyncQueueDb.pendingSyncEvents.get(args.changeId);
+        if (!event) return false;
+        // Fail closed when local queue contains a later mutation, deletion,
+        // conflict, or an event without reliably comparable chronology.
+        const related = await localSyncQueueDb.pendingSyncEvents
+          .where('entityId').equals(event.entityId).toArray();
+        if (!hasExclusiveBlockedInsertLineage(event, related)) return false;
+        if (!canRecoverBlockedMeasurement({
+          event,
+          activeScope: args.activeScope,
+          parent: args.parent,
+          authorizedForScope: args.authorizedForScope,
+          noLaterMutationOrConflict: true,
+        })) return false;
+        // Avoid any rollback-to-PENDING after the event changes underneath us.
+        const changed = await localSyncQueueDb.pendingSyncEvents.update(args.changeId, {
+          syncStatus: 'PENDING',
+          updatedAt: new Date().toISOString(),
+        });
+        return changed === 1;
+      },
+    );
+  } catch (error: unknown) {
+    console.error('[SyncQueue] Verified recovery refused.', error);
+    return false;
+  }
 }
 
 export async function activateBlockedSyncEvent(
