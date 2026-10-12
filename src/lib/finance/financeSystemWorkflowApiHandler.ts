@@ -233,7 +233,33 @@ export async function handleFinanceSystemWorkflowApi(
         result
     };
   }
-  catch {
+  catch (error: unknown) {
+    // Do not print error.message, error.stack, RPC payload, actor or ERP scope.
+    // Supabase gateway currently concatenates an untrusted DB message into
+    // Error.message. Only fixed, allowlisted category strings may be logged.
+    let failureClass:
+      | "RPC_REJECTED"
+      | "RPC_RESULT_INVALID"
+      | "RPC_TRANSACTION_ID_MISSING"
+      | "RPC_RESPONSE_INVALID"
+      | "UNKNOWN" = "UNKNOWN";
+
+    if (error instanceof Error) {
+      if (error.message.startsWith("FINANCE_WORKFLOW_ATOMIC_RPC_FAILED:")) {
+        failureClass = "RPC_REJECTED";
+      } else if (error.message === "FINANCE_WORKFLOW_ATOMIC_RPC_RESULT_INVALID") {
+        failureClass = "RPC_RESULT_INVALID";
+      } else if (error.message === "FINANCE_WORKFLOW_ATOMIC_TRANSACTION_ID_REQUIRED") {
+        failureClass = "RPC_TRANSACTION_ID_MISSING";
+      } else if (
+        error.message === "FINANCE_WORKFLOW_ATOMIC_CONFLICT_REASON_REQUIRED" ||
+        error.message === "FINANCE_WORKFLOW_ATOMIC_UNEXPECTED_REASON"
+      ) {
+        failureClass = "RPC_RESPONSE_INVALID";
+      }
+    }
+
+    console.error("FINANCE_SYSTEM_WORKFLOW_FAILURE", { failureClass });
     return {
       status:
         500,
