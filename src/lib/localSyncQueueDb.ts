@@ -1635,10 +1635,12 @@ export function getPendingSyncEvents(limit?: number): Promise<SyncEvent[]>;
 export function getPendingSyncEvents(
   activeScope: ErpScope,
   limit?: number,
+  entityTypeFilter?: 'MEASUREMENT',
 ): Promise<SyncEvent[]>;
 export async function getPendingSyncEvents(
   scopeOrLimit: ErpScope | number = 50,
   scopedLimit: number = 50,
+  entityTypeFilter?: 'MEASUREMENT',
 ): Promise<SyncEvent[]> {
   try {
     const activeScope =
@@ -1664,6 +1666,8 @@ export async function getPendingSyncEvents(
 
     const invalidScopeChangeIds: string[] = [];
     const scopePartitionedEvents = retryableEvents.filter((event) => {
+      // Filter before any normalization, deduplication, blocking or retry mutation.
+      if (entityTypeFilter && event.entityType !== entityTypeFilter) return false;
       if (event.entityType === 'MEASUREMENT' && legacyIds.has(event.changeId)) return false;
       const eventScope = readErpScope(event.scope);
       if (!eventScope) {

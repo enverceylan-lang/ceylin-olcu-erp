@@ -3,7 +3,7 @@
 import {
   Search, Ruler, ArrowRight, ChevronDown, ChevronUp, User, Calendar, Layers,
   Image as ImageIcon, Video as VideoIcon, CheckCircle2, AlertCircle, ClipboardList,
-  Trash2, Edit3, X, Save, BadgeCheck, Filter, CloudDownload, MapPin, Wrench
+  Trash2, Edit3, X, Save, BadgeCheck, Filter, CloudDownload, RefreshCw, MapPin, Wrench
 } from "lucide-react";
 import Link from "next/link";
 import { Customer, ProductMeasurement, Room, WindowItem, useStore } from "@/store/useStore";
@@ -22,6 +22,7 @@ import {
   updateInboundStatus
 } from "@/lib/localDraftDb";
 
+import { requestMeasurementManualSync } from "@/lib/syncService";
 import { processAsNewCustomer, processAsMerge } from "@/lib/inboundProcessor";
 import {
   loadLocalCustomers,
@@ -118,6 +119,7 @@ export default function OlculerPage() {
   const [draftFilter, setDraftFilter] = useState<FilterKey>("ALL");
 
   const [inboundMeasurements, setInboundMeasurements] = useState<InboundMeasurement[]>([]);
+  const [isManualPulling, setIsManualPulling] = useState(false);
   const [quarantinedMeasurements, setQuarantinedMeasurements] =
     useState<InboundMeasurement[]>([]);
 
@@ -988,9 +990,19 @@ const handleManualOrphanRepair = async (
                 {inboundMeasurements.length} bekleyen
               </span>
             </h2>
-            <span className="inline-flex min-h-10 items-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300">
-              Otomatik senkron açık
-            </span>
+            <button type="button" disabled={isManualPulling}
+              onClick={async () => {
+                setIsManualPulling(true);
+                try {
+                  const ok = await requestMeasurementManualSync('pull');
+                  if (!ok) window.alert('Gelen ölçüler alınamadı. Tekrar deneyebilirsiniz.');
+                  else await loadInbound();
+                } finally { setIsManualPulling(false); }
+              }}
+              className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
+              <RefreshCw className="h-4 w-4" />
+              {isManualPulling ? 'Alınıyor…' : 'Gelen Ölçüleri Al'}
+            </button>
           </div>          {quarantinedMeasurements.length > 0 && (
             <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
               <div className="mb-3">
