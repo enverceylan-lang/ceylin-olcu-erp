@@ -1,7 +1,7 @@
 import { loadVerifiedClientErpScope } from '@/lib/clientErpScope';
 import { executePendingSalesFinanceOutbox } from '@/lib/finance/salesFinanceOutboxExecutor';
 import { createSalesFinanceOutboxRetryCoordinator } from '@/lib/finance/salesFinanceOutboxRetryCoordinator';
-import { pushDeltaSyncEvents, pullInboundMeasurements } from '@/lib/deltaSyncClient';
+import { pushMeasurementSyncEvents, pullInboundMeasurements } from '@/lib/deltaSyncClient';
 import { ensureMeasurementCutover, isLegacyMeasurementEvent, getPendingSyncEvents, localSyncQueueDb } from '@/lib/localSyncQueueDb';
 import { erpScopeMatches } from '@/lib/erpScope';
 import { readErpScope } from '@/lib/customerTreeScope';
@@ -133,118 +133,61 @@ async function hasMeasurementSyncBlockerForActiveScope(
   return false;
 }
 
-async function runMeasurementAutoSync(
-  reason: string,
-): Promise<void> {
-  if (typeof window === 'undefined') return;
-
-  const store = useStore.getState();
-
-  if (!window.navigator.onLine) {
-    measurementTransportState = 'offline';
+async function runMeasurementManualSync(direction: 'push' | 'pull'): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  if (!window.navigator.onLine || CLOUD_SYNC_DISABLED) {
+    measurementTransportState = window.navigator.onLine ? 'error' : 'offline';
     applyMeasurementAwareSyncedStatus();
-    return;
+    return false;
   }
-
-  if (CLOUD_SYNC_DISABLED) {
-    measurementTransportState = 'synced';
-    applyMeasurementAwareSyncedStatus();
-    return;
-  }
-
   const auth = useAuthStore.getState();
-  if (!auth.currentUser || !auth.sessionToken) {
-    return;
-  }
-
+  if (!auth.currentUser || !auth.sessionToken) return false;
   measurementTransportState = 'pending';
   applyMeasurementAwareSyncedStatus();
-
   try {
     await ensureMeasurementCutover();
-    const activeScope =
-      await loadVerifiedClientErpScope(auth.sessionToken);
-
-    const pushResult = await pushDeltaSyncEvents();
-    const pullResult = await pullInboundMeasurements(
-      useStore.getState().customers,
-    );
-
-    if (pullResult.success) {
-      window.dispatchEvent(
-        new Event(MEASUREMENT_SYNC_COMPLETE_EVENT),
-      );
+    const activeScope = await loadVerifiedClientErpScope(auth.sessionToken);
+    if (direction === 'push') {
+      const result = await pushMeasurementSyncEvents();
+      const remaining = await getPendingSyncEvents(activeScope, 1, "MEASUREMENT");
+      const blocker = await hasMeasurementSyncBlockerForActiveScope(activeScope);
+      if (!result.success || remaining.length > 0 || blocker) {
+        measurementTransportState = 'error';
+        applyMeasurementAwareSyncedStatus();
+        return false;
+      }
+      // Sending succeeded; another device has not necessarily received the measurements.
+    } else {
+      const result = await pullInboundMeasurements(useStore.getState().customers);
+      if (!result.success) {
+        measurementTransportState = 'error';
+        applyMeasurementAwareSyncedStatus();
+        return false;
+      }
+      window.dispatchEvent(new Event(MEASUREMENT_SYNC_COMPLETE_EVENT));
     }
-
-    const remaining = await getPendingSyncEvents(
-      activeScope,
-      1,
-    );
-
-    const hasBlocker =
-      await hasMeasurementSyncBlockerForActiveScope(
-        activeScope,
-      );
-
-    if (
-      !pushResult.success ||
-      !pullResult.success ||
-      hasBlocker
-    ) {
-      measurementTransportState = 'error';
-      applyMeasurementAwareSyncedStatus();
-      return;
-    }
-
-    if (remaining.length > 0) {
-      measurementTransportState = 'error';
-      applyMeasurementAwareSyncedStatus();
-      return;
-    }
-
-    measurementTransportState = 'synced';
+    // Do not imply end-to-end freshness after a single, one-direction manual action.
+    measurementTransportState = 'idle';
     applyMeasurementAwareSyncedStatus();
-
-    if (process.env.NODE_ENV === 'development') {
-      console.log(
-        `[Measurement Auto Sync] ${reason}: push=${pushResult.pushedCount}, pull=${pullResult.fetchedCount}`,
-      );
-    }
+    return true;
   } catch (error: unknown) {
     measurementTransportState = 'error';
     applyMeasurementAwareSyncedStatus();
-    console.error(
-      '[Measurement Auto Sync] Automatic delta sync failed.',
-      error,
-    );
+    console.error('[Measurement Manual Sync] Failed', error);
+    return false;
   }
 }
 
-export function requestMeasurementAutoSync(
-  reason: string = 'requested',
-): void {
-  if (typeof window === 'undefined') return;
-
-  if (measurementSyncInFlight) {
-    measurementSyncQueued = true;
-    return;
-  }
-
-  const run = runMeasurementAutoSync(reason);
-  measurementSyncInFlight = run;
-
-  void run.finally(() => {
-    if (measurementSyncInFlight === run) {
-      measurementSyncInFlight = null;
-    }
-
-    if (measurementSyncQueued) {
-      measurementSyncQueued = false;
-      window.setTimeout(() => {
-        requestMeasurementAutoSync('queued-follow-up');
-      }, 300);
-    }
+let measurementManualInFlight: Promise<boolean> | null = null;
+export function requestMeasurementManualSync(direction: 'push' | 'pull'): Promise<boolean> {
+  // A single-flight lock prevents concurrent double clicks across both manual actions.
+  if (measurementManualInFlight) return measurementManualInFlight;
+  const task = runMeasurementManualSync(direction);
+  measurementManualInFlight = task;
+  void task.finally(() => {
+    if (measurementManualInFlight === task) measurementManualInFlight = null;
   });
+  return task;
 }
 
 // Track last 413 Payload Too Large error timestamp
@@ -1047,7 +990,7 @@ export function initSync() {
       console.log('[Client Sync] Stores hydrated. Running initial sync.');
       void retryPendingFinanceOutboxForActiveScope();
       syncNow();
-      requestMeasurementAutoSync('initial');
+      // Measurements are manual-only; no automatic push or pull.
     } else {
       console.log('[Client Sync] Stores not hydrated yet. Retrying initial sync in 500ms...');
       setTimeout(tryInitialSync, 500);
@@ -1072,7 +1015,7 @@ export function initSync() {
     measurementTransportState = 'pending';
     applyMeasurementAwareSyncedStatus();
     void syncNow();
-    requestMeasurementAutoSync('online');
+    // Customer sync remains automatic; measurement transport remains manual.
   };
 
   // Mark as offline immediately when network drops
@@ -1082,42 +1025,14 @@ export function initSync() {
     applyMeasurementAwareSyncedStatus();
   };
 
+  // Measurement saved locally: never auto-push it.
   const handleMeasurementSyncRequest = () => {
-    requestMeasurementAutoSync('local-measurement-commit');
+    measurementTransportState = 'idle';
+    applyMeasurementAwareSyncedStatus();
   };
-
-  let lastMeasurementResumeSyncTime = 0;
-  const handleMeasurementResume = () => {
-    if (
-      typeof document === 'undefined' ||
-      document.visibilityState !== 'visible'
-    ) {
-      return;
-    }
-
-    const now = Date.now();
-    if (now - lastMeasurementResumeSyncTime < 5000) {
-      return;
-    }
-
-    lastMeasurementResumeSyncTime = now;
-    requestMeasurementAutoSync('resume');
-  };
-
   window.addEventListener('online', handleOnline);
   window.addEventListener('offline', handleOffline);
-  window.addEventListener(
-    MEASUREMENT_SYNC_REQUEST_EVENT,
-    handleMeasurementSyncRequest,
-  );
-  window.addEventListener('focus', handleMeasurementResume);
-
-  if (typeof document !== 'undefined') {
-    document.addEventListener(
-      'visibilitychange',
-      handleMeasurementResume,
-    );
-  }
+  window.addEventListener(MEASUREMENT_SYNC_REQUEST_EVENT, handleMeasurementSyncRequest);
 
   // Disabled: Zustand/local store her değiştiğinde otomatik sync (Phase 1)
   const unsubscribeStore = () => {};
@@ -1135,19 +1050,11 @@ export function initSync() {
       console.log('[Sync] User login or switch detected — triggering immediate sync.');
       void retryPendingFinanceOutboxForActiveScope();
       syncNow();
-      requestMeasurementAutoSync('login-or-switch');
+      measurementTransportState = 'idle';
+      applyMeasurementAwareSyncedStatus();
     }
     lastUserId = currentId;
   });
-
-  const measurementInterval = window.setInterval(() => {
-    if (
-      typeof document === 'undefined' ||
-      document.visibilityState === 'visible'
-    ) {
-      requestMeasurementAutoSync('background-interval');
-    }
-  }, 30000);
 
   // Return cleanup function for use in React effects
   return () => {
@@ -1157,16 +1064,7 @@ export function initSync() {
       MEASUREMENT_SYNC_REQUEST_EVENT,
       handleMeasurementSyncRequest,
     );
-    window.removeEventListener('focus', handleMeasurementResume);
 
-    if (typeof document !== 'undefined') {
-      document.removeEventListener(
-        'visibilitychange',
-        handleMeasurementResume,
-      );
-    }
-
-    window.clearInterval(measurementInterval);
     unsubscribeStore();
     unsubscribeAuth();
   };

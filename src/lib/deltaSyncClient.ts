@@ -452,7 +452,7 @@ export async function applyInboundMeasurementSoftDelete(
   return "APPLIED";
 }
 
-async function pushDeltaSyncEventsBatch(eventLimit: number): Promise<{
+async function pushDeltaSyncEventsBatch(eventLimit: number, measurementOnly = false): Promise<{
   success: boolean;
   pushedCount: number;
   isolatedCount: number;
@@ -489,7 +489,7 @@ async function pushDeltaSyncEventsBatch(eventLimit: number): Promise<{
     const activeScope = await loadVerifiedClientErpScope(sessionToken);
     // RELEASE SAFETY GATE: historical BLOCKED auto recovery is not wired into push.
     // It stays disabled until IndexedDB deletion-race and SQL concurrency tests pass.
-    const pendingEvents = await getPendingSyncEvents(activeScope, eventLimit);
+    const pendingEvents = await getPendingSyncEvents(activeScope, eventLimit, measurementOnly ? "MEASUREMENT" : undefined);
     const activeScopeEvents = pendingEvents.filter((event) =>
       erpScopeMatches(event.scope, activeScope),
     );
@@ -997,7 +997,7 @@ function isTerminalMeasurementConflictOnly(errors: string[]): boolean {
   );
 }
 
-async function pushDeltaSyncEventsUnlocked(): Promise<
+async function pushDeltaSyncEventsUnlocked(measurementOnly = false): Promise<
   Awaited<ReturnType<typeof pushDeltaSyncEventsBatch>>
 > {
   let totalPushedCount = 0;
@@ -1013,6 +1013,7 @@ async function pushDeltaSyncEventsUnlocked(): Promise<
   ) {
     const result = await pushDeltaSyncEventsBatch(
       DELTA_SYNC_SERVER_REQUEST_EVENT_LIMIT,
+      measurementOnly,
     );
 
     lastResult = result;
@@ -1082,9 +1083,10 @@ const DELTA_SYNC_CROSS_TAB_LOCK_UNAVAILABLE =
 let deltaPushInFlight:
   ReturnType<typeof pushDeltaSyncEventsUnlocked> | null = null;
 
-async function runDeltaPushWithCrossTabLock() {
+let deltaPushInFlightMode: 'all' | 'measurement' | null = null;
+async function runDeltaPushWithCrossTabLock(measurementOnly = false) {
   if (typeof navigator === 'undefined') {
-    return pushDeltaSyncEventsUnlocked();
+    return pushDeltaSyncEventsUnlocked(measurementOnly);
   }
 
   if (!('locks' in navigator)) {
@@ -1094,26 +1096,41 @@ async function runDeltaPushWithCrossTabLock() {
   return navigator.locks.request(
     'enverp-delta-sync-push',
     { mode: 'exclusive' },
-    () => pushDeltaSyncEventsUnlocked(),
+    () => pushDeltaSyncEventsUnlocked(measurementOnly),
   );
 }
 
-export async function pushDeltaSyncEvents():
+async function pushDeltaSyncEventsWithMode(measurementOnly: boolean):
   ReturnType<typeof pushDeltaSyncEventsUnlocked> {
+  const requestedMode = measurementOnly ? 'measurement' : 'all';
   if (deltaPushInFlight) {
+    // Never represent an all-entity run as measurement-only ACK.
+    if (deltaPushInFlightMode !== requestedMode) {
+      throw new Error('DELTA_PUSH_MODE_CONFLICT');
+    }
     return deltaPushInFlight;
   }
 
-  const run = runDeltaPushWithCrossTabLock();
+  const run = runDeltaPushWithCrossTabLock(measurementOnly);
   deltaPushInFlight = run;
+  deltaPushInFlightMode = requestedMode;
 
   try {
     return await run;
   } finally {
     if (deltaPushInFlight === run) {
       deltaPushInFlight = null;
+      deltaPushInFlightMode = null;
     }
   }
+}
+
+export async function pushDeltaSyncEvents(): ReturnType<typeof pushDeltaSyncEventsUnlocked> {
+  return pushDeltaSyncEventsWithMode(false);
+}
+
+export async function pushMeasurementSyncEvents(): ReturnType<typeof pushDeltaSyncEventsUnlocked> {
+  return pushDeltaSyncEventsWithMode(true);
 }
 export async function pullInboundMeasurements(
   allLocalCustomers: LocalCustomer[],

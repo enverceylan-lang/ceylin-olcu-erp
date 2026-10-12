@@ -2,12 +2,12 @@
 
 import { useTheme } from "next-themes";
 import { Moon, Sun, Menu, Bell, Cloud, CloudOff, RefreshCw, AlertCircle } from "lucide-react";
-import { useSyncExternalStore } from "react";
+import { useSyncExternalStore, useState } from "react";
 import { useAuthStore, ROLE_PERMISSIONS, normalizeUser } from "@/store/useAuthStore";
 import { useUiStore } from "@/store/useUiStore";
 import { useStore } from "@/store/useStore";
 
-import { CLOUD_SYNC_DISABLED } from "@/lib/syncService";
+import { requestMeasurementManualSync, CLOUD_SYNC_DISABLED } from "@/lib/syncService";
 import { ErpScopeSelector } from "@/components/ErpScopeSelector";
 const subscribeToHydration = () => () => {};
 const getClientSnapshot = () => true;
@@ -36,6 +36,7 @@ export function Topbar() {
     getServerSnapshot,
   );
 
+  const [isManualPushing, setIsManualPushing] = useState(false);
   if (!rawCurrentUser) return null;
 
 
@@ -95,6 +96,20 @@ export function Topbar() {
                 </span>
               )}
 
+              {!CLOUD_SYNC_DISABLED && (
+                <button type="button" disabled={isManualPushing}
+                  aria-label="Ölçüleri Gönder"
+                  onClick={async () => {
+                    setIsManualPushing(true);
+                    try {
+                      const ok = await requestMeasurementManualSync('push');
+                      window.alert(ok ? 'Ölçü gönderim kontrolü tamamlandı. Merkez kabulü doğrulandı.' : 'Ölçüler gönderilemedi; yerel kayıtları silmeyin.');
+                    } finally { setIsManualPushing(false); }
+                  }}
+                  className="ml-2 min-h-10 rounded-lg border border-indigo-300 px-3 text-xs font-semibold text-indigo-700 disabled:opacity-50">
+                  {isManualPushing ? 'Gönderiliyor…' : 'Ölçüleri Gönder'}
+                </button>
+              )}
             </div>
           </div>
         )}
