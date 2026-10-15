@@ -10,6 +10,7 @@ import { getLocalMeasurementById } from "./localMeasurementDb";
 import { useStore } from "@/store/useStore";
 import { loadLocalCustomers, saveLocalCustomerWithoutSync } from "./localCustomerDb";
 import { resolveMeasurementParentCustomerId } from "./measurementParentAckGate";
+import { getCanonicalParentPackageFromSnapshot } from "./measurementCanonicalParentSnapshot";
 import {
   activateDeferredMeasurementMutationAfterPredecessor,
   classifyDeltaQueueEntityType,
@@ -38,7 +39,6 @@ import {
 import { validateMeasurementRecord } from "@/lib/measurementValidationEngine";
 import { useAuthStore } from "@/store/useAuthStore";
 import { getDeviceId } from "./deviceIdentity";
-import { getCanonicalParentPackageFromSnapshot } from "./measurementCanonicalParentSnapshot";
 
 type LocalCustomer = Awaited<
   ReturnType<typeof loadLocalCustomers>
@@ -230,82 +230,74 @@ function getInboundCustomerMeta(
 async function ensureCustomerStructureForMeasurement(
   customer: LocalCustomer,
   measurement: LocalMeasurement,
+  canonicalParent: NonNullable<ReturnType<typeof getCanonicalParentPackageFromSnapshot>>,
 ): Promise<LocalCustomer> {
-  const roomId = measurement?.roomId;
+  const roomId = measurement.roomId;
   const openingId = getOpeningId(measurement);
-  if (!roomId || !openingId) return customer;
-
-  type LocalRoom = LocalCustomer["rooms"][number];
-  type CompatibleRoom = LocalRoom & {
-    openings?: LocalRoom["windows"];
-  };
-
-  const rooms: CompatibleRoom[] = Array.isArray(customer.rooms)
-    ? [...customer.rooms]
-    : [];
-  const roomIndex = rooms.findIndex((room) => room.id === roomId);
-  const incomingRoomName =
-    measurement.roomName || measurement.roomLabel || "Gelen Oda";
-  const incomingOpeningName =
-    measurement.openingName ||
-    measurement.windowName ||
-    measurement.openingLabel ||
-    "Gelen Açıklık";
-
-  if (roomIndex === -1) {
-    rooms.push({
-      id: roomId,
-      name: incomingRoomName,
-      photos: [],
-      videos: [],
-      windows: [
-        {
-          id: openingId,
-          name: incomingOpeningName,
-          photos: [],
-          videos: [],
-          products: [],
-        },
-      ],
-    });
-  } else {
-    const room = rooms[roomIndex];
-    const windows = Array.isArray(room.windows)
-      ? [...room.windows]
-      : Array.isArray(room.openings)
-        ? [...room.openings]
-        : [];
-
-    if (!windows.some((opening) => opening.id === openingId)) {
-      windows.push({
-        id: openingId,
-        name: incomingOpeningName,
-        photos: [],
-        videos: [],
-        products: [],
-      });
-    }
-
-    rooms[roomIndex] = {
-      ...room,
-      windows,
-    };
+  if (!roomId || canonicalParent.room.id !== roomId ||
+      (openingId && canonicalParent.opening?.id !== openingId) ||
+      (!openingId && canonicalParent.opening)) {
+    throw new Error("MEASUREMENT_CANONICAL_PARENT_ID_MISMATCH");
   }
 
-  const updatedCustomer = {
-    ...customer,
-    rooms,
-    updatedAt: new Date().toISOString(),
-  };
-
+  type LocalRoom = LocalCustomer["rooms"][number];
+  type CompatibleRoom = LocalRoom & { openings?: LocalRoom["windows"] };
+  const rooms: CompatibleRoom[] = Array.isArray(customer.rooms)
+    ? [...customer.rooms] : [];
+  const index = rooms.findIndex((room) => room.id === roomId);
+  const existing = index >= 0 ? rooms[index] : null;
+  if (existing?.isDeleted) {
+    throw new Error("MEASUREMENT_LOCAL_PARENT_DELETED");
+  }
+  const windows = existing
+    ? Array.isArray(existing.windows) ? [...existing.windows]
+      : Array.isArray(existing.openings) ? [...existing.openings] : []
+    : [];
+  if (openingId && canonicalParent.opening &&
+      !windows.some((window) => window.id === openingId)) {
+    windows.push({
+      id: openingId, name: canonicalParent.opening.name,
+      photos: [], videos: [], products: [],
+    });
+  }
+  if (existing && (!openingId || windows.length === (existing.windows || existing.openings || []).length)) {
+    return customer;
+  }
+  const updatedRoom: CompatibleRoom = existing
+    ? { ...existing, windows }
+    : {
+        id: roomId, name: canonicalParent.room.name,
+        photos: [], videos: [], windows,
+        ...(canonicalParent.room.customerAddressId
+          ? { customerAddressId: canonicalParent.room.customerAddressId }
+          : {}),
+      };
+  if (index >= 0) rooms[index] = updatedRoom;
+  else rooms.push(updatedRoom);
+  const updatedCustomer = { ...customer, rooms, updatedAt: new Date().toISOString() };
   await saveLocalCustomerWithoutSync(updatedCustomer);
   useStore.setState((state) => ({
     customers: state.customers.map((item) =>
-      item.id === updatedCustomer.id ? updatedCustomer : item,
-    ),
+      item.id === updatedCustomer.id ? updatedCustomer : item),
   }));
-
   return updatedCustomer;
+}
+
+async function readScopedCanonicalParent(
+  token: string,
+  scope: ErpScope,
+  ids: { customerId: string; roomId: string; openingId?: string },
+) {
+  const response = await fetch('/api/measurement-parent-authority/check', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(ids),
+  });
+  if (!response.ok) throw new Error('MEASUREMENT_PARENT_READBACK_HTTP_FAILED');
+  const raw: unknown = await response.json();
+  const parent = getCanonicalParentPackageFromSnapshot(raw, scope, ids);
+  if (!parent) throw new Error('MEASUREMENT_PARENT_NOT_CANONICALLY_VERIFIED');
+  return parent;
 }
 
 export function extractMeasurementFromChange(
@@ -348,7 +340,7 @@ export function isMeasurementEmpty(
   m: Partial<LocalMeasurement> | null | undefined,
 ): boolean {
   if (!m) return true;
-  if (!m.id || !m.customerId || !m.roomId || !(m.openingId || m.windowId)) return true;
+  if (!m.id || !m.customerId || !m.roomId) return true;
   if (!m.templateType) return true;
   if (
     !m.rawValues ||
@@ -1563,11 +1555,25 @@ export async function pullInboundMeasurements(
                 continue;
               }
 
-              const updatedCustomer =
-                await ensureCustomerStructureForMeasurement(
-                  localCustomer,
-                  measurementToPersist,
-                );
+              const matchingRoom = localCustomer.rooms?.find(
+                (room) => room.id === measurementToPersist.roomId && !room.isDeleted,
+              );
+              const matchingOpenings = matchingRoom?.windows ?? [];
+              const parentNeedsLocalMaterialization = !matchingRoom ||
+                (Boolean(openingId) && !matchingOpenings.some(
+                  (opening) => opening.id === openingId && !opening.isDeleted,
+                ));
+              const updatedCustomer = parentNeedsLocalMaterialization
+                ? await ensureCustomerStructureForMeasurement(
+                    localCustomer,
+                    measurementToPersist,
+                    await readScopedCanonicalParent(token, activeScope, {
+                      customerId: resolvedCustomerId,
+                      roomId: measurementToPersist.roomId,
+                      ...(openingId ? { openingId } : {}),
+                    }),
+                  )
+                : localCustomer;
               const customerIndex = allLocalCustomers.findIndex(
                 (customer) => customer.id === updatedCustomer.id,
               );
