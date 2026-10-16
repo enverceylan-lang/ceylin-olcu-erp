@@ -340,8 +340,12 @@ export async function POST(req: NextRequest) {
           );
         }
 
-        // Legacy hard delete remains limited to non-measurement child structures.
-        if (["rooms", "openings"].includes(del.table)) {
+        // No legacy physical removal of rooms: it detaches canonical measurements.
+        if (del.table === "rooms") {
+          return NextResponse.json({ success: false, error: "ROOM_DELETE_REQUIRES_SERVER_AUTHORITY" }, { status: 409 });
+        }
+        // Existing opening semantics are outside this change.
+        if (del.table === "openings") {
           const { error } = await supabaseServer
             .from(del.table)
             .delete()
@@ -602,6 +606,19 @@ export async function POST(req: NextRequest) {
 
       dbRooms.forEach((dr: SyncRecord) => {
         const lr = mergedRoomsMap.get(dr.id);
+        if (dr.isDeleted === true) {
+          // Canonical server tombstone wins against a stale local room.
+          mergedRoomsMap.set(dr.id, {
+            ...lr,
+            id: dr.id,
+            name: dr.name,
+            isDeleted: true,
+            windows: [],
+            createdAt: dr.createdAt,
+            updatedAt: dr.updatedAt,
+          });
+          return;
+        }
         if (!lr) {
           mergedRoomsMap.set(dr.id, {
             id: dr.id,

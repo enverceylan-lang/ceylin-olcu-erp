@@ -346,6 +346,12 @@ function mergeRooms(local: Room[], remote: Room[], parentDeleted: boolean = fals
           videos: (base.videos && base.videos.length > 0) ? base.videos : (lr.videos || rr.videos || [])
         };
       }
+      // Server-side deletion must not be resurrected by an older phone/PC cache.
+      if (rr.isDeleted === true) {
+        mergedRoom = { ...mergedRoom, isDeleted: true,
+          deletedAt: rr.deletedAt || mergedRoom.deletedAt || new Date().toISOString(),
+          updatedAt: rr.updatedAt || mergedRoom.updatedAt };
+      }
       mergedMap.set(rr.id, mergedRoom);
     }
   });

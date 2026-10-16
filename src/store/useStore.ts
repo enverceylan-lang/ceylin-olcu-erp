@@ -630,6 +630,7 @@ interface AppState {
 
   addRoom: (customerId: string, roomName: string, customerAddressId?: string) => Promise<string>;
   deleteRoom: (customerId: string, roomId: string) => Promise<void>;
+  applyServerRoomDeletion: (customerId: string, roomId: string) => Promise<void>;
   moveRoom: (sourceCustomerId: string, targetCustomerId: string, roomId: string) => Promise<void>;
   ensureCustomerAddressIdentity: (customerId: string) => Promise<string | null>;
   addCustomerAddress: (customerId: string, data: Omit<CustomerAddress, 'id' | 'customerId' | 'normalizedTitle' | 'createdAt' | 'updatedAt'>) => Promise<string>;
@@ -1415,6 +1416,23 @@ export const useStore = create<AppState>()(
             };
           });
         }
+      },
+
+      applyServerRoomDeletion: async (customerId, roomId) => {
+        const target = get().customers.find(c => c.id === customerId);
+        if (!target) throw new Error("ROOM_DELETE_LOCAL_CUSTOMER_MISSING");
+        const room = target.rooms.find(r => r.id === roomId);
+        if (!room) return;
+        const updatedCustomer = {
+          ...target,
+          updatedAt: new Date().toISOString(),
+          rooms: target.rooms.filter(r => r.id !== roomId),
+        };
+        await saveLocalCustomer(updatedCustomer);
+        set(state => {
+          notifyStoreChanges();
+          return { customers: state.customers.map(c => c.id === customerId ? updatedCustomer : c) };
+        });
       },
 
       addWindow: async (customerId, roomId, windowName) => {

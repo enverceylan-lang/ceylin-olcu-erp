@@ -459,27 +459,28 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
 
     try {
       if (type === "room") {
-        const hasSyncedMeasurements =
-          measurementStore.measurements.some(
-            (measurement) =>
-              measurement.customerId === data.customerId &&
-              measurement.roomId === data.roomId &&
-              !measurement.isDeleted &&
-              isMeasurementServerSynced(measurement),
-          );
-
-        if (hasSyncedMeasurements && !canMutateSynced) {
-          throw new Error(
-            "MEASUREMENT_SYNCED_MUTATION_FORBIDDEN",
-          );
+        if (currentUser?.role !== "ADMIN") throw new Error("ADMIN_REQUIRED");
+        const { sessionToken } = useAuthStore.getState();
+        if (!sessionToken) throw new Error("UNAUTHORIZED");
+        const result = await fetch("/api/measurements/rooms/delete", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${sessionToken}`,
+          },
+          body: JSON.stringify({ customerId: data.customerId, roomId: data.roomId }),
+        });
+        const receipt: { success?: boolean; error?: string; reason?: string } = await result.json();
+        if (!result.ok || receipt.success !== true) {
+          throw new Error(receipt.reason || receipt.error || "ROOM_DELETE_REJECTED");
         }
-
-        await measurementStore.cascadeDeleteRoom(
-          data.customerId,
-          data.roomId,
-          username,
-        );
-        await deleteRoom(data.customerId, data.roomId);
+        // Server accepted atomic tombstones. Never call legacy local cascading
+        // deletion or enqueue the deprecated physical room delete.
+        await measurementStore.applyServerRoomDeletion(data.customerId, data.roomId, username);
+        await store.applyServerRoomDeletion(data.customerId, data.roomId);
+        showToast("Oda ve ölçüler silindi.");
+        setDeleteConfirm(null);
+        return;
       } else if (type === "window") {
         const hasSyncedMeasurements =
           measurementStore.measurements.some(
