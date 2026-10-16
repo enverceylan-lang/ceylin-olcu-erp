@@ -75,6 +75,7 @@ interface MeasurementState {
     openingId: string,
     username: string
   ) => Promise<number>;
+  applyServerRoomDeletion: (customerId: string, roomId: string, actor: string) => Promise<void>;
   cascadeDeleteRoom: (
     customerId: string,
     roomId: string,
@@ -941,6 +942,19 @@ export const useMeasurementStore = create<MeasurementState>((set, get) => ({
     requestMeasurementTransportSync();
 
     return changed.length;
+  },
+
+  applyServerRoomDeletion: async (customerId, roomId, actor) => {
+    const now = new Date().toISOString();
+    const changed = get().measurements.filter(m =>
+      m.customerId === customerId && m.roomId === roomId && !m.isDeleted
+    ).map(m => ({ ...m, isDeleted: true, deletedAt: now, deletedBy: actor }));
+    if (!changed.length) return;
+    await batchSaveLocalMeasurements(changed);
+    const ids = new Set(changed.map(m => m.id));
+    set(state => ({ measurements: state.measurements.map(m =>
+      ids.has(m.id) ? changed.find(x => x.id === m.id)! : m
+    ) }));
   },
 
   cascadeDeleteRoom: async (customerId, roomId, username) => {
