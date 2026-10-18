@@ -47,20 +47,27 @@ function record(
 }
 
 async function main(): Promise<void> {
-  for (
-    const status of
-    ["PENDING", "PROCESSING", "ERROR"] as const
-  ) {
-    assert.equal(
-      isSalesFinanceOutboxRetryCandidate(
-        record(status, status),
-        scope
-      ),
-      true,
-      `${status} exact-scope record must be retryable`
-    );
-  }
+  // 1. PENDING exact-scope record must be retryable
+  assert.equal(
+    isSalesFinanceOutboxRetryCandidate(
+      record("pending", "PENDING"),
+      scope
+    ),
+    true,
+    "PENDING exact-scope record must be retryable"
+  );
 
+  // 2. PROCESSING record must FAIL CLOSED (never automatically retried)
+  assert.equal(
+    isSalesFinanceOutboxRetryCandidate(
+      record("processing", "PROCESSING"),
+      scope
+    ),
+    false,
+    "PROCESSING record must fail closed and not be retried automatically"
+  );
+
+  // 3. SYNCED record must never be retried
   assert.equal(
     isSalesFinanceOutboxRetryCandidate(
       record("synced", "SYNCED"),
@@ -70,11 +77,90 @@ async function main(): Promise<void> {
     "SYNCED record must not be retried"
   );
 
+  // 4. Permanent errors must never be retried
+  const permanentErrors = [
+    "PROJECTION_ERROR:ITEM_NOT_FOUND:Detail",
+    "PROJECTION_RECONCILIATION_FAILED",
+    "FINANCE_COMMAND_REJECTED:INVALID_PAYLOAD",
+    "FINANCE_COMMAND_REJECTED:ACCOUNT_CLOSED",
+    "ACTOR_CONTEXT_INVALID",
+    "SCOPE_MISMATCH",
+    "SCHEMA_ERROR"
+  ];
+
+  for (const err of permanentErrors) {
+    assert.equal(
+      isSalesFinanceOutboxRetryCandidate(
+        record(`perm-${err}`, "ERROR", { lastError: err, retryCount: 0 }),
+        scope
+      ),
+      false,
+      `Permanent error "${err}" must never be retried automatically`
+    );
+  }
+
+  // 5. Indeterminate server responses must fail closed
+  const indeterminateErrors = [
+    "EXECUTOR_ERROR:HTTP_500",
+    "EXECUTOR_ERROR:TIMEOUT",
+    "UNKNOWN_EXECUTOR_ERROR"
+  ];
+
+  for (const err of indeterminateErrors) {
+    assert.equal(
+      isSalesFinanceOutboxRetryCandidate(
+        record(`indet-${err}`, "ERROR", { lastError: err, retryCount: 0 }),
+        scope
+      ),
+      false,
+      `Indeterminate error "${err}" must not be equated to transient network failure`
+    );
+  }
+
+  // 6. Verified transient errors within retry quota (retryCount < 3) must be retryable
+  assert.equal(
+    isSalesFinanceOutboxRetryCandidate(
+      record("transient-offline", "ERROR", { lastError: "NETWORK_OFFLINE", retryCount: 0 }),
+      scope
+    ),
+    true,
+    "Transient NETWORK_OFFLINE with retryCount 0 must be retryable"
+  );
+
+  assert.equal(
+    isSalesFinanceOutboxRetryCandidate(
+      record("transient-client-off", "ERROR", { lastError: "CLIENT_OFFLINE", retryCount: 2 }),
+      scope
+    ),
+    true,
+    "Transient CLIENT_OFFLINE with retryCount 2 must be retryable"
+  );
+
+  // 7. Transient errors with exhausted retry quota (retryCount >= 3) must NOT be retried
+  assert.equal(
+    isSalesFinanceOutboxRetryCandidate(
+      record("transient-exhausted", "ERROR", { lastError: "NETWORK_OFFLINE", retryCount: 3 }),
+      scope
+    ),
+    false,
+    "Transient error with retryCount >= 3 must be blocked"
+  );
+
+  assert.equal(
+    isSalesFinanceOutboxRetryCandidate(
+      record("transient-exhausted-5", "ERROR", { lastError: "NETWORK_OFFLINE", retryCount: 5 }),
+      scope
+    ),
+    false,
+    "Transient error with retryCount 5 must be blocked"
+  );
+
+  // 8. Scope boundaries must be strictly enforced
   assert.equal(
     isSalesFinanceOutboxRetryCandidate(
       record(
         "wrong-tenant",
-        "ERROR",
+        "PENDING",
         { tenantId: "tenant-b" }
       ),
       scope
@@ -87,7 +173,7 @@ async function main(): Promise<void> {
     isSalesFinanceOutboxRetryCandidate(
       record(
         "wrong-company",
-        "ERROR",
+        "PENDING",
         { companyId: "company-b" }
       ),
       scope
@@ -100,7 +186,7 @@ async function main(): Promise<void> {
     isSalesFinanceOutboxRetryCandidate(
       record(
         "wrong-branch",
-        "ERROR",
+        "PENDING",
         { branchId: "branch-b" }
       ),
       scope
@@ -113,7 +199,7 @@ async function main(): Promise<void> {
     isSalesFinanceOutboxRetryCandidate(
       record(
         "wrong-period",
-        "ERROR",
+        "PENDING",
         { accountingPeriodId: "period-b" }
       ),
       scope

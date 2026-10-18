@@ -396,21 +396,147 @@ export async function loadSaleStatusAudits(
     .sortBy('occurredAt');
 }
 
+export type SalesFinanceErrorClassification =
+  | 'PERMANENT'
+  | 'INDETERMINATE'
+  | 'TRANSIENT';
+
+export function classifySalesFinanceError(
+  reason: string
+): SalesFinanceErrorClassification {
+  if (
+    reason.startsWith('PROJECTION_ERROR') ||
+    reason === 'PROJECTION_RECONCILIATION_FAILED' ||
+    reason.startsWith('FINANCE_COMMAND_REJECTED:') ||
+    reason.includes('VALIDATION_FAILED') ||
+    reason.includes('INVALID_TRANSACTION') ||
+    reason.includes('ACTOR_CONTEXT_INVALID') ||
+    reason.includes('SCOPE_MISMATCH') ||
+    reason.includes('SCHEMA_ERROR')
+  ) {
+    return 'PERMANENT';
+  }
+
+  if (
+    reason.includes('CLIENT_OFFLINE') ||
+    reason.includes('NETWORK_PREFLIGHT_FAILED') ||
+    reason.includes('ERR_INTERNET_DISCONNECTED') ||
+    reason === 'EXECUTOR_ERROR:OFFLINE' ||
+    reason === 'NETWORK_OFFLINE'
+  ) {
+    return 'TRANSIENT';
+  }
+
+  return 'INDETERMINATE';
+}
+
+export function isSalesFinanceErrorRetryable(
+  lastError: string | undefined,
+  retryCount: number,
+  maxRetries: number = 3
+): boolean {
+  if (!lastError) return false;
+  if (retryCount >= maxRetries) return false;
+  return classifySalesFinanceError(lastError) === 'TRANSIENT';
+}
+
 export function isSalesFinanceOutboxRetryCandidate(
   record: SalesFinanceOutboxRecord,
-  scope: ErpScope
+  scope: ErpScope,
+  maxRetries: number = 3
 ): boolean {
-  return (
-    record.tenantId === scope.tenantId &&
-    record.companyId === scope.companyId &&
-    record.branchId === scope.branchId &&
-    record.accountingPeriodId === scope.accountingPeriodId &&
-    (
-      record.status === 'PENDING' ||
-      record.status === 'PROCESSING' ||
-      record.status === 'ERROR'
-    )
-  );
+  if (
+    record.tenantId !== scope.tenantId ||
+    record.companyId !== scope.companyId ||
+    record.branchId !== scope.branchId ||
+    record.accountingPeriodId !== scope.accountingPeriodId
+  ) {
+    return false;
+  }
+
+  if (record.status === 'PROCESSING') {
+    return false;
+  }
+
+  if (record.status === 'SYNCED') {
+    return false;
+  }
+
+  if (record.status === 'PENDING') {
+    return true;
+  }
+
+  if (record.status === 'ERROR') {
+    return isSalesFinanceErrorRetryable(
+      record.lastError,
+      record.retryCount,
+      maxRetries
+    );
+  }
+
+  return false;
+}
+
+export interface SalesFinanceOutboxStatusSummary {
+  pendingCount: number;
+  errorCount: number;
+  processingCount: number;
+  syncedCount: number;
+  hasErrors: boolean;
+  hasPending: boolean;
+}
+
+export async function loadSalesFinanceOutboxStatusSummary(
+  scope: ErpScope
+): Promise<SalesFinanceOutboxStatusSummary> {
+  const scopeValidation = validateErpScope(scope);
+
+  if (!scopeValidation.valid) {
+    throw new Error(
+      `SALES_FINANCE_OUTBOX_SCOPE_REQUIRED:${scopeValidation.missingFields.join(',')}`
+    );
+  }
+
+  const records = await localSalesDb.financeOutbox
+    .where('[tenantId+companyId+branchId+accountingPeriodId]')
+    .equals([
+      scope.tenantId,
+      scope.companyId,
+      scope.branchId,
+      scope.accountingPeriodId
+    ])
+    .toArray();
+
+  let pendingCount = 0;
+  let errorCount = 0;
+  let processingCount = 0;
+  let syncedCount = 0;
+
+  for (const r of records) {
+    switch (r.status) {
+      case 'PENDING':
+        pendingCount++;
+        break;
+      case 'ERROR':
+        errorCount++;
+        break;
+      case 'PROCESSING':
+        processingCount++;
+        break;
+      case 'SYNCED':
+        syncedCount++;
+        break;
+    }
+  }
+
+  return {
+    pendingCount,
+    errorCount,
+    processingCount,
+    syncedCount,
+    hasErrors: errorCount > 0,
+    hasPending: pendingCount > 0 || processingCount > 0
+  };
 }
 
 export async function loadPendingSalesFinanceOutbox(

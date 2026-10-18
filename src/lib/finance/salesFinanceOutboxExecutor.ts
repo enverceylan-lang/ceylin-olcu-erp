@@ -12,8 +12,17 @@ import {
 import {
   loadPendingSalesFinanceOutbox,
   updateSalesFinanceOutbox,
-  type SalesFinanceOutboxRecord
+  type SalesFinanceOutboxRecord,
+  classifySalesFinanceError,
+  isSalesFinanceErrorRetryable,
+  type SalesFinanceErrorClassification
 } from "@/lib/localSalesDb";
+
+export {
+  classifySalesFinanceError,
+  isSalesFinanceErrorRetryable,
+  type SalesFinanceErrorClassification
+};
 
 import type {
   ErpScope

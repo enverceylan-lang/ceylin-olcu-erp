@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -12,6 +12,10 @@ import {
 } from "lucide-react";
 import type { ErpScope } from "@/lib/erpScope";
 import type { FinancePermission } from "@/lib/finance/financeAccessPolicy";
+import {
+  loadSalesFinanceOutboxStatusSummary,
+  type SalesFinanceOutboxStatusSummary,
+} from "@/lib/localSalesDb";
 import { CollectionWorkspace } from "@/components/finance/CollectionWorkspace";
 import { PaymentWorkspace } from "@/components/finance/PaymentWorkspace";
 import { OpeningBalanceWorkspace } from "@/components/finance/OpeningBalanceWorkspace";
@@ -144,6 +148,35 @@ export default function FinanceOperationsPanel({
   overviewAllowed,
 }: FinanceOperationsPanelProps) {
   const [activeItem, setActiveItem] = useState<string | null>(null);
+  const [outboxSummary, setOutboxSummary] =
+    useState<SalesFinanceOutboxStatusSummary | null>(null);
+
+  useEffect(() => {
+    if (!permissions.includes("finance.view") && !overviewAllowed) {
+      setOutboxSummary(null);
+      return;
+    }
+
+    let isMounted = true;
+    void loadSalesFinanceOutboxStatusSummary(scope)
+      .then((summary) => {
+        if (isMounted) setOutboxSummary(summary);
+      })
+      .catch(() => {
+        if (isMounted) setOutboxSummary(null);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    overviewAllowed,
+    permissions,
+    scope.tenantId,
+    scope.companyId,
+    scope.branchId,
+    scope.accountingPeriodId,
+  ]);
 
   const visibleSections = useMemo(
     () =>
@@ -194,6 +227,32 @@ export default function FinanceOperationsPanel({
               ? `${section} işlemleri`
               : "Yetkiniz dahilindeki finans işlemleri"}
           </h2>
+          {outboxSummary && (outboxSummary.hasErrors || outboxSummary.hasPending) ? (
+            <div
+              className="mt-2 flex flex-wrap items-center gap-2"
+              role="status"
+              aria-label="Finans outbox durumu"
+            >
+              {outboxSummary.hasErrors ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">
+                  <span
+                    className="h-1.5 w-1.5 rounded-full bg-rose-600 dark:bg-rose-400"
+                    aria-hidden="true"
+                  />
+                  {outboxSummary.errorCount} işlem kontrol gerektiriyor
+                </span>
+              ) : null}
+              {outboxSummary.hasPending ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300">
+                  <span
+                    className="h-1.5 w-1.5 rounded-full bg-amber-600 dark:bg-amber-400"
+                    aria-hidden="true"
+                  />
+                  {outboxSummary.pendingCount} işlem bekliyor
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         {section && overviewAllowed ? (
