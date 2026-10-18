@@ -5,8 +5,8 @@ import type {
 } from "../src/lib/finance/financeContracts";
 
 import type {
-  FinanceCommandResult
-} from "../src/lib/finance/financeCommandService";
+  FinanceSystemWorkflowClientResult
+} from "../src/lib/finance/financeSystemWorkflowClient";
 
 import {
   executeSaleReturnFinanceOutboxRecord,
@@ -78,7 +78,7 @@ const baseRecord:
 
 function dependencies(
   financeResult:
-    FinanceCommandResult
+    FinanceSystemWorkflowClientResult
 ): {
   value:
     SaleReturnFinanceOutboxExecutorDependencies;
@@ -107,7 +107,8 @@ function dependencies(
 
     value: {
       async executeFinanceCommand(
-        transaction
+        transaction: FinanceTransaction,
+        record: SaleReturnFinanceOutboxRecord
       ) {
         transactions.push(
           transaction
@@ -144,7 +145,7 @@ function dependencies(
 async function run():
 Promise<void> {
   const createdFinance:
-    FinanceCommandResult = {
+    FinanceSystemWorkflowClientResult = {
     outcome: "CREATED",
 
     transaction: {
@@ -290,7 +291,7 @@ Promise<void> {
   );
 
   const replayFinance:
-    FinanceCommandResult = {
+    FinanceSystemWorkflowClientResult = {
     outcome: "REPLAY",
     transaction:
       createdFinance.transaction

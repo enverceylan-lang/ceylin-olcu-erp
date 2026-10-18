@@ -522,16 +522,24 @@ export async function loadLocalSaleReturns(
     .sortBy("occurredAt");
 }
 
-export async function loadPendingSaleReturnFinanceOutbox():
-Promise<SaleReturnFinanceOutboxRecord[]> {
+export async function loadPendingSaleReturnFinanceOutbox(
+  scope: ErpScope
+): Promise<SaleReturnFinanceOutboxRecord[]> {
+  const scopeValidation = validateErpScope(scope);
+  if (!scopeValidation.valid) {
+    throw new Error(`SALE_RETURN_FINANCE_OUTBOX_SCOPE_REQUIRED:${scopeValidation.missingFields.join(",")}`);
+  }
+
   return localSaleReturnsDb
     .financeOutbox
-    .where("status")
-    .anyOf([
-      "PENDING",
-      "PROCESSING",
-      "ERROR"
+    .where("[tenantId+companyId+branchId+accountingPeriodId]")
+    .equals([
+      scope.tenantId,
+      scope.companyId,
+      scope.branchId,
+      scope.accountingPeriodId
     ])
+    .and(record => ["PENDING", "PROCESSING", "ERROR"].includes(record.status))
     .sortBy("updatedAt");
 }
 

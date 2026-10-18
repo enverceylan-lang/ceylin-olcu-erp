@@ -13,6 +13,20 @@ import {
   type SaleReturnFinanceOutboxRecord
 } from "@/lib/localSaleReturnsDb";
 
+import type { ErpScope } from "@/lib/erpScope";
+
+import {
+  persistApprovedSaleReturnFinanceSource,
+  type FinanceSystemWorkflowClientResult
+} from "@/lib/finance/financeSystemWorkflowClient";
+
+import {
+  reconcileFinanceSystemWorkflow,
+  type FinanceSystemWorkflowReconcileResult
+} from "@/lib/finance/financeSystemWorkflowClient";
+
+import { sha256 } from "@/lib/finance/financeSystemWorkflowClient";
+
 export type SaleReturnFinanceOutboxExecutionResult =
   | {
       outcome: "SYNCED";
@@ -30,8 +44,9 @@ export type SaleReturnFinanceOutboxExecutionResult =
 
 export interface SaleReturnFinanceOutboxExecutorDependencies {
   executeFinanceCommand(
-    transaction: FinanceTransaction
-  ): Promise<FinanceCommandResult>;
+    transaction: FinanceTransaction,
+    record: SaleReturnFinanceOutboxRecord
+  ): Promise<FinanceSystemWorkflowClientResult>;
 
   updateSaleReturnFinanceOutbox(
     record:
@@ -43,7 +58,7 @@ export interface SaleReturnFinanceOutboxExecutorDependencies {
 
 const defaultDependencies:
   SaleReturnFinanceOutboxExecutorDependencies = {
-    executeFinanceCommand,
+    executeFinanceCommand: persistApprovedSaleReturnFinanceSource,
     updateSaleReturnFinanceOutbox,
     now: () =>
       new Date().toISOString()
@@ -233,20 +248,31 @@ export async function executeSaleReturnFinanceOutboxRecord(
     const financeResult =
       await dependencies
         .executeFinanceCommand(
-          transaction
+          transaction,
+          processingRecord
         );
 
     if (
       financeResult.outcome ===
       "REJECT"
     ) {
+      const reason = financeResult.reason;
+      // CONFLICT (different payload) or REJECT (validation error) -> no retry
+      if (reason.startsWith("CONFLICT:") || reason === "REFUND_EXCEEDS_SALE_LIMIT") {
+        return markError(
+          processingRecord,
+          `FINANCE_COMMAND_REJECTED:${reason}`,
+          dependencies
+        );
+      }
       return markError(
         processingRecord,
-        `FINANCE_COMMAND_REJECTED:${financeResult.reason}`,
+        `FINANCE_COMMAND_REJECTED:${reason}`,
         dependencies
       );
     }
 
+    // CREATED or REPLAY -> success
     const processedAt =
       dependencies.now();
 
@@ -279,6 +305,78 @@ export async function executeSaleReturnFinanceOutboxRecord(
         ? error.message
         : "UNKNOWN_EXECUTOR_ERROR";
 
+    // AMBIGUOUS: network error, timeout, 5xx -> attempt reconciliation
+    if (message.startsWith("AMBIGUOUS:")) {
+      const record = processingRecord;
+      const transaction = buildFinanceTransaction(record);
+      const idempotencyKey = [
+        "sale-return",
+        encodeURIComponent(record.saleReturnId),
+        "finance"
+      ].join(":");
+      const transactionId = [
+        "sale-return-finance",
+        encodeURIComponent(record.saleReturnId)
+      ].join(":");
+      const sourceBase = {
+        tenantId: record.tenantId,
+        companyId: record.companyId,
+        branchId: record.branchId,
+        accountingPeriodId: record.accountingPeriodId,
+        saleReturnId: record.saleReturnId,
+        saleId: record.saleId,
+        customerId: record.customerId,
+        amount: record.saleReturnSnapshot.amount,
+        currency: record.saleReturnSnapshot.currency,
+        actorUserId: record.saleReturnSnapshot.actorUserId,
+        approvedAt: record.saleReturnSnapshot.updatedAt,
+        sourceVersion: 1
+      };
+      const source = { ...sourceBase, payloadHash: await sha256(sourceBase) };
+
+      const recon = await reconcileFinanceSystemWorkflow(
+        "SALE_RETURN_APPROVAL",
+        { tenantId: record.tenantId, companyId: record.companyId, branchId: record.branchId, accountingPeriodId: record.accountingPeriodId },
+        record.saleReturnId,
+        idempotencyKey,
+        transactionId,
+        source.payloadHash
+      );
+
+      if (recon.outcome === "CONFIRMED") {
+        // Server confirmed created/replay -> mark SYNCED
+        const syncedRecord: SaleReturnFinanceOutboxRecord = {
+          ...processingRecord,
+          status: "SYNCED",
+          lastError: undefined,
+          processedAt: dependencies.now(),
+          updatedAt: dependencies.now()
+        };
+        await dependencies.updateSaleReturnFinanceOutbox(syncedRecord);
+        return {
+          outcome: "SYNCED",
+          record: syncedRecord,
+          financeOutcome: "CREATED"
+        };
+      }
+
+      if (recon.outcome === "CONFLICT" || recon.outcome === "NOT_FOUND") {
+        // Definitive conflict or not found -> ERROR, no retry
+        return markError(
+          processingRecord,
+          `RECONCILIATION_${recon.outcome}:${recon.reason}`,
+          dependencies
+        );
+      }
+
+      // AMBIGUOUS from reconciliation -> remains ambiguous, mark ERROR for retry
+      return markError(
+        processingRecord,
+        `RECONCILIATION_AMBIGUOUS:${recon.reason}`,
+        dependencies
+      );
+    }
+
     return markError(
       processingRecord,
       `EXECUTOR_ERROR:${message}`,
@@ -287,12 +385,13 @@ export async function executeSaleReturnFinanceOutboxRecord(
   }
 }
 
-export async function executePendingSaleReturnFinanceOutbox():
-Promise<
+export async function executePendingSaleReturnFinanceOutbox(
+  scope: ErpScope
+): Promise<
   SaleReturnFinanceOutboxExecutionResult[]
 > {
   const records =
-    await loadPendingSaleReturnFinanceOutbox();
+    await loadPendingSaleReturnFinanceOutbox(scope);
 
   const results:
     SaleReturnFinanceOutboxExecutionResult[] = [];

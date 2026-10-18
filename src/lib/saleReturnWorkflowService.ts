@@ -117,7 +117,7 @@ export interface SaleReturnWorkflowDependencies {
     }
   ): Promise<ApplySaleReturnStatusOutcome>;
 
-  loadPendingSaleReturnFinanceOutbox():
+  loadPendingSaleReturnFinanceOutbox(scope: ErpScope):
     Promise<
       SaleReturnFinanceOutboxRecord[]
     >;
@@ -244,7 +244,7 @@ export async function approveSaleReturnWorkflow(
 
   const outboxRecords =
     await dependencies
-      .loadPendingSaleReturnFinanceOutbox();
+      .loadPendingSaleReturnFinanceOutbox(input.scope);
 
   const matchingOutbox =
     outboxRecords.find(

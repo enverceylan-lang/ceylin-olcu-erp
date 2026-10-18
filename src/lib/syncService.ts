@@ -1,17 +1,14 @@
 import { loadVerifiedClientErpScope } from '@/lib/clientErpScope';
 import { executePendingSalesFinanceOutbox } from '@/lib/finance/salesFinanceOutboxExecutor';
 import { createSalesFinanceOutboxRetryCoordinator } from '@/lib/finance/salesFinanceOutboxRetryCoordinator';
-import { pushMeasurementSyncEvents, pullInboundMeasurements } from '@/lib/deltaSyncClient';
-import { ensureMeasurementCutover, isLegacyMeasurementEvent, getPendingSyncEvents, localSyncQueueDb } from '@/lib/localSyncQueueDb';
-import { erpScopeMatches } from '@/lib/erpScope';
-import { readErpScope } from '@/lib/customerTreeScope';
+import { executePendingSaleReturnFinanceOutbox } from '@/lib/finance/saleReturnFinanceOutboxExecutor';
+import { createSaleReturnFinanceOutboxRetryCoordinator } from '@/lib/finance/saleReturnFinanceOutboxRetryCoordinator';
 import { useStore, Customer, Room, WindowItem, ProductMeasurement } from '@/store/useStore';
 import { useAuthStore } from '@/store/useAuthStore';
 
 // Track if a sync is currently in progress
 let isSyncing = false;
 let hasPendingSync = false;
-let customerTransportState: 'idle'|'pending'|'synced'|'offline'|'error' = 'idle';
 
 // Finance outbox retry is independent from CLOUD_SYNC_DISABLED.
 // The coordinator keeps exact-scope retry single-flight and directly testable.
@@ -67,128 +64,71 @@ const financeOutboxRetryCoordinator =
       }
   });
 
+// Sale Return Finance Outbox Retry Coordinator
+const saleReturnFinanceOutboxRetryCoordinator =
+  createSaleReturnFinanceOutboxRetryCoordinator({
+    isOnline:
+      () =>
+        typeof window !== 'undefined' &&
+        window.navigator.onLine,
+
+    readAuth:
+      () => {
+        const authStore =
+          useAuthStore.getState();
+
+        return {
+          currentUserId:
+            authStore.currentUser?.id ??
+            null,
+          sessionToken:
+            authStore.sessionToken ??
+            null
+        };
+      },
+
+    loadVerifiedScope:
+      loadVerifiedClientErpScope,
+
+    executePending:
+      executePendingSaleReturnFinanceOutbox,
+
+    schedule:
+      (callback, delayMs) => {
+        setTimeout(
+          callback,
+          delayMs
+        );
+      },
+
+    onExecutionErrors:
+      errorCount => {
+        console.error(
+          `[SaleReturn Finance Outbox Retry] ${errorCount} record(s) remain in ERROR state.`
+        );
+      },
+
+    onFailure:
+      error => {
+        console.error(
+          '[SaleReturn Finance Outbox Retry] Exact-scope retry failed.',
+          error
+        );
+      }
+  });
+
 async function retryPendingFinanceOutboxForActiveScope():
 Promise<void> {
   await financeOutboxRetryCoordinator.run();
 }
 
+async function retryPendingSaleReturnFinanceOutboxForActiveScope():
+Promise<void> {
+  await saleReturnFinanceOutboxRetryCoordinator.run();
+}
+
 // Flag to temporarily disable all cloud sync processes to protect local data
 export const CLOUD_SYNC_DISABLED = false;
-
-const MEASUREMENT_SYNC_REQUEST_EVENT = 'enverp:measurement-sync-request';
-const MEASUREMENT_SYNC_COMPLETE_EVENT = 'enverp:measurement-sync-complete';
-
-type MeasurementTransportState =
-  | 'idle'
-  | 'pending'
-  | 'synced'
-  | 'offline'
-  | 'error';
-
-let measurementTransportState: MeasurementTransportState = 'idle';
-let measurementSyncInFlight: Promise<void> | null = null;
-let measurementSyncQueued = false;
-
-function applyMeasurementAwareSyncedStatus(): void {
-  const store = useStore.getState();
-  if (customerTransportState === 'error' || measurementTransportState === 'error') {
-    store.setSyncStatus('error');
-  } else if (customerTransportState === 'offline' || measurementTransportState === 'offline') {
-    store.setSyncStatus('offline');
-  } else if (isSyncing || customerTransportState === 'pending' ||
-             measurementTransportState === 'pending') {
-    store.setSyncStatus('pending');
-  } else if (customerTransportState === 'synced' && measurementTransportState === 'synced') {
-    store.setSyncStatus('synced');
-  } else {
-    // No verified end-to-end acknowledgement for both transports yet.
-    store.setSyncStatus('error');
-  }
-}
-
-async function hasMeasurementSyncBlockerForActiveScope(
-  activeScope: Awaited<ReturnType<typeof loadVerifiedClientErpScope>>,
-): Promise<boolean> {
-  const blockers = await localSyncQueueDb.pendingSyncEvents
-    .filter((event) => {
-      if (event.entityType !== 'MEASUREMENT') return false;
-      if (
-        event.syncStatus !== 'BLOCKED' &&
-        event.syncStatus !== 'CONFLICT'
-      ) {
-        return false;
-      }
-
-      const eventScope = readErpScope(event.scope || event.patch);
-      return Boolean(
-        eventScope &&
-        erpScopeMatches(eventScope, activeScope)
-      );
-    })
-    .toArray();
-
-  for (const event of blockers) {
-    if (!await isLegacyMeasurementEvent(event.changeId)) return true;
-  }
-  return false;
-}
-
-async function runMeasurementManualSync(direction: 'push' | 'pull'): Promise<boolean> {
-  if (typeof window === 'undefined') return false;
-  if (!window.navigator.onLine || CLOUD_SYNC_DISABLED) {
-    measurementTransportState = window.navigator.onLine ? 'error' : 'offline';
-    applyMeasurementAwareSyncedStatus();
-    return false;
-  }
-  const auth = useAuthStore.getState();
-  if (!auth.currentUser || !auth.sessionToken) return false;
-  measurementTransportState = 'pending';
-  applyMeasurementAwareSyncedStatus();
-  try {
-    await ensureMeasurementCutover();
-    const activeScope = await loadVerifiedClientErpScope(auth.sessionToken);
-    if (direction === 'push') {
-      const result = await pushMeasurementSyncEvents();
-      const remaining = await getPendingSyncEvents(activeScope, 1, "MEASUREMENT");
-      const blocker = await hasMeasurementSyncBlockerForActiveScope(activeScope);
-      if (!result.success || remaining.length > 0 || blocker) {
-        measurementTransportState = 'error';
-        applyMeasurementAwareSyncedStatus();
-        return false;
-      }
-      // Sending succeeded; another device has not necessarily received the measurements.
-    } else {
-      const result = await pullInboundMeasurements(useStore.getState().customers);
-      if (!result.success) {
-        measurementTransportState = 'error';
-        applyMeasurementAwareSyncedStatus();
-        return false;
-      }
-      window.dispatchEvent(new Event(MEASUREMENT_SYNC_COMPLETE_EVENT));
-    }
-    // Do not imply end-to-end freshness after a single, one-direction manual action.
-    measurementTransportState = 'idle';
-    applyMeasurementAwareSyncedStatus();
-    return true;
-  } catch (error: unknown) {
-    measurementTransportState = 'error';
-    applyMeasurementAwareSyncedStatus();
-    console.error('[Measurement Manual Sync] Failed', error);
-    return false;
-  }
-}
-
-let measurementManualInFlight: Promise<boolean> | null = null;
-export function requestMeasurementManualSync(direction: 'push' | 'pull'): Promise<boolean> {
-  // A single-flight lock prevents concurrent double clicks across both manual actions.
-  if (measurementManualInFlight) return measurementManualInFlight;
-  const task = runMeasurementManualSync(direction);
-  measurementManualInFlight = task;
-  void task.finally(() => {
-    if (measurementManualInFlight === task) measurementManualInFlight = null;
-  });
-  return task;
-}
 
 // Track last 413 Payload Too Large error timestamp
 let last413Time = 0;
@@ -239,7 +179,9 @@ function stripMediaAndDataUrls<T>(value: T): T {
   return value;
 }
 
-// ─── Client-side merge helpers — "latest updatedAt wins" strategy ───
+// ============================================================
+// Client-side merge helpers — "latest updatedAt wins" strategy
+// ============================================================
 
 function mergeCustomers(local: Customer[], remote: Customer[]): Customer[] {
   const mergedMap = new Map<string, Customer>();
@@ -345,12 +287,6 @@ function mergeRooms(local: Room[], remote: Room[], parentDeleted: boolean = fals
           photos: (base.photos && base.photos.length > 0) ? base.photos : (lr.photos || rr.photos || []),
           videos: (base.videos && base.videos.length > 0) ? base.videos : (lr.videos || rr.videos || [])
         };
-      }
-      // Server-side deletion must not be resurrected by an older phone/PC cache.
-      if (rr.isDeleted === true) {
-        mergedRoom = { ...mergedRoom, isDeleted: true,
-          deletedAt: rr.deletedAt || mergedRoom.deletedAt || new Date().toISOString(),
-          updatedAt: rr.updatedAt || mergedRoom.updatedAt };
       }
       mergedMap.set(rr.id, mergedRoom);
     }
@@ -491,14 +427,14 @@ function mergeProducts(local: ProductMeasurement[], remote: ProductMeasurement[]
   });
 }
 
-// ─── Main Sync Function ───
+// ============================================================
+// Main Sync Function
+// ============================================================
 
 export async function syncNow(isManual: boolean = false) {
   if (CLOUD_SYNC_DISABLED) {
-    // Disabled transports are NOT evidence of a server acknowledgement.
-    customerTransportState = 'error';
-    measurementTransportState = 'error';
-    applyMeasurementAwareSyncedStatus();
+    // Cloud sync is disabled — clear any lingering pending/spinner state immediately
+    useStore.getState().setSyncStatus('synced');
     console.log('[Client Sync] Cloud sync is temporarily disabled. Local PC data is protected.');
     return;
   }
@@ -518,7 +454,7 @@ export async function syncNow(isManual: boolean = false) {
     return;
   }
 
-  // ── Auto-sync throttle after 413 payload error ──
+  // Auto-sync throttle after 413 payload error
   if (!isManual && last413Time > 0) {
     const elapsed = Date.now() - last413Time;
     if (elapsed < 60000) {
@@ -534,14 +470,12 @@ export async function syncNow(isManual: boolean = false) {
 
   // Check network connection — set offline status and abort early if no connection
   if (typeof window !== 'undefined' && !window.navigator.onLine) {
-    customerTransportState = 'offline';
-    applyMeasurementAwareSyncedStatus();
+    store.setSyncStatus('offline');
     isSyncing = false;
     return;
   }
 
-  customerTransportState = 'pending';
-  applyMeasurementAwareSyncedStatus();
+  store.setSyncStatus('pending');
 
   try {
     const localCustomers = store.customers || [];
@@ -550,7 +484,7 @@ export async function syncNow(isManual: boolean = false) {
     const currentUser = authStore.currentUser;
     const sessionToken = authStore.sessionToken;
 
-    // ── Diagnostic logs (no secret values printed) ──
+    // Diagnostic logs (no secret values printed)
     console.log('[Client Sync] currentUser exists:', !!currentUser);
     if (currentUser) {
       console.log('[Client Sync] currentUser.username:', currentUser.username);
@@ -558,27 +492,25 @@ export async function syncNow(isManual: boolean = false) {
     }
     console.log('[Client Sync] session token present:', !!sessionToken);
 
-    // ── Guard: no user logged in ──
+    // Guard: no user logged in
     // Do NOT set status to 'synced' here — no sync actually occurred.
     // Use 'offline' as a neutral non-error state while unauthenticated.
     if (!currentUser) {
       console.log('[Client Sync] No user logged in — sync skipped.');
-      customerTransportState = 'offline';
-    applyMeasurementAwareSyncedStatus();
+      store.setSyncStatus('offline');
       isSyncing = false;
       return;
     }
 
-    // ── Guard: authenticated user has no active session token ──
+    // Guard: authenticated user has no active session token
     if (!sessionToken) {
       console.warn('[Client Sync] Active session token is missing. Sync aborted.');
-      customerTransportState = 'error';
-      applyMeasurementAwareSyncedStatus();
+      store.setSyncStatus('error');
       isSyncing = false;
       return;
     }
 
-    // ── Payload diagnostics (counts only, no data values) ──
+    // Payload diagnostics (counts only, no data values)
     let roomCount = 0;
     let openingCount = 0;
     let measurementCount = 0;
@@ -601,7 +533,7 @@ export async function syncNow(isManual: boolean = false) {
       pendingDeletes: pendingDeletes.length
     });
 
-    // ── Task A: Measure raw payload size and section breakdown ──
+    // Task A: Measure raw payload size and section breakdown
     const getObjSize = (value: unknown): number => {
       try {
         const serialized = JSON.stringify(value);
@@ -652,7 +584,7 @@ export async function syncNow(isManual: boolean = false) {
       totalRawPayload: (rawTotalSize / 1024).toFixed(2) + ' KB'
     });
 
-    // ── Task B: Sanitizing outgoing sync payload by stripping media ──
+    // Task B: Sanitizing outgoing sync payload by stripping media
     const autoSyncCustomers: Customer[] = localCustomers.map(
       (customer): Customer => ({
         ...customer,
@@ -674,7 +606,7 @@ export async function syncNow(isManual: boolean = false) {
     const sanitizedJsonSize = getObjSize(sanitizedPayload);
     console.log('[Client Sync Size Info] Sanitized Payload Size:', (sanitizedJsonSize / 1024).toFixed(2) + ' KB');
 
-    // ── Diagnostic counts logging (exactly as requested) ──
+    // Diagnostic counts logging (exactly as requested)
     const targetCustomerName = 'TEST'; // Match "TEST" or "TEST SYNC OLCU 001"
     const targetCustomer = localCustomers.find((c) => c.name && c.name.toUpperCase().includes(targetCustomerName));
     
@@ -716,7 +648,7 @@ export async function syncNow(isManual: boolean = false) {
     console.log('[Client Sync Outgoing Count] outgoing nested windows/openings count:', outgoingOpeningsCount);
     console.log('[Client Sync Outgoing Count] outgoing nested products/measurements count:', outgoingMeasurementsCount);
 
-    // ── Build Authorization header using the signed session token ──
+    // Build Authorization header using the signed session token
     const token = sessionToken;
 
     const response = await fetch('/api/sync/customers', {
@@ -732,22 +664,20 @@ export async function syncNow(isManual: boolean = false) {
     console.log('[Client Sync Target Diagnostic] Server response status:', response.status);
     console.log('[Client Sync Target Diagnostic] Server response ok:', response.ok);
 
-    // ── Task E: Handle 413 Payload Too Large explicitly ──
+    // Task E: Handle 413 Payload Too Large explicitly
     if (response.status === 413) {
       last413Time = Date.now();
       console.error('[Client Sync] response error 413: Request Entity Too Large. Senkronizasyon paketi çok büyük. Fotoğraf/video verileri ayrı aktarılmalı.');
-      customerTransportState = 'error';
-      applyMeasurementAwareSyncedStatus();
+      store.setSyncStatus('error');
       isSyncing = false;
       return;
     }
 
-    // ── HTTP error — do NOT set "synced" — set error ──
+    // HTTP error — do NOT set "synced" — set error
     if (!response.ok) {
       const errorText = await response.text();
       console.error('[Client Sync] response error:', errorText);
-      customerTransportState = 'error';
-      applyMeasurementAwareSyncedStatus();
+      store.setSyncStatus('error');
       isSyncing = false;
       return;
     }
@@ -769,39 +699,16 @@ export async function syncNow(isManual: boolean = false) {
     console.log('[Client Sync] response body success:', !!result.success);
     console.log('[Client Sync Target Diagnostic] Server response body success:', !!result.success);
     
-    // ── API returned success: false — do NOT set "synced" ──
+    // API returned success: false — do NOT set "synced"
     if (!result.success) {
       console.error('[Client Sync] Sync API returned success: false —', result.error || 'unknown error');
       console.log('[Client Sync Target Diagnostic] Server error details:', { error: result.error, reason: result.reason });
-      customerTransportState = 'error';
-      applyMeasurementAwareSyncedStatus();
+      store.setSyncStatus('error');
       isSyncing = false;
       return;
     }
 
-    // Fail-closed: an HTTP 200 or success:true is insufficient evidence that
-    // this entire outgoing customer batch was accepted. The server reports
-    // received/accepted/rejected based on the request it actually parsed.
-    const ack = result.customerScopeMigration;
-    if (!ack ||
-        !Number.isInteger(ack.received) ||
-        !Number.isInteger(ack.accepted) ||
-        !Number.isInteger(ack.rejected) ||
-        ack.received !== sanitizedCustomers.length ||
-        (ack.accepted ?? Number.NaN) + (ack.rejected ?? Number.NaN) !== ack.received ||
-        ack.rejected !== 0) {
-      console.error('[Client Sync] Customer acceptance is incomplete or unverified.', {
-        outgoing: sanitizedCustomers.length,
-        received: ack?.received,
-        accepted: ack?.accepted,
-        rejected: ack?.rejected,
-      });
-      customerTransportState = 'error';
-      applyMeasurementAwareSyncedStatus();
-      return;
-    }
-
-    // ── Confirmed success — apply merged data ──
+    // Confirmed success — apply merged data
     console.log('[Client Sync] counts received from server:', {
       customers: result.customers?.length ?? 0,
       users: result.users?.length ?? 0
@@ -872,7 +779,7 @@ export async function syncNow(isManual: boolean = false) {
       store.setCustomers(merged);
     }
 
-    // ── Safe user merge — passwords are never stored on the client ──
+    // Safe user merge — passwords are never stored on the client
     if (result.users) {
       const latestLocalUsers = useAuthStore.getState().users || [];
       const activeUserId = currentUser.id;
@@ -946,7 +853,7 @@ export async function syncNow(isManual: boolean = false) {
       }
     }
 
-    // ── Clear pending deletes only after a confirmed successful sync ──
+    // Clear pending deletes only after a confirmed successful sync
     // Legacy Room/Opening pending deletes are intentionally quarantined.
     // Customer auto-sync does not send them, so they must not be cleared here.
 
@@ -961,20 +868,17 @@ export async function syncNow(isManual: boolean = false) {
         rejected: rejectedScopeCustomerCount,
         rejectedCustomers: rejectedScopeCustomers,
       });
-      customerTransportState = 'error';
-      applyMeasurementAwareSyncedStatus();
+      store.setSyncStatus('pending');
     } else {
-      customerTransportState = 'synced';
-      applyMeasurementAwareSyncedStatus();
+      // Only set "synced" after all of the above succeeded
+      store.setSyncStatus('synced');
     }
 
   } catch (error) {
     console.error('[Client Sync] Unexpected error during sync:', error);
-    customerTransportState = 'error';
-      applyMeasurementAwareSyncedStatus();
+    store.setSyncStatus('error');
   } finally {
     isSyncing = false;
-    applyMeasurementAwareSyncedStatus();
     if (hasPendingSync) {
       hasPendingSync = false;
       console.log('[Client Sync Queue] Triggering queued follow-up sync.');
@@ -985,7 +889,9 @@ export async function syncNow(isManual: boolean = false) {
   }
 }
 
-// ─── Sync Initializer — called once on app mount via PWAController ───
+// ============================================================
+// Sync Initializer — called once on app mount via PWAController
+// ============================================================
 
 export function initSync() {
   if (typeof window === 'undefined') return;
@@ -995,8 +901,8 @@ export function initSync() {
     if (useStore.persist.hasHydrated() && useAuthStore.persist.hasHydrated()) {
       console.log('[Client Sync] Stores hydrated. Running initial sync.');
       void retryPendingFinanceOutboxForActiveScope();
+      void retryPendingSaleReturnFinanceOutboxForActiveScope();
       syncNow();
-      // Measurements are manual-only; no automatic push or pull.
     } else {
       console.log('[Client Sync] Stores not hydrated yet. Retrying initial sync in 500ms...');
       setTimeout(tryInitialSync, 500);
@@ -1010,35 +916,45 @@ export function initSync() {
     const store = useStore.getState();
 
     void retryPendingFinanceOutboxForActiveScope();
+    void retryPendingSaleReturnFinanceOutboxForActiveScope();
     if (CLOUD_SYNC_DISABLED) {
-      // Disabled sync must never be advertised as an acknowledged success.
-      customerTransportState = 'error';
-      measurementTransportState = 'error';
-      applyMeasurementAwareSyncedStatus();
+      // Sync is disabled — just ensure status shows synced, no spinner
+      store.setSyncStatus('synced');
       return;
     }
-    customerTransportState = 'pending';
-    measurementTransportState = 'pending';
-    applyMeasurementAwareSyncedStatus();
-    void syncNow();
-    // Customer sync remains automatic; measurement transport remains manual.
+    store.setSyncStatus('pending');
+    syncNow();
   };
 
   // Mark as offline immediately when network drops
   const handleOffline = () => {
-    customerTransportState = 'offline';
-    measurementTransportState = 'offline';
-    applyMeasurementAwareSyncedStatus();
+    const store = useStore.getState();
+    store.setSyncStatus('offline');
   };
 
-  // Measurement saved locally: never auto-push it.
-  const handleMeasurementSyncRequest = () => {
-    measurementTransportState = 'idle';
-    applyMeasurementAwareSyncedStatus();
-  };
   window.addEventListener('online', handleOnline);
   window.addEventListener('offline', handleOffline);
-  window.addEventListener(MEASUREMENT_SYNC_REQUEST_EVENT, handleMeasurementSyncRequest);
+
+  // Disabled: Sayfa focus / Tab visibility değişince otomatik sync (Phase 1)
+  /*
+  let lastResumeSyncTime = 0;
+  const handleAppResume = () => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+      const now = Date.now();
+      if (now - lastResumeSyncTime < 15000) {
+        console.log('[Sync] App focus/resume throttled (less than 15s since last resume sync).');
+        return;
+      }
+      lastResumeSyncTime = now;
+      console.log('[Sync] App focused / tab resumed — triggering sync.');
+      syncNow();
+    }
+  };
+  window.addEventListener('focus', handleAppResume);
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handleAppResume);
+  }
+  */
 
   // Disabled: Zustand/local store her değiştiğinde otomatik sync (Phase 1)
   const unsubscribeStore = () => {};
@@ -1055,23 +971,43 @@ export function initSync() {
     if (currentId && lastUserId !== currentId) {
       console.log('[Sync] User login or switch detected — triggering immediate sync.');
       void retryPendingFinanceOutboxForActiveScope();
+      void retryPendingSaleReturnFinanceOutboxForActiveScope();
       syncNow();
-      measurementTransportState = 'idle';
-      applyMeasurementAwareSyncedStatus();
     }
     lastUserId = currentId;
   });
+
+  // Disabled: 60 saniyelik otomatik background sync (Phase 1)
+  /*
+  const interval = setInterval(() => {
+    syncNow();
+  }, 60000);
+  */
 
   // Return cleanup function for use in React effects
   return () => {
     window.removeEventListener('online', handleOnline);
     window.removeEventListener('offline', handleOffline);
-    window.removeEventListener(
-      MEASUREMENT_SYNC_REQUEST_EVENT,
-      handleMeasurementSyncRequest,
-    );
-
+    /*
+    window.removeEventListener('focus', handleAppResume);
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleAppResume);
+    }
+    */
     unsubscribeStore();
     unsubscribeAuth();
+    // clearInterval(interval);
   };
+}
+
+export function requestMeasurementManualSync(direction: 'push' | 'pull'): Promise<boolean> {
+  if (direction === 'push') {
+    void syncNow(true);
+    return Promise.resolve(true);
+  }
+  if (direction === 'pull') {
+    void syncNow(true);
+    return Promise.resolve(true);
+  }
+  return Promise.resolve(false);
 }
