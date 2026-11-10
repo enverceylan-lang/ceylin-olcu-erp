@@ -1219,6 +1219,21 @@ export async function recoverMissingMeasurementsFromCanonical(): Promise<{
           continue;
         }
         const openingId = typeof row.openingId === "string" ? row.openingId.trim() : "";
+        // The persisted customer tree may be intact while the Zustand snapshot
+        // used by /olculer and /cariler has no rooms. Rehydrate only missing
+        // in-memory rooms from the already verified, exact-scope local customer.
+        // Never overwrite a nonempty tree, tombstone, or other customer fields.
+        const visibleCustomer = useStore.getState().customers.find((item) => item.id === customerId);
+        if (visibleCustomer && !visibleCustomer.isDeleted &&
+            (visibleCustomer.rooms || []).length === 0 &&
+            (customer.rooms || []).some((item) => !item.isDeleted)) {
+          useStore.setState((state) => ({
+            customers: state.customers.map((item) =>
+              item.id === customerId && !item.isDeleted && (item.rooms || []).length === 0
+                ? { ...item, rooms: customer.rooms }
+                : item),
+          }));
+        }
         // Existing IDs with an intact local parent need no API read or write.
         // Only a missing parent enters the verified parent-only repair path.
         if (existingMeasurement) {

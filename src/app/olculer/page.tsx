@@ -342,6 +342,21 @@ const links: Record<string, string> = {};
         photoCount += (room.photos || []).length;
         videoCount += (room.videos || []).length;
         const activeWindows = (room.windows || []).filter((w) => !w.isDeleted);
+        // Measurements may belong directly to a room (openingId is optional).
+        const roomOnly = measurementStore.measurements.filter(m =>
+          measurementBelongsTo(m, customer.id, room.id, "") && !m.isDeleted && !m.isArchived
+        );
+        measurementCount += roomOnly.length;
+        for (const p of roomOnly) {
+          photoCount += (p.photos || []).length;
+          videoCount += (p.videos || []).length;
+          const time = new Date(p.measuredDate || p.createdAt || p.updatedAt || 0).getTime();
+          if (Number.isFinite(time) && time > sortDate) sortDate = time;
+          if (p.measuredDate && (!latestDate || new Date(p.measuredDate).getTime() > latestDate.getTime())) {
+            latestDate = new Date(p.measuredDate);
+            latestMeasuredBy = p.measuredBy || "";
+          }
+        }
         for (const window of activeWindows) {
           const activeProducts = measurementStore.measurements.filter(m =>
             measurementBelongsTo(m, customer.id, room.id, window.id) && !m.isDeleted && !m.isArchived
@@ -1782,6 +1797,24 @@ const handleManualOrphanRepair = async (
                           </h4>
 
                           <div className="space-y-4 pl-4">
+                             {/* Opening-free measurements are legitimate room records. */}
+                             {measurementStore.measurements
+                               .filter((p) => measurementBelongsTo(p, customer.id, room.id, "") && !p.isDeleted && !p.isArchived)
+                               .sort((a, b) => new Date(b.createdAt || b.measuredDate || 0).getTime() - new Date(a.createdAt || a.measuredDate || 0).getTime())
+                               .map((p) => {
+                                 const dims = resolveMeasurementDisplayDimensions(p);
+                                 return (
+                                   <div key={p.id} className="rounded-lg border border-blue-200 bg-white p-3 text-xs shadow-sm dark:border-blue-900 dark:bg-gray-900">
+                                     <div className="mb-1 font-bold text-blue-700 dark:text-blue-300">Doğrudan oda ölçüsü</div>
+                                     <div className="font-semibold text-gray-800 dark:text-gray-200">
+                                       {getTemplateLabel(dims.templateType)} — {dims.summaryLabel}
+                                     </div>
+                                     <div className="mt-1 text-gray-500 dark:text-gray-400">
+                                       Ölçen: {p.measuredBy || "-"}{p.measuredDate ? ` • ${new Date(p.measuredDate).toLocaleDateString("tr-TR")}` : ""}
+                                     </div>
+                                   </div>
+                                 );
+                               })}
                             {room.windows.filter((w) =>
                               !w.isDeleted &&
                               measurementStore.measurements.some((measurement) =>
