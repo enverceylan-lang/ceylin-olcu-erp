@@ -1195,6 +1195,27 @@ export async function recoverMissingMeasurementsFromCanonical(): Promise<{
           throw new Error("RECOVERY_ROW_IDENTITY_OR_SCOPE_INVALID");
         }
         seen.add(id);
+        // Fail closed if canonical parent metadata is absent or inconsistent.
+        // Unlike a local "roomName" label, this came from a verified scoped DB read.
+        const parentValue = row.recoveryParent;
+        if (!parentValue || typeof parentValue !== "object" || Array.isArray(parentValue)) {
+          throw new Error("RECOVERY_PARENT_SNAPSHOT_INVALID");
+        }
+        const parentRecord = parentValue as Record<string, unknown>;
+        const roomValue = parentRecord.room;
+        const openingIdFromRow = typeof row.openingId === "string" ? row.openingId.trim() : "";
+        const openingValue = parentRecord.opening;
+        if (!roomValue || typeof roomValue !== "object" || Array.isArray(roomValue) ||
+            (roomValue as { id?: unknown }).id !== roomId ||
+            typeof (roomValue as { name?: unknown }).name !== "string" ||
+            !(roomValue as { name: string }).name.trim() ||
+            (openingIdFromRow && (!openingValue || typeof openingValue !== "object" ||
+              (openingValue as { id?: unknown }).id !== openingIdFromRow ||
+              typeof (openingValue as { name?: unknown }).name !== "string" ||
+              !(openingValue as { name: string }).name.trim())) ||
+            (!openingIdFromRow && openingValue)) {
+          throw new Error("RECOVERY_PARENT_SNAPSHOT_INVALID");
+        }
         // Read IndexedDB directly: state can be stale, and recovery must not overwrite local edits.
         const local = await localMeasurementDb.measurements.get(id);
         const inMemory = useMeasurementStore.getState().measurements.find((m) => m.id === id);
@@ -1208,7 +1229,10 @@ export async function recoverMissingMeasurementsFromCanonical(): Promise<{
             existingMeasurement.roomId !== roomId ||
             String(existingMeasurement.openingId || existingMeasurement.windowId || "").trim() !== canonicalOpening ||
             Boolean(existingMeasurement.isDeleted))) {
-          existing += 1;
+          // Do not conflate a conflicting local identity with a successfully
+          // materialized measurement. Never silently reassign an existing ID.
+          unresolved += 1;
+          errors.push(`RECOVERY_LOCAL_PARENT_CONFLICT:${id}`);
           continue;
         }
         const customer = customers.get(customerId);
@@ -1237,15 +1261,40 @@ export async function recoverMissingMeasurementsFromCanonical(): Promise<{
         // Existing IDs with an intact local parent need no API read or write.
         // Only a missing parent enters the verified parent-only repair path.
         if (existingMeasurement) {
-          const localRoom = (customer.rooms || []).find((item) => item.id === roomId && !item.isDeleted);
+          const localRoom = (customer.rooms || []).find((item) => item.id === roomId);
           const localOpenings = localRoom?.windows || [];
-          if (localRoom && (!openingId || localOpenings.some((item) => item.id === openingId && !item.isDeleted))) {
+          const localOpening = openingId ? localOpenings.find((item) => item.id === openingId) : null;
+          if (localRoom?.isDeleted || localOpening?.isDeleted) {
+            unresolved += 1;
+            errors.push(`RECOVERY_LOCAL_PARENT_TOMBSTONE:${id}`);
+            continue;
+          }
+          if (localRoom && (!openingId || localOpening)) {
+            // The local DB has the verified structure, but the customer list
+            // rendered by /olculer may be stale or have a partial tree.
+            useStore.setState((state) => ({
+              customers: state.customers.map((item) => {
+                if (item.id !== customerId || item.isDeleted) return item;
+                const visibleRooms = Array.isArray(item.rooms) ? item.rooms : [];
+                const index = visibleRooms.findIndex((r) => r.id === roomId);
+                if (index >= 0 && visibleRooms[index].isDeleted) return item;
+                if (index < 0) return { ...item, rooms: [...visibleRooms, localRoom] };
+                if (!openingId) return item;
+                const visibleRoom = visibleRooms[index];
+                const visibleWindows = visibleRoom.windows || [];
+                if (visibleWindows.some((w) => w.id === openingId)) return item;
+                return { ...item, rooms: visibleRooms.map((r, i) =>
+                  i === index ? { ...r, windows: [...visibleWindows, localOpening!] } : r) };
+              }),
+            }));
             existing += 1;
             continue;
           }
         }
+        const { recoveryParent: _recoveryParent, ...measurementFields } = row;
+        void _recoveryParent;
         const canonical = {
-          ...row,
+          ...measurementFields,
           id, customerId, roomId,
           openingId: openingId || undefined,
           windowId: openingId || undefined,
@@ -1258,9 +1307,9 @@ export async function recoverMissingMeasurementsFromCanonical(): Promise<{
         }
         try {
           // Read and verify the canonical parent before any persistent write.
-          const parent = await readScopedCanonicalParent(sessionToken, scope, {
-            customerId, roomId, ...(openingId ? { openingId } : {}),
-          });
+          // recoveryParent is verified by the scoped server query; do not
+          // issue a second per-measurement parent request (134x round trips).
+          const parent = parentRecord as unknown as NonNullable<ReturnType<typeof getCanonicalParentPackageFromSnapshot>>;
           let outcome: "INSERTED" | "EXISTS" = "EXISTS";
           if (!existingMeasurement) {
             // Insert first: an IndexedDB failure must not create an empty room.

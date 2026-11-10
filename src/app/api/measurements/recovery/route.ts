@@ -62,18 +62,39 @@ export async function POST(req: NextRequest) {
       ? await db.from("customers").select('id,isDeleted').match(scope).in("id", customerIds)
       : { data: [], error: null };
     const roomsResult = roomIds.length
-      ? await db.from("rooms").select('id,customerId,isDeleted').match(scope).in("id", roomIds)
+      ? await db.from("rooms").select('id,customerId,name,customerAddressId,isDeleted').match(scope).in("id", roomIds)
       : { data: [], error: null };
-    if (customersResult.error || roomsResult.error) {
+    const openingIds = [...new Set(active.map((row) => String(row.openingId || "").trim()).filter(Boolean))];
+    const openingsResult = openingIds.length
+      ? await db.from("openings").select('id,roomId,name,isDeleted').match(scope).in("id", openingIds)
+      : { data: [], error: null };
+    if (customersResult.error || roomsResult.error || openingsResult.error) {
       return NextResponse.json({ success: false, error: "RECOVERY_PARENTS_READ_FAILED" }, { status: 503 });
     }
 
     const liveCustomers = new Set((customersResult.data || [])
       .filter((c) => c.isDeleted !== true).map((c) => c.id));
     const rooms = new Map((roomsResult.data || [])
-      .filter((r) => r.isDeleted !== true).map((r) => [r.id, r.customerId]));
-    const verified = active.filter((row) =>
-      liveCustomers.has(row.customerId) && rooms.get(row.roomId) === row.customerId);
+      .filter((r) => r.isDeleted !== true).map((r) => [r.id, r]));
+    const openings = new Map((openingsResult.data || [])
+      .filter((o) => o.isDeleted !== true).map((o) => [o.id, o]));
+    // A room/opening is returned ONLY after its canonical ownership is verified.
+    // Names are authoritative server labels, never invented on the client.
+    const verified = active.flatMap((row) => {
+      const room = rooms.get(row.roomId);
+      if (!liveCustomers.has(row.customerId) || !room || room.customerId !== row.customerId ||
+          !String(room.name || "").trim()) return [];
+      const openingId = String(row.openingId || "").trim();
+      const opening = openingId ? openings.get(openingId) : null;
+      if (openingId && (!opening || opening.roomId !== room.id || !String(opening.name || "").trim())) return [];
+      return [{
+        ...row,
+        recoveryParent: {
+          room: { id: room.id, name: room.name, customerAddressId: room.customerAddressId || null },
+          ...(opening ? { opening: { id: opening.id, name: opening.name } } : {}),
+        },
+      }];
+    });
 
     // Do not return other-scope or orphan records. No writes, no cursor mutation.
     return NextResponse.json({

@@ -28,14 +28,14 @@ function scope() { return { tenantId: 't', companyId: 'c', branchId: 'b', accoun
 function row(id, customer='cust', room='room', opening=null) {
   return { id, customerId: customer, roomId: room, openingId: opening,
     tenant_id:'t', company_id:'c', branch_id:'b', accounting_period_id:'p',
-    isDeleted:false, templateType:'BASIC', rawValues:{ width:75,height:38 }, entity_version:2 };
+    isDeleted:false, recoveryParent:{room:{id:room,name:'Canonical room'},...(opening?{opening:{id:opening,name:'Canonical opening'}}:{})}, templateType:'BASIC', rawValues:{ width:75,height:38 }, entity_version:2 };
 }
 async function clientTest(name, cases) {
   const measurements = new Map(cases.initialMeasurements || []);
   const customer = { id: 'cust', isDeleted:false, rooms:[], tenantId:'t', companyId:'c', branchId:'b', accountingPeriodId:'p' };
-  const customers = cases.noCustomer ? [] : [customer];
+  const customers = cases.noCustomer ? [] : [cases.persistedCustomer || customer];
   const calls = { inserts:0, parent:0, recoverRequests:0, reloads:0, parentWrites:0 };
-  const state = { customers };
+  const state = { customers: cases.uiCustomers || customers };
   const oldFetch = global.fetch;
   const pages = cases.pages || [{ success:true, sourceCount:1, excludedCount:0, hasMore:false, nextOffset:1, measurements:[row('m1')] }];
   global.fetch = async (url, options) => {
@@ -92,17 +92,17 @@ async function clientTest(name, cases) {
       '@/store/useAuthStore': { useAuthStore:{getState:()=>({currentUser:{id:'u',role: cases.role||'ADMIN'},sessionToken:'session'})} },
     });
     const result = await exports.recoverMissingMeasurementsFromCanonical();
-    await cases.verify(result, measurements, calls);
+    await cases.verify(result, measurements, calls, state);
     console.log('PAK', name);
   } finally { global.fetch = oldFetch; }
 }
 async function serverTests() {
   let lastMatches=[];
-  const source = [row('a'),row('b'), {...row('d'),isDeleted:true},row('orphan','missing','room')];
+  const source = [row('a'),row('b','cust','room','opening'), {...row('d'),isDeleted:true},row('orphan','missing','room')];
   const chain = (table)=>({
     select:()=>chain(table), match:(scopeCols)=> {lastMatches.push(scopeCols);return chain(table);},
     order:()=>chain(table), range:async(start,end)=>({data:source.slice(start,end+1),error:null}),
-    in:async()=>({data:table==='customers'?[{id:'cust',isDeleted:false}]:[{id:'room',customerId:'cust',isDeleted:false}],error:null})
+    in:async()=>({data:table==='customers'?[{id:'cust',isDeleted:false}]:table==='rooms'?[{id:'room',customerId:'cust',name:'Canonical room',isDeleted:false}]:table==='openings'?[{id:'opening',roomId:'room',name:'Canonical opening',isDeleted:false}]:[],error:null})
   });
   const mod = loadTs('src/app/api/measurements/recovery/route.ts',{
     'next/server': { NextResponse:{json:(body,config)=>({body,status:config?.status||200})} },
@@ -117,6 +117,8 @@ async function serverTests() {
     const valid=await mod.POST({json:async()=>({offset:0})});
     assert.equal(valid.status,200);
     assert.equal(valid.body.measurements.length,2);
+    assert.equal(valid.body.measurements[0].recoveryParent.room.name,'Canonical room');
+    assert.equal(valid.body.measurements[1].recoveryParent.opening.name,'Canonical opening');
     assert.equal(valid.body.excludedCount,1);
     assert.equal(valid.body.sourceCount,4);
     assert.ok(lastMatches.length>=3);
@@ -134,9 +136,19 @@ async function serverTests() {
  await clientTest('missing ID saved once', {verify:async(result,rows,calls)=>{
    assert.equal(result.success,true);assert.equal(result.recovered,1);assert.equal(calls.inserts,1);assert.ok(rows.has('m1'));
  }});
- await clientTest('same ID never overwritten', {initialMeasurements:[['m1',{id:'m1',version:999,notes:'LOCAL'}]],verify:async(result,rows,calls)=>{
+ await clientTest('same ID never overwritten', {initialMeasurements:[['m1',{...row('m1'),version:999,notes:'LOCAL'}]],verify:async(result,rows,calls)=>{
    assert.equal(result.success,true);assert.equal(result.existing,1);assert.equal(calls.inserts,0);assert.equal(rows.get('m1').notes,'LOCAL');
  }});
+ await clientTest('existing measurement hydrates room tree into UI', {
+   initialMeasurements:[['m1',{...row('m1'),version:999,notes:'LOCAL'}]],
+   persistedCustomer:{id:'cust',isDeleted:false,rooms:[{id:'room',name:'Canonical room',windows:[],isDeleted:false}],tenantId:'t',companyId:'c',branchId:'b',accountingPeriodId:'p'},
+   uiCustomers:[{id:'cust',isDeleted:false,rooms:[],tenantId:'t',companyId:'c',branchId:'b',accountingPeriodId:'p'}],
+   verify:async(result,rows,calls,state)=>{
+     assert.equal(result.success,true);assert.equal(result.existing,1);assert.equal(calls.inserts,0);
+     assert.equal(rows.get('m1').notes,'LOCAL');
+     assert.equal(state.customers[0].rooms[0].id,'room');
+   }
+ });
  await clientTest('concurrent insert race preserves local value', {raceExisting:true,verify:async(result,rows,calls)=>{
    assert.equal(result.success,true);assert.equal(result.recovered,0);assert.equal(result.existing,1);
    assert.equal(rows.get('m1').notes,'CONCURRENT_LOCAL_EDIT');assert.equal(calls.inserts,1);
@@ -147,6 +159,13 @@ async function serverTests() {
  await clientTest('cross-scope response rejected', {pages:[{success:true,sourceCount:1,nextOffset:1,hasMore:false,excludedCount:0,measurements:[{...row('m1'),company_id:'OTHER'}]}],verify:async(result,rows,calls)=>{
    assert.equal(result.success,false);assert.equal(calls.inserts,0);assert.ok(!rows.has('m1'));
  }});
+ await clientTest('opening measurement creates verified missing room and opening', {
+   pages:[{success:true,sourceCount:1,excludedCount:0,hasMore:false,nextOffset:1,measurements:[row('m1','cust','room','opening')]}],
+   verify:async(result,rows,calls,state)=>{
+     assert.equal(result.success,true); assert.equal(calls.parentWrites,1);
+     assert.equal(state.customers[0].rooms[0].windows[0].id,'opening');
+   }
+ });
  await clientTest('direct room measurement accepted', {verify:async(result,rows,calls)=>{
    assert.equal(result.success,true);assert.equal(rows.get('m1').openingId,undefined);assert.equal(calls.inserts,1);
  }});
