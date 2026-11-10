@@ -501,6 +501,28 @@ export function createDraftSaleFromCustomer(
       activeProducts.forEach(ap => {
         const calc = ap.calculation || {};
 
+        // BIRIZ V5 has its own dimensions, kind, room and scope validations.
+        // The generic calculation validator may reject a valid simple width/height
+        // measurement before the V5 converter can create the real sale lines.
+        // This temporary source item is replaced by prepareBirizSaleItemsV5;
+        // it is never persisted as a sale line if V5 validation fails.
+        if (String(ap.productType || '').trim().toUpperCase() === 'BIRIZ') {
+          const birizSource = createSaleItemFromMeasurement(
+            {
+              ...m,
+              productType: ap.productType,
+              selectedProducts: [ap],
+              details: { ...m.details, ...calc }
+            },
+            room?.name || 'Oda',
+            win?.name || 'Pencere',
+            'BIRIZ'
+          );
+          birizSource.id = `${m.id}-BIRIZ-v5-seed`;
+          items.push(birizSource);
+          return;
+        }
+
         const calculationValidation =
           validateCalculationForSale(calc);
 
