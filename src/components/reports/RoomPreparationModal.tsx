@@ -47,6 +47,7 @@ type ProductOptions = {
   pleatType?: 'TIGHT' | 'NORMAL' | 'SPARSE' | 'AMERICAN' | 'CUSTOM';
   customPleatFactor?: number;
   openingType?: 'SINGLE' | 'DOUBLE';
+  birizType?: 'SABIT' | 'SALIK';
 
   doorFonRequested?: boolean;
   wingQuantity?: 1 | 2;
@@ -99,6 +100,11 @@ function defaultOptions(productType: string): ProductOptions {
       tulleStyle: 'PLEATED',
       pleatType: 'TIGHT'
     };
+  }
+
+  if (productType === 'BIRIZ') {
+    // Preserve the established two-rod behavior for legacy selections.
+    return { birizType: 'SABIT' };
   }
 
   if (
@@ -983,6 +989,40 @@ export function RoomPreparationModal({
               </p>
             </div>
           )}
+        </div>
+      );
+    }
+
+    if (productType === 'BIRIZ') {
+      return (
+        <div className="mt-3 rounded-lg border border-slate-700 p-3">
+          <label className="mb-2 block text-[11px] font-bold uppercase tracking-wide text-slate-300">
+            Biriz Türü
+          </label>
+          <div className="flex flex-wrap gap-4 text-xs">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                type="radio"
+                name={`${measurementId}-${productType}-biriz`}
+                checked={options.birizType !== 'SALIK'}
+                onChange={() => updateOptions(measurementId, productType, {
+                  birizType: 'SABIT'
+                })}
+              />
+              Sabit (2 çubuk, 4 başlık)
+            </label>
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                type="radio"
+                name={`${measurementId}-${productType}-biriz`}
+                checked={options.birizType === 'SALIK'}
+                onChange={() => updateOptions(measurementId, productType, {
+                  birizType: 'SALIK'
+                })}
+              />
+              Salık (1 çubuk, 2 başlık)
+            </label>
+          </div>
         </div>
       );
     }

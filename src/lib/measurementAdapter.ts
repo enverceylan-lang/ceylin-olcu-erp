@@ -2480,17 +2480,26 @@ export function calculateSelectedProduct(
     };
   }
   if (norm === 'BIRIZ') {
-    const tülMiktar = Number(((width * 3.20) / 100).toFixed(2));
-    const rodCount = 2;
+    // Legacy records without a saved type remain SABIT.
+    const birizProduct = siblingProducts.find(
+      product => product.productType === 'BIRIZ'
+    );
+    const configuredBirizType = birizProduct?.userOverrides?.birizType ?? rawValues?.birizType;
+    const birizType = configuredBirizType === 'SALIK' ? 'SALIK' : 'SABIT';
+    const rodCount = birizType === 'SALIK' ? 1 : 2;
+    const capsCount = rodCount * 2;
+    // 3.20 fabric factor applies to BOTH Biriz types.
+    // Bill in 0.10 m upward increments (avoid premature rounding).
+    const tülMiktar = Math.ceil((width * 3.20 / 100) * 10 - 1e-9) / 10;
     const demirMiktar = Number(((width * rodCount) / 100).toFixed(2));
-    const capsCount = 4;
 
     return {
+      birizType,
       birizTulMeters: tülMiktar,
       rodCount,
       rodLengthMeters: demirMiktar,
       capsCount,
-      description: `Brizli Perde (Tül: ${tülMiktar}m, Demir: ${demirMiktar}m, Başlık: 4 adet)`
+      description: `${birizType === 'SALIK' ? 'Salık' : 'Sabit'} Biriz (Tül: ${tülMiktar}m, Çubuk: ${demirMiktar}m, Başlık: ${capsCount} adet)`
     };
   }
 

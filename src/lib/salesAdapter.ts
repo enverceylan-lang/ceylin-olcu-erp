@@ -4,6 +4,7 @@ import { Sale, SaleItem } from '@/store/salesStore';
 import type { ErpScope } from '@/lib/erpScope';
 import { getMeasurementDimensions, resolveMeasurementProductGroup, resolveMeasurementProductLabel } from '@/lib/measurementAdapter';
 import { resolveSaleStockItemId } from '@/lib/saleStockIdentity';
+import { prepareBirizSaleItemsV5 } from '@/lib/calculationEngine/birizSaleIntegration';
 
 import {
   CALCULATION_ENGINE_VERSION,
@@ -23,7 +24,7 @@ interface DraftSalesStore {
  * Ölçüden tek bir satış satırı oluşturur.
  */
 function createSaleItemFromMeasurement(
-  p: ProductMeasurement,
+  p: ProductMeasurement & { roomId?: string },
   roomName: string,
   windowName: string,
   selectedType?: string,
@@ -203,6 +204,7 @@ function createSaleItemFromMeasurement(
   return {
     id: crypto.randomUUID(),
     measurementId: p.id,
+    roomId: p.roomId || undefined,
     roomName,
     windowName,
     productType: label,
@@ -318,6 +320,7 @@ export function createJumboSaleItem(
   return {
     id: `${parentItemId}-jumbo`,
     measurementId: p.id,
+    roomId: p.roomId || undefined,
     roomName,
     windowName: `${windowName}${g.sourceSegments?.length > 0 ? ` - Parça ${gIdx + 1}` : ''}`,
     productType: compName,
@@ -407,6 +410,10 @@ export function saleItemContainsTransferBundleV1(
 
   if (!measurementId || !productType) {
     return false;
+  }
+
+  if (item.birizRuleVersion && productType.toUpperCase() === 'BIRIZ') {
+    return Boolean(item.birizSourceMeasurementIds?.includes(measurementId));
   }
 
   const measurementIds =
@@ -843,6 +850,7 @@ export function createDraftSaleFromCustomer(
           items.push({
             id: crypto.randomUUID(),
             measurementId: undefined,
+            roomId: intent.roomId || undefined,
             roomName: intent.roomName || customer.rooms?.find(r => r.id === intent.roomId)?.name || 'Bilinmeyen Oda',
             windowName: 'Ürün İsteği (Genel)',
             productType: pIntent.productType,
@@ -865,6 +873,18 @@ export function createDraftSaleFromCustomer(
     });
   }
 
+  // BİRİZ V5: ortak tüketim yalnız oda kapsamındaki hazırlanmış ölçülerle hesaplanır.
+  // Diğer perde türlerinin satış miktarları aynen korunur.
+  const birizPreparedItems = prepareBirizSaleItemsV5({
+    items,
+    measurements,
+    scope,
+    customerId: customer.id,
+    customerAddressId: resolvedCustomerAddressId,
+    rooms: customer.rooms || [],
+    selectedTransferBundles: selectedTransferBundles
+  });
+
   /*
    * SATIŞ SUNUM GRUPLAMASI
    *
@@ -882,11 +902,26 @@ export function createDraftSaleFromCustomer(
   const groupedSaleItemMap =
     new Map<string, SaleItem>();
 
-  items.forEach((item: SaleItem) => {
+  birizPreparedItems.forEach((item: SaleItem) => {
+    // V5 satırları oda başına zaten optimize edilmiştir: klasik gruplama
+    // bunları tekrar sarmalayıp ölçü kökenini kaybetmemelidir.
+    if (item.birizRuleVersion) {
+      const v5Key = `V5:${item.id}`;
+      if (groupedSaleItemMap.has(v5Key)) {
+        throw new Error('BIRIZ_V5_DUPLICATE_GROUP_LINE');
+      }
+      groupedSaleItemMap.set(v5Key, item);
+      return;
+    }
     const groupKey = [
-      normalizeSaleGroupKeyPart(item.roomName),
+      // Room ID is authoritative. Missing legacy IDs must never merge
+      // unrelated rooms merely because their display names coincide.
+      item.roomId
+        ? `ROOM:${item.roomId}`
+        : `UNBOUND:${item.measurementId || item.id}`,
       normalizeSaleGroupKeyPart(item.productType),
       normalizeSaleGroupKeyPart(item.metricUnit),
+      item.birizRuleVersion || 'LEGACY',
       normalizeSaleGroupKeyPart(item.stockItemId || ''),
       item.isJumboComponent ? 'JUMBO' : 'NORMAL',
       normalizeSaleGroupKeyPart(
@@ -1297,6 +1332,17 @@ export async function syncOrCreateDraftSale(
       ? existingDraft.items
       : [];
 
+  // Eski otomatik grup metrajlarını sessizce değiştiren normal refresh engellenir.
+  if (!normalizedTransferSelection) {
+    const newV5Rooms = new Set(newSaleObj.items.filter(item => item.birizRuleVersion).map(item => item.roomId));
+    if (newV5Rooms.size && existingItems.some(item =>
+      (!item.roomId || newV5Rooms.has(item.roomId)) &&
+      (item.birizRuleVersion || /B[İI]R[İI]Z/i.test(String(item.productType || ''))))) {
+      throw new Error('BIRIZ_V5_DRAFT_RECONCILIATION_REQUIRED');
+    }
+  }
+
+
   /*
    * Explicit transfer selection append-only ve non-destructive çalışır.
    * Bu tur seçilmeyen otomatik satırlar ile manuel satırlar aynen korunur.
@@ -1307,51 +1353,78 @@ export async function syncOrCreateDraftSale(
    * V1'de bilinçli olarak yapılmaz.
    */
   if (normalizedTransferSelection) {
+    // Eski taslak + yeni BİRİZ ölçüsü, oda toplamını yeniden uzlaştırma gerektirir.
+    // V5-C sunucu transaction/CAS doğrulanmadan eski satır sessizce değiştirilemez.
+    const requestedBirizIds = new Set(
+      normalizedTransferSelection
+        .filter(ref => ref.productType.trim().toUpperCase() === 'BIRIZ')
+        .map(ref => ref.measurementId)
+    );
+    if (requestedBirizIds.size > 0) {
+      const requestedRooms = new Set(
+        useMeasurementStore.getState().measurements
+          .filter(m => requestedBirizIds.has(m.id))
+          .map(m => m.roomId)
+      );
+      const newBirizRequested = normalizedTransferSelection.some(ref =>
+        requestedBirizIds.has(ref.measurementId) &&
+        !existingItems.some(item => saleItemContainsTransferBundleV1(item, ref))
+      );
+      if (newBirizRequested && existingItems.some(item =>
+          (!item.roomId || requestedRooms.has(item.roomId)) &&
+          (item.birizRuleVersion || String(item.productType || '').toLocaleUpperCase('tr-TR').includes('BİRİZ') ||
+           String(item.productType || '').toLocaleUpperCase('tr-TR').includes('BIRIZ')))) {
+        throw new Error('BIRIZ_V5_DRAFT_RECONCILIATION_REQUIRED');
+      }
+    }
     const additions: SaleItem[] = [];
 
-    for (const ref of normalizedTransferSelection) {
-      const alreadyExists =
-        existingItems.some(item =>
-          saleItemContainsTransferBundleV1(
-            item,
-            ref
-          )
-        );
+    // V5: A selection containing multiple new Biriz measurements must
+    // be optimized as ONE room-aware input set, not one measurement at a time.
+    // Existing Biriz in affected rooms remains guarded above until atomic
+    // draft reconciliation is available in the persistence layer.
+    const pendingRefs = normalizedTransferSelection.filter(ref =>
+      !existingItems.some(item => saleItemContainsTransferBundleV1(item, ref))
+    );
+    const newBirizRefs = pendingRefs.filter(ref =>
+      ref.productType.trim().toUpperCase() === 'BIRIZ'
+    );
+    const otherRefs = pendingRefs.filter(ref =>
+      ref.productType.trim().toUpperCase() !== 'BIRIZ'
+    );
 
-      if (alreadyExists) {
-        continue;
+    if (newBirizRefs.length) {
+      const sharedDraft = createDraftSaleFromCustomer(
+        customer,
+        actor,
+        scope,
+        [...new Set(newBirizRefs.map(ref => ref.measurementId))],
+        customerAddressId,
+        newBirizRefs
+      );
+      if (!sharedDraft.items.length) {
+        throw new Error('SALE_TRANSFER_BIRIZ_BATCH_NO_ITEMS');
       }
+      additions.push(...sharedDraft.items);
+    }
 
-      const bundleDraft =
-        createDraftSaleFromCustomer(
-          customer,
-          actor,
-          scope,
-          [ref.measurementId],
-          customerAddressId,
-          [ref]
-        );
-
-      const bundleItems =
-        bundleDraft.items.filter((item: SaleItem) => {
-          if (!item.measurementId) {
-            return true;
-          }
-
-          return (
-            Number.isFinite(Number(item.metricSize)) &&
-            Number(item.metricSize) > 0 &&
-            Number.isFinite(Number(item.quantity)) &&
-            Number(item.quantity) > 0
-          );
-        });
-
-      if (bundleItems.length === 0) {
-        throw new Error(
-          'SALE_TRANSFER_BUNDLE_NO_ITEMS'
-        );
-      }
-
+    for (const ref of otherRefs) {
+      const bundleDraft = createDraftSaleFromCustomer(
+        customer,
+        actor,
+        scope,
+        [ref.measurementId],
+        customerAddressId,
+        [ref]
+      );
+      const bundleItems = bundleDraft.items.filter((item: SaleItem) => {
+        if (!item.measurementId) return true;
+        return Number.isFinite(Number(item.metricSize)) &&
+          Number(item.metricSize) > 0 &&
+          Number.isFinite(Number(item.quantity)) &&
+          Number(item.quantity) > 0;
+      });
+      if (!bundleItems.length) throw new Error('SALE_TRANSFER_BUNDLE_NO_ITEMS');
       additions.push(...bundleItems);
     }
 

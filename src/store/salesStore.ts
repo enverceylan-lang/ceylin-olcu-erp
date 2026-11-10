@@ -92,6 +92,16 @@ export interface SaleCustomerApproval {
 export interface SaleItem {
   id: string;
   measurementId?: string;
+  roomId?: string; // Canonical room isolation for sales grouping
+  /** BİRİZ V5 calculation provenance; only present on generated Biriz group lines. */
+  birizRuleVersion?: string;
+  birizSourceMeasurementIds?: string[];
+  birizCuttingGroups?: Array<{
+    measurementIds: string[];
+    occupiedFabricWidthCm: number;
+    maxBirizWidthCm: number;
+    fabricMeters: number;
+  }>;
   roomName: string;
   windowName: string;
   productType: string;
