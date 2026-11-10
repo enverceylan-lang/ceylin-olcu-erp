@@ -1006,8 +1006,20 @@ export function requestMeasurementManualSync(direction: 'push' | 'pull'): Promis
     return Promise.resolve(true);
   }
   if (direction === 'pull') {
-    void syncNow(true);
-    return Promise.resolve(true);
+    // Do not run the bidirectional legacy sync when requesting only inbound measurements.
+    // Explicit recovery is scope-verified, read-only on the server and add-only locally.
+    return import('./deltaSyncClient').then(async ({ recoverMissingMeasurementsFromCanonical }) => {
+      const result = await recoverMissingMeasurementsFromCanonical();
+      if (!result.success) {
+        console.error('[P0 Recovery] Incomplete recovery', {
+          recovered: result.recovered,
+          existing: result.existing,
+          unresolved: result.unresolved,
+          errorCount: result.errors.length,
+        });
+      }
+      return result.success;
+    });
   }
   return Promise.resolve(false);
 }

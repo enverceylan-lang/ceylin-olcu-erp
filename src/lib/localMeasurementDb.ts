@@ -1369,3 +1369,26 @@ export async function batchSaveLocalMeasurements(
     throw err;
   }
 }
+
+// P0 recovery: Dexie add() is an atomic insert-if-absent on the unique ID key.
+// Never use put() or batchUpsertMeasurements() for server-snapshot recovery.
+// A duplicate means another writer has already created the row: preserve it.
+export async function addRecoveredLocalMeasurementIfAbsent(
+  measurement: MeasurementRecord,
+): Promise<"INSERTED" | "EXISTS"> {
+  const normalized = normalizeMeasurementLinks(measurement);
+  if (!String(normalized.id || "").trim()) {
+    throw new Error("RECOVERY_LOCAL_ID_MISSING");
+  }
+  try {
+    await localMeasurementDb.measurements.add(normalized);
+    return "INSERTED";
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === "ConstraintError") {
+      // Fail closed if the storage did not actually retain this ID.
+      const existing = await localMeasurementDb.measurements.get(normalized.id);
+      if (existing) return "EXISTS";
+    }
+    throw error;
+  }
+}

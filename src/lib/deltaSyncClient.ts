@@ -6,7 +6,8 @@ import {
   type ErpScope,
 } from './erpScope';
 import { useMeasurementStore } from "@/store/measurementStore";
-import { getLocalMeasurementById } from "./localMeasurementDb";
+import { getLocalMeasurementById, localMeasurementDb, addRecoveredLocalMeasurementIfAbsent } from "./localMeasurementDb";
+import { readErpScope } from "./customerTreeScope";
 import { useStore } from "@/store/useStore";
 import { loadLocalCustomers, saveLocalCustomerWithoutSync } from "./localCustomerDb";
 import { resolveMeasurementParentCustomerId } from "./measurementParentAckGate";
@@ -1124,6 +1125,157 @@ export async function pushDeltaSyncEvents(): ReturnType<typeof pushDeltaSyncEven
 export async function pushMeasurementSyncEvents(): ReturnType<typeof pushDeltaSyncEventsUnlocked> {
   return pushDeltaSyncEventsWithMode(true);
 }
+
+// P0 canonical snapshot recovery. Explicit action only: never triggered by delta sync.
+// Add missing IDs; never overwrite pending local edits, tombstones or newer versions.
+export async function recoverMissingMeasurementsFromCanonical(): Promise<{
+  success: boolean;
+  recovered: number;
+  existing: number;
+  unresolved: number;
+  errors: string[];
+}> {
+  let recovered = 0;
+  let existing = 0;
+  let unresolved = 0;
+  const errors: string[] = [];
+  try {
+    const { currentUser, sessionToken } = useAuthStore.getState();
+    if (!currentUser || !sessionToken ||
+        !["ADMIN", "OFFICE"].includes(String(currentUser.role).toUpperCase())) {
+      throw new Error("RECOVERY_AUTH_REQUIRED");
+    }
+    const scope = await loadVerifiedClientErpScope(sessionToken);
+    // Fail closed: measurementStore.loadMeasurements() catches read failures and
+    // otherwise leaves the previous in-memory snapshot in place.
+    // A direct IndexedDB read must succeed before any recovery mutation.
+    await localMeasurementDb.measurements.toArray();
+    await useMeasurementStore.getState().loadMeasurements();
+    const persisted = await loadLocalCustomers();
+    const customers = new Map<string, LocalCustomer>();
+    for (const customer of useStore.getState().customers) customers.set(customer.id, customer);
+    for (const customer of persisted) customers.set(customer.id, customer);
+    const seen = new Set<string>();
+    let offset = 0;
+    for (let page = 0; page < 101; page++) {
+      const response = await fetch("/api/measurements/recovery", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionToken}` },
+        body: JSON.stringify({ offset }),
+      });
+      if (!response.ok) throw new Error(`RECOVERY_HTTP_${response.status}`);
+      const body: unknown = await response.json();
+      if (!body || typeof body !== "object" ||
+          (body as { success?: unknown }).success !== true ||
+          !Array.isArray((body as { measurements?: unknown }).measurements)) {
+        throw new Error("RECOVERY_RESPONSE_INVALID");
+      }
+      const payload = body as {
+        measurements: Array<Record<string, unknown>>;
+        sourceCount: number;
+        nextOffset: number;
+        hasMore: boolean;
+        excludedCount: number;
+      };
+      if (!Number.isInteger(payload.sourceCount) || payload.sourceCount < 0 ||
+          !Number.isInteger(payload.nextOffset) || payload.nextOffset !== offset + payload.sourceCount ||
+          typeof payload.hasMore !== "boolean" ||
+          !Number.isInteger(payload.excludedCount) || payload.excludedCount < 0 ||
+          payload.measurements.length > payload.sourceCount) {
+        throw new Error("RECOVERY_PAGE_CONTRACT_INVALID");
+      }
+      unresolved += payload.excludedCount;
+      for (const row of payload.measurements) {
+        const id = typeof row.id === "string" ? row.id.trim() : "";
+        const customerId = typeof row.customerId === "string" ? row.customerId.trim() : "";
+        const roomId = typeof row.roomId === "string" ? row.roomId.trim() : "";
+        if (!id || !customerId || !roomId || row.isDeleted === true || seen.has(id) ||
+            row.tenant_id !== scope.tenantId || row.company_id !== scope.companyId ||
+            row.branch_id !== scope.branchId || row.accounting_period_id !== scope.accountingPeriodId) {
+          throw new Error("RECOVERY_ROW_IDENTITY_OR_SCOPE_INVALID");
+        }
+        seen.add(id);
+        // Read IndexedDB directly: state can be stale, and recovery must not overwrite local edits.
+        const local = await localMeasurementDb.measurements.get(id);
+        const inMemory = useMeasurementStore.getState().measurements.find((m) => m.id === id);
+        const existingMeasurement = local || inMemory;
+        // Never overwrite a local ID, including local tombstones and pending edits.
+        // If it was previously inserted by recovery but its parent write failed,
+        // allow a verified parent-only repair on the next explicit recovery.
+        const canonicalOpening = typeof row.openingId === "string" ? row.openingId.trim() : "";
+        if (existingMeasurement && (
+            existingMeasurement.customerId !== customerId ||
+            existingMeasurement.roomId !== roomId ||
+            String(existingMeasurement.openingId || existingMeasurement.windowId || "").trim() !== canonicalOpening ||
+            Boolean(existingMeasurement.isDeleted))) {
+          existing += 1;
+          continue;
+        }
+        const customer = customers.get(customerId);
+        if (!customer || customer.isDeleted ||
+            !erpScopeMatches(readErpScope(customer) || { tenantId: "", companyId: "", branchId: "", accountingPeriodId: "" }, scope) ||
+            !useStore.getState().customers.some((item) => item.id === customerId && !item.isDeleted)) {
+          unresolved += 1;
+          continue;
+        }
+        const openingId = typeof row.openingId === "string" ? row.openingId.trim() : "";
+        // Existing IDs with an intact local parent need no API read or write.
+        // Only a missing parent enters the verified parent-only repair path.
+        if (existingMeasurement) {
+          const localRoom = (customer.rooms || []).find((item) => item.id === roomId && !item.isDeleted);
+          const localOpenings = localRoom?.windows || [];
+          if (localRoom && (!openingId || localOpenings.some((item) => item.id === openingId && !item.isDeleted))) {
+            existing += 1;
+            continue;
+          }
+        }
+        const canonical = {
+          ...row,
+          id, customerId, roomId,
+          openingId: openingId || undefined,
+          windowId: openingId || undefined,
+          version: Number(row.entity_version) > 0 ? Number(row.entity_version) : 1,
+        } as LocalMeasurement;
+        // A row without a usable template/dimensions must be reviewed, not silently invented.
+        if (!canonical.templateType || !canonical.rawValues || typeof canonical.rawValues !== "object") {
+          unresolved += 1;
+          continue;
+        }
+        try {
+          // Read and verify the canonical parent before any persistent write.
+          const parent = await readScopedCanonicalParent(sessionToken, scope, {
+            customerId, roomId, ...(openingId ? { openingId } : {}),
+          });
+          let outcome: "INSERTED" | "EXISTS" = "EXISTS";
+          if (!existingMeasurement) {
+            // Insert first: an IndexedDB failure must not create an empty room.
+            outcome = await addRecoveredLocalMeasurementIfAbsent(canonical);
+          }
+          // Cross-DB atomicity is impossible: these are separate Dexie DBs.
+          // If this parent write fails, a later explicit recovery will repair
+          // the matching existing ID without ever overwriting its measurement.
+          const materialized = await ensureCustomerStructureForMeasurement(customer, canonical, parent);
+          customers.set(customerId, materialized);
+          if (outcome === "EXISTS") existing += 1;
+          else recovered += 1;
+          // Refresh from canonical local persistence, not a stale store snapshot.
+          await useMeasurementStore.getState().loadMeasurements();
+        } catch (error) {
+          unresolved += 1;
+          errors.push(`RECOVERY_ITEM_BLOCKED:${id}:${getErrorMessage(error)}`);
+        }
+      }
+      if (!payload.hasMore) return { success: errors.length === 0 && unresolved === 0, recovered, existing, unresolved, errors };
+      if (payload.sourceCount !== 100) throw new Error("RECOVERY_PAGE_SIZE_INVALID");
+      offset = payload.nextOffset;
+    }
+    throw new Error("RECOVERY_PAGE_LIMIT_EXCEEDED");
+  } catch (error) {
+    errors.push(getErrorMessage(error));
+    return { success: false, recovered, existing, unresolved, errors };
+  }
+}
+
 export async function pullInboundMeasurements(
   allLocalCustomers: LocalCustomer[],
 ): Promise<{
