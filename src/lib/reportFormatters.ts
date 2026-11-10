@@ -1037,6 +1037,25 @@ export function buildWhatsAppShortReport(
               `• ${openingPrefix}${productLabel}: ${display.dimensionText}`,
             );
 
+            if (product.productType === 'BIRIZ') {
+              // Only present the stored product calculation; no sale/cutting recomputation.
+              const birizCalc = getStoredProductCalculation(product, 'BIRIZ');
+              const birizType = birizCalc.birizType === 'SALIK' || birizCalc.birizType === 'SABIT'
+                ? birizCalc.birizType
+                : null;
+              const rodCount = birizType === 'SALIK' ? 1 : birizType === 'SABIT' ? 2 : null;
+              const tulMeters = Number(birizCalc.birizTulMeters);
+              const rodMeters = Number(birizCalc.rodLengthMeters);
+              roomLines.push(`  Biriz türü: ${birizType === 'SALIK' ? 'Salık' : birizType === 'SABIT' ? 'Sabit' : 'Belirtilmemiş'}`);
+              if (Number.isFinite(tulMeters) && tulMeters > 0 &&
+                  Number.isFinite(rodMeters) && rodMeters > 0) {
+                roomLines.push(
+                  `  Tül: ${tulMeters.toFixed(2)} mt, Çubuk: ${rodMeters.toFixed(2)} mt` +
+                  (rodCount === null ? '' : ` (${rodCount} çubuk), Başlık: ${rodCount * 2} adet`),
+                );
+              }
+            }
+
             if (note) {
               roomLines.push(
                 `  Not: ${note}`,

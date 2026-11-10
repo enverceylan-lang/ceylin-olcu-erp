@@ -1611,8 +1611,22 @@ export function MeasurementVisualReport({ isOpen, onClose, customer, measurement
             ) {
               detailsList.push('Lazer Etek: Aktif');
             }
-            if (item.productType === 'BIRIZ' && calc.birizTulMeters) {
-              detailsList.push(`Biriz Tül: ${calc.birizTulMeters} m, Demir: ${calc.rodLengthMeters} m (2 çubuk), Başlık: ${calc.capsCount} adet`);
+            if (item.productType === 'BIRIZ') {
+              // Report stored values without inventing a legacy BIRIZ type.
+              const birizType = calc.birizType === 'SALIK' || calc.birizType === 'SABIT'
+                ? calc.birizType
+                : null;
+              const rodCount = birizType === 'SALIK' ? 1 : birizType === 'SABIT' ? 2 : null;
+              const tulMeters = Number(calc.birizTulMeters);
+              const rodMeters = Number(calc.rodLengthMeters);
+              if (Number.isFinite(tulMeters) && tulMeters > 0 &&
+                  Number.isFinite(rodMeters) && rodMeters > 0) {
+                detailsList.push(
+                  `Biriz (${birizType === 'SALIK' ? 'Salık' : birizType === 'SABIT' ? 'Sabit' : 'Belirtilmemiş'}): ` +
+                  `Tül ${tulMeters.toFixed(2)} mt, Çubuk ${rodMeters.toFixed(2)} mt` +
+                  (rodCount === null ? '' : ` (${rodCount} çubuk), Başlık ${rodCount * 2} adet`)
+                );
+              }
             }
 
             return (
