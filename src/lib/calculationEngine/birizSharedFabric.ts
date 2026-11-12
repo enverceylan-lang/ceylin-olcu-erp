@@ -84,7 +84,6 @@ export function optimizeBirizSharedFabric(request: BirizSharedFabricRequest): Bi
     requireFiniteNonnegative(p.heightCm,'PIECE_HEIGHT',true);
     requireFiniteNonnegative(p.foldingAllowanceCm,'FOLDING_ALLOWANCE',false);
     const occupied = p.heightCm + p.foldingAllowanceCm;
-    if (occupied > request.usableFabricWidthCm + 1e-9) throw new Error('BIRIZ_V5A_PIECE_DOES_NOT_FIT');
     return { ...p, measurementId, compatibilityKey:p.compatibilityKey.trim(), occupied };
   }).sort((a,b)=> a.measurementId.localeCompare(b.measurementId,'en'));
   const n = pieces.length;
@@ -100,7 +99,11 @@ export function optimizeBirizSharedFabric(request: BirizSharedFabricRequest): Bi
     widths[mask]=widths[prev]+pieces[i].occupied;
     maxCutWidth[mask]=Math.max(maxCutWidth[prev],pieces[i].widthCm);
     const prevFirstIndex=prev ? 31-Math.clz32(prev & -prev) : i;
-    allowed[mask]=widths[mask] <= request.usableFabricWidthCm + 1e-9 && (prev === 0 || (allowed[prev] && pieces[i].compatibilityKey === pieces[prevFirstIndex].compatibilityKey));
+    // Oversize pieces are billed individually with the existing width-based rounding.
+    allowed[mask] = prev === 0 || (
+      widths[mask] <= request.usableFabricWidthCm + 1e-9 &&
+      allowed[prev] && pieces[i].compatibilityKey === pieces[prevFirstIndex].compatibilityKey
+    );
     if (allowed[mask]) costs[mask]=tenthsOfMeters(maxCutWidth[mask]);
   }
   const best = new Array<number>(totalMasks).fill(Infinity);

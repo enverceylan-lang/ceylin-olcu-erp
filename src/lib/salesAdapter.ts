@@ -474,8 +474,22 @@ export function createDraftSaleFromCustomer(
   measurements.forEach(m => {
     const room = customer.rooms?.find(r => r.id === m.roomId);
     const win = room?.windows?.find(w => w.id === (m.openingId || m.windowId));
-    const activeProducts =
-      (m.selectedProducts?.filter(sp => sp.isActive) || [])
+    const selectedProducts = m.selectedProducts?.filter(product => product.isActive) || [];
+    const hasBiriz = selectedProducts.some(product =>
+      product.productType.trim().toUpperCase() === 'BIRIZ' &&
+      (!selectedTransferBundleKeys || selectedTransferBundleKeys.has(
+        saleTransferBundleKeyV1({ measurementId: m.id, productType: product.productType })
+      ))
+    );
+    const activeProducts = selectedProducts
+        .filter(product => {
+          // The legacy measurement default has the measurement creation timestamp.
+          // Explicit room preparation stores product overrides.
+          const inheritedTul = product.productType.trim().toUpperCase() === 'TUL' &&
+            Boolean(m.createdAt) && product.addedAt === m.createdAt &&
+            !product.userOverrides && !product.stockId;
+          return !(hasBiriz && inheritedTul);
+        })
         .filter(product =>
           !selectedTransferBundleKeys ||
           selectedTransferBundleKeys.has(

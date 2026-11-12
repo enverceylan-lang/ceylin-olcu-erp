@@ -43,6 +43,56 @@ async function run() {
     assert.equal(saved.customerAddressId, undefined);
     assert.ok(saved.items.some(line => line.metricUnit === "mt" && line.metricSize === 2.6));
     console.log("Addressless BİRİZ real sale adapter: PAK");
+
+    const createdAt = "2026-11-12T08:00:00.000Z";
+    const withTul = (id: string, width: number, kind: "SALIK" | "SABIT", explicit = false) => {
+      const base = measurement(id, width);
+      return {
+        ...base, createdAt,
+        selectedProducts: [
+          { productType: "TUL", isActive: true, addedAt: createdAt,
+            ...(explicit ? { userOverrides: { pleatFactor: 3.2 } } : {}),
+            calculation: calculateSelectedProduct("TUL", width, 80, { pleatFactor: 3.2 }) },
+          { productType: "BIRIZ", isActive: true, userOverrides: { birizType: kind },
+            calculation: calculateSelectedProduct("BIRIZ", width, 80, { birizType: kind }) },
+        ],
+      };
+    };
+    const transferRoom = async (measurements: MeasurementRecord[]) => {
+      draft = undefined;
+      useMeasurementStore.setState({ measurements });
+      await syncOrCreateDraftSale(customer, store, actor, scope);
+      assert.ok(draft);
+      return (draft as Sale).items;
+    };
+    const duplicateFixture = await transferRoom([withTul("salik", 75, "SALIK"), withTul("sabit", 65, "SABIT")]);
+    assert.deepEqual(duplicateFixture.map(item => [item.metricSize, item.metricUnit]).sort(), [[2.05, "mt"], [2.4, "mt"], [6, "adet"]]);
+    assert.equal(duplicateFixture.filter(item => item.birizCuttingGroups).length, 1);
+    assert.ok(duplicateFixture.every(item => item.birizRuleVersion));
+
+    const independent = await transferRoom([withTul("salik", 75, "SALIK", true), withTul("sabit", 65, "SABIT")]);
+    assert.equal(independent.filter(item => !item.birizRuleVersion && item.productType === "TUL").length, 1);
+    assert.equal(independent.find(item => item.birizCuttingGroups)?.metricSize, 2.4);
+
+    const atHeight = (id: string, width: number, height: number) => ({
+      ...measurement(id, width),
+      rawValues: { windowWidth: width, windowHeight: height },
+      selectedProducts: [{ productType: "BIRIZ", isActive: true,
+        calculation: calculateSelectedProduct("BIRIZ", width, height, {}) }],
+    });
+    // The 280 cm rule applies after adding the existing 30 cm folding allowance.
+    const mixed = await transferRoom([
+      atHeight("short-a", 75, 80), atHeight("short-b", 65, 80),
+      atHeight("exact-280", 60, 250), atHeight("above-280", 80, 251),
+    ]);
+    const fabric = mixed.filter(item => item.birizCuttingGroups);
+    assert.equal(fabric.length, 1);
+    assert.equal(fabric[0].metricSize, 7);
+    assert.deepEqual(fabric[0].birizCuttingGroups?.map(group =>
+      [group.measurementIds.join(","), group.occupiedFabricWidthCm, group.fabricMeters]), [
+      ["above-280", 281, 2.6], ["exact-280", 280, 2], ["short-a,short-b", 220, 2.4],
+    ]);
+    console.log("BİRİZ V5 duplicate, independent TÜL and 280 cm boundary: PAK");
   } finally {
     useMeasurementStore.setState({ measurements: prior });
   }
