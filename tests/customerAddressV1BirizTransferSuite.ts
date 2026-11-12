@@ -133,6 +133,24 @@ async function run() {
     draft = approved;
     await assert.rejects(repair(), { message: "TARGET_SALE_NOT_FOUND_OR_NOT_EDITABLE" });
     assert.deepEqual(draft, approved);
+    // Legacy default TUL added immediately after measurement creation:
+    // the historical exact-string comparison must not retain a duplicate.
+    const delayedDefault = (id: string, width: number, kind: "SALIK" | "SABIT") => {
+      const base = withTul(id, width, kind);
+      return { ...base, selectedProducts: base.selectedProducts.map((p, index) =>
+        index === 0 ? { ...p, addedAt: "2026-11-12T08:00:01.000Z" } : p) };
+    };
+    const delayed = [delayedDefault("salik", 75, "SALIK"), delayedDefault("sabit", 65, "SABIT")];
+    useMeasurementStore.setState({ measurements: delayed });
+    const oldDelayed = createDraftSaleFromCustomer(customer, actor, scope,
+      ["salik", "sabit"], undefined,
+      refs.map(ref => ({ ...ref, productType: "TUL" })));
+    assert.equal(oldDelayed.items.find(item => item.productType === "TUL")?.metricSize, 4.5);
+    draft = { ...oldDelayed, items: [...duplicateFixture, ...oldDelayed.items] };
+    await syncOrCreateDraftSale(customer, store, actor, scope, oldDelayed.id, undefined, refs);
+    assert.equal(draft?.items.filter(item => item.productType === "TUL").length, 0);
+    assert.deepEqual(draft?.items.filter(item => item.birizRuleVersion).map(item => item.metricSize).sort(), [2.05, 2.4, 6]);
+    console.log("BIRIZ delayed default TUL legacy repair: PAK");
     console.log("BİRİZ V5 legacy draft reconciliation: PAK");
 
     const atHeight = (id: string, width: number, height: number) => ({

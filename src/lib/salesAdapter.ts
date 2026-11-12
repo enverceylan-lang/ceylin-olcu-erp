@@ -446,9 +446,20 @@ function isInheritedTul(
   measurement: MeasurementRecord,
   product: NonNullable<MeasurementRecord['selectedProducts']>[number]
 ): boolean {
-  return product.productType.trim().toUpperCase() === 'TUL' &&
-    Boolean(measurement.createdAt) && product.addedAt === measurement.createdAt &&
-    !product.userOverrides && !product.stockId;
+  if (product.productType.trim().toUpperCase() !== 'TUL' ||
+      product.userOverrides || product.stockId) return false;
+  if (Boolean(measurement.createdAt) && product.addedAt === measurement.createdAt) return true;
+  // Legacy normalization could stamp the original default immediately after creation.
+  // Do not infer defaults when timestamps are absent or arbitrary, or when the
+  // selected TUL is not the first selection accompanied by an active BIRIZ.
+  const selected = measurement.selectedProducts || [];
+  if (selected[0] !== product ||
+      selected.filter(p => p.productType.trim().toUpperCase() === 'TUL').length !== 1 ||
+      !selected.some(p => p.isActive && p.productType.trim().toUpperCase() === 'BIRIZ')) return false;
+  const created = Date.parse(measurement.createdAt || '');
+  const added = Date.parse(product.addedAt || '');
+  return Number.isFinite(created) && Number.isFinite(added) &&
+    added >= created && added - created <= 3000;
 }
 
 function reconcileBirizDraftItems(
