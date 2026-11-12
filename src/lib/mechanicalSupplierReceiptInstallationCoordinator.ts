@@ -2,15 +2,10 @@ import type {
   SupplierOrder,
   SupplierReceiptRequest
 } from "@/lib/supplierSupplyFlow";
-import {
-  resolveInstallationAssignment
-} from "@/lib/installationAssignmentService";
+import { routeReadySaleInstallation } from "@/lib/tailorCompletionInstallationCoordinator";
 import type {
   OperationRecord
 } from "@/lib/operationsWorkflow";
-import {
-  useAuthStore
-} from "@/store/useAuthStore";
 import {
   useOperationsStore
 } from "@/store/useOperationsStore";
@@ -99,27 +94,6 @@ function findMainOperation(
         operation.kind === "GENERAL" &&
         operation.saleId === saleId &&
         operation.status !== "CANCELLED" &&
-        sameScope(operation, scope)
-    );
-}
-
-function findInstallationOperation(
-  parentId: string,
-  partyId: string,
-  scope: SupplierReceiptRequest
-): OperationRecord | undefined {
-  return useOperationsStore
-    .getState()
-    .operations.find(
-      operation =>
-        operation.kind ===
-          "INSTALLATION" &&
-        operation.parentOperationId ===
-          parentId &&
-        operation.party?.id ===
-          partyId &&
-        operation.status !==
-          "CANCELLED" &&
         sameScope(operation, scope)
     );
 }
@@ -252,185 +226,15 @@ export function executeMechanicalSupplierReceiptToInstallation(
     };
   }
 
-  if (
-    product.requiresInstallation !==
-    true
-  ) {
-    return {
-      outcome:
-        receipt.outcome === "REPLAY"
-          ? "REPLAY"
-          : "READY_NO_INSTALLATION",
-      supplierOrder: orderAfter
-    };
+  const parent = findMainOperation(orderAfter.saleId, input.request);
+  if (!parent) return { outcome: "READY_NOT_ROUTED", supplierOrder: orderAfter, reason: "MAIN_OPERATION_NOT_FOUND" };
+  const result = routeReadySaleInstallation(parent, orderAfter.saleItemId,
+    input.request.receivedByUserId, input.now ?? input.request.receivedAt);
+  if (result.outcome === "ROUTED" || result.outcome === "REPLAY") {
+    return { outcome: result.outcome, supplierOrder: orderAfter, installationOperation: result.installationOperation };
   }
-
-  const customer =
-    appState.customers.find(
-      candidate =>
-        candidate.id ===
-        useOperationsStore
-          .getState()
-          .operations.find(
-            operation =>
-              operation.kind ===
-                "GENERAL" &&
-              operation.saleId ===
-                orderAfter.saleId &&
-              operation.status !==
-                "CANCELLED" &&
-              sameScope(
-                operation,
-                input.request
-              )
-          )?.customerId
-    );
-
-  const assignedInstallerId =
-    customer
-      ?.assignedInstallerId
-      ?.trim() || "";
-
-  if (!assignedInstallerId) {
-    return {
-      outcome:
-        "WAITING_ASSIGNMENT",
-      supplierOrder: orderAfter,
-      reason:
-        "NO_ASSIGNED_INSTALLER"
-    };
+  if (result.outcome === "WAITING_ASSIGNMENT") {
+    return { outcome: result.outcome, supplierOrder: orderAfter, reason: result.reason };
   }
-
-  const assignedUser =
-    useAuthStore
-      .getState()
-      .users.find(
-        user =>
-          user.id ===
-          assignedInstallerId
-      );
-
-  if (!assignedUser) {
-    return {
-      outcome:
-        "WAITING_ASSIGNMENT",
-      supplierOrder: orderAfter,
-      reason:
-        "ASSIGNED_INSTALLER_NOT_FOUND"
-    };
-  }
-
-  const assignment =
-    resolveInstallationAssignment({
-      id: assignedUser.id,
-      name: assignedUser.name,
-      phone: assignedUser.phone,
-      role: assignedUser.role,
-      isActive: assignedUser.isActive,
-      providerCustomerId:
-        assignedUser
-          .providerCustomerId,
-      providerType:
-        assignedUser.providerType
-    });
-
-  if (
-    assignment.mode ===
-    "UNASSIGNED" ||
-    assignment.mode ===
-    "REJECTED"
-  ) {
-    return {
-      outcome:
-        "WAITING_ASSIGNMENT",
-      supplierOrder: orderAfter,
-      reason:
-        "ASSIGNED_INSTALLER_INVALID"
-    };
-  }
-
-  const parent =
-    findMainOperation(
-      orderAfter.saleId,
-      input.request
-    );
-
-  if (!parent) {
-    return {
-      outcome:
-        "READY_NOT_ROUTED",
-      supplierOrder: orderAfter,
-      reason:
-        "MAIN_OPERATION_NOT_FOUND"
-    };
-  }
-
-  const existing =
-    findInstallationOperation(
-      parent.id,
-      assignment.party.id,
-      input.request
-    );
-
-  if (
-    receipt.outcome === "REPLAY" &&
-    existing
-  ) {
-    return {
-      outcome: "REPLAY",
-      supplierOrder: orderAfter,
-      installationOperation:
-        existing
-    };
-  }
-
-  const now =
-    input.now ??
-    input.request.receivedAt;
-
-  const route =
-    useOperationsStore
-      .getState()
-      .routeChild({
-        parent,
-        kind: "INSTALLATION",
-        party: assignment.party,
-        scheduledAt: now,
-        dueAt: now,
-        priority: "NORMAL",
-        notes:
-          `Mekanik ürün tedarikçi teslimi tamamlandı. Sipariş: ${orderAfter.id}`,
-        createdByUserId:
-          input.request
-            .receivedByUserId,
-        now
-      });
-
-  if (
-    route.outcome ===
-    "REJECTED"
-  ) {
-    /*
-     * Fiziksel teslim gerçektir.
-     * Operasyon yönlendirmesi başarısız diye
-     * supplier receipt geri alınmaz.
-     */
-    return {
-      outcome:
-        "READY_NOT_ROUTED",
-      supplierOrder: orderAfter,
-      reason:
-        "INSTALLATION_ROUTE_REJECTED"
-    };
-  }
-
-  return {
-    outcome:
-      route.outcome === "REPLAY"
-        ? "REPLAY"
-        : "ROUTED",
-    supplierOrder: orderAfter,
-    installationOperation:
-      route.operation
-  };
+  return { outcome: "READY_NOT_ROUTED", supplierOrder: orderAfter, reason: "INSTALLATION_ROUTE_REJECTED" };
 }

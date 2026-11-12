@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
-import { ArrowLeft, Save, MapPin, Loader2, Camera, X } from "lucide-react";
+import { ArrowLeft, Save, Loader2, Camera, X } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -9,6 +9,7 @@ import { useStore, generateUUID } from "@/store/useStore";
 import { useAuthStore, canCreateCariType, normalizeRole } from "@/store/useAuthStore";
 import { fileToDataUrl } from "@/lib/fileStorage";
 import { syncNow } from "@/lib/syncService";
+import { CustomerAddressModal, type AddressInput } from "@/components/modals/CustomerAddressModal";
 
 export default function YeniCariPage() {
   const router = useRouter();
@@ -101,31 +102,8 @@ export default function YeniCariPage() {
     ((normRole === 'FIELD' || currentUser.role === 'SALES') && isCustomer)
   );
 
-  const [fetchingLocation, setFetchingLocation] = useState(false);
-
-  const handleGetLocation = () => {
-    if (!navigator.geolocation) {
-      showToast("Tarayıcınız konum bilgisini desteklemiyor.");
-      return;
-    }
-    setFetchingLocation(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-        setFormData(prev => ({
-          ...prev,
-          mapLocation: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
-        }));
-        setFetchingLocation(false);
-      },
-      (error) => {
-        console.error(error);
-        showToast("Konum bilgisi alınamadı. Lütfen konum izinlerini kontrol edin.");
-        setFetchingLocation(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
-  };
+  const [addressDraft, setAddressDraft] = useState<AddressInput | null>(null);
+  const [addressOpen, setAddressOpen] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -133,7 +111,9 @@ export default function YeniCariPage() {
     console.log('[UI Diagnostic] submit started');
     console.log('[UI Diagnostic] isSaving before:', isSaving);
     
-    if (!formData.name || isSaving) return;
+    if (isSaving) return;
+    if (!formData.name.trim()) { showToast("Cari adı zorunludur."); return; }
+    if (!formData.phone.trim() && !formData.phone2.trim()) { showToast("En az bir telefon girin."); return; }
     
     setIsSaving(true);
     
@@ -148,7 +128,10 @@ export default function YeniCariPage() {
       await addCustomer({
         ...formData,
         id: customerId
-      });
+      }, addressDraft ?? undefined);
+      if (!useStore.getState().customers.some(customer => customer.id === customerId)) {
+        throw new Error("Cari oluşturulmadı.");
+      }
       console.log('[UI Diagnostic] addCustomer success: true');
       console.log('[UI Diagnostic] local count after add:', useStore.getState().customers.length);
     } catch (err) {
@@ -176,6 +159,7 @@ export default function YeniCariPage() {
     
     // Generate a new submitId for future form usage
     setSubmitId(generateUUID());
+    setAddressDraft(null);
 
     // Trigger sync in the background with separate try/catch
     console.log('[UI Diagnostic] background sync started');
@@ -319,42 +303,13 @@ export default function YeniCariPage() {
               />
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Cari Konum</label>
-              <div className="flex gap-2">
-                <input 
-                  type="text" 
-                  value={formData.mapLocation}
-                  onChange={e => setFormData({...formData, mapLocation: e.target.value})}
-                  className="flex-1 px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 focus:ring-2 focus:ring-blue-500 outline-none transition-shadow text-sm" 
-                  placeholder="39.9334, 32.8597 veya https://maps.app.goo.gl/..." 
-                />
-                <button
-                  type="button"
-                  onClick={handleGetLocation}
-                  disabled={fetchingLocation}
-                  className="flex items-center gap-1 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 transition-colors text-xs font-semibold cursor-pointer"
-                  title="Mevcut Konumu Al"
-                >
-                  {fetchingLocation ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <MapPin className="w-4 h-4 text-red-500" />
-                  )}
-                  {fetchingLocation ? "Alınıyor..." : "Konum Al"}
-                </button>
-              </div>
-            </div>
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Cari Adresi</label>
-            <textarea 
-              rows={2} 
-              value={formData.address}
-              onChange={e => setFormData({...formData, address: e.target.value})}
-              className="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 focus:ring-2 focus:ring-blue-500 outline-none transition-shadow" 
-              placeholder="Müşteri adresi..."></textarea>
+            <button type="button" onClick={() => setAddressOpen(true)} className="rounded-lg border px-3 py-2 text-sm">
+              {addressDraft ? "Adresi düzenle" : "Adres ekle (isteğe bağlı)"}
+            </button>
+            {addressDraft && <p className="text-sm">{[addressDraft.title, addressDraft.province, addressDraft.district, addressDraft.address].filter(Boolean).join(" · ")}</p>}
           </div>
 
           {canAddAddressPhoto && (
@@ -503,6 +458,12 @@ export default function YeniCariPage() {
           </div>
         </div>
       )}
+
+      <CustomerAddressModal isOpen={addressOpen} address={addressDraft}
+        onClose={() => setAddressOpen(false)} onSave={async address => {
+          setAddressDraft(address);
+          setAddressOpen(false);
+        }} />
 
       {toastMessage && (
         <div className="fixed bottom-4 right-4 bg-gray-900 dark:bg-gray-800 text-white px-4 py-3 rounded-lg shadow-lg z-50 text-sm flex items-center gap-2 border border-gray-800 animate-slide-up">

@@ -7,10 +7,10 @@ interface CariCustomerTabsNavProps {
 }
 
 function tabClassName(active: boolean): string {
-  return `pb-3 text-sm font-semibold border-b-2 transition-colors cursor-pointer ${
+  return `min-h-11 shrink-0 whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-sky-500 ${
     active
-      ? "border-blue-500 text-blue-600 dark:text-blue-400"
-      : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400"
+      ? "bg-sky-100 text-sky-900 dark:bg-[#89ceff] dark:text-[#00344d]"
+      : "text-slate-600 hover:bg-white hover:text-slate-900 dark:text-slate-300 dark:hover:bg-[#222a3d]"
   }`;
 }
 
@@ -20,7 +20,7 @@ export function CariCustomerTabsNav({
   onTabChange,
 }: CariCustomerTabsNavProps) {
   return (
-    <div className="flex border-b border-gray-200 dark:border-gray-800 mb-4 gap-6">
+    <div className="mb-4 flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-slate-100 p-1 dark:border-[#3e4850] dark:bg-[#131b2e]">
       <button
         onClick={() => onTabChange("rooms")}
         className={tabClassName(activeTab === "rooms")}

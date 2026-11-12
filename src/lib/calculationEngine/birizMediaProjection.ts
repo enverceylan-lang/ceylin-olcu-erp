@@ -46,7 +46,7 @@ export function prepareBirizMediaRoom(
 ): BirizMediaProjection {
   if (!scope || !Array.isArray(measurements) || !measurements.length) throw new Error('BIRIZ_MEDIA_INPUT_REQUIRED');
   for (const key of KEYS) {
-    if (typeof scope[key] !== 'string' || !scope[key].trim()) throw new Error(`BIRIZ_MEDIA_SCOPE_${key}_REQUIRED`);
+    if (typeof scope[key] !== 'string' || (key !== 'customerAddressId' && !scope[key].trim())) throw new Error(`BIRIZ_MEDIA_SCOPE_${key}_REQUIRED`);
   }
   const ids = new Set<string>();
   const pieces = measurements.map((m) => {

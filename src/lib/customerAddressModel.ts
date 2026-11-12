@@ -1,4 +1,29 @@
-import type { CustomerAddress } from '@/store/useStore';
+import type { Customer, CustomerAddress } from '@/store/useStore';
+import type { Sale } from '@/store/salesStore';
+import { erpScopeMatches, type ErpScope } from './erpScope';
+import { readErpScope } from './customerTreeScope';
+
+export function resolveInstallationWorkAddress(
+  scope: ErpScope & { customerId: string },
+  sale: Sale | undefined,
+  customers: Customer[],
+): string | undefined {
+  if (!sale || !erpScopeMatches(sale, scope) || sale.customerId !== scope.customerId) return;
+  const id = sale.customerAddressId?.trim();
+  const snapshot = sale.customerAddressSnapshot;
+  if (!id || snapshot?.customerAddressId !== id || !snapshot.address?.trim()) return;
+  const customer = customers.find(candidate => {
+    const candidateScope = readErpScope(candidate);
+    return !candidate.isDeleted && candidate.id === sale.customerId &&
+      candidateScope && erpScopeMatches(candidateScope, scope);
+  });
+  const address = customer?.addresses?.find(candidate => {
+    const candidateScope = readErpScope(candidate);
+    return !candidate.isDeleted && candidate.id === id && candidate.customerId === sale.customerId &&
+      candidateScope && erpScopeMatches(candidateScope, scope);
+  });
+  return address ? snapshot.address.trim() : undefined;
+}
 
 export const CUSTOMER_ADDRESS_TITLE_REQUIRED_MESSAGE =
   'Bu caride birden fazla adres bulunduğu için yeni adres için Adres Başlığı girilmelidir. Örn: Ev, İş, Yazlık, Yeni Ev.';

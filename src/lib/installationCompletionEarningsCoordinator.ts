@@ -254,7 +254,7 @@ export function calculateInstallationEarningsAmount(
   }
 
   const installableItems =
-    flattenSaleItems(sale)
+    flattenSaleItems(sale).filter(item => !operation.fulfillmentLineId || item.id === operation.fulfillmentLineId)
       .filter(item => {
         const product =
           products.find(

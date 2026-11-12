@@ -101,17 +101,17 @@ test(
 
     assert.match(
       source,
-      /requiresInstallation/
+      /routeReadySaleInstallation\(parent, orderAfter\.saleItemId/
     );
 
     assert.match(
       source,
-      /assignedInstallerId/
+      /input\.request\.receivedByUserId/
     );
 
     assert.match(
       source,
-      /routeChild/
+      /installationOperation: result\.installationOperation/
     );
 
     assert.doesNotMatch(

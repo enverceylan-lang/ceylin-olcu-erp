@@ -832,7 +832,7 @@ const handleManualOrphanRepair = async (
   return (
     <div className="mx-auto max-w-7xl space-y-6 pb-12">
       {/* Page header */}
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <section className="overflow-hidden rounded-xl border border-sky-200 border-t-4 border-t-sky-500 bg-white shadow-sm dark:border-[#3e4850] dark:border-t-[#89ceff] dark:bg-[#131b2e]">
         <div className="border-b border-slate-100 px-4 py-4 dark:border-slate-800 sm:px-5">
           <div className="flex items-start gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 dark:bg-blue-950/40">

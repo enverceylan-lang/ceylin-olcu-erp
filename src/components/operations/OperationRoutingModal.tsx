@@ -14,6 +14,10 @@ import type {
   RouteChildOperationResult
 } from "@/lib/operationRoutingService";
 
+import { useSalesStore } from "@/store/salesStore";
+import { erpScopeMatches } from "@/lib/erpScope";
+import { getSaleFulfillmentLines, fulfillmentLineLabel } from "@/lib/installationFulfillment";
+
 type ChildOperationKind = Exclude<
   OperationKind,
   "GENERAL"
@@ -81,6 +85,9 @@ export default function OperationRoutingModal({
       "TAILOR"
     );
 
+  const [fulfillmentLineId, setFulfillmentLineId] = useState("");
+  const sale = useSalesStore(state => state.sales.find(item => item.id === parent.saleId && erpScopeMatches(item, parent)));
+  const fulfillmentLines = sale ? getSaleFulfillmentLines(sale) : [];
   const [selectedPartyId, setSelectedPartyId] =
     useState("");
 
@@ -233,6 +240,7 @@ export default function OperationRoutingModal({
         onRoute({
           parent,
           kind,
+          fulfillmentLineId: kind === "INSTALLATION" ? fulfillmentLineId || undefined : undefined,
 
           party: selectedParty
             ? {
@@ -310,6 +318,9 @@ export default function OperationRoutingModal({
 
         SUPPLIER_REQUIRED:
           "Tedarikçi bilgisi zorunludur.",
+        FULFILLMENT_LINE_REQUIRED: "Teslim veya montaj için satış kalemi seçin.",
+        STORE_PICKUP_NOT_READY: "Seçilen ürün teslim veya montaja hazır değil.",
+        INSTALLATION_ADDRESS_REQUIRED: "Adreste montaj için satışın doğrulanmış iş adresi gerekli.",
 
         INVALID_DATE_RANGE:
           "Başlangıç ve termin tarihleri geçersizdir.",
@@ -390,6 +401,17 @@ export default function OperationRoutingModal({
               </option>
             </select>
           </label>
+
+          {kind === "INSTALLATION" && (
+            <label className="text-sm font-medium text-slate-700">
+              Ürün / iş birimi
+              <select value={fulfillmentLineId} onChange={event => setFulfillmentLineId(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5">
+                <option value="">Ürün seçin</option>
+                {fulfillmentLines.map(line => <option key={line.id} value={line.id}>{fulfillmentLineLabel(line)}</option>)}
+              </select>
+            </label>
+          )}
 
           {kind !== "SUPPLIER" ? (
             <label className="text-sm font-medium text-slate-700">

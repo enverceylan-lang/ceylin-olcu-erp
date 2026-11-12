@@ -318,8 +318,8 @@ export function MeasurementsExplorerPanel({
           Henüz oda yok. Sayfanın üstündeki Yeni Oda Ekle aksiyonuyla oda oluşturun.
         </div>
       ) : (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
-          <div className="max-h-[72vh] space-y-3 overflow-y-auto pr-1">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
+          <div className="min-w-0 space-y-2 xl:max-h-[72vh] xl:overflow-y-auto xl:pr-1">
             {rooms.map(room => {
               const roomMeasurementCount =
                 room.directMeasurements.length +
@@ -533,7 +533,7 @@ export function MeasurementsExplorerPanel({
                           selectedSelection.roomId,
                         )
                       }
-                      className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] font-black text-amber-800 hover:bg-amber-100 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300"
+                      className="min-h-11 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs font-black text-amber-800 hover:bg-amber-100 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300"
                     >
                       Satışa Hazırlık
                     </button>
@@ -542,7 +542,7 @@ export function MeasurementsExplorerPanel({
                     <button
                       type="button"
                       onClick={onTransferToSale}
-                      className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[11px] font-black text-rose-700 hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300"
+                      className="min-h-11 rounded-lg bg-sky-700 px-2.5 py-2 text-xs font-bold text-white hover:bg-sky-800 dark:bg-[#89ceff] dark:text-[#00344d] dark:hover:bg-sky-200"
                     >
                       Satışa Aktar
                     </button>

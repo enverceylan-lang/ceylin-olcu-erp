@@ -32,7 +32,7 @@ export function CustomerMeasurementsWorkspace({
             Ölçüler
           </h2>
           <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
-            Ölçüleri kaydedin; cihaz çevrimdışıyken yerelde korunur ve bağlantı gelince otomatik eşitlenir.
+            Ölçüleri cihazda kaydedin. Gönderme ve alma işlemlerini ilgili düğmelerden başlatın.
           </p>
         </div>
         <div className="rounded-full bg-blue-50 px-3 py-1 text-[10px] font-bold text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
@@ -41,16 +41,16 @@ export function CustomerMeasurementsWorkspace({
       </div>
 
       <div
-        className="grid grid-cols-2 gap-2 rounded-xl border border-gray-200 bg-white p-2 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+        className="grid grid-cols-2 gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1.5 dark:border-[#3e4850] dark:bg-[#0b1326]"
         aria-label="Ölçü çalışma alanı görünümü"
       >
         <button
           type="button"
           onClick={onCapture}
           aria-pressed={tab === "CAPTURE"}
-          className={`rounded-lg px-4 py-2.5 text-sm font-bold transition-colors ${
+          className={`min-h-11 rounded-md px-2.5 py-2 text-sm font-bold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 sm:px-4 ${
             tab === "CAPTURE"
-              ? "bg-blue-600 text-white shadow-sm"
+              ? "bg-sky-700 text-white shadow-sm dark:bg-[#89ceff] dark:text-[#00344d]"
               : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
           }`}
         >
@@ -60,9 +60,9 @@ export function CustomerMeasurementsWorkspace({
           type="button"
           onClick={onExplorer}
           aria-pressed={tab === "EXPLORER"}
-          className={`rounded-lg px-4 py-2.5 text-sm font-bold transition-colors ${
+          className={`min-h-11 rounded-md px-2.5 py-2 text-sm font-bold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 sm:px-4 ${
             tab === "EXPLORER"
-              ? "bg-blue-600 text-white shadow-sm"
+              ? "bg-sky-700 text-white shadow-sm dark:bg-[#89ceff] dark:text-[#00344d]"
               : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
           }`}
         >

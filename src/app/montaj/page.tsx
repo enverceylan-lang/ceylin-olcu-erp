@@ -6,6 +6,7 @@ import {
   Shield
 } from "lucide-react";
 import {
+  useEffect,
   useMemo,
   useSyncExternalStore
 } from "react";
@@ -35,6 +36,10 @@ import {
   useStore
 } from "@/store/useStore";
 
+import { routeReadyInstallationsInScope } from "@/lib/tailorCompletionInstallationCoordinator";
+import { canViewAllScopedOperations } from "@/lib/operationAccessPolicy";
+import { useSupplyChainStore } from "@/store/useSupplyChainStore";
+
 const subscribeToHydration =
   () => () => undefined;
 
@@ -57,6 +62,13 @@ const NEXT_STATUS: Partial<
   IN_PROGRESS: "COMPLETED",
   PROBLEM: "IN_PROGRESS"
 };
+
+function nextInstallationStatus(operation: OperationRecord): OperationStatus | undefined {
+  if (operation.fulfillmentMode === "STORE_PICKUP") {
+    return operation.status === "ASSIGNED" ? "COMPLETED" : undefined;
+  }
+  return NEXT_STATUS[operation.status];
+}
 
 function statusLabel(
   status: OperationStatus
@@ -185,6 +197,14 @@ export default function MontajPage() {
       getVisibleOperations
     ]);
 
+  const production = useStore(state => state.productionItems);
+  const supplierOrders = useSupplyChainStore(state => state.supplierOrders);
+  useEffect(() => {
+    if (scope && currentUser && canViewAllScopedOperations({ userId: currentUser.id, role: currentUser.role })) {
+      routeReadyInstallationsInScope(scope, currentUser.id, new Date().toISOString());
+    }
+  }, [scope, currentUser, sales, production, supplierOrders, operations]);
+
   if (!mounted) {
     return (
       <div className="p-8 text-center text-gray-500">
@@ -221,12 +241,17 @@ export default function MontajPage() {
   }
 
   const handleAdvance = (
-    operation: OperationRecord
+    operation: OperationRecord,
+    fulfillmentMethod?: OperationRecord["fulfillmentMethod"],
   ) => {
     const nextStatus =
-      NEXT_STATUS[
-        operation.status
-      ];
+      nextInstallationStatus(operation);
+
+    if (!scope) return;
+    if (nextStatus && operation.fulfillmentMode === "STORE_PICKUP" &&
+        !window.confirm(fulfillmentMethod === "ON_SITE"
+          ? "Adreste montajın tamamlandığını onaylıyor musunuz?"
+          : "Ürünün mağazadan teslim edildiğini onaylıyor musunuz?")) return;
 
     if (!nextStatus) {
       window.alert(
@@ -243,7 +268,8 @@ export default function MontajPage() {
           userId: currentUser.id,
           role: currentUser.role
         },
-        new Date().toISOString()
+        new Date().toISOString(),
+        { scope, fulfillmentMethod }
       );
 
     if (
@@ -278,6 +304,11 @@ export default function MontajPage() {
       window.alert(
         "Montaj tamamlandı ancak tamamlanan operasyon kaydı tekrar okunamadı."
       );
+      return;
+    }
+
+    if (completedOperation.fulfillmentMode === "STORE_PICKUP") {
+      window.alert(completedOperation.fulfillmentMethod === "ON_SITE" ? "Mağaza montajı onaylandı." : "Mağazadan teslim onaylandı.");
       return;
     }
 
@@ -374,7 +405,7 @@ export default function MontajPage() {
 
   return (
     <main className="space-y-3">
-      <header className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <header className="relative overflow-hidden rounded-xl border border-sky-200/80 border-l-4 border-l-sky-500 bg-gradient-to-r from-sky-50 to-white px-4 py-4 shadow-sm dark:border-[#3e4850] dark:border-l-[#89ceff] dark:from-[#171f33] dark:to-[#131b2e] sm:px-5">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <div className="min-w-0 flex-1">
             <h1 className="text-xl font-black tracking-tight text-slate-950 dark:text-white">
@@ -424,9 +455,7 @@ export default function MontajPage() {
                 <tbody>
                   {visibleInstallationOperations.map(operation => {
                     const nextStatus =
-                      NEXT_STATUS[
-                        operation.status
-                      ];
+                      nextInstallationStatus(operation);
 
                     return (
                       <tr
@@ -448,8 +477,7 @@ export default function MontajPage() {
 
                         <td className="px-3 py-3">
                           <div className="font-semibold">
-                            {operation.party?.name ??
-                              "Atama bekliyor"}
+                            {operation.party?.name ?? (operation.fulfillmentMode === "STORE_PICKUP" ? "Mağaza işlemi" : "Atama bekliyor")}
                           </div>
                           {operation.party?.assignmentType ? (
                             <div className="mt-0.5 text-xs text-slate-500">
@@ -508,8 +536,13 @@ export default function MontajPage() {
                         </td>
 
                         <td className="px-3 py-3 text-right">
-                          {nextStatus ? (
-                            <button
+                          {nextStatus && operation.fulfillmentMode === "STORE_PICKUP" ? (
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <button type="button" onClick={() => handleAdvance(operation, "STORE_HANDOFF")} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white">Mağazadan teslim</button>
+                          <button type="button" onClick={() => handleAdvance(operation, "ON_SITE")} className="rounded-lg border px-3 py-2 text-xs font-bold">Adreste montaj</button>
+                        </div>
+                      ) : nextStatus ? (
+                        <button
                               type="button"
                               onClick={() =>
                                 handleAdvance(
@@ -541,9 +574,7 @@ export default function MontajPage() {
             <div className="divide-y divide-slate-200 dark:divide-slate-800 md:hidden">
               {visibleInstallationOperations.map(operation => {
                 const nextStatus =
-                  NEXT_STATUS[
-                    operation.status
-                  ];
+                  nextInstallationStatus(operation);
 
                 return (
                   <article
@@ -581,8 +612,7 @@ export default function MontajPage() {
                       <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/70">
                         <div className="flex items-center gap-2 text-sm font-bold">
                           <Shield className="h-4 w-4 text-emerald-600" />
-                          {operation.party?.name ??
-                            "Atama bekliyor"}
+                          {operation.party?.name ?? (operation.fulfillmentMode === "STORE_PICKUP" ? "Mağaza işlemi" : "Atama bekliyor")}
                         </div>
                         <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
                           <Calendar className="h-4 w-4" />
@@ -606,7 +636,12 @@ export default function MontajPage() {
                         </a>
                       ) : null}
 
-                      {nextStatus ? (
+                      {nextStatus && operation.fulfillmentMode === "STORE_PICKUP" ? (
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <button type="button" onClick={() => handleAdvance(operation, "STORE_HANDOFF")} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white">Mağazadan teslim</button>
+                          <button type="button" onClick={() => handleAdvance(operation, "ON_SITE")} className="rounded-lg border px-3 py-2 text-xs font-bold">Adreste montaj</button>
+                        </div>
+                      ) : nextStatus ? (
                         <button
                           type="button"
                           onClick={() =>

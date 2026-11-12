@@ -381,7 +381,7 @@ export default function ProviderOperationActions({
             setMessage(
               `Tamamlandı. Hakediş ${automaticEarningsAmount.toFixed(
                 2
-              )} TRY olarak cariye işlendi ve montaj işi hazırlandı.`
+              )} TRY olarak cariye işlendi ve ${installation.installationOperation.fulfillmentMode === "STORE_PICKUP" ? "mağazadan teslim işi" : "montaj işi"} hazırlandı.`
             );
             return;
           }

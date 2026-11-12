@@ -93,7 +93,7 @@ export function MeasurementCapturePanel({
 
   if (!room) {
     return (
-      <section className="rounded-2xl border border-blue-200 bg-white p-5 shadow-sm dark:border-blue-900/50 dark:bg-gray-900">
+      <section className="rounded-xl border border-sky-200 bg-white p-5 shadow-sm dark:border-blue-900/50 dark:bg-gray-900">
         <h3 className="text-base font-black text-gray-900 dark:text-white">
           Yeni Ölçü
         </h3>
@@ -112,7 +112,7 @@ export function MeasurementCapturePanel({
   };
 
   return (
-    <section className="rounded-2xl border border-blue-200 bg-white p-4 shadow-sm dark:border-blue-900/50 dark:bg-gray-900 sm:p-5">
+    <section className="rounded-xl border border-sky-200 bg-white p-4 shadow-sm dark:border-blue-900/50 dark:bg-gray-900 sm:p-5">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 pb-3 dark:border-gray-800">
         <div>
           <div className="text-[10px] font-black uppercase tracking-[0.16em] text-blue-600 dark:text-blue-300">

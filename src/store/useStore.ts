@@ -341,6 +341,8 @@ export interface CustomerAddress {
   updatedAt?: string;
 }
 
+type NewCustomerAddress = Omit<CustomerAddress, "id" | "customerId" | "normalizedTitle" | "createdAt" | "updatedAt">;
+
 export interface Customer {
   addresses?: CustomerAddress[];
   id: string;
@@ -619,7 +621,7 @@ interface AppState {
   pendingDeletes: { id: string; table: 'customers' | 'rooms' | 'openings' | 'measurements' }[];
   syncStatus: 'synced' | 'pending' | 'offline' | 'error';
 
-  addCustomer: (customer: Omit<Customer, 'rooms'> & { id?: string }) => Promise<void>;
+  addCustomer: (customer: Omit<Customer, 'rooms'> & { id?: string }, firstAddress?: NewCustomerAddress) => Promise<void>;
   updateCustomer: (id: string, data: Partial<Customer>) => Promise<void>;
   deleteCustomer: (id: string) => Promise<void>;
     archiveCustomer: (id: string, user: StoreActor | null) => Promise<void>;
@@ -711,7 +713,7 @@ export const useStore = create<AppState>()(
         set({ products });
       },
 
-      addCustomer: async (data) => {
+      addCustomer: async (data, firstAddress) => {
         const authState = useAuthStore.getState();
         const currentUser = authState.currentUser;
         const customerScope = await loadVerifiedClientErpScope(
@@ -719,6 +721,7 @@ export const useStore = create<AppState>()(
         );
         const state = get();
         const newCustomerId = data.id || generateUUID();
+        if (firstAddress && data.addresses?.length) throw new Error("Cari adresi zaten tanımlı.");
 
         // Submission/Id-based duplicate prevention:
         const exists = state.customers.some(c => c.id === newCustomerId);
@@ -782,7 +785,36 @@ export const useStore = create<AppState>()(
           addressPhotos: data.addressPhotos || []
         };
 
-        // 1. Write to IndexedDB first
+        if (firstAddress) {
+          const title = firstAddress.title?.trim() || "Ana Adres";
+          const validation = validateCustomerAddressTitle([], { title });
+          if (!validation.ok) throw new Error(validation.message);
+          const canonical = applyErpScope({
+            ...firstAddress,
+            id: generateUUID(),
+            customerId: newCustomerId,
+            title,
+            normalizedTitle: validation.normalizedTitle,
+            legacyPrimary: true,
+            address: normalizeCariAddress(firstAddress.address),
+            province: normalizeCariRegion(firstAddress.province || ""),
+            district: normalizeCariRegion(firstAddress.district || ""),
+            isDeleted: false,
+            createdAt: now,
+            updatedAt: now,
+          }, customerScope);
+          Object.assign(newCustomer, {
+            addresses: [canonical],
+            address: canonical.address,
+            province: canonical.province,
+            district: canonical.district,
+            mapLocation: canonical.mapLocation || "",
+            latitude: canonical.latitude,
+            longitude: canonical.longitude,
+          });
+        }
+
+        // Save customer and first address in the same IndexedDB record.
         await saveLocalCustomer(newCustomer);
 
         // 2. Then update Zustand state
@@ -1221,7 +1253,11 @@ export const useStore = create<AppState>()(
           }
         }
 
-        const validation = validateCustomerAddressTitle(workingAddresses, { title: data.title });
+        const active = activeCustomerAddresses(workingAddresses);
+        const legacyPrimary = active.length === 0 ||
+          Boolean(data.legacyPrimary) && !active.some(address => address.legacyPrimary);
+        const title = data.title?.trim() || (legacyPrimary ? "Ana Adres" : undefined);
+        const validation = validateCustomerAddressTitle(workingAddresses, { title });
         if (!validation.ok) throw new Error(validation.message);
 
         const now = new Date().toISOString();
@@ -1229,8 +1265,9 @@ export const useStore = create<AppState>()(
           ...data,
           id: generateUUID(),
           customerId,
-          title: String(data.title || '').trim() || undefined,
+          title,
           normalizedTitle: validation.normalizedTitle,
+          legacyPrimary,
           phone: String(data.phone || '').trim() || undefined,
           province: normalizeCariRegion(data.province || ''),
           district: normalizeCariRegion(data.district || ''),
@@ -1242,6 +1279,10 @@ export const useStore = create<AppState>()(
         const newAddress = applyErpScope(baseAddress, customerScope);
         const updatedCustomer: Customer = {
           ...customer,
+          ...(newAddress.legacyPrimary ? {
+            address: newAddress.address, province: newAddress.province, district: newAddress.district,
+            mapLocation: newAddress.mapLocation, latitude: newAddress.latitude, longitude: newAddress.longitude,
+          } : {}),
           addresses: [...workingAddresses, newAddress],
           updatedAt: now,
         };

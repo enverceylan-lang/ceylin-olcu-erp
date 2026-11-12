@@ -163,7 +163,7 @@ export default function TailorQueueV2() {
 
   return (
     <main className="space-y-3">
-      <header className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <header className="relative overflow-hidden rounded-xl border border-sky-200/80 border-l-4 border-l-sky-500 bg-gradient-to-r from-sky-50 to-white px-4 py-4 shadow-sm dark:border-[#3e4850] dark:border-l-[#89ceff] dark:from-[#171f33] dark:to-[#131b2e] sm:px-5">
         <h1 className="text-xl font-black text-slate-950 dark:text-white">
           Atölye
         </h1>

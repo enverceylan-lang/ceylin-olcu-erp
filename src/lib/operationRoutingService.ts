@@ -22,6 +22,9 @@ export interface RouteChildOperationInput {
     "GENERAL"
   >;
   party?: OperationParty;
+  fulfillmentMode?: "STORE_PICKUP";
+  fulfillmentLineId?: string;
+  fulfillmentLineLabel?: string;
   supplierName?: string;
   supplierPhone?: string;
   scheduledAt: string;
@@ -54,6 +57,11 @@ export type RouteChildOperationResult =
       reason:
         | "PARENT_MUST_BE_GENERAL"
         | "PARTY_REQUIRED"
+        | "INSTALLATION_ADDRESS_REQUIRED"
+        | "INVALID_FULFILLMENT_MODE"
+        | "STORE_PICKUP_ALREADY_COMPLETED"
+        | "STORE_PICKUP_NOT_READY"
+        | "FULFILLMENT_LINE_REQUIRED"
         | "SUPPLIER_REQUIRED"
         | "INVALID_DATE_RANGE"
         | "SCHEDULE_CONFLICT"
@@ -143,6 +151,15 @@ export function routeChildOperation(
     };
   }
 
+  const pickup = input.fulfillmentMode === "STORE_PICKUP";
+  if (pickup && (input.kind !== "INSTALLATION" || input.party)) {
+    return { outcome: "REJECTED", state, reason: "INVALID_FULFILLMENT_MODE" };
+  }
+
+  if (input.kind === "INSTALLATION" && !pickup && !input.parent.address?.trim()) {
+    return { outcome: "REJECTED", state, reason: "INSTALLATION_ADDRESS_REQUIRED" };
+  }
+
   const scheduledAt =
     new Date(input.scheduledAt);
 
@@ -177,6 +194,7 @@ export function routeChildOperation(
 
   if (
     input.kind !== "SUPPLIER" &&
+    !pickup &&
     !party
   ) {
     return {
@@ -186,12 +204,12 @@ export function routeChildOperation(
     };
   }
 
-  const stableParty = party as OperationParty;
+  const assignmentKey = pickup ? "store-pickup" : party!.id;
 
   if (
     input.kind === "TAILOR" &&
-    stableParty.assignmentType === "EXTERNAL" &&
-    !stableParty.providerCustomerId?.trim()
+    party?.assignmentType === "EXTERNAL" &&
+    !party.providerCustomerId?.trim()
   ) {
     return {
       outcome: "REJECTED",
@@ -202,8 +220,8 @@ export function routeChildOperation(
 
   if (
     input.kind === "INSTALLATION" &&
-    stableParty.assignmentType === "EXTERNAL" &&
-    !stableParty.providerCustomerId?.trim()
+    party?.assignmentType === "EXTERNAL" &&
+    !party.providerCustomerId?.trim()
   ) {
     return {
       outcome: "REJECTED",
@@ -214,8 +232,8 @@ export function routeChildOperation(
 
   if (
     input.kind === "INSTALLATION" &&
-    stableParty.assignmentType === "INTERNAL" &&
-    !stableParty.userId?.trim()
+    party?.assignmentType === "INTERNAL" &&
+    !party.userId?.trim()
   ) {
     return {
       outcome: "REJECTED",
@@ -224,18 +242,39 @@ export function routeChildOperation(
     };
   }
 
+  const lineId = input.kind === "INSTALLATION" ? input.fulfillmentLineId : undefined;
+  const identity = lineId ? `line:${encodeURIComponent(lineId)}` : assignmentKey;
   const id =
     createStableChildId(
       input.parent.id,
       input.kind,
-      stableParty.id
+      identity
     );
 
   const idempotencyKey = [
     input.kind,
     input.parent.id,
-    stableParty.id
+    identity
   ].join(":");
+
+  const scopedInstallations = input.kind === "INSTALLATION"
+    ? state.operations.filter(operation => operation.kind === "INSTALLATION" &&
+        operation.parentOperationId === input.parent.id && operation.saleId === input.parent.saleId &&
+        operation.fulfillmentLineId === lineId &&
+        operation.status !== "CANCELLED" && erpScopeMatches(operation, input.parent))
+    : [];
+  const existingPickup = scopedInstallations.find(operation => operation.fulfillmentMode === "STORE_PICKUP");
+  if (pickup) {
+    const existingInstallation = existingPickup ?? scopedInstallations[0];
+    if (existingInstallation) return { outcome: "REPLAY", state, operation: existingInstallation };
+  } else if (existingPickup?.status === "COMPLETED") {
+    return { outcome: "REJECTED", state, reason: "STORE_PICKUP_ALREADY_COMPLETED" };
+  }
+
+  const existingLine = lineId ? scopedInstallations[0] : undefined;
+  if (existingLine && !existingPickup) {
+    return { outcome: "REPLAY", state, operation: existingLine };
+  }
 
   const existing =
     state.operations.find(
@@ -243,8 +282,9 @@ export function routeChildOperation(
         operation.parentOperationId ===
           input.parent.id &&
         operation.kind === input.kind &&
-        operation.party?.id ===
-          stableParty.id &&
+        operation.fulfillmentLineId === lineId &&
+        operation.fulfillmentMode !== "STORE_PICKUP" &&
+        operation.party?.id === assignmentKey &&
         operation.status !==
           "CANCELLED" &&
         erpScopeMatches(
@@ -261,7 +301,7 @@ export function routeChildOperation(
     };
   }
 
-  if (input.kind === "INSTALLATION") {
+  if (input.kind === "INSTALLATION" && !pickup) {
     const scheduleDecision =
       decideInstallationScheduleConflict(
         {
@@ -270,13 +310,16 @@ export function routeChildOperation(
           branchId: input.parent.branchId,
           accountingPeriodId:
             input.parent.accountingPeriodId,
-          partyId: stableParty.id,
+          partyId: assignmentKey,
           scheduledAt:
             scheduledAt.toISOString(),
           dueAt:
             dueAt.toISOString()
         },
-        state.operations
+        lineId ? state.operations.filter(operation =>
+          operation.saleId !== input.parent.saleId || !operation.fulfillmentLineId ||
+          operation.scheduledAt !== scheduledAt.toISOString() || operation.dueAt !== dueAt.toISOString()
+        ) : state.operations
       );
 
     if (!scheduleDecision.allowed) {
@@ -318,20 +361,19 @@ export function routeChildOperation(
     customerName:
       input.parent.customerName,
 
-    address:
-      input.parent.address,
+    address: pickup ? undefined : input.parent.address,
 
-    title:
-      titleForKind(
-        input.kind,
-        input.parent
-      ),
+    title: input.fulfillmentLineLabel
+      ? `${input.fulfillmentLineLabel} — ${input.parent.title}`
+      : pickup ? `Mağazadan Teslim — ${input.parent.title}` : titleForKind(input.kind, input.parent),
+    ...(lineId ? { fulfillmentLineId: lineId } : {}),
+    ...(pickup ? { fulfillmentMode: "STORE_PICKUP" as const } : {}),
 
     details: [
       ...input.parent.details
     ],
 
-    party: stableParty,
+    party: party ?? undefined,
 
     scheduledAt:
       scheduledAt.toISOString(),
@@ -358,23 +400,32 @@ export function routeChildOperation(
       input.now
   };
 
-  const agenda =
-    buildAgendaEvent(operation);
+  const agenda = buildAgendaEvent(operation);
+  const cancelledPickup: OperationRecord | undefined = existingPickup && !pickup && !lineId
+    ? { ...existingPickup, status: "CANCELLED", updatedAt: input.now }
+    : undefined;
 
   return {
     outcome: "CREATED",
     operation,
     state: {
       operations: [
-        ...state.operations,
+        ...state.operations.flatMap(item => {
+          if (lineId && item.id === operation.id && item.status === "CANCELLED" &&
+              erpScopeMatches(item, operation)) return [];
+          if (item !== existingPickup) return [item];
+          if (lineId && !pickup) return [];
+          return [cancelledPickup ?? item];
+        }),
         operation
       ],
       agendaEvents: [
         ...state.agendaEvents.filter(
           event =>
-            event.operationId !==
-            operation.id
+            !erpScopeMatches(event, input.parent) || (event.operationId !== operation.id &&
+            event.operationId !== cancelledPickup?.id)
         ),
+        ...(cancelledPickup ? [buildAgendaEvent(cancelledPickup)] : []),
         agenda
       ]
     }

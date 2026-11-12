@@ -59,6 +59,10 @@ export interface OperationParty {
 }
 
 export interface OperationRecord extends ErpScope {
+  fulfillmentMode?: "STORE_PICKUP";
+  fulfillmentLineId?: string;
+  fulfillmentMethod?: "STORE_HANDOFF" | "ON_SITE";
+  completedByUserId?: string;
   id: string;
   idempotencyKey: string;
   kind: OperationKind;
@@ -131,6 +135,8 @@ export type OperationTransitionRejectReason =
   | "ASSIGNMENT_REQUIRED"
   | "INVALID_TRANSITION"
   | "TERMINAL_STATUS_LOCKED"
+  | "FULFILLMENT_INCOMPLETE"
+  | "INSTALLATION_ADDRESS_REQUIRED"
   | "OPERATION_RELEASE_WAITING"
   | "OPERATION_RELEASE_BLOCKED";
 
@@ -146,6 +152,9 @@ export type OperationTransitionDecision =
     };
 
 export interface OperationTransitionContext {
+  scope?: ErpScope;
+  fulfillmentMethod?: OperationRecord["fulfillmentMethod"];
+  fulfillmentAddress?: string;
   release?: {
     dependencies: readonly OperationDependencySignal[];
     blockers?: readonly OperationReleaseBlocker[];
@@ -363,8 +372,23 @@ export function decideOperationTransition(
     role === "OFFICE" ||
     role === "MODERATOR";
 
+  if (operation.fulfillmentMode === "STORE_PICKUP") {
+    if ((!manager && role !== "SALES") || !context?.scope || !erpScopeMatches(operation, context.scope)) {
+      return { allowed: false, reason: "ROLE_FORBIDDEN" };
+    }
+    if (target === "COMPLETED" && !context.fulfillmentMethod) {
+      return { allowed: false, reason: "INVALID_TRANSITION" };
+    }
+    if (target === "COMPLETED" && context.fulfillmentMethod === "ON_SITE" && !context.fulfillmentAddress) {
+      return { allowed: false, reason: "INSTALLATION_ADDRESS_REQUIRED" };
+    }
+    if (target !== "COMPLETED" && target !== "CANCELLED") {
+      return { allowed: false, reason: "INVALID_TRANSITION" };
+    }
+  }
+
   const assignedWorker =
-    operation.party?.userId === actor.userId;
+    operation.party?.userId === actor.userId || (operation.fulfillmentMode === "STORE_PICKUP" && role === "SALES");
 
   if (!manager && !assignedWorker) {
     return {
@@ -429,7 +453,12 @@ export function decideOperationTransition(
 
     ...(target === "COMPLETED"
       ? {
-          completedAt: occurredAt
+          completedAt: occurredAt,
+          completedByUserId: actor.userId,
+          ...(operation.kind === "INSTALLATION" ? {
+            fulfillmentMethod: operation.fulfillmentMode === "STORE_PICKUP" ? context?.fulfillmentMethod : "ON_SITE",
+            ...(context?.fulfillmentAddress ? { address: context.fulfillmentAddress } : {}),
+          } : {})
         }
       : {})
   };

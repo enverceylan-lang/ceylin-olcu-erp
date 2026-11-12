@@ -3,8 +3,10 @@
 import { useState } from "react";
 import { Loader2, MapPin, X } from "lucide-react";
 import type { CustomerAddress } from "@/store/useStore";
+import { captureAddressLocation, parseAddressMapLocation } from "@/lib/customerAddressLocation";
+import { getGoogleMapsUrl } from "@/lib/measurementAdapter";
 
-type AddressInput = Omit<
+export type AddressInput = Omit<
   CustomerAddress,
   "id" | "customerId" | "normalizedTitle" | "createdAt" | "updatedAt"
 >;
@@ -12,7 +14,7 @@ type AddressInput = Omit<
 interface CustomerAddressModalProps {
   isOpen: boolean;
   onClose: () => void;
-  address: CustomerAddress | null;
+  address: Partial<CustomerAddress> | null;
   onSave: (data: AddressInput) => Promise<void>;
 }
 
@@ -50,8 +52,8 @@ function CustomerAddressModalContent({
   const [district, setDistrict] = useState(address?.district || "");
   const [openAddress, setOpenAddress] = useState(address?.address || "");
   const [mapLocation, setMapLocation] = useState(address?.mapLocation || "");
-  const [latitude, setLatitude] = useState<number | undefined>(address?.latitude);
-  const [longitude, setLongitude] = useState<number | undefined>(address?.longitude);
+  const [accuracy, setAccuracy] = useState<number | null>(null);
+  const previewUrl = getGoogleMapsUrl({ mapLocation });
   const [isLocating, setIsLocating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
@@ -67,18 +69,22 @@ function CustomerAddressModalContent({
     setError("");
     navigator.geolocation.getCurrentPosition(
       position => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        setLatitude(lat);
-        setLongitude(lng);
-        setMapLocation(`${lat},${lng}`);
+        try {
+          const location = captureAddressLocation(position.coords);
+          setMapLocation(location.mapLocation);
+          setAccuracy(location.accuracy);
+        } catch (error) {
+          setError(error instanceof Error ? error.message : "Konum doğrulanamadı.");
+        } finally {
+          setIsLocating(false);
+        }
+      },
+      error => {
+        setError(error.code === 1 ? "Konum izni reddedildi." :
+          error.code === 3 ? "Konum isteği zaman aşımına uğradı." : "Konum alınamadı.");
         setIsLocating(false);
       },
-      () => {
-        setError("Konum alınamadı. Cihazın konum iznini kontrol edin.");
-        setIsLocating(false);
-      },
-      { enableHighAccuracy: true, timeout: 15000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   };
 
@@ -87,15 +93,19 @@ function CustomerAddressModalContent({
     setIsSaving(true);
     setError("");
     try {
+      const location = address && mapLocation === (address.mapLocation || "")
+        ? { mapLocation: address.mapLocation, latitude: address.latitude, longitude: address.longitude }
+        : parseAddressMapLocation(mapLocation);
+      if (!address?.id && ![province, district, openAddress, mapLocation].some(value => value.trim())) {
+        throw new Error("Adres bilgisi veya harita konumu girin.");
+      }
       await onSave({
         title: title.trim() || undefined,
         phone: phone.trim() || undefined,
         province: province.trim() || undefined,
         district: district.trim() || undefined,
         address: openAddress.trim(),
-        mapLocation: mapLocation.trim() || undefined,
-        latitude,
-        longitude,
+        ...location,
         isDeleted: false,
       });
     } catch (err: unknown) {
@@ -149,7 +159,15 @@ function CustomerAddressModalContent({
               {isLocating ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />}
               {isLocating ? "Konum Alınıyor..." : "Konum Al"}
             </button>
-            {mapLocation && <div className="mt-2 break-all font-mono text-[10px] text-gray-500">{mapLocation}</div>}
+            <label className="mt-2 block">
+              <span className="text-xs font-bold">Harita konumu</span>
+              <input value={mapLocation} onChange={event => {
+                setMapLocation(event.target.value);
+                setAccuracy(null);
+              }} placeholder="Enlem,boylam veya harita bağlantısı" className="w-full rounded-lg border px-3 py-2 text-sm dark:bg-gray-800" />
+            </label>
+            {accuracy !== null && <p className="text-xs">Doğruluk: {Math.round(accuracy)} m</p>}
+            {previewUrl && <a href={previewUrl} target="_blank" rel="noreferrer" className="text-sm underline">Haritada önizle</a>}
           </div>
 
           {error && (
@@ -163,7 +181,7 @@ function CustomerAddressModalContent({
           <button type="button" onClick={onClose} disabled={isSaving} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 dark:border-gray-700 dark:text-gray-300">
             İptal
           </button>
-          <button type="button" onClick={handleSave} disabled={isSaving} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50">
+          <button type="button" onClick={handleSave} disabled={isSaving || isLocating} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50">
             {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
             Kaydet
           </button>

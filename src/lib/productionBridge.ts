@@ -76,6 +76,7 @@ function toProductionItem(
   assignedEmployeeId?: string
 ): ProductionItem {
   return {
+    ...{ tenantId: sale.tenantId, companyId: sale.companyId, branchId: sale.branchId, accountingPeriodId: sale.accountingPeriodId },
     id: `central-production-${sale.id}-${item.id}`,
     orderId: sale.id,
     saleLineId: item.id,

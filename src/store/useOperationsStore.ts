@@ -1,7 +1,14 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { mergeMainOperationsW1 } from "@/lib/mainOperationW1";
-import type { ErpScope } from "@/lib/erpScope";
+import { erpScopeMatches, type ErpScope } from "@/lib/erpScope";
+import { resolveInstallationWorkAddress } from "@/lib/customerAddressModel";
+import { getSaleFulfillmentLines, isFulfillmentLineReady, hasCompletedSaleFulfillment, fulfillmentLineLabel } from "@/lib/installationFulfillment";
+import { useSupplyChainStore } from "@/store/useSupplyChainStore";
+import { buildAgendaEvent } from "@/lib/operationsWorkflow";
+import { routeInstallationAfterTailorCompletion } from "@/lib/tailorCompletionInstallationCoordinator";
+import { useSalesStore } from "@/store/salesStore";
+import { useStore } from "@/store/useStore";
 import {
   listScopedAgendaEvents,
   listScopedOperations,
@@ -190,6 +197,25 @@ interface OperationsStore
   repairAgenda(): void;
 }
 
+function updateGeneralFulfillmentProgress(state: OperationsStateData, operation: OperationRecord): OperationsStateData {
+  if (operation.kind !== "INSTALLATION" || !operation.fulfillmentLineId || operation.status !== "COMPLETED") return state;
+  const parent = state.operations.find(item => item.kind === "GENERAL" && item.id === operation.parentOperationId &&
+    item.saleId === operation.saleId && erpScopeMatches(item, operation));
+  if (!parent || parent.status === "COMPLETED" || parent.status === "CANCELLED") return state;
+  const sale = useSalesStore.getState().sales.find(item => item.id === parent.saleId && erpScopeMatches(item, parent));
+  const completed = hasCompletedSaleFulfillment(sale, state.operations, parent);
+  if (!completed && parent.status !== "DRAFT") return state;
+  const progressed: OperationRecord = {
+    ...parent, status: completed ? "COMPLETED" : "IN_PROGRESS", updatedAt: operation.updatedAt,
+    ...(completed ? { completedAt: operation.completedAt, completedByUserId: operation.completedByUserId } : {}),
+  };
+  return {
+    operations: state.operations.map(item => item === parent ? progressed : item),
+    agendaEvents: [...state.agendaEvents.filter(event => event.operationId !== parent.id || !erpScopeMatches(event, parent)),
+      buildAgendaEvent(progressed)],
+  };
+}
+
 export const useOperationsStore =
   create<OperationsStore>()(
     persist(
@@ -252,11 +278,35 @@ export const useOperationsStore =
             agendaEvents: get().agendaEvents
           };
 
-          const result =
-            routeChildOperation(
-              current,
-              input
-            );
+          if (input.kind === "INSTALLATION") {
+            const sales = useSalesStore.getState().sales;
+            const sale = sales.find(sale => sale.id === input.parent.saleId && erpScopeMatches(sale, input.parent));
+            if (input.fulfillmentMode !== "STORE_PICKUP") {
+              const address = resolveInstallationWorkAddress(input.parent, sale, useStore.getState().customers);
+              if (!address) return { outcome: "REJECTED", state: current, reason: "INSTALLATION_ADDRESS_REQUIRED" };
+              input = { ...input, parent: { ...input.parent, address } };
+            }
+            if (!sale || sale.customerId !== input.parent.customerId) {
+              return { outcome: "REJECTED", state: current, reason: "FULFILLMENT_LINE_REQUIRED" };
+            }
+            const lines = getSaleFulfillmentLines(sale);
+            const line = lines.find(item => item.id === input.fulfillmentLineId) ?? (!input.fulfillmentLineId && lines.length === 1 ? lines[0] : undefined);
+            if (!line || lines.filter(item => item.id === line.id).length !== 1) {
+              return { outcome: "REJECTED", state: current, reason: "FULFILLMENT_LINE_REQUIRED" };
+            }
+            const existing = current.operations.find(item => item.kind === "INSTALLATION" && item.saleId === sale.id &&
+              item.parentOperationId === input.parent.id && item.fulfillmentLineId === line.id &&
+              item.status !== "CANCELLED" && erpScopeMatches(item, sale));
+            if (!existing && (input.parent.status === "COMPLETED" || input.parent.status === "CANCELLED")) {
+              return { outcome: "REJECTED", state: current, reason: "STORE_PICKUP_NOT_READY" };
+            }
+            if (!existing && !isFulfillmentLineReady(sale, line, useStore.getState().productionItems,
+                useSupplyChainStore.getState().supplierOrders, sales.filter(item => item.id === sale.id).length === 1)) {
+              return { outcome: "REJECTED", state: current, reason: "STORE_PICKUP_NOT_READY" };
+            }
+            input = { ...input, fulfillmentLineId: line.id, fulfillmentLineLabel: fulfillmentLineLabel(line) };
+          }
+          const result = routeChildOperation(current, input);
 
           if (
             result.outcome ===
@@ -292,6 +342,20 @@ export const useOperationsStore =
             agendaEvents: get().agendaEvents
           };
 
+          const operation = current.operations.find(item => item.id === operationId &&
+            (!context?.scope || erpScopeMatches(item, context.scope)));
+          if (operation && target === "COMPLETED") {
+            const sale = useSalesStore.getState().sales.find(item => item.id === operation.saleId && erpScopeMatches(item, operation));
+            if (operation.kind === "GENERAL" && !hasCompletedSaleFulfillment(sale, current.operations, operation)) {
+              return { outcome: "REJECTED", state: current, reason: "FULFILLMENT_INCOMPLETE" };
+            }
+            if (operation.fulfillmentMode === "STORE_PICKUP" && context?.fulfillmentMethod === "ON_SITE") {
+              const address = resolveInstallationWorkAddress(operation, sale, useStore.getState().customers);
+              if (!address) return { outcome: "REJECTED", state: current, reason: "INSTALLATION_ADDRESS_REQUIRED" };
+              context = { ...context, fulfillmentAddress: address };
+            }
+          }
+
           const result =
             updateOperationRecordStatus(
               current,
@@ -303,7 +367,10 @@ export const useOperationsStore =
             );
 
           if (result.outcome === "UPDATED") {
-            set(result.state);
+            set(updateGeneralFulfillmentProgress(result.state, result.operation));
+            if (result.operation.kind === "TAILOR" && result.operation.status === "COMPLETED") {
+              routeInstallationAfterTailorCompletion({ operation: result.operation, actorUserId: actor.userId, now: occurredAt });
+            }
           }
 
           return result;
@@ -402,7 +469,7 @@ export const useOperationsStore =
             }
 
             set(state => ({
-              ...result.state,
+              ...updateGeneralFulfillmentProgress(result.state, result.operation),
 
               providerStatusAudits: [
                 ...state.providerStatusAudits,
@@ -413,6 +480,11 @@ export const useOperationsStore =
                 nextPendingDrafts
             }));
 
+            if (result.operation.kind === "TAILOR" && result.operation.status === "COMPLETED") {
+              routeInstallationAfterTailorCompletion({
+                operation: result.operation, actorUserId: request.actor.userId, now: request.occurredAt,
+              });
+            }
             return result;
           },
 

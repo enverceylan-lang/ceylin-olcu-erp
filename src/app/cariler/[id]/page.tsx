@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useSyncExternalStore } from "react";
-import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, ChevronRight, ChevronUp, Layers, FileText, Shield, AlertTriangle, MapPin, MessageCircle, Loader2, Ruler, RefreshCw, Phone } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, X, LayoutPanelTop as WindowIcon, ChevronDown, ChevronRight, ChevronUp, Layers, FileText, Shield, AlertTriangle, MapPin, MessageCircle, Ruler, RefreshCw, Phone } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -360,9 +360,7 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   const [correctionNewUserId, setCorrectionNewUserId] = useState("");
   const [correctionReason, setCorrectionReason] = useState("");
 
-  const [updatingLocation, setUpdatingLocation] = useState(false);
-  const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
-  const [locationWarning, setLocationWarning] = useState<string | null>(null);
+  const [locationAddressEdit, setLocationAddressEdit] = useState<{ addressId?: string }>();
   const [isSaving, setIsSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isVisualReportOpen, setIsVisualReportOpen] = useState(false);
@@ -1363,40 +1361,12 @@ export default function CariDetayPage({ params }: { params: Promise<{ id: string
   };
 
   const handleUpdateLocation = () => {
-    if (!navigator.geolocation) {
-      showToast("Tarayıcınız konum bilgisini desteklemiyor.");
+    if (!canEdit) {
+      showToast("Bu cari için adres düzenleme yetkiniz yok.");
       return;
     }
-    setUpdatingLocation(true);
-    setLocationAccuracy(null);
-    setLocationWarning(null);
-
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const { latitude, longitude, accuracy } = position.coords;
-        const newCoords = `${latitude.toFixed(6)},${longitude.toFixed(6)}`;
-
-        setLocationAccuracy(accuracy);
-        if (accuracy > 100) {
-          setLocationWarning("Konum doğruluğu düşük. GPS açıkken tekrar deneyin veya haritadan kontrol edin.");
-        }
-
-        updateCustomer(customer.id, { mapLocation: newCoords });
-
-        try {
-          await syncNow();
-        } catch (err) {
-          console.error("Otomatik senkronizasyon başarısız oldu:", err);
-        }
-        setUpdatingLocation(false);
-      },
-      (error) => {
-        console.error(error);
-        showToast("Konum bilgisi alınamadı. İzinleri kontrol edin.");
-        setUpdatingLocation(false);
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-    );
+    setLocationAddressEdit({ addressId: selectedCustomerAddressId || undefined });
+    setIsEditModalOpen(true);
   };
 
   const handleSaveAsLocalDraft = async () => {
@@ -1575,8 +1545,8 @@ showToast("Saha taslağı telefona kaydedildi.");
 
   const renderMeasurementForm = (room: Room, window: WindowItem, isInlineEdit = false) => {
     return (
-      <div key={isInlineEdit ? editingMeasurementId : "new"} className={`relative mt-3 overflow-hidden rounded-2xl border border-blue-200 bg-white shadow-md dark:border-gray-700 dark:bg-gray-900 ${isInlineEdit ? "" : "ml-0 sm:ml-6"}`}>
-                              <div className="flex items-center justify-between border-b border-blue-100 bg-blue-50/80 px-3 py-2.5 dark:border-gray-700 dark:bg-gray-950/70 sm:px-4">
+      <div key={isInlineEdit ? editingMeasurementId : "new"} className={`relative mt-3 min-w-0 overflow-hidden rounded-xl border border-sky-200 bg-white shadow-sm dark:border-[#3e4850] dark:bg-[#131b2e] ${isInlineEdit ? "" : "ml-0 sm:ml-6"}`}>
+                              <div className="flex items-center justify-between gap-2 border-b border-sky-100 bg-sky-50 px-3 py-3 dark:border-[#3e4850] dark:bg-[#171f33] sm:px-4">
                                 <div className="flex min-w-0 items-center gap-2">
                                   <h5 className="truncate font-bold text-blue-900 dark:text-gray-100">
                                     {editingMeasurementId ? "Saha Ölçüsü Düzenleme Formu" : "Saha Ölçü Formu"}
@@ -1825,7 +1795,7 @@ showToast("Saha taslağı telefona kaydedildi.");
               }
               mapsUrl={getGoogleMapsUrl(customer)}
               hasMapLocation={Boolean(customer.mapLocation)}
-              updatingLocation={updatingLocation}
+              updatingLocation={false}
               canEdit={canEdit}
               onUpdateLocation={handleUpdateLocation}
               onEdit={() => setIsEditModalOpen(true)}
@@ -2040,18 +2010,6 @@ showToast("Saha taslağı telefona kaydedildi.");
                     <div className="mb-2 break-all font-mono text-[10px] leading-relaxed text-gray-500 dark:text-gray-400">{customer.mapLocation}</div>
                   )}
 
-                  {locationAccuracy !== null && (
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                      Doğruluk: {Math.round(locationAccuracy)} metre
-                    </div>
-                  )}
-                  {locationWarning && (
-                    <div className="text-xs text-amber-500 dark:text-amber-400 font-medium mb-2 flex items-start gap-1">
-                      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                      <span>{locationWarning}</span>
-                    </div>
-                  )}
-
                   <div className="mt-2 flex flex-wrap gap-2">
                     {(() => {
                       const mapsUrl = getGoogleMapsUrl(customer);
@@ -2080,20 +2038,10 @@ showToast("Saha taslağı telefona kaydedildi.");
 
                     <button
                       onClick={handleUpdateLocation}
-                      disabled={updatingLocation}
-                      className="inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-emerald-700 bg-emerald-700 px-2 py-1.5 text-center text-[11px] font-bold text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+                       className="inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-emerald-700 bg-emerald-700 px-2 py-1.5 text-center text-[11px] font-bold text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {updatingLocation ? (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          Konum Alınıyor...
-                        </>
-                      ) : (
-                        <>
-                          <MapPin className="w-3.5 h-3.5" />
-                          Konumu Güncelle
-                        </>
-                      )}
+                      <MapPin className="w-3.5 h-3.5" />
+                      Konumu Güncelle
                     </button>
                   </div>
                 </div>
@@ -3932,8 +3880,12 @@ showToast("Saha taslağı telefona kaydedildi.");
         {isEditModalOpen && (
           <CariEditModal
             isOpen={isEditModalOpen}
-            onClose={() => setIsEditModalOpen(false)}
+            onClose={() => {
+              setIsEditModalOpen(false);
+              setLocationAddressEdit(undefined);
+            }}
             customer={customer}
+            initialAddressEdit={locationAddressEdit}
             onSave={handleSaveCustomer}
           />
         )}

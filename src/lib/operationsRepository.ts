@@ -75,7 +75,7 @@ function replaceAgendaEvent(
 ): AgendaEvent[] {
   return [
     ...events.filter(
-      event => event.operationId !== nextEvent.operationId
+      event => event.operationId !== nextEvent.operationId || !sameScope(event, nextEvent)
     ),
     nextEvent
   ];
@@ -130,10 +130,13 @@ export function updateOperationRecordStatus(
   occurredAt: string,
   context?: OperationTransitionContext
 ): UpdateOperationStatusResult {
-  const current = state.operations.find(
-    operation => operation.id === operationId
-  );
+  const matches = state.operations.filter(operation => operation.id === operationId);
+  const scope = context?.scope;
+  const current = scope ? matches.find(operation => sameScope(operation, scope)) : matches[0];
 
+  if (!current && matches.length) {
+    return { outcome: "REJECTED", state, reason: "ROLE_FORBIDDEN" };
+  }
   if (!current) {
     return {
       outcome: "NOT_FOUND",
@@ -163,7 +166,7 @@ export function updateOperationRecordStatus(
     state: {
       operations: state.operations.map(
         operation =>
-          operation.id === operationId
+          operation === current
             ? decision.operation
             : operation
       ),
@@ -219,6 +222,7 @@ export function listVisibleOperationsForUser(
   return listScopedOperations(state, scope).filter(
     operation =>
       manager ||
+      (role === "SALES" && operation.fulfillmentMode === "STORE_PICKUP") ||
       operation.party?.userId === actor.userId
   );
 }

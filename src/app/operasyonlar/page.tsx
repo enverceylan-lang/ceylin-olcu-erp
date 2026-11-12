@@ -793,7 +793,7 @@ const [showCompleted, setShowCompleted] =
         role: currentUser.role
       },
       new Date().toISOString(),
-      releaseProjection.context
+      { ...releaseProjection.context, scope: scope ?? undefined }
     );
 
     if (result.outcome !== "UPDATED") {

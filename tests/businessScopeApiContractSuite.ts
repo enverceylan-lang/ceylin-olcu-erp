@@ -210,7 +210,7 @@ for (const source of [
 }
 
 const addCustomerStart = customerStore.indexOf(
-  "      addCustomer: async (data) => {",
+  "      addCustomer: async (data, firstAddress) => {",
 );
 const updateCustomerStart = customerStore.indexOf(
   "      updateCustomer:",

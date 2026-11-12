@@ -10,15 +10,26 @@ interface CariEditModalProps {
   isOpen: boolean;
   onClose: () => void;
   customer: Customer;
+  initialAddressEdit?: { addressId?: string };
   onSave: (id: string, data: Partial<Customer>) => Promise<void>;
 }
 
-export function CariEditModal({ isOpen, onClose, customer, onSave }: CariEditModalProps) {
-  const [formData, setFormData] = useState<Partial<Customer>>({ ...customer });
+export function CariEditModal({ isOpen, onClose, customer, onSave, initialAddressEdit }: CariEditModalProps) {
+  const [formData, setFormData] = useState<Partial<Customer>>(() => {
+    const editable = { ...customer };
+    delete (editable as Partial<Customer>).addresses;
+    for (const field of ["address", "mapLocation", "province", "district", "latitude", "longitude"] as const) {
+      delete (editable as Partial<Customer>)[field];
+    }
+    return editable;
+  });
   const [isSaving, setIsSaving] = useState(false);
   const [addressTab, setAddressTab] = useState<string>("PRIMARY");
-  const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
-  const [editingAddress, setEditingAddress] = useState<CustomerAddress | null>(null);
+  const [isAddressModalOpen, setIsAddressModalOpen] = useState(Boolean(initialAddressEdit));
+  const [editingAddress, setEditingAddress] = useState<CustomerAddress | null>(() =>
+    customer.addresses?.find(address => !address.isDeleted && address.id === initialAddressEdit?.addressId) || null
+  );
+  const [editingPrimary, setEditingPrimary] = useState(Boolean(initialAddressEdit && !initialAddressEdit.addressId));
 
   const liveCustomer =
     useStore(state => state.customers.find(item => item.id === customer.id)) ||
@@ -34,13 +45,20 @@ export function CariEditModal({ isOpen, onClose, customer, onSave }: CariEditMod
   const selectedExtraAddress =
     activeAddresses.find(address => address.id === addressTab) || null;
 
-  const openNewAddress = async () => {
-    await ensureCustomerAddressIdentity(customer.id);
+  const openNewAddress = () => {
+    setEditingPrimary(false);
     setEditingAddress(null);
     setIsAddressModalOpen(true);
   };
 
+  const openPrimaryAddress = () => {
+    setEditingPrimary(true);
+    setEditingAddress(activeAddresses.find(address => address.legacyPrimary) || null);
+    setIsAddressModalOpen(true);
+  };
+
   const openEditAddress = (address: CustomerAddress) => {
+    setEditingPrimary(false);
     setEditingAddress(address);
     setIsAddressModalOpen(true);
   };
@@ -48,18 +66,38 @@ export function CariEditModal({ isOpen, onClose, customer, onSave }: CariEditMod
   const saveCustomerAddress = async (
     data: Omit<CustomerAddress, "id" | "customerId" | "normalizedTitle" | "createdAt" | "updatedAt">,
   ) => {
-    if (editingAddress) {
-      await updateCustomerAddress(customer.id, editingAddress.id, data);
-      setAddressTab(editingAddress.id);
+    const existingId = editingAddress?.id || (editingPrimary &&
+      !activeAddresses.length ? await ensureCustomerAddressIdentity(customer.id) : null);
+    if (existingId) {
+      await updateCustomerAddress(customer.id, existingId, data);
+      setAddressTab(editingPrimary ? "PRIMARY" : existingId);
     } else {
-      const addressId = await addCustomerAddress(customer.id, data);
-      setAddressTab(addressId);
+      const addressId = await addCustomerAddress(customer.id, { ...data, legacyPrimary: editingPrimary });
+      const saved = useStore.getState().customers.find(item => item.id === customer.id)
+        ?.addresses?.find(address => address.id === addressId);
+      setAddressTab(saved?.legacyPrimary ? "PRIMARY" : addressId);
     }
     setIsAddressModalOpen(false);
     setEditingAddress(null);
   };
 
   if (!isOpen) return null;
+
+  if (initialAddressEdit) {
+    const target = editingAddress || (!initialAddressEdit.addressId
+      ? activeAddresses.find(address => address.legacyPrimary) || null
+      : null);
+    return <CustomerAddressModal isOpen address={target ?? (editingPrimary ? {
+      title: "Ana Adres", address: liveCustomer.address, province: liveCustomer.province,
+      district: liveCustomer.district, mapLocation: liveCustomer.mapLocation,
+      latitude: liveCustomer.latitude, longitude: liveCustomer.longitude,
+    } : null)} onClose={onClose} onSave={async data => {
+      if (target) await updateCustomerAddress(customer.id, target.id, data);
+      else if (initialAddressEdit.addressId) throw new Error("Seçilen adres bulunamadı.");
+      else await saveCustomerAddress(data);
+      onClose();
+    }} />;
+  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
@@ -76,6 +114,11 @@ export function CariEditModal({ isOpen, onClose, customer, onSave }: CariEditMod
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.name?.trim()) { alert("Cari adı zorunludur."); return; }
+    if (![formData.phone, formData.phone2, formData.mobile1, formData.mobile2].some(phone => phone?.trim())) {
+      alert("En az bir telefon girin.");
+      return;
+    }
     setIsSaving(true);
     try {
       await onSave(customer.id, formData);
@@ -215,12 +258,8 @@ export function CariEditModal({ isOpen, onClose, customer, onSave }: CariEditMod
                   <input name="email" type="email" value={formData.email || ''} onChange={handleChange} className="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 text-sm outline-none focus:border-blue-500" />
                 </div>
                 <div className="space-y-1 md:col-span-2">
-                  <label className="text-xs font-semibold text-gray-600">Açık Adres</label>
-                  <textarea name="address" value={formData.address || ''} onChange={handleChange} rows={2} className="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 text-sm outline-none focus:border-blue-500" />
-                </div>
-                <div className="space-y-1 md:col-span-2">
-                  <label className="text-xs font-semibold text-gray-600">Konum (Harita Linki)</label>
-                  <input name="mapLocation" value={formData.mapLocation || ''} onChange={handleChange} placeholder="https://maps.google.com/..." className="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 text-sm outline-none focus:border-blue-500" />
+                  <button type="button" onClick={openPrimaryAddress} className="rounded-lg border px-3 py-2 text-sm">Ana adresi düzenle</button>
+                  <p className="text-sm">{liveCustomer.address}</p>
                 </div>
               </div>
             </div>
@@ -366,7 +405,11 @@ export function CariEditModal({ isOpen, onClose, customer, onSave }: CariEditMod
           setIsAddressModalOpen(false);
           setEditingAddress(null);
         }}
-        address={editingAddress}
+        address={editingAddress ?? (editingPrimary ? {
+          title: "Ana Adres", province: liveCustomer.province, district: liveCustomer.district,
+          address: liveCustomer.address, mapLocation: liveCustomer.mapLocation,
+          latitude: liveCustomer.latitude, longitude: liveCustomer.longitude,
+        } : null)}
         onSave={saveCustomerAddress}
       />
     </div>

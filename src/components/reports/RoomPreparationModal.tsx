@@ -1395,8 +1395,8 @@ export function RoomPreparationModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 font-sans text-slate-100 backdrop-blur-md">
-      <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-800 p-6">
+      <div className="flex max-h-[92dvh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-[#3e4850] bg-[#131b2e] sm:max-h-[88dvh] shadow-2xl">
+        <div className="flex items-center justify-between gap-3 border-b border-[#3e4850] px-4 py-3 sm:px-6 sm:py-5">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
               <Sparkles className="h-5 w-5" />
@@ -1421,7 +1421,7 @@ export function RoomPreparationModal({
           </button>
         </div>
 
-        <div className="flex-1 space-y-6 overflow-y-auto p-6">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-3 sm:space-y-6 sm:p-6">
           {canTransferToSale && roomMeasurements.length > 0 && (
             <div className="flex flex-col gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 sm:flex-row sm:items-center sm:justify-between">
               <div>

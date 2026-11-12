@@ -1,6 +1,11 @@
 import {
   resolveInstallationAssignment
 } from "@/lib/installationAssignmentService";
+import { readErpScope } from "@/lib/customerTreeScope";
+import { getSaleFulfillmentLines, isFulfillmentLineReady } from "@/lib/installationFulfillment";
+import { shouldPublishTailorPlanning } from "@/lib/tailorPlanningEligibility";
+import type { ErpScope } from "@/lib/erpScope";
+import { useSupplyChainStore } from "@/store/useSupplyChainStore";
 import type {
   OperationRecord
 } from "@/lib/operationsWorkflow";
@@ -45,7 +50,8 @@ export type TailorCompletionInstallationResult =
         "READY_NOT_ROUTED";
       reason:
         | "MAIN_OPERATION_NOT_FOUND"
-        | "INSTALLATION_ROUTE_REJECTED";
+        | "INSTALLATION_ROUTE_REJECTED"
+        | "FULFILLMENT_LINE_NOT_READY";
     }
   | {
       outcome:
@@ -56,21 +62,61 @@ export type TailorCompletionInstallationResult =
         | "SALE_NOT_FOUND";
     };
 
-function flattenSaleItems(
-  sale:
-    ReturnType<
-      typeof useSalesStore.getState
-    >["sales"][number]
-) {
-  return sale.items.flatMap(
-    item =>
-      Array.isArray(
-        item.productionBreakdown
-      ) &&
-      item.productionBreakdown.length > 0
-        ? item.productionBreakdown
-        : [item]
-  );
+export function routeReadySaleInstallation(
+  parent: OperationRecord, saleLineId: string, actorUserId: string, now: string,
+): TailorCompletionInstallationResult {
+  const sales = useSalesStore.getState().sales;
+  const sale = sales.find(item => item.id === parent.saleId && erpScopeMatches(item, parent));
+  if (!sale || sale.customerId !== parent.customerId || !(shouldPublishTailorPlanning(sale.status) || sale.status === "MONTAJA_GÖNDERİLDİ")) {
+    return { outcome: "REJECTED", reason: "SALE_NOT_FOUND" };
+  }
+  const line = getSaleFulfillmentLines(sale).find(item => item.id === saleLineId);
+  const app = useStore.getState();
+  if (!line || !isFulfillmentLineReady(sale, line, app.productionItems,
+      useSupplyChainStore.getState().supplierOrders, sales.filter(item => item.id === sale.id).length === 1)) {
+    return { outcome: "READY_NOT_ROUTED", reason: "FULFILLMENT_LINE_NOT_READY" };
+  }
+  const operations = useOperationsStore.getState();
+  const existing = operations.operations.find(item => item.kind === "INSTALLATION" &&
+    item.saleId === sale.id && item.parentOperationId === parent.id && item.fulfillmentLineId === line.id &&
+    item.status !== "CANCELLED" && erpScopeMatches(item, parent));
+  if (existing) return { outcome: "REPLAY", installationOperation: existing };
+
+  const requiresInstallation = app.products.find(product => product.id === line.stockItemId)?.requiresInstallation === true;
+  const customer = app.customers.find(item => {
+    const scope = readErpScope(item);
+    return item.id === sale.customerId && !item.isDeleted && scope && erpScopeMatches(scope, sale);
+  });
+  const assignedInstallerId = requiresInstallation ? customer?.assignedInstallerId?.trim() : undefined;
+  let party: OperationRecord["party"];
+  if (assignedInstallerId) {
+    const installer = useAuthStore.getState().users.find(user => user.id === assignedInstallerId);
+    if (!installer) return { outcome: "WAITING_ASSIGNMENT", reason: "ASSIGNED_INSTALLER_NOT_FOUND" };
+    const assignment = resolveInstallationAssignment(installer);
+    if (assignment.mode !== "INTERNAL" && assignment.mode !== "EXTERNAL") {
+      return { outcome: "WAITING_ASSIGNMENT", reason: "ASSIGNED_INSTALLER_INVALID" };
+    }
+    party = assignment.party;
+  }
+
+  const routed = operations.routeChild({
+    parent, kind: "INSTALLATION", fulfillmentLineId: line.id,
+    ...(party ? { party } : { fulfillmentMode: "STORE_PICKUP" as const }),
+    scheduledAt: now, dueAt: now, createdByUserId: actorUserId, now,
+  });
+  if (routed.outcome === "REJECTED") return { outcome: "READY_NOT_ROUTED", reason: "INSTALLATION_ROUTE_REJECTED" };
+  return { outcome: routed.outcome === "REPLAY" ? "REPLAY" : "ROUTED", installationOperation: routed.operation };
+}
+
+export function routeReadyInstallationsInScope(scope: ErpScope, actorUserId: string, now: string): void {
+  const sales = useSalesStore.getState().sales;
+  const state = useOperationsStore.getState();
+  for (const parent of state.operations) {
+    if (parent.kind !== "GENERAL" || parent.status === "CANCELLED" || parent.status === "COMPLETED" ||
+        !erpScopeMatches(parent, scope)) continue;
+    const sale = sales.find(item => item.id === parent.saleId && erpScopeMatches(item, parent));
+    if (sale) for (const line of getSaleFulfillmentLines(sale)) routeReadySaleInstallation(parent, line.id, actorUserId, now);
+  }
 }
 
 export function routeInstallationAfterTailorCompletion(
@@ -136,116 +182,6 @@ export function routeInstallationAfterTailorCompletion(
     };
   }
 
-  const app =
-    useStore.getState();
-
-  const requiresInstallation =
-    flattenSaleItems(sale)
-      .some(item => {
-        const product =
-          app.products.find(
-            candidate =>
-              candidate.id ===
-              item.stockItemId
-          );
-
-        return (
-          product
-            ?.requiresInstallation ===
-          true
-        );
-      });
-
-  if (!requiresInstallation) {
-    return {
-      outcome:
-        "READY_NO_INSTALLATION"
-    };
-  }
-
-  const customer =
-    app.customers.find(
-      current =>
-        current.id ===
-        sale.customerId
-    );
-
-  const assignedInstallerId =
-    customer
-      ?.assignedInstallerId
-      ?.trim();
-
-  if (!assignedInstallerId) {
-    return {
-      outcome:
-        "WAITING_ASSIGNMENT",
-      reason:
-        "NO_ASSIGNED_INSTALLER"
-    };
-  }
-
-  const installer =
-    useAuthStore
-      .getState()
-      .users
-      .find(
-        user =>
-          user.id ===
-          assignedInstallerId
-      );
-
-  if (!installer) {
-    return {
-      outcome:
-        "WAITING_ASSIGNMENT",
-      reason:
-        "ASSIGNED_INSTALLER_NOT_FOUND"
-    };
-  }
-
-  const assignment =
-    resolveInstallationAssignment(
-      installer
-    );
-
-  if (
-    assignment.mode ===
-    "REJECTED"
-  ) {
-    return {
-      outcome:
-        "WAITING_ASSIGNMENT",
-      reason:
-        "ASSIGNED_INSTALLER_INVALID"
-    };
-  }
-
-  if (
-    assignment.mode ===
-    "UNASSIGNED"
-  ) {
-    return {
-      outcome:
-        "WAITING_ASSIGNMENT",
-      reason:
-        "NO_ASSIGNED_INSTALLER"
-    };
-  }
-
-  if (
-    assignment.mode !==
-      "INTERNAL" &&
-    assignment.mode !==
-      "EXTERNAL"
-  ) {
-    return {
-      outcome:
-        "WAITING_ASSIGNMENT",
-      reason:
-        "ASSIGNED_INSTALLER_INVALID"
-    };
-  }
-
   const operations =
     useOperationsStore
       .getState();
@@ -255,8 +191,9 @@ export function routeInstallationAfterTailorCompletion(
       current =>
         current.id ===
           operation.parentOperationId &&
-        current.kind ===
-          "GENERAL"
+        current.kind === "GENERAL" &&
+        current.saleId === operation.saleId &&
+        erpScopeMatches(current, operation)
     ) ??
     operations.operations.find(
       current =>
@@ -283,46 +220,14 @@ export function routeInstallationAfterTailorCompletion(
     };
   }
 
-  const routed =
-    operations.routeChild({
-      parent:
-        main,
-      kind:
-        "INSTALLATION",
-      party:
-        assignment.party,
-      scheduledAt:
-        now,
-      dueAt:
-        main.dueAt >= now
-          ? main.dueAt
-          : now,
-      createdByUserId:
-        actorUserId,
-      now,
-      notes:
-        "Terzi işi tamamlandıktan sonra otomatik montaj yönlendirmesi."
-    });
-
-  if (
-    routed.outcome ===
-    "REJECTED"
-  ) {
-    return {
-      outcome:
-        "READY_NOT_ROUTED",
-      reason:
-        "INSTALLATION_ROUTE_REJECTED"
-    };
+  if (operation.fulfillmentLineId) {
+    return routeReadySaleInstallation(main, operation.fulfillmentLineId, actorUserId, now);
   }
-
-  return {
-    outcome:
-      routed.outcome ===
-      "REPLAY"
-        ? "REPLAY"
-        : "ROUTED",
-    installationOperation:
-      routed.operation
-  };
+  let result: TailorCompletionInstallationResult = { outcome: "READY_NOT_ROUTED", reason: "FULFILLMENT_LINE_NOT_READY" };
+  for (const line of getSaleFulfillmentLines(sale)) {
+    const candidate = routeReadySaleInstallation(main, line.id, actorUserId, now);
+    if (candidate.outcome === "ROUTED" || candidate.outcome === "REPLAY" ||
+        (result.outcome === "READY_NOT_ROUTED" && candidate.outcome === "WAITING_ASSIGNMENT")) result = candidate;
+  }
+  return result;
 }

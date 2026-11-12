@@ -64,7 +64,7 @@ export function optimizeBirizSharedFabric(request: BirizSharedFabricRequest): Bi
   if (!request || !request.scope) throw new Error('BIRIZ_V5A_SCOPE_REQUIRED');
   const scope: BirizScope = { ...request.scope };
   for (const key of SCOPE_KEYS) {
-    if (typeof scope[key] !== 'string' || !scope[key].trim()) throw new Error(`BIRIZ_V5A_SCOPE_${key}_REQUIRED`);
+    if (typeof scope[key] !== 'string' || (key !== 'customerAddressId' && !scope[key].trim())) throw new Error(`BIRIZ_V5A_SCOPE_${key}_REQUIRED`);
     scope[key] = scope[key].trim();
   }
   if (request.cuttingConstraintsVerified !== true) throw new Error('BIRIZ_V5A_CUTTING_CONSTRAINTS_UNVERIFIED');

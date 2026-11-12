@@ -54,7 +54,7 @@ export function prepareBirizSaleItemsV5(input: BirizSalePreparationV5Input): Sal
     branchId: requireText(scope.branchId, 'BRANCH'),
     accountingPeriodId: requireText(scope.accountingPeriodId, 'PERIOD'),
     customerId: requireText(customerId, 'CUSTOMER'),
-    customerAddressId: requireText(customerAddressId, 'ADDRESS')
+    customerAddressId: customerAddressId.trim()
   };
   const selectedIds = new Set(birizMeasurements.map(m => m.id));
   if (selectedIds.size !== birizMeasurements.length) throw new Error('BIRIZ_V5_DUPLICATE_MEASUREMENT');
