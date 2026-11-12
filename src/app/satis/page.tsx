@@ -50,6 +50,7 @@ import {
 } from "@/lib/saleLineSourceProducerClient";
 import {
   approveSaleServerAuthority,
+  recoverSaleMainOperation,
 } from "@/lib/salesAuthorityRuntimeClient";
 import {
   saleApprovalStockIdentityMessage,
@@ -194,11 +195,23 @@ export default function SatisPage() {
       const now =
         new Date().toISOString();
 
+      const approvedSale: Sale = {
+        ...sale,
+        status: "ONAYLANDI",
+        updatedAt: now
+      };
+
       // SERVER_AUTHORITY_RUNTIME_V1
-      await approveSaleServerAuthority({
-        saleId: sale.id,
+      const approval = await approveSaleServerAuthority({
+        sale: approvedSale,
         scope,
+        currency: "TRY",
       });
+      if (approval.operationMessage) alert(approval.operationMessage);
+      if (approval.replay) {
+        if (!approval.operationMessage) alert("Satış zaten onaylı. Merkezi ana operasyon doğrulandı.");
+        return;
+      }
       const transition =
         requestSaleStatusTransition({
           saleId: sale.id,
@@ -219,11 +232,6 @@ export default function SatisPage() {
         );
       }
 
-      const approvedSale: Sale = {
-        ...sale,
-        status: "ONAYLANDI",
-        updatedAt: now
-      };
 
       const financeOutboxRecord =
         await updateSaleWithFinanceOutbox(
@@ -235,6 +243,7 @@ export default function SatisPage() {
 
       const operationsResult =
         executeSaleApprovalOperations({
+          centralOperationHandled: true,
           sale:
             approvedSale,
           scope,
@@ -292,6 +301,8 @@ export default function SatisPage() {
         );
         return;
       }
+
+      if (approval.operationMessage) return;
 
       const supplyStarted =
         operationsResult.material.outcome ===
@@ -487,6 +498,16 @@ export default function SatisPage() {
 
                       <td className="flex items-center justify-between px-4 py-2 sm:table-cell sm:px-6 sm:py-4">
                         <span className="text-xs font-semibold text-gray-400 sm:hidden">Durum</span>
+                        {sale.status === "ONAYLANDI" && scope && canApproveSpecificSale(currentUser, sale) && (
+                          <button type="button" onClick={async () => {
+                            try {
+                              const message = await recoverSaleMainOperation(scope, sale.id);
+                              alert(message ?? "Merkezi ana operasyon doğrulandı.");
+                            } catch {
+                              alert("Merkezi ana operasyon tekrar denemesi tamamlanamadı.");
+                            }
+                          }}>Ana operasyonu doğrula</button>
+                        )}
                         {canApprove ? (
                           <button
                             type="button"

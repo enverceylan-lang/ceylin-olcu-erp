@@ -28,6 +28,7 @@ import {
 
 import {
   approveSaleServerAuthority,
+  recoverSaleMainOperation,
   persistDraftSaleServerAuthority,
 } from "@/lib/salesAuthorityRuntimeClient";
 import OpenMeasurementsNotice from "@/components/sales/OpenMeasurementsNotice";
@@ -563,17 +564,31 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
         persistedSaleForSave.status === "TASLAK" ||
         persistedSaleForSave.status === "TEKLİF"
       ) {
-        await persistDraftSaleServerAuthority({
-          sale: updatedSale,
-          scope,
-          sourceStatus: persistedSaleForSave.status,
-        });
+        try {
+          await persistDraftSaleServerAuthority({
+            sale: updatedSale,
+            scope,
+            sourceStatus: persistedSaleForSave.status,
+          });
+        } catch (error) {
+          if (updatedSale.status !== "ONAYLANDI" || !(error instanceof Error) ||
+              !/(^|:)SALE_AUTHORITY_APPROVED_IMMUTABLE$/.test(error.message)) throw error;
+          const message = await recoverSaleMainOperation(scope, updatedSale.id);
+          alert(message ?? "Satış zaten onaylı. Merkezi ana operasyon doğrulandı.");
+          return;
+        }
 
         if (updatedSale.status === "ONAYLANDI") {
-          await approveSaleServerAuthority({
-            saleId: updatedSale.id,
+          const approval = await approveSaleServerAuthority({
+            sale: updatedSale,
             scope,
+            currency: "TRY",
           });
+          if (approval.operationMessage) alert(approval.operationMessage);
+          if (approval.replay) {
+            if (!approval.operationMessage) alert("Satış zaten onaylı. Merkezi ana operasyon doğrulandı.");
+            return;
+          }
         }
       }
       if (
@@ -670,6 +685,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ id: strin
         persistedSaleForSave.status !==
           "ONAYLANDI"
           ? executeSaleApprovalOperations({
+              centralOperationHandled: true,
               sale:
                 updatedSale,
               scope,

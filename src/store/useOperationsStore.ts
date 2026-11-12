@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { mergeMainOperationsW1 } from "@/lib/mainOperationW1";
 import type { ErpScope } from "@/lib/erpScope";
 import {
   listScopedAgendaEvents,
@@ -157,6 +158,7 @@ interface OperationsStore
     input: BuildMainOperationInput
   ): SyncMainOperationResult;
 
+  mergeCentralMainOperations(scope: ErpScope, records: OperationRecord[]): string[];
   updateStatus(
     operationId: string,
     target: OperationStatus,
@@ -264,6 +266,18 @@ export const useOperationsStore =
           }
 
           return result;
+        },
+
+        mergeCentralMainOperations: (scope, records) => {
+          const current = get();
+          const { added, review } = mergeMainOperationsW1(current.operations, records, scope);
+          if (added.length) {
+            set({
+              operations: [...current.operations, ...added],
+              agendaEvents: [...current.agendaEvents, ...rebuildAgendaEvents(added)],
+            });
+          }
+          return review;
         },
 
         updateStatus: (

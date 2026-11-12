@@ -305,6 +305,39 @@ const [showCompleted, setShowCompleted] =
 
     void loadSales(scope);
   }, [loadSales, scope]);
+  const mergeCentralMainOperations = useOperationsStore(state => state.mergeCentralMainOperations);
+  useEffect(() => {
+    if (
+      !scope ||
+      !currentUser
+    ) {
+      return;
+    }
+
+    const token = useAuthStore.getState().sessionToken;
+    if (!token) return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch("/api/operations/main", { cache: "no-store", signal: controller.signal,
+          headers: { Authorization: `Bearer ${token}` } });
+        if (response.status === 401 || response.status === 403) return;
+        if (!response.ok) throw new Error("W1_READ_FAILED");
+        const { operations } = await response.json();
+        if (!controller.signal.aborted) {
+          const review = mergeCentralMainOperations(scope, operations);
+          if (review.length) alert(`Ana operasyon incelemesi gerekli: ${review.join(", ")}`);
+        }
+      } catch {
+        if (!controller.signal.aborted) alert("Merkezi ana operasyonlar okunamadı.");
+      }
+    })();
+    return () => controller.abort();
+  }, [
+    scope,
+    currentUser,
+    mergeCentralMainOperations
+  ]);
   useEffect(() => {
     function handleShortcut(
       event: KeyboardEvent

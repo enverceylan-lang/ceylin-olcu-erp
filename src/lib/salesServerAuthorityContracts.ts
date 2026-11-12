@@ -1,5 +1,6 @@
 import type { ErpScope } from "@/lib/erpScope";
 import { validateErpScope } from "@/lib/erpScope";
+import type { PersistSaleLineSourceRequestV1 } from "@/lib/saleLineSourceContracts";
 
 export interface SaleAuthorityAddressSnapshot {
   customerAddressId: string;
@@ -27,6 +28,7 @@ export interface SaleAuthorityDraftInput extends ErpScope {
 
 export interface SaleApprovalAuthorityInput extends ErpScope {
   saleId: string;
+  lineSource: PersistSaleLineSourceRequestV1;
 }
 
 export type SaleReturnAuthorityAction =
