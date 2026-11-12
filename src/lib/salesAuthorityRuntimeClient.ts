@@ -6,11 +6,18 @@ import { useAuthStore } from "@/store/useAuthStore";
 import type {
   SaleReturnDocument,
 } from "@/lib/saleReturnService";
+import {
+  buildApprovedSaleLineSourcePayloadV1,
+} from "@/lib/saleLineSourceProducerClient";
+
+import type { MainOperationW1Result } from "@/lib/mainOperationW1";
+import { useOperationsStore } from "@/store/useOperationsStore";
 
 type AuthorityResponse = {
   success: boolean;
   error?: string;
-  result?: unknown;
+  result?: { outcome?: string };
+  mainOperation?: MainOperationW1Result;
 };
 
 function sessionToken(): string {
@@ -73,16 +80,44 @@ export async function persistDraftSaleServerAuthority(input: {
 }
 
 export async function approveSaleServerAuthority(input: {
-  saleId: string;
+  sale: Sale;
   scope: ErpScope;
-}): Promise<void> {
-  await postAuthority(
+  currency?: string;
+}) {
+  const lineSource =
+    buildApprovedSaleLineSourcePayloadV1({
+      sale: input.sale,
+      scope: input.scope,
+      currency: input.currency || "TRY",
+    });
+
+  const response = await postAuthority(
     "/api/sales/authority/approve",
     {
       ...input.scope,
-      saleId: input.saleId,
+      saleId: input.sale.id,
+      lineSource,
     },
   );
+  return {
+    replay: response.result?.outcome === "REPLAY",
+    operationMessage: applyMainOperation(input.scope, response.mainOperation),
+  };
+}
+
+function applyMainOperation(scope: ErpScope, result?: MainOperationW1Result): string | null {
+  if (!result?.ok) {
+    return `Satış onayı kesinleşmiş olabilir. Merkezi ana operasyon doğrulanamadı (${result?.error ?? "W1_RESPONSE_MISSING"}). Ana operasyonu tekrar deneyin.`;
+  }
+  const conflicts = useOperationsStore.getState().mergeCentralMainOperations(scope, [result.operation]);
+  return conflicts.length ? "Merkezi ana operasyon ile yerel kayıt çelişiyor. Kayıt inceleme gerektiriyor." : null;
+}
+
+export async function recoverSaleMainOperation(scope: ErpScope, saleId: string) {
+  const response = await postAuthority("/api/sales/authority/approve", {
+    ...scope, saleId, recoverMainOperation: true,
+  });
+  return applyMainOperation(scope, response.mainOperation);
 }
 
 export async function persistSaleReturnServerAuthority(input: {

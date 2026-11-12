@@ -59,6 +59,7 @@ export function executeSaleApprovalOperations(
       string;
     now:
       string;
+    centralOperationHandled?: boolean;
   }
 ): SaleApprovalOperationsResult {
   const {
@@ -70,6 +71,7 @@ export function executeSaleApprovalOperations(
   } = input;
 
   if (
+    !input.centralOperationHandled &&
     shouldSyncMainOperationForSaleStatus(
       sale.status
     )

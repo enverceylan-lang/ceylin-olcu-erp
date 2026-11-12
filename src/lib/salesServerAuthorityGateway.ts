@@ -47,12 +47,16 @@ export async function approveSaleDocumentAuthority(
     saleId: string;
     actorUserId: string;
     allowSelfApproval: boolean;
+    approvedLineSnapshotVersion?: number;
   },
 ): Promise<unknown> {
   const response = await client.rpc(
     "approve_sale_document_authority_v1",
     {
-      p_scope: input.scope,
+      p_scope: {
+        ...input.scope,
+        ...(input.approvedLineSnapshotVersion === undefined ? {} : { approvedLineSnapshotVersion: input.approvedLineSnapshotVersion }),
+      },
       p_sale_id: input.saleId,
       p_actor_user_id: input.actorUserId,
       p_allow_self_approval: input.allowSelfApproval,
