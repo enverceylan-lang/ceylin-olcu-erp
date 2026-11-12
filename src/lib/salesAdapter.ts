@@ -1,7 +1,7 @@
 import { Customer, ProductMeasurement } from '@/store/useStore';
 import { useMeasurementStore, MeasurementRecord } from '@/store/measurementStore';
 import { Sale, SaleItem } from '@/store/salesStore';
-import type { ErpScope } from '@/lib/erpScope';
+import { erpScopeMatches, type ErpScope } from '@/lib/erpScope';
 import { getMeasurementDimensions, resolveMeasurementProductGroup, resolveMeasurementProductLabel } from '@/lib/measurementAdapter';
 import { resolveSaleStockItemId } from '@/lib/saleStockIdentity';
 import { prepareBirizSaleItemsV5 } from '@/lib/calculationEngine/birizSaleIntegration';
@@ -442,6 +442,112 @@ export function saleItemContainsTransferBundleV1(
   );
 }
 
+function isInheritedTul(
+  measurement: MeasurementRecord,
+  product: NonNullable<MeasurementRecord['selectedProducts']>[number]
+): boolean {
+  return product.productType.trim().toUpperCase() === 'TUL' &&
+    Boolean(measurement.createdAt) && product.addedAt === measurement.createdAt &&
+    !product.userOverrides && !product.stockId;
+}
+
+function reconcileBirizDraftItems(
+  existing: SaleItem[],
+  calculated: SaleItem[],
+  measurements: MeasurementRecord[]
+): SaleItem[] {
+  const freshBiriz = calculated.filter(item => item.birizRuleVersion);
+  const sourcesByRoom = new Map<string | undefined, Set<string>>();
+  const replacements = new Map<string, SaleItem>();
+  const fail = () => { throw new Error('BIRIZ_V5_DRAFT_RECONCILIATION_REQUIRED'); };
+  const ids = (item: SaleItem) => (item.measurementId || '').split(',').filter(Boolean);
+  const sameIds = (left: string[], right: string[]) =>
+    left.length === right.length && new Set(left).size === left.length &&
+    new Set(right).size === right.length && left.every(id => right.includes(id));
+  const isBiriz = (item: SaleItem) =>
+    item.birizRuleVersion || /B[İI]R[İI]Z/i.test(item.productType);
+
+  for (const fresh of freshBiriz) {
+    const sourceIds = fresh.birizSourceMeasurementIds || [];
+    const old = existing.filter(item => item.id === fresh.id);
+    const historicalRoom = existing.some(item =>
+      isBiriz(item) && (item.birizRuleVersion || item.measurementId) &&
+      (item.roomId === fresh.roomId || ids(item).some(id => sourceIds.includes(id)))
+    );
+    if (!historicalRoom) continue;
+    if (old.length !== 1 || old[0].roomId !== fresh.roomId ||
+        old[0].birizRuleVersion !== fresh.birizRuleVersion ||
+        !sameIds(ids(old[0]), sourceIds) ||
+        !sameIds(old[0].birizSourceMeasurementIds || [], sourceIds)) fail();
+
+    const previous = old[0];
+    const rowTotal = Number((fresh.metricSize * fresh.quantity * previous.unitPrice *
+      (1 - Math.min(100, Math.max(0, previous.discount)) / 100)).toFixed(2));
+    replacements.set(previous.id, {
+      ...previous,
+      metricSize: fresh.metricSize,
+      metricUnit: fresh.metricUnit,
+      quantity: fresh.quantity,
+      fabricMeters: fresh.fabricMeters,
+      productionBreakdown: fresh.productionBreakdown,
+      birizCuttingGroups: fresh.birizCuttingGroups,
+      rowTotal,
+    });
+    sourcesByRoom.set(fresh.roomId, new Set(sourceIds));
+  }
+
+  const selectedSources = new Set([...sourcesByRoom.values()].flatMap(source => [...source]));
+  return existing.flatMap(item => {
+    const replacement = replacements.get(item.id);
+    if (replacement) return [replacement];
+
+    const sourceIds = ids(item);
+    const roomSources = sourcesByRoom.get(item.roomId);
+    const linkedToRepair = sourceIds.some(id => selectedSources.has(id)) ||
+      item.productionBreakdown?.some(part => ids(part).some(id => selectedSources.has(id))) ||
+      [...selectedSources].some(id => item.id.startsWith(`${id}-TUL-`));
+    if (isBiriz(item) && (item.birizRuleVersion || item.measurementId) &&
+        (roomSources || linkedToRepair)) fail();
+
+    if (item.productType.trim().toUpperCase() !== 'TUL' || !linkedToRepair) return [item];
+    const parts = item.productionBreakdown || [];
+    if (!roomSources || !sourceIds.length || !sameIds(sourceIds, parts.map(part => part.measurementId || '')) ||
+        item.id !== parts[0]?.id || parts.some(part =>
+          part.roomId !== item.roomId || part.productType !== item.productType ||
+          part.metricUnit !== item.metricUnit || !Number.isFinite(part.metricSize) || part.metricSize <= 0 ||
+          !part.id.startsWith(`${part.measurementId}-TUL-`) ||
+          !/^(g0|sale-\d+)$/.test(part.id.slice(`${part.measurementId}-TUL-`.length))
+        )) fail();
+
+    const inherited = parts.map(part => {
+      const measurement = measurements.find(m => m.id === part.measurementId && m.roomId === item.roomId);
+      const products = measurement?.selectedProducts?.filter(product =>
+        product.isActive && product.productType.trim().toUpperCase() === 'TUL'
+      );
+      if (!measurement || products?.length !== 1) return fail();
+      return isInheritedTul(measurement, products[0]);
+    });
+    const retained = parts.filter((part, index) =>
+      !inherited[index] || !roomSources?.has(part.measurementId || '')
+    );
+    if (retained.length === parts.length) return [item];
+    if (item.stockItemId || parts.some(part => part.stockItemId)) fail();
+    if (!retained.length) return [];
+
+    const metricSize = Number(retained.reduce((sum, part) => sum + part.metricSize, 0).toFixed(2));
+    const rowTotal = Number((metricSize * item.quantity * item.unitPrice *
+      (1 - Math.min(100, Math.max(0, item.discount)) / 100)).toFixed(2));
+    return [{
+      ...item,
+      id: retained[0].id,
+      measurementId: retained.map(part => part.measurementId).join(','),
+      productionBreakdown: retained,
+      metricSize,
+      rowTotal,
+    }];
+  });
+}
+
 export function createDraftSaleFromCustomer(
   customer: Customer,
   actor: SalesActor,
@@ -485,10 +591,7 @@ export function createDraftSaleFromCustomer(
         .filter(product => {
           // The legacy measurement default has the measurement creation timestamp.
           // Explicit room preparation stores product overrides.
-          const inheritedTul = product.productType.trim().toUpperCase() === 'TUL' &&
-            Boolean(m.createdAt) && product.addedAt === m.createdAt &&
-            !product.userOverrides && !product.stockId;
-          return !(hasBiriz && inheritedTul);
+          return !(hasBiriz && isInheritedTul(m, product));
         })
         .filter(product =>
           !selectedTransferBundleKeys ||
@@ -1192,6 +1295,7 @@ export async function syncOrCreateDraftSale(
           sale =>
             sale.id === cleanTargetSaleId &&
             sale.customerId === customer.id &&
+            erpScopeMatches(sale, scope) &&
             (
               sale.status === 'TASLAK' ||
               sale.status === 'TEKLİF'
@@ -1201,6 +1305,7 @@ export async function syncOrCreateDraftSale(
       : salesStore.sales.find(
           sale =>
             sale.customerId === customer.id &&
+            erpScopeMatches(sale, scope) &&
             (
               resolvedCustomerAddressId
                 ? String(
@@ -1223,6 +1328,7 @@ export async function syncOrCreateDraftSale(
     );
   }
 
+  let addressRepaired = false;
   if (existingDraft) {
     const existingAddressId =
       String(
@@ -1318,14 +1424,7 @@ export async function syncOrCreateDraftSale(
           new Date().toISOString()
       };
 
-      /*
-       * Repair hemen persist edilir; böylece
-       * additions.length === 0 erken dönüşü pair repair'i
-       * bypass edemez.
-       */
-      await salesStore.updateSale(
-        existingDraft
-      );
+      addressRepaired = true;
     }
   }
 
@@ -1379,15 +1478,7 @@ export async function syncOrCreateDraftSale(
   }
 
 
-  /*
-   * Explicit transfer selection append-only ve non-destructive çalışır.
-   * Bu tur seçilmeyen otomatik satırlar ile manuel satırlar aynen korunur.
-   * Zaten mevcut olan bundle yeniden eklenmez.
-   *
-   * Mevcut bundle'ı kısmi olarak yeniden yazmak, oda bazında gruplanmış
-   * historical satırlarda başka measurement bundle'larını silebileceği için
-   * V1'de bilinçli olarak yapılmaz.
-   */
+  // Explicit transfer appends new bundles and repairs only exact BİRİZ source sets.
   if (normalizedTransferSelection) {
     // Eski taslak + yeni BİRİZ ölçüsü, oda toplamını yeniden uzlaştırma gerektirir.
     // V5-C sunucu transaction/CAS doğrulanmadan eski satır sessizce değiştirilemez.
@@ -1403,7 +1494,7 @@ export async function syncOrCreateDraftSale(
           .map(m => m.roomId)
       );
       const newBirizRequested = normalizedTransferSelection.some(ref =>
-        requestedBirizIds.has(ref.measurementId) &&
+        ref.productType.trim().toUpperCase() === 'BIRIZ' &&
         !existingItems.some(item => saleItemContainsTransferBundleV1(item, ref))
       );
       if (newBirizRequested && existingItems.some(item =>
@@ -1413,6 +1504,13 @@ export async function syncOrCreateDraftSale(
         throw new Error('BIRIZ_V5_DRAFT_RECONCILIATION_REQUIRED');
       }
     }
+    const measurements = useMeasurementStore.getState().measurements.filter(m =>
+      m.customerId === customer.id &&
+      String(m.customerAddressId || '').trim() === resolvedCustomerAddressId &&
+      !m.isDeleted && !m.isArchived
+    );
+    const reconciledItems = reconcileBirizDraftItems(existingItems, calculatedItems, measurements);
+    const reconciled = JSON.stringify(reconciledItems) !== JSON.stringify(existingItems);
     const additions: SaleItem[] = [];
 
     // V5: A selection containing multiple new Biriz measurements must
@@ -1425,9 +1523,13 @@ export async function syncOrCreateDraftSale(
     const newBirizRefs = pendingRefs.filter(ref =>
       ref.productType.trim().toUpperCase() === 'BIRIZ'
     );
-    const otherRefs = pendingRefs.filter(ref =>
-      ref.productType.trim().toUpperCase() !== 'BIRIZ'
-    );
+    const otherRefs = pendingRefs.filter(ref => {
+      const type = ref.productType.trim().toUpperCase();
+      if (type === 'BIRIZ') return false;
+      if (type !== 'TUL' || !requestedBirizIds.has(ref.measurementId)) return true;
+      const measurement = measurements.find(m => m.id === ref.measurementId);
+      return !measurement?.selectedProducts?.some(product => product.isActive && isInheritedTul(measurement, product));
+    });
 
     if (newBirizRefs.length) {
       const sharedDraft = createDraftSaleFromCustomer(
@@ -1464,14 +1566,7 @@ export async function syncOrCreateDraftSale(
       additions.push(...bundleItems);
     }
 
-    if (additions.length === 0) {
-      return existingDraft.id;
-    }
-
-    const existingIds =
-      new Set(
-        existingItems.map(item => item.id)
-      );
+    const existingIds = new Set(reconciledItems.map(item => item.id));
 
     const uniqueAdditions =
       additions.filter(item => {
@@ -1483,12 +1578,13 @@ export async function syncOrCreateDraftSale(
         return true;
       });
 
+    if (!reconciled && !addressRepaired && !uniqueAdditions.length) return existingDraft.id;
+
+    const items = [...reconciledItems, ...uniqueAdditions];
     await salesStore.updateSale({
       ...existingDraft,
-      items: [
-        ...existingItems,
-        ...uniqueAdditions
-      ],
+      items,
+      ...(reconciled ? { totalAmount: Number(items.reduce((sum, item) => sum + item.rowTotal, 0).toFixed(2)) } : {}),
       updatedAt: new Date().toISOString()
     });
 
